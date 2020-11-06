@@ -31,9 +31,30 @@
 	
 	var numericData = {};
 
-	const yellowGradient = [ "#B2A315", "#CCBA18", "#E5D11B", "#FFE91F", 
-	  "#FFE91F", "#FFEB35", "#FFED4B", "#FFEF62", 
-	  "#FFF178", "#FFF48F" ];		
+	function getColor(pct) {
+		if (pct > 0.95) {
+			return '#cc0000'; // dark red
+		} else if (pct > 0.90) {
+			return '#ff8080'; // bright red
+		} else if (pct > 0.85) {
+			return '#ffffcd'; // pinkish red
+		} else if (pct > 0.80) {
+			return '#c9d9ab'; // light yellow
+		} else if (pct > 0.75) {
+			return '#b6e195'; // yellow
+		} else if (pct > 0.70) {
+			return '#8ccf81'; // light green
+		} else if (pct > 0.65) {
+			return '#64bc6e'; // lime green
+		} else if (pct > 0.60) {
+			return '#3ca859'; // medium green
+		} else if (pct > 0.55) {
+			return '#2b9b50'; // bright green
+		} else {
+			return '#09743d'; // dark green
+		}
+	} 
+
 
 	function pctToString(pct) {
 		return Number(pct).toLocaleString(undefined,{style: 'percent', minimumFractionDigits:2});
@@ -111,9 +132,8 @@
 	} 
 
 	function colorGradient(results) {
-		const gradient = yellowGradient;
 
-		numColors = gradient.length;
+		// First, set the html
 		sortedObj = sortByKeys(results);
 		var validCount = 0;
 		
@@ -123,7 +143,6 @@
 			}
 		});
 		
-		const step = ((validCount + 0.0)/(numColors + 0.0));
 		var index = 0;
 		var highestHtml = "<b>Highest</b><br/>";
 		var lowestHtml = "<b>Lowest</b><br/>";
@@ -131,26 +150,34 @@
 		$.each(sortedObj, function(k, v) {
 			if (k in counties) {
 				const myid = counties[k];
-				const bracket = Math.floor((index+0.0) / step);
-				var myColor = gradient[bracket];
 				if (index > (validCount - 10)) {
 					lowestHtml += liveData[k]["name"] + " " + pctToString(v) + "<br/>";
-					myColor = "#0000FF";
 				}
 				if (index < 10) {
 					highestHtml += liveData[k]["name"] + " " + pctToString(v) + "<br/>";
-					myColor = "#FF0000";
 				}
+				/*
 
 				uswijsconfig[myid].upColor = myColor;
 				uswijsconfig[myid].downColor = myColor;
-				$('#' + myid).attr({fill: myColor});
+				$('#' + myid).attr({fill: myColor});*/
 				//console.log("Colored " + k + " " + myid);
 				index = index + 1;
 			}
 		});
 		$('#highest').html(highestHtml);
 		$('#lowest').html(lowestHtml);
+		
+		// second, set the colors. 
+		$.each(results, function(k, v) {
+			if (k in counties) {
+				const myid = counties[k];
+				const color = getColor(v);
+				uswijsconfig[myid].upColor = color;
+				uswijsconfig[myid].downColor = color;
+				$('#' + myid).attr({fill: color});
+			}
+		});
 	}
 
 
@@ -229,7 +256,7 @@
 		$('#numerator').html(htmlOptions);
 		$('#denominator').html(htmlOptions);
 
-		$("#numerator option[value='election_day_registered']").prop('selected', true);
+		$("#numerator option[value='ballots_cast']").prop('selected', true);
 		$("#denominator option[value='nov_1_registered']").prop('selected', true);
 		
 		$("#numerator").change(function () {
