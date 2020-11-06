@@ -74,7 +74,7 @@
 		var lookup = {};
 		$.each(numericData, function(k, v) {
 			if (!v[attr]) {
-				console.log("Could not find " + attr + " for county " + k);
+				//console.log("Could not find " + attr + " for county " + k);
 				return;
 			}
 			lookup[k] = v[attr][0];
@@ -92,7 +92,7 @@
 			countyHtml += "Ward id: " + liveData[county]["ward_id"] + "<br/>";
 			const warning = liveData[county]["warning"];
 			if (warning) {
-			console.log(county + " " + warning);
+			//console.log(county + " " + warning);
 				countyHtml += "<i><small>" + warning + "</small></i><br/>";
 			}
 		
@@ -108,7 +108,7 @@
 	function setHover(county, numeratorType, nVal, denominatorType, dVal) {
 		const hoverId = counties[county];
 		if (!hoverId) {
-			console.log("Unable to set hover for " + county);
+			//console.log("Unable to set hover for " + county);
 			return;
 		}
 		
@@ -202,7 +202,7 @@
 		var ratios = {}
 		$.each(lookupNumerator, function(k, numerator) {
 			if (!(k in lookupDenominator)) {
-				console.log("Denominator " + denominatorAttr + " not found for " + k);
+				//console.log("Denominator " + denominatorAttr + " not found for " + k);
 				return;
 			}
 			
