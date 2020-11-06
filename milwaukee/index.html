@@ -27,31 +27,37 @@
 	// Map the following: 
 	// County name -> {
 	//  "attr" -> [num, human name]
-	// }
+	// }e60000
 	
 	var numericData = {};
 
 	function getColor(pct) {
-		if (pct > 0.95) {
-			return '#cc0000'; // dark red
+		if (pct > 100.0) {
+			return '#cc0000';
+		} else if (pct > 0.95) {
+			return '#e60000'; 
+		} else if (pct > 0.92) {
+			return '#ff1a1a'; 
 		} else if (pct > 0.90) {
-			return '#ff8080'; // bright red
+			return '#ff4d4d'; 
+		} else if (pct > 0.875) {
+			return '#ff8080';
 		} else if (pct > 0.85) {
-			return '#ffffcd'; // pinkish red
+			return '#ffb3b3'; 
 		} else if (pct > 0.80) {
-			return '#c9d9ab'; // light yellow
+			return '#ffcc66';
 		} else if (pct > 0.75) {
-			return '#b6e195'; // yellow
+			return '#ffff66'; // yellow
 		} else if (pct > 0.70) {
-			return '#8ccf81'; // light green
+			return '#ffff99'; // light green
 		} else if (pct > 0.65) {
-			return '#64bc6e'; // lime green
+			return '#ccff66'; // lime green
 		} else if (pct > 0.60) {
-			return '#3ca859'; // medium green
+			return '#bbff33'; // medium green
 		} else if (pct > 0.55) {
-			return '#2b9b50'; // bright green
+			return '#aaff00'; // bright green
 		} else {
-			return '#09743d'; // dark green
+			return '#88cc00'; // dark green
 		}
 	} 
 
