@@ -1204,7 +1204,7 @@ const addendum = `
           .attr('stroke-width', 2);
         nodeElements.select('rect')
           .attr('stroke', n => getNodeStroke(n))
-          .attr('stroke-width', n => getNodeStrokeWidth(n);
+          .attr('stroke-width', n => getNodeStrokeWidth(n));
       });
 
     // Create nodes
@@ -1248,7 +1248,7 @@ const addendum = `
       .attr('height', d => getNodeHeight(d))
       .attr('fill', d => getNodeColor(d))
       .attr('stroke', d => getNodeStroke(d))
-      .attr('stroke-width', d => getNodeStrokeWidth(d)
+      .attr('stroke-width', d => getNodeStrokeWidth(d))
       .style('cursor', 'grab')
       .style('transition', 'filter 0.2s ease');
 
@@ -1437,7 +1437,7 @@ const addendum = `
         d3.select(this).style('filter', 'none');
         nodeElements.select('rect')
           .attr('stroke', n => getNodeStroke(n))
-          .attr('stroke-width', n => getNodeStrokeWidth(n);
+          .attr('stroke-width', n => getNodeStrokeWidth(n));
         // Reset all link highlights
         linkElements.selectAll('.link')
           .attr('stroke', '#94A3B8')
