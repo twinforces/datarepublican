@@ -41,16 +41,16 @@ $(document).ready(function() {
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
 <meta property="og:description" content="Tracking where the money goes" />
-<link rel="canonical" href="https://datarepublican.com/expose/" />
-<meta property="og:url" content="https://datarepublican.com/expose/" />
+<link rel="canonical" href="http://localhost:4000/expose/" />
+<meta property="og:url" content="http://localhost:4000/expose/" />
 <meta property="og:site_name" content="DataRepublican" />
-<meta property="og:image" content="https://datarepublican.com/assets/images/og.png" />
+<meta property="og:image" content="http://localhost:4000/assets/images/og.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta property="twitter:image" content="https://datarepublican.com/assets/images/og.png" />
+<meta property="twitter:image" content="http://localhost:4000/assets/images/og.png" />
 <meta property="twitter:title" content="Charity graph - multi-root BFS &amp; taxpayer totals" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"Charity graph - multi-root BFS &amp; taxpayer totals","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/expose/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"Charity graph - multi-root BFS &amp; taxpayer totals","image":"http://localhost:4000/assets/images/og.png","url":"http://localhost:4000/expose/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
@@ -1097,7 +1097,7 @@ const addendum = `
           .attr('fill', '#94A3B8');
         nodeElements.select('rect')
           .attr('stroke', n => getNodeStroke(n))
-          .attr('stroke-width', n => isUserEin(n.id) ? 3 : 1);
+          .attr('stroke-width', n => getNodeStrokeWidth(n));
       });
 
     // Create label group
@@ -1154,7 +1154,7 @@ const addendum = `
           .attr('stroke-width', 2);
         nodeElements.select('rect')
           .attr('stroke', n => getNodeStroke(n))
-          .attr('stroke-width', n => isUserEin(n.id) ? 3 : 1);
+          .attr('stroke-width', n => getNodeStrokeWidth(n));
       });
     
     // Add text
@@ -1204,7 +1204,7 @@ const addendum = `
           .attr('stroke-width', 2);
         nodeElements.select('rect')
           .attr('stroke', n => getNodeStroke(n))
-          .attr('stroke-width', n => isUserEin(n.id) ? 3 : 1);
+          .attr('stroke-width', n => getNodeStrokeWidth(n);
       });
 
     // Create nodes
@@ -1248,7 +1248,7 @@ const addendum = `
       .attr('height', d => getNodeHeight(d))
       .attr('fill', d => getNodeColor(d))
       .attr('stroke', d => getNodeStroke(d))
-      .attr('stroke-width', d => isUserEin(d.id) ? 3 : 1)
+      .attr('stroke-width', d => getNodeStrokeWidth(d)
       .style('cursor', 'grab')
       .style('transition', 'filter 0.2s ease');
 
@@ -1437,7 +1437,7 @@ const addendum = `
         d3.select(this).style('filter', 'none');
         nodeElements.select('rect')
           .attr('stroke', n => getNodeStroke(n))
-          .attr('stroke-width', n => isUserEin(n.id) ? 3 : 1);
+          .attr('stroke-width', n => getNodeStrokeWidth(n);
         // Reset all link highlights
         linkElements.selectAll('.link')
           .attr('stroke', '#94A3B8')
@@ -2152,7 +2152,10 @@ labelloc="t";\n`;
     return '#F3F4F6'; // gray-100
   }
 
-  function getNodeStroke(d) {
+   function getNodeStrokeWidth(d) {
+     isUserEin(d.id) ? 3 : 1; // gray-400
+  }
+ function getNodeStroke(d) {
     const charity = charities[d.id];
     if (charity.govt_amt > 10000000) return '#DC2626'; // red-600
     if (charity.govt_amt > 1000000) return '#D97706';  // amber-600
@@ -2270,7 +2273,7 @@ labelloc="t";\n`;
         .attr('stroke-width', d => {
           const isMatch = matches.some(m => m.id === d.id);
           if (isMatch) return 3;
-          return isUserEin(d.id) ? 3 : 1;
+          return getNodeStrokeWidth(d);
         });
 
       // Zoom to show all matches
@@ -2310,7 +2313,7 @@ labelloc="t";\n`;
       // Reset node highlighting if no matches
       nodeElements.select('rect')
         .attr('stroke', n => getNodeStroke(n))
-        .attr('stroke-width', n => isUserEin(n.id) ? 3 : 1);
+        .attr('stroke-width', n => getNodeStrokeWidth(n));
     }
   }
 
@@ -2319,7 +2322,7 @@ labelloc="t";\n`;
     if (!searchInput.value) {
       nodeElements.select('rect')
         .attr('stroke', n => getNodeStroke(n))
-        .attr('stroke-width', n => isUserEin(n.id) ? 3 : 1);
+        .attr('stroke-width', n => getNodeStrokeWidth(d));
     }
   }
 
@@ -2365,7 +2368,7 @@ labelloc="t";\n`;
       // Highlight the selected node
       nodeElements.select('rect')
         .attr('stroke', n => n.id === ein ? '#2563EB' : getNodeStroke(n))
-        .attr('stroke-width', n => n.id === ein ? 3 : (isUserEin(n.id) ? 3 : 1));
+        .attr('stroke-width', n => n.id === ein ? 3 : getNodeStrokeWidth(n));
     }
   }
 
