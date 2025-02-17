@@ -940,16 +940,14 @@ const addendum = `
             count++;
             if (charities[filer] && charities[grantee]) {
               const key = filer + '~' + grantee;
-              if (!localEdges[key]) localEdges[key] = 0;
-              localEdges[key] += amt;
-              localEdgesRelOut[key] += amt/charities[grantee].receipt_amt;
-              localEdgesRelIn[key] += amt/charities[filer].receipt_amt;
+              if (!localEdges[key]) localEdges[key] = { rawAmt:0, relOutAmt:0, relInAmt:0};
+              localEdges[key].rawAmt += amt;
+              localEdges[key].relOutAmt += amt/charities[grantee].receipt_amt;
+              localEdges[key].relInAmt += amt/charities[filer].receipt_amt;
               charities[filer].grant_amt += amt;
             }
           });
           edgeAccumulator = localEdges;
-          edgeAccumulatorRelOut = localEdgesRelOut;
-          edgeAccumulatorRelIn = localEdgesRelIn;
           totalGrantsCount = count;
           resolve();
         },
@@ -1172,7 +1170,8 @@ const addendum = `
       .attr('text-anchor', 'middle')
       .attr('fill', '#94A3B8') // Match line color
       .attr('font-size', '12px')
-      .text(d => `$${formatNumber(d.amt)}`)
+      .text(d => 
+      `$${formatNumber(d.edata.rawAmt)}`)
       .style('cursor', 'pointer')
       // Add same hover effects to text
       .on('mouseover', function(event, d) {
@@ -1705,6 +1704,26 @@ const addendum = `
       .restart();
   }
 
+function customSankeyStyleLink(startX, startY, endX, endY, startWidth, endWidth) {
+  const path = d3.path();
+  path.moveTo(startX, startY - startWidth / 2);
+  path.lineTo(startX, startY + startWidth / 2);
+  
+  // Control points for a smooth curve
+  const cp1x = startX + (endX - startX) / 3;
+  const cp1y1 = startY - startWidth / 2;
+  const cp1y2 = startY + startWidth / 2;
+  const cp2x = startX + 2 * (endX - startX) / 3;
+  const cp2y1 = endY - endWidth / 2;
+  const cp2y2 = endY + endWidth / 2;
+  
+  path.bezierCurveTo(cp1x, cp1y1, cp2x, cp2y1, endX, endY - endWidth / 2);
+  path.lineTo(endX, endY + endWidth / 2);
+  path.bezierCurveTo(cp2x, cp2y2, cp1x, cp1y2, startX, startY + startWidth / 2);
+  path.closePath();
+  return path.toString();
+}
+
   // Helper functions for graph data preparation
   function getCustomGraphData() {
     // First collect all unique EINs that exist in our data
@@ -1720,9 +1739,9 @@ const addendum = `
       .map(e => ({
         source: e.filer,
         target: e.grantee,
-        amt: e.amt,
-        relIn: e.amt/charities[e.filer].receipt_amt,
-        relOut: e.amt/charities[e.grantee].receipt_amt,
+        rawAmt: e.amt,
+        relIn: e.amt/e.filer.receipt_amt,
+        relOut: e.amt/e.grantee.receipt_amt,
       }));
 
     return {
@@ -1742,10 +1761,10 @@ const addendum = `
 
     // Build final edges
     const edges = [];
-    Object.entries(filteredEdges).forEach(([key, amt]) => {
+    Object.entries(filteredEdges).forEach(([key, edata]) => {
       const [filer, grantee] = key.split('~');
       if (visitedSet.has(filer) && visitedSet.has(grantee)) {
-        edges.push({ source: filer, target: grantee, amt });
+        edges.push({ source: filer, target: grantee, edata });
       }
     });
 
@@ -1803,10 +1822,10 @@ const addendum = `
 
     // Filter edges so that both ends are in the filtered set
     let filteredEdges = {};
-    for (const [key, amt] of Object.entries(edgeAccumulator)) {
+    for (const [key, edata] of Object.entries(edgeAccumulator)) {
       const [filer, grantee] = key.split('~');
       if (filteredCharities[filer] && filteredCharities[grantee]) {
-        filteredEdges[key] = amt;
+        filteredEdges[key] = edata;
       }
     }
 
@@ -1938,7 +1957,7 @@ labelloc="t";\n`;
 
     // Edges
     for (const e of edgeList) {
-      const amt = formatNumber(e.amt);
+      const amt = formatNumber(e.rawAmt);
       dot += `  "${e.filer}" -> "${e.grantee}" [label="$${amt}", color="#94A3B8"];\n`;
     }
 
@@ -2050,7 +2069,7 @@ labelloc="t";\n`;
     const fwd = {};
     const rev = {};
     
-    Object.entries(edges).forEach(([key, amt]) => {
+    Object.entries(edges).forEach(([key, edata]) => {
       const [filer, grantee] = key.split('~');
       
       // Forward adjacency
