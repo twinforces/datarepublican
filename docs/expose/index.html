@@ -628,6 +628,8 @@ $(document).ready(function() {
   // Full data from CSV
   let charities = {};             // EIN -> { name, receipt_amt, govt_amt, contrib_amt, grant_amt }
   let edgeAccumulator = {};       // "filer~grantee" -> totalGrant
+  let edgeAccumulatorRelIn = {};       // "filer~grantee" -> totalGrant
+  let edgeAccumulatorRelOut = {};       // "filer~grantee" -> totalGrant
   let totalCharitiesCount = 0;    // total charities read
   let totalGrantsCount = 0;       // total edges read from CSV
 
@@ -927,6 +929,8 @@ const addendum = `
         skipEmptyLines: true,
         complete: results => {
           let localEdges = {};
+          let localEdgesRelOut = {};
+          let localEdgesRelIn = {};
           let count = 0;
           results.data.forEach(row => {
             const filer = (row['filer_ein'] || '').trim();
@@ -938,10 +942,14 @@ const addendum = `
               const key = filer + '~' + grantee;
               if (!localEdges[key]) localEdges[key] = 0;
               localEdges[key] += amt;
+              localEdgesRelOut[key] += amt/charities[grantee].receipt_amt;
+              localEdgesRelIn[key] += amt/charities[filer].receipt_amt;
               charities[filer].grant_amt += amt;
             }
           });
           edgeAccumulator = localEdges;
+          edgeAccumulatorRelOut = localEdgesRelOut;
+          edgeAccumulatorRelIn = localEdgesRelIn;
           totalGrantsCount = count;
           resolve();
         },
@@ -1083,7 +1091,7 @@ const addendum = `
           .filter(n => n.id === d.source.id || n.id === d.target.id)
           .select('rect')
           .attr('stroke', '#2563EB')
-          .attr('stroke-width', 3);
+          .attr('stroke-width', 3+getNodeStrokeWidth(d));
       })
       .on('mouseout', function() {
         // Reset all highlights
@@ -1360,6 +1368,7 @@ const addendum = `
         ['Gross receipts', charity.receipt_amt],
         ['Contributions', charity.contrib_amt],
         ['Grants given', charity.grant_amt],
+        ['Grants Rel', charity.grant_amt/charity.receipt_amt],
         ['Taxpayer funds', charity.govt_amt]
       ];
 
@@ -1402,7 +1411,7 @@ const addendum = `
           if (l.source.id === d.id || l.target.id === d.id) {
             d3.select(this).select('.link')
               .attr('stroke', '#2563EB')
-              .attr('stroke-width', 3);
+              .attr('stroke-width', 3+getNodeStrokeWidth(d));
 
             // Highlight the label
             labelGroup.selectAll('.link-label-group')
@@ -1422,7 +1431,7 @@ const addendum = `
               .filter(n => n.id === (l.source.id === d.id ? l.target.id : l.source.id))
               .select('rect')
               .attr('stroke', '#2563EB')
-              .attr('stroke-width', 3);
+              .attr('stroke-width', 3+getNodeStrokeWidth(d));
           }
         });
       })
@@ -1441,7 +1450,7 @@ const addendum = `
         // Reset all link highlights
         linkElements.selectAll('.link')
           .attr('stroke', '#94A3B8')
-          .attr('stroke-width', 2);
+          .attr('stroke-width', d => getNodeStrokeWidth(d)+2);
         // Reset label highlights
         labelGroup.selectAll('.label-bg')
           .attr('fill', '#F3F4F6')
@@ -1711,7 +1720,9 @@ const addendum = `
       .map(e => ({
         source: e.filer,
         target: e.grantee,
-        amt: e.amt
+        amt: e.amt,
+        relIn: e.amt/charities[e.filer].receipt_amt,
+        relOut: e.amt/charities[e.grantee].receipt_amt,
       }));
 
     return {
@@ -1863,6 +1874,7 @@ labelloc="t";\n`;
       const govt = formatNumber(c.govt_amt);
       const contrib = formatNumber(c.contrib_amt);
       const grants = formatNumber(c.grant_amt);
+      const grantsRel = formatNumber(c.grant_amt/c.receipt_amt);
 
       const label = `<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2" cellpadding="2">
         ${
@@ -1881,6 +1893,7 @@ labelloc="t";\n`;
         <tr><td align="left">Gross receipts</td><td>&nbsp;</td><td align="right">$${receipts}</td><td>&nbsp;</td></tr>
         <tr><td align="left">Contributions</td><td>&nbsp;</td><td align="right">$${contrib}</td><td>&nbsp;</td></tr>
         <tr><td align="left">Grants given (visible)</td><td>&nbsp;</td><td align="right">$${grants}</td><td>&nbsp;</td></tr>
+        <tr><td align="left">Rel Grants given (visible)</td><td>&nbsp;</td><td align="right">$${grantsRel}</td><td>&nbsp;</td></tr>
         <tr>
           <td colspan="3">
             <table border="0" cellspacing="0" cellpadding="0">
@@ -2322,7 +2335,7 @@ labelloc="t";\n`;
     if (!searchInput.value) {
       nodeElements.select('rect')
         .attr('stroke', n => getNodeStroke(n))
-        .attr('stroke-width', n => getNodeStrokeWidth(d));
+        .attr('stroke-width', n => getNodeStrokeWidth(n));
     }
   }
 
