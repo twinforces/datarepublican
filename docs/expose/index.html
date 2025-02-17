@@ -1636,8 +1636,10 @@ const addendum = `
           
           const ctrlX = midX + perpX * curvature;
           const ctrlY = midY + perpY * curvature;
+          const startWidth = d.edata.relOutAmt*100+2;
+          const endWidth = d.edata.relInAmt*100+2;
           
-          return `M${sourcePoint.x},${sourcePoint.y} Q${ctrlX},${ctrlY} ${targetPoint.x},${targetPoint.y}`;
+          return customSankeyStyleLink(sourcePoint.x, sourcePoint.y, targetPoint.x,targetPoint.y,startWidth,endWidth);
         });
 
         // Update hover paths
@@ -1739,7 +1741,7 @@ function customSankeyStyleLink(startX, startY, endX, endY, startWidth, endWidth)
       .map(e => ({
         source: e.filer,
         target: e.grantee,
-        rawAmt: e.amt,
+        rawAmt: e.rawAmt,
         relIn: e.amt/e.filer.receipt_amt,
         relOut: e.amt/e.grantee.receipt_amt,
       }));
