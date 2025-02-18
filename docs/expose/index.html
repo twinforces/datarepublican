@@ -628,8 +628,6 @@ $(document).ready(function() {
   // Full data from CSV
   let charities = {};             // EIN -> { name, receipt_amt, govt_amt, contrib_amt, grant_amt }
   let edgeAccumulator = {};       // "filer~grantee" -> totalGrant
-  let edgeAccumulatorRelIn = {};       // "filer~grantee" -> totalGrant
-  let edgeAccumulatorRelOut = {};       // "filer~grantee" -> totalGrant
   let totalCharitiesCount = 0;    // total charities read
   let totalGrantsCount = 0;       // total edges read from CSV
 
@@ -929,8 +927,6 @@ const addendum = `
         skipEmptyLines: true,
         complete: results => {
           let localEdges = {};
-          let localEdgesRelOut = {};
-          let localEdgesRelIn = {};
           let count = 0;
           results.data.forEach(row => {
             const filer = (row['filer_ein'] || '').trim();
@@ -942,8 +938,8 @@ const addendum = `
               const key = filer + '~' + grantee;
               if (!localEdges[key]) localEdges[key] = { rawAmt:0, relOutAmt:0, relInAmt:0};
               localEdges[key].rawAmt += amt;
-              localEdges[key].relOutAmt += amt/charities[grantee].receipt_amt;
-              localEdges[key].relInAmt += amt/charities[filer].receipt_amt;
+              localEdges[key].relOutAmt += amt/(charities[grantee].govt_amt+charities[grantee].contrib_amt);
+              localEdges[key].relInAmt += amt/(charities[filer].govt_amt+charities[filer].contrib_amt);
               charities[filer].grant_amt += amt;
             }
           });
@@ -1367,7 +1363,7 @@ const addendum = `
         ['Gross receipts', charity.receipt_amt],
         ['Contributions', charity.contrib_amt],
         ['Grants given', charity.grant_amt],
-        ['Grants Rel', charity.grant_amt/charity.receipt_amt],
+        ['Grants Rel', charity.grant_amt/(charity.contrib_amt+charity.govt_amt)*100],
         ['Taxpayer funds', charity.govt_amt]
       ];
 
@@ -1636,11 +1632,11 @@ const addendum = `
           
           const ctrlX = midX + perpX * curvature;
           const ctrlY = midY + perpY * curvature;
-          const startWidth = d.edata.relOutAmt*100+2;
-          const endWidth = d.edata.relInAmt*100+2;
+          const startWidth = d.edata.relOutAmt*1000+20;
+          const endWidth = d.edata.relInAmt*1000+20;
           
           return customSankeyStyleLink(sourcePoint.x, sourcePoint.y, targetPoint.x,targetPoint.y,startWidth,endWidth);
-        });
+        }).attr('fill', 'grey');
 
         // Update hover paths
         linkElements.select('.link-hover')
@@ -1742,8 +1738,8 @@ function customSankeyStyleLink(startX, startY, endX, endY, startWidth, endWidth)
         source: e.filer,
         target: e.grantee,
         rawAmt: e.rawAmt,
-        relIn: e.amt/e.filer.receipt_amt,
-        relOut: e.amt/e.grantee.receipt_amt,
+        relIn: e.rawAmt/(e.filer.grant_amt),
+        relOut: e.rawAmt/(e.grantee.grant_amt),
       }));
 
     return {
