@@ -1,0 +1,188 @@
+---
+layout: default
+title: Charity graph - multi-root BFS & taxpayer totals
+---
+    <svg></svg>
+<script src="../expose/jquery.min.js"></script>
+
+<!-- Viz.js (core + full render) -->
+<script src="../expose/viz.js"></script>
+<script src="../expose/full.render.js"></script>
+
+<!-- svg-pan-zoom for panning/zooming the resulting SVG -->
+<script src="../expose/svg-pan-zoom.min.js"></script>
+
+<!-- JSZip for reading the zipped CSVs -->
+<script src="../expose/jszip.min.js"></script>
+
+<!-- Papa Parse for CSV parsing -->
+<script src="../expose/papaparse.min.js"></script>
+    <script src="../expose/d3.v7.min.js"></script>
+    <script src="d3-sankey.min.js"></script>
+    <script src="script.js"></script>
+
+
+<style>
+  #activeEINs, #activeFilters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+  }
+
+  #graph-container {
+    overflow: hidden; /* Hide scrollbars */
+  }
+</style>
+
+<div id="topbar" class="">
+  <div id="explanation">
+    <h1 class="mb-1">Charity graph</h1>
+    <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
+    <p id="instructions" class="opacity-80 mb-0 text-[15px]">
+      <!-- Will be dynamically set in parseQueryParams() -->
+    </p>
+    <script>
+      const urlParams = new URLSearchParams(window.location.search);
+      const returnUrl = urlParams.get('return_url');
+      if (returnUrl) {
+        document.write(`<div class="mt-1 mb-2"><button class="frameless" onclick="window.location.href='${returnUrl}'">&larr; Back to officer search</button></div>`);
+      }
+    </script>
+    
+    <!-- "How it works" toggle is BFS-only -->
+    <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works</button>
+    <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
+      <div class="p-4 border border-gray-200 rounded-md bg-white">
+        <h3 class="mt-0">How it works</h3>
+        <ol class="!list-decimal space-y-1 text-sm pl-4">
+          <li>We filter charities by user-specified EINs + any keywords. EINs are always included, everything else must match at least one keyword <em>unless</em> no keywords are set (then all are included).</li>
+          <li>We pick the BFS root from the largest-<code>receipt_amt</code> EIN (if any exist), otherwise the largest from the filtered set. If that BFS yields fewer than 5 nodes, we pick the next-largest unvisited charity in the filtered set, BFS again, and so on, until the subgraph has 5 or more nodes or we run out.</li>
+          <li>We always include all user-specified EINs plus direct edges among them. Node labels highlight <strong>Taxpayer Funds Received</strong> from <code>govt_amt</code>, and we sum that for the final subgraph.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- BFS controls are BFS-only -->
+  <div id="controls" class="mt-2 mb-4 flex flex-col @xl:items-start @xl:justify-between @xl:flex-row gap-4 bfs-only">
+    <!-- EIN Input & Add Button -->
+    <div class="relative flex flex-col gap-2 max-w-lg">
+      {% include input.html 
+        label="Add EIN(s)" 
+        id="einInput" 
+        placeholder="XX-XXXXXXX or 9 digits" 
+        buttonLabel="Add EIN" 
+        buttonId="addEinBtn" 
+        actions="<button id='clearEINsBtn' class='frameless'>Clear EINs</button>"
+      %}
+
+      <div id="activeEINs"></div>
+    </div>
+
+    <div class="relative flex flex-col gap-2 max-w-lg">
+      {% include input.html 
+        label="Add keyword" 
+        id="keywordInput" 
+        placeholder="Keyword or phrase..." 
+        buttonLabel="Add" 
+        buttonId="addFilterBtn"
+        actions="<button id='clearFiltersBtn' class='frameless'>Clear keywords</button>"
+      %}
+
+      <div id="activeFilters"></div>
+    </div>
+
+    <div class="flex-1 text-right flex flex-row-reverse md:flex-col items-end justify-between md:justify-end gap-1 md:self-end">
+      <!-- <button id="generateBtn">Generate Graph</button> -->
+      <button id="downloadBtn" class="frameless" style="display: none;">
+        <span class="flex items-center gap-1 text-sm text-gray-500 font-semibold">
+          <img src="/assets/images/download.svg" class="size-5" alt="Download SVG">
+          Download SVG
+        </span>
+      </button>
+      <div id="status" class=""></div>
+    </div>
+  </div>
+</div>
+
+<div id="excluded-info" class="-mx-4 md:mx-0 mb-4 px-3 pt-3 pb-2 flex gap-4 md:gap-8 md:rounded border-y md:border-x border-gray-200 bg-white" style="display: none;">
+  {% include stat.html label="501(c)(3)s <em>not</em> displayed" valueId="excluded501" %}
+  {% include stat.html label="Grants <em>not</em> displayed" valueId="excludedGrants" %}
+  {% include stat.html label="<strong class='font-semibold'>Taxpayer total in subgraph</strong>" labelColor="text-red opacity-100" valueId="taxpayerTotal" %}
+</div>
+
+<div class="relative flex-1 -mx-4 md:mx-0 min-h-[75vh]">
+
+  <!-- Search -->
+  <div class="absolute top-4 left-4 md:left-[initial] right-4 z-10">
+    <div class="relative">
+      <input 
+        type="text" 
+        id="searchInput"
+        class="w-full md:w-64 px-2 py-2 md:py-1 text-sm border border-gray-300 rounded-sm shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        placeholder="Search graph..."
+        autocomplete="off"
+      >
+      <button 
+        id="clearSearch" 
+        class="absolute right-2 top-1/2 -translate-y-1/2 min-w-0 p-1 aspect-square items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 hidden"
+        aria-label="Clear search"
+      >
+        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+      <div id="searchResults" class="absolute w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg hidden">
+        <!-- Results will be populated here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="absolute bottom-4 left-4 z-10 bg-white p-3 rounded-md shadow-md border border-gray-200 flex flex-col md:flex-row gap-2 md:gap-4">
+    <div class="flex items-center gap-2">
+      <div class="w-4 h-4 bg-[#FEE2E2] rounded-sm border-2 border-[#DC2626]"></div>
+      <span class="text-[13px]">🚨 High taxpayer funds (>$10M)</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="w-4 h-4 bg-[#FEF3C7] rounded-sm border-2 border-[#D97706]"></div>
+      <span class="text-[13px]">Medium taxpayer funds ($1M-$10M)</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="w-4 h-4 bg-[#F3F4F6] rounded-sm border-2 border-[#94A3B8]"></div>
+      <span class="text-[13px]">Low/No taxpayer funds</span>
+    </div>
+  </div>
+
+  <!-- Zoom Controls -->
+  <div class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
+    <button id="zoomIn" class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+      </svg>
+    </button>
+    <button id="zoomOut" class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
+      </svg>
+    </button>
+    <button id="zoomFit" class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Graph Container -->
+  <div id="graph-container" class="absolute inset-0 border-y md:border-x border-gray-200 md:rounded bg-white">
+    <svg id="graph"></svg>
+  </div>
+  
+  <!-- Loading spinner -->
+  <div id="loading" class="absolute inset-0 flex items-center justify-center bg-white z-30">
+    <svg class="animate-spin h-8 w-8 text-navy" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+  </div>
+</div>
