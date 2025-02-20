@@ -1,6 +1,6 @@
 // Full data from CSV
-let charities = {};             // EIN -> { name, receipt_amt, govt_amt, contrib_amt, grant_amt }
-let grants = {};                // "filer~grantee" -> totalGrant
+let charities = {};             // EIN -> { name, receipt_amt, govt_amt, contrib_amt, grant_amt, grants: [] }
+let grants = {};                // "filer~grantee" -> { rawAmt, relOutAmt, relInAmt, filer_ein, grantee_ein, filer, grantee }
 let totalCharitiesCount = 0;    // total charities read
 let totalGrantsCount = 0;       // total edges read from CSV
 
@@ -19,7 +19,6 @@ let customTitle = null;         // optional custom title from the query param
 // Additional global variables
 let simulation = null;
 let nodeElements = null;
-let zoom = null;
 let selectedSearchIndex = 0;    // Track selected search result
 
 // Sankey state (MOVED TO GLOBAL SCOPE - FIX)
@@ -30,6 +29,14 @@ let expandedOutflows = new Map(); // Tracks displayed outflows per source
 let outflows = new Map();       // EIN -> total outflow
 const TOP_N_INITIAL = 5;        // Top nodes to start with
 const TOP_N_OUTFLOWS = 5;       // Outflows per expansion
+
+// Global references
+let svg = null;
+let zoom = null;
+let topNodes = [];             // MADE GLOBAL: For coloring or logic access
+
+// Color scale for unique node colors (based on EIN or name)
+const colorScale = d3.scaleOrdinal(d3.schemeCategory10); // 10 distinct colors, repeatable
 
 $(document).ready(function() {
     // Parse query params first
@@ -121,7 +128,6 @@ $(document).ready(function() {
     });
 });
 
-// RESTORED: addEINFromInput
 function addEINFromInput() {
     let val = $('#einInput').val().trim();
     val = val.replace(/[-\s]/g, ''); // Remove hyphens and spaces first
@@ -142,7 +148,6 @@ function addEINFromInput() {
     generateGraph();
 }
 
-// RESTORED: renderActiveEINs
 function renderActiveEINs() {
     const $c = $('#activeEINs');
     $c.empty();
@@ -164,7 +169,6 @@ function renderActiveEINs() {
     });
 }
 
-// RESTORED: addKeywordFromInput
 function addKeywordFromInput() {
     const kw = $('#keywordInput').val().trim();
     if (kw.length > 0) {
@@ -176,7 +180,6 @@ function addKeywordFromInput() {
     }
 }
 
-// RESTORED: renderActiveKeywords
 function renderActiveKeywords() {
     const $c = $('#activeFilters');
     $c.empty();
@@ -198,7 +201,6 @@ function renderActiveKeywords() {
     });
 }
 
-// RESTORED: downloadSVG
 function downloadSVG() {
     const svgEl = document.querySelector('#graph-container svg');
     if (!svgEl) {
@@ -218,7 +220,6 @@ function downloadSVG() {
     URL.revokeObjectURL(url);
 }
 
-// RESTORED: parseQueryParams
 function parseQueryParams() {
     const params = new URLSearchParams(window.location.search);
     customTitle = params.get('title') || null;
@@ -248,7 +249,7 @@ function parseQueryParams() {
         const addendum = `
             <br/><br/>
             <p style="font-weight: bold; color: red; background: yellow; text-align: center; padding: 20px; border: 5px solid black;">
-                🚨🚨🚨 <strong>WARNING! <a href="https://www.dictionary.com/browse/disclaimer" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">DISCLAIMER</a>! PAY ATTENTION! HAVE SOME READING <a href="https://www.dictionary.com/browse/comprehension" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">COMPREHENSION</a>! 📢📢📢</strong> 🚨🚨🚨
+                🚨🚨🚨 <strong>WARNING! <a href="https://www.dictionary.com/browse/disclaimer" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">DISCLAIMER</a>! PAY ATTENTION! HAVE SOME READING <a href="https://www.dictionary.com/browse/comprehension" title="Look it up if you must." style="color: inherit; text-decoration: underline;">COMPREHENSION</a>! 📢📢📢</strong> 🚨🚨🚨
             </p>
             <p style="color: white; background: black; padding: 15px; text-align: center; border: 3px dashed red;">
                 <strong>FUNDING IS <a href="https://www.dictionary.com/browse/fungible" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">FUNGIBLE</a>!!!</strong> That means <span style="color: yellow; text-transform: uppercase;">USAID DOLLARS DO NOT <a href="https://www.dictionary.com/browse/literally" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">LITERALLY</a> FLOW INTO THESE NGOS!!!</span> 
@@ -316,7 +317,6 @@ function parseQueryParams() {
     }
 }
 
-// RESTORED: updateQueryParams
 function updateQueryParams() {
     if (customGraphEdges) {
         return;
@@ -332,9 +332,12 @@ function updateQueryParams() {
     window.history.replaceState({}, '', newUrl);
 }
 
-// RESTORED (ASSUMED): formatNumber (not in original snippet, added a common version)
 function formatNumber(num) {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    if (num >= 1e12) return (num / 1e12).toFixed(1) + 'T'; // Trillions
+    if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B'; // Billions
+    if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M'; // Millions
+    if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K'; // Thousands
+    return num.toString(); // Less than 1,000
 }
 
 async function loadData() {
@@ -355,7 +358,7 @@ async function loadData() {
                     let rAmt = parseInt((row['receipt_amt'] || '0').trim(), 10);
                     if (isNaN(rAmt)) rAmt = 0;
                     charities[ein] = {
-                        filer_ein: ein, // Added for Sankey compatibility (FIX)
+                        filer_ein: ein,
                         name: (row['filer_name'] || '').trim(),
                         xml_name: row['xml_name'],
                         receipt_amt: rAmt,
@@ -364,7 +367,8 @@ async function loadData() {
                         grant_amt: 0,
                         grant_in_index: 0,
                         grant_out_index: 0,
-                        grant_count: 0
+                        grant_count: 0,
+                        grants: [] // Array to store grants for this filer
                     };
                 });
                 totalCharitiesCount = Object.keys(charities).length;
@@ -393,7 +397,17 @@ async function loadData() {
                     count++;
                     if (charities[filer] && charities[grantee]) {
                         const key = filer + '~' + grantee;
-                        if (!localEdges[key]) localEdges[key] = { rawAmt: 0, relOutAmt: 0, relInAmt: 0 };
+                        if (!localEdges[key]) {
+                            localEdges[key] = { 
+                                rawAmt: 0, 
+                                relOutAmt: 0, 
+                                relInAmt: 0, 
+                                filer_ein: filer, 
+                                grantee_ein: grantee, 
+                                filer: charities[filer], 
+                                grantee: charities[grantee] 
+                            };
+                        }
                         localEdges[key].rawAmt += amt;
                         charities[filer].grant_amt += amt;
                         charities[filer].grant_count += 1;
@@ -401,10 +415,10 @@ async function loadData() {
                         charities[grantee].grant_in_index += 1;
                         localEdges[key].relOutAmt += amt / (charities[grantee].govt_amt + charities[grantee].contrib_amt);
                         localEdges[key].relInAmt += amt / (charities[filer].govt_amt + charities[filer].contrib_amt);
-                        localEdges[key].filer_ein = filer;
-                        localEdges[key].grantee_ein = grantee;
-                        localEdges[key].filer = charities[filer];
-                        localEdges[key].grantee = charities[grantee];
+                        // Store grant in filer's grants array
+                        charities[filer].grants.push(localEdges[key]);
+                    } else {
+                        console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
                     }
                 });
                 grants = localEdges;
@@ -417,7 +431,7 @@ async function loadData() {
     console.log(totalCharitiesCount, "501c3s loaded");
     console.log(totalGrantsCount, "grants loaded");
 
-    // Initialize Sankey maps after data load (FIX)
+    // Initialize Sankey maps after data load
     nodeMap = charities;
     linkMap = grants;
 }
@@ -439,13 +453,17 @@ function generateGraph() {
     const height = container.offsetHeight || window.innerHeight * 0.7;
     console.log('4. Container dimensions calculated');
 
-    const svg = d3.select('#graph')
+    // Ensure #graph exists in DOM
+    svg = d3.select('#graph-container')
+        .append('svg')
+        .attr('id', 'graph')
         .attr('width', '100%')
         .attr('height', '100%')
-        .style('display', 'block');
+        .style('display', 'block')
+        .style('background', '#fff'); // Ensure white background
     console.log('5. SVG created');
 
-    const zoom = d3.zoom()
+    zoom = d3.zoom()
         .scaleExtent([0.1, 4])
         .on('zoom', (event) => {
             g.attr('transform', event.transform);
@@ -457,48 +475,79 @@ function generateGraph() {
         .attr("transform", "translate(50, 50)");
 
     const sankey = d3.sankey()
-        .nodeId(d => d.filer_ein)
-        .nodeWidth(20)
-        .nodePadding(15)
-        .extent([[0, 0], [width - 100, height - 100]]);
+        .nodeId(d => d.filer_ein || d.id) // Handle missing IDs
+        .nodeWidth(50) // Wider nodes for ribbons
+        .nodePadding(80) // More space between nodes
+        .extent([[0, 0], [width - 200, height - 100]]); // More horizontal space
 
-    // Reset Sankey state (FIX)
+    // Reset Sankey state
     currentData = { nodes: [], links: [] };
     expandedOutflows.clear();
     outflows.clear();
 
-    // Compute total outflows (FIX)
-    Object.entries(grants).forEach(([key, grant]) => {
-        outflows.set(grant.filer_ein, (outflows.get(grant.filer_ein) || 0) + grant.rawAmt);
+    // Compute total outflows
+    Object.values(charities).forEach(charity => {
+        outflows.set(charity.filer_ein, charity.grant_amt || 0);
     });
+    console.log('Outflows:', Array.from(outflows.entries()).sort((a, b) => b[1] - a[1])); // DEBUG: Check top outflows
 
-    // Initialize with top N nodes (FIX)
-    const topNodes = Object.entries(charities)
-        .map(([ein, charity]) => ({ filer_ein: ein, outflow: outflows.get(ein) || 0 }))
+    // Initialize with top N nodes (MADE GLOBAL)
+    topNodes = Object.values(charities)
+        .map(charity => ({ filer_ein: charity.filer_ein, outflow: outflows.get(charity.filer_ein) || 0 }))
+        .filter(d => d.outflow > 0 && !activeEINs.length) // Exclude if filters apply
         .sort((a, b) => b.outflow - a.outflow)
         .slice(0, TOP_N_INITIAL)
-        .map(n => charities[n.filer_ein]);
+        .map(n => nodeMap[n.filer_ein]);
 
-    topNodes.forEach(n => expandNode(n.filer_ein, true));
+    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): ${outflows.get(n.filer_ein)}`)); // DEBUG: Verify selection
+    console.log('Active EINs:', activeEINs); // DEBUG: Check filters
 
-    renderSankey(g, sankey);
+    // Add top nodes
+    topNodes.forEach(node => {
+        if (!currentData.nodes.some(n => n.filer_ein === node.filer_ein)) {
+            currentData.nodes.push(node);
+        }
+    });
+
+    // Add initial links for top nodes (using filer.grants, only to charities)
+    topNodes.forEach(node => {
+        const grantsForNode = node.grants || [];
+        grantsForNode.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
+            if (nodeMap.hasOwnProperty(grant.grantee.filer_ein)) { // Only charities
+                currentData.links.push({
+                    source: grant.filer.filer_ein,
+                    target: grant.grantee.filer_ein,
+                    value: grant.rawAmt
+                });
+                if (!currentData.nodes.some(n => n.filer_ein === grant.grantee.filer_ein)) {
+                    currentData.nodes.push(grant.grantee);
+                }
+            }
+        });
+    });
+
+    renderSankey(g, sankey, svg);
     $('#loading').hide();
     console.log('Graph generation complete');
 }
 
 function expandNode(nodeId, isInitial = false) {
-    if (!currentData.nodes.some(n => n.filer_ein === nodeId)) {
-        currentData.nodes.push(nodeMap[nodeId]);
+    const node = currentData.nodes.find(n => n.filer_ein === nodeId) || nodeMap[nodeId];
+    if (!node || !currentData.nodes.some(n => n.filer_ein === nodeId)) {
+        if (nodeMap.hasOwnProperty(nodeId)) {
+            currentData.nodes.push(nodeMap[nodeId]);
+        } else {
+            currentData.nodes.push({ filer_ein: nodeId, name: `Unknown (${nodeId})`, grant_amt: 0 });
+            if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
+        }
     }
 
-    const allLinks = Object.entries(linkMap)
-        .filter(([key, grant]) => grant.filer_ein === nodeId)
-        .map(([key, grant]) => ({
-            source: grant.filer_ein,
-            target: grant.grantee_ein,
-            value: grant.rawAmt
-        }))
-        .sort((a, b) => b.value - a.value);
+    const grantsForNode = (nodeMap[nodeId] || {}).grants || [];
+    const allLinks = grantsForNode.map(grant => ({
+        source: grant.filer.filer_ein,
+        target: grant.grantee.filer_ein,
+        value: grant.rawAmt
+    })).sort((a, b) => b.value - a.value);
 
     const displayedLinks = expandedOutflows.get(nodeId) || [];
     const remainingLinks = allLinks.filter(l => !displayedLinks.some(d => d.source === l.source && d.target === l.target));
@@ -513,13 +562,30 @@ function expandNode(nodeId, isInitial = false) {
             const instance = (loopTracker.get(l.target) || 0) + 1;
             targetId = `${l.target} (Loop ${instance})`;
             loopTracker.set(l.target, instance);
-            const newNode = { ...nodeMap[l.target], filer_ein: targetId };
-            currentData.nodes.push(newNode);
-            nodeMap[targetId] = newNode;
+            if (currentData.nodes.some(n => n.filer_ein === l.target)) {
+                const baseNode = currentData.nodes.find(n => n.filer_ein === l.target);
+                const newNode = { ...baseNode, filer_ein: targetId };
+                currentData.nodes.push(newNode);
+            } else if (nodeMap.hasOwnProperty(l.target)) {
+                const newNode = { ...nodeMap[l.target], filer_ein: targetId };
+                currentData.nodes.push(newNode);
+            } else {
+                const newNode = { filer_ein: targetId, name: `Unknown (${targetId})`, grant_amt: 0 };
+                currentData.nodes.push(newNode);
+                if (!nodeMap.hasOwnProperty(targetId)) nodeMap[targetId] = newNode;
+            }
         } else if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
-            currentData.nodes.push(nodeMap[l.target]);
+            if (nodeMap.hasOwnProperty(l.target)) {
+                currentData.nodes.push(nodeMap[l.target]);
+            } else {
+                const newNode = { filer_ein: l.target, name: `Unknown (${l.target})`, grant_amt: 0 };
+                currentData.nodes.push(newNode);
+                if (!nodeMap.hasOwnProperty(l.target)) nodeMap[l.target] = newNode;
+            }
         }
-        currentData.links.push({ source: l.source, target: targetId, value: l.value });
+        if (!currentData.links.some(link => link.source === l.source && link.target === targetId)) {
+            currentData.links.push({ source: l.source, target: targetId, value: l.value });
+        }
         displayedLinks.push(l);
     });
 
@@ -529,11 +595,15 @@ function expandNode(nodeId, isInitial = false) {
     if (othersLinks.length > 0 && !isInitial) {
         const othersValue = othersLinks.reduce((sum, l) => sum + l.value, 0);
         if (!currentData.nodes.some(n => n.filer_ein === othersId)) {
-            currentData.nodes.push({ filer_ein: othersId, name: "Others", grant_amt: 0 });
-        } else {
-            currentData.links = currentData.links.filter(l => l.target !== othersId);
+            currentData.nodes.push({ 
+                filer_ein: othersId, 
+                name: "Others", 
+                grant_amt: 0 
+            });
         }
-        currentData.links.push({ source: nodeId, target: othersId, value: othersValue });
+        if (!currentData.links.some(l => l.source === nodeId && l.target === othersId)) {
+            currentData.links.push({ source: nodeId, target: othersId, value: othersValue });
+        }
     } else {
         currentData.nodes = currentData.nodes.filter(n => n.filer_ein !== othersId);
         currentData.links = currentData.links.filter(l => l.target !== othersId);
@@ -544,11 +614,12 @@ function expandOthers(sourceId) {
     expandNode(sourceId);
 }
 
-function renderSankey(g, sankey) {
-    const graph = sankey(JSON.parse(JSON.stringify(currentData)));
+function renderSankey(g, sankey, svgRef) {
+    const graph = sankey(currentData);
 
     g.selectAll("*").remove();
 
+    // Draw links as ribbons (FIXED: Wide, translucent ribbons like sample)
     const link = g.append("g")
         .attr("class", "links")
         .selectAll("path")
@@ -556,9 +627,12 @@ function renderSankey(g, sankey) {
         .enter()
         .append("path")
         .attr("d", d3.sankeyLinkHorizontal())
-        .attr("stroke-width", d => Math.max(1, d.width))
-        .attr("class", d => d.target.filer_ein.includes("(Loop)") ? "link loop" : "link");
+        .attr("stroke-width", d => Math.max(10, d.width)) // Wider ribbons based on value
+        .attr("stroke", d => d.target.filer_ein.includes("(Loop)") ? "#ff4444" : "#ccc")
+        .attr("stroke-opacity", d => d.target.filer_ein.includes("(Loop)") ? 0.6 : 0.5) // Translucent ribbons
+        .attr("fill", "none"); // Ensure no fill, just stroke for ribbon effect
 
+    // Draw nodes with improved styling (FIXED: Unique colors for each node)
     const node = g.append("g")
         .attr("class", "nodes")
         .selectAll("rect")
@@ -567,18 +641,24 @@ function renderSankey(g, sankey) {
         .append("rect")
         .attr("x", d => d.x0)
         .attr("y", d => d.y0)
-        .attr("height", d => d.y1 - d.y0)
+        .attr("height", d => Math.max(40, d.y1 - d.y0)) // Taller nodes for visibility
         .attr("width", d => d.x1 - d.x0)
+        .attr("fill", d => {
+            if (d.filer_ein.includes("(Loop)")) return "#ff9999";
+            if (d.filer_ein.includes("(Others)")) return "#ccc";
+            return colorScale(d.filer_ein || d.name); // Unique color per node (EIN or name)
+        })
         .attr("class", d => d.filer_ein.includes("(Loop)") ? "node loop" : d.filer_ein.includes("(Others)") ? "node others" : "node")
-        .on("click", (event, d) => {
+        .on("click", (event, d) => { // Maintain click handler
             if (d.filer_ein.includes("(Others)")) {
                 expandOthers(d.filer_ein.split(" (Others)")[0]);
             } else {
                 expandNode(d.filer_ein);
             }
-            renderSankey(g, sankey);
+            renderSankey(g, sankey, svgRef);
         });
 
+    // Draw labels with improved wrapping and truncation
     g.selectAll("text")
         .data(graph.nodes)
         .enter()
@@ -586,10 +666,49 @@ function renderSankey(g, sankey) {
         .attr("x", d => d.x0 + (d.x1 - d.x0) / 2)
         .attr("y", d => d.y0 - 5)
         .attr("text-anchor", "middle")
-        .text(d => d.name || d.filer_ein);
+        .text(d => {
+            const maxLength = 20; // Truncate long names
+            return d.name.length > maxLength ? d.name.substring(0, maxLength - 3) + "..." : d.name || d.filer_ein;
+        })
+        .style("font-size", "14px") // Larger text for readability
+        .style("fill", "#000") // Ensure black text for contrast
+        .call(wrapText, 120); // Wider wrap for labels
 
+    // Tooltips
     node.append("title")
         .text(d => `${d.name || d.filer_ein}\nOutflow: ${formatNumber(outflows.get(d.filer_ein) || 0)}\nValue: ${formatNumber(d.grant_amt || 0)}`);
+
+    // Initial zoom out for better overview
+    if (svgRef) {
+        svgRef.call(zoom.transform, d3.zoomIdentity.scale(0.5));
+    }
+}
+
+function wrapText(text, width) {
+    text.each(function() {
+        const text = d3.select(this);
+        const words = text.text().split(/\s+/).reverse();
+        let word;
+        let line = [];
+        let lineHeight = 1.1; // ems
+        let y = text.attr("y");
+        let tspan = text.text(null).append("tspan").attr("x", text.attr("x")).attr("y", y);
+
+        while (word = words.pop()) {
+            line.push(word);
+            tspan.text(line.join(" "));
+            if (tspan.node().getComputedTextLength() > width) {
+                line.pop();
+                tspan.text(line.join(" "));
+                line = [word];
+                tspan = text.append("tspan")
+                    .attr("x", text.attr("x"))
+                    .attr("y", y)
+                    .attr("dy", lineHeight + "em")
+                    .text(word);
+            }
+        }
+    });
 }
 
 function getTextWidth(text, font) {
@@ -657,8 +776,12 @@ function handleSearchClick(e) {
     searchInput.value = charities[ein].name;
     document.getElementById('searchResults').classList.add('hidden');
 
-    expandNode(ein);
-    generateGraph();
+    expandNode(ein); // FIXED: Removed generateGraph() to preserve zoom
+    renderSankey(svg.select('g'), d3.sankey()
+        .nodeId(d => d.filer_ein || d.id)
+        .nodeWidth(50)
+        .nodePadding(80)
+        .extent([[0, 0], [svg.node().offsetWidth - 200, svg.node().offsetHeight - 100]]), svg);
 }
 
 function handleSearchKeydown(e) {
@@ -719,5 +842,12 @@ function handleSearchResultHover(index) {
     updateSearchSelection(document.querySelectorAll('[data-index]'));
 }
 
-const extraStyle = `.node.others { fill: #ccc; cursor: pointer; }`;
+const extraStyle = `.node.others { fill: #ccc; cursor: pointer; }
+                    .node.loop { fill: #ff9999; }
+                    .link.loop { stroke: #ff4444; }
+                    .node { fill: #999; } // Default node color (light gray, overridden by unique colors)
+                    .link { stroke: #ccc; stroke-opacity: 0.5; } // Light gray ribbons, 50% opacity
+                    #graph { background: #fff !important; } // Ensure white background, override any dark themes
+                    text { fill: #000; } // Ensure black text for labels
+                    svg { background: #fff !important; } // Double-check SVG background`;
 d3.select("head").append("style").text(extraStyle);
