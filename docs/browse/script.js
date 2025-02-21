@@ -368,7 +368,8 @@ async function loadData() {
                         grant_in_index: 0,
                         grant_out_index: 0,
                         grant_count: 0,
-                        grants: [] // Array to store grants for this filer
+                        grants: [], // Array to store grants for this filer
+                        grantsIn: []
                     };
                 });
                 totalCharitiesCount = Object.keys(charities).length;
@@ -417,6 +418,7 @@ async function loadData() {
                         localEdges[key].relInAmt += amt / (charities[filer].govt_amt + charities[filer].contrib_amt);
                         // Store grant in filer's grants array
                         charities[filer].grants.push(localEdges[key]);
+                        charities[grantee].grantsIn.push(localEdges[key])
                     } else {
                         console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
                     }
@@ -483,23 +485,18 @@ function generateGraph() {
     // Reset Sankey state
     currentData = { nodes: [], links: [] };
     expandedOutflows.clear();
-    outflows.clear();
-
-    // Compute total outflows
-    Object.values(charities).forEach(charity => {
-        outflows.set(charity.filer_ein, charity.grant_amt || 0);
-    });
-    console.log('Outflows:', Array.from(outflows.entries()).sort((a, b) => b[1] - a[1])); // DEBUG: Check top outflows
-
+ 
     // Initialize with top N nodes (MADE GLOBAL)
     topNodes = Object.values(charities)
-        .map(charity => ({ filer_ein: charity.filer_ein, outflow: outflows.get(charity.filer_ein) || 0 }))
-        .filter(d => d.outflow > 0 && !activeEINs.length) // Exclude if filters apply
+        .map(charity => ({ filer_ein: charity.filer_ein, outflow: charity.grant_amt || 0 }))
+        .filter(d => d.outflow > 0 ) // Exclude if filters apply
         .sort((a, b) => b.outflow - a.outflow)
         .slice(0, TOP_N_INITIAL)
-        .map(n => nodeMap[n.filer_ein]);
+        .map(n => charities[n.filer_ein]);
+        
+    activeEINs.forEach( nodeId => {if (charities[nodeId]) topNodes.push(charities[nodeId]);});
 
-    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): ${outflows.get(n.filer_ein)}`)); // DEBUG: Verify selection
+    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): ${formatNumber(n.grant_amt)}`)); // DEBUG: Verify selection
     console.log('Active EINs:', activeEINs); // DEBUG: Check filters
 
     // Add top nodes
@@ -511,16 +508,14 @@ function generateGraph() {
     topNodes.forEach(node => {
         const grantsForNode = node.grants || [];
         grantsForNode.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
-            if (nodeMap.hasOwnProperty(grant.grantee.filer_ein)) { // Only charities
-                currentData.links.push({
-                    source: grant.filer.filer_ein,
-                    target: grant.grantee.filer_ein,
-                    value: grant.rawAmt
-                });
-                if (!currentData.nodes.some(n => n.filer_ein === grant.grantee.filer_ein)) {
-                    currentData.nodes.push(grant.grantee);
-                }
-            }
+            currentData.links.push({
+                source: grant.filer,
+                target: grant.grantee,
+                value: grant.rawAmt,
+                filer: grant.filer,
+                grantee: grant.grantee
+            });
+            currentData.nodes.push(grant.grantee)
         });
     });
 
@@ -530,18 +525,21 @@ function generateGraph() {
 }
 
 function expandNode(nodeId, isInitial = false) {
-    const node = nodeMap[nodeId];
+    const node = charities[nodeId];
     if (!node) {
         currentData.nodes.push({ filer_ein: nodeId, name: `Unknown (${nodeId})`, grant_amt: 0 });
         if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
     } else {
-        currentData.nodes.push(node);
+        if (!isInitial)
+                currentData.nodes.push(node);
     }
 
     const grantsForNode = node.grants || [];
     const allLinks = grantsForNode.map(grant => ({
-        source: grant.filer.filer_ein,
-        target: grant.grantee.filer_ein,
+        source: grant.filer,
+        target: grant.grantee,
+        filer: grant.filer,
+        grantee: grant.grantee,
         value: grant.rawAmt
     })).sort((a, b) => b.value - a.value);
 
@@ -551,31 +549,31 @@ function expandNode(nodeId, isInitial = false) {
     const othersLinks = remainingLinks.slice(newLinks.length);
 
     newLinks.forEach(l => {
-        if (nodeMap.hasOwnProperty(l.target)) { // Only add charities
             if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
-                currentData.nodes.push(nodeMap[l.target]);
+                currentData.nodes.push(charities[l.target]);
             }
             if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
-                currentData.links.push({ source: l.source, target: l.target, value: l.value });
+                currentData.links.push({ source: l.source, target: l.target, value: l.value , filer: l.filer, grantee: l.grantee});
             }
             displayedLinks.push(l);
         }
-    });
+    );
 
     expandedOutflows.set(nodeId, displayedLinks);
 
     const othersId = `${nodeId} (Others)`;
     if (othersLinks.length > 0 && !isInitial) {
-        const othersValue = othersLinks.reduce((sum, l) => sum + l.value, 0);
-        if (!currentData.nodes.some(n => n.filer_ein === othersId)) {
-            currentData.nodes.push({ 
+        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawAmt, 0);
+        const othersNode = { 
                 filer_ein: othersId, 
                 name: "Others", 
-                grant_amt: 0 
-            });
+                grant_amt: othersValue 
+            }
+        if (!currentData.nodes.some(n => n.filer_ein === othersId)) {
+            currentData.nodes.push(othersNode);
         }
         if (!currentData.links.some(l => l.source === nodeId && l.target === othersId)) {
-            currentData.links.push({ source: nodeId, target: othersId, value: othersValue });
+            currentData.links.push({ source: charities[nodeId], target: othersNode, value: othersValue });
         }
     } else {
         currentData.nodes = currentData.nodes.filter(n => n.filer_ein !== othersId);
@@ -595,32 +593,29 @@ function expandOthers(sourceId) {
 }
 
 function renderSankey(g, sankey, svgRef) {
-    const graph = sankey(currentData);
+    let sankeyG = d3.sankey()
+        .nodeId(d => d.filer_ein);
+        //.nodeAlign(d3.sankeyRight);
+    const graph = sankeyG(currentData);
+    const color = d3.scaleOrdinal(d3.schemeCategory10);
 
     g.selectAll("*").remove();
 
-    // Draw links as ribbons (FIXED: Wide, translucent ribbons like sample)
-    const link = g.append("g")
-        .attr("class", "links")
-        .selectAll("path")
-        .data(graph.links)
-        .enter()
-        .append("path")
-        .attr("d", d3.sankeyLinkHorizontal())
-        .attr("stroke-width", d => Math.max(10, d.width)) // Wider ribbons based on value
-        .attr("stroke", d => d.target.filer_ein.includes("(Loop)") ? "#ff4444" : "#ccc")
-        .attr("stroke-opacity", d => d.target.filer_ein.includes("(Loop)") ? 0.6 : 0.5) // Translucent ribbons
-        .attr("fill", "none"); // Ensure no fill, just stroke for ribbon effect
+   // Creates the rects that represent the nodes.
+  const rect = svg.append("g")
+      .attr("stroke", "#000")
+    .selectAll()
+    .data(nodes)
+    .join("rect")
+      /*.attr("x", d => d.x0)
+      .attr("y", d => d.y0)
+      .attr("height", d => d.y1 - d.y0)
+      .attr("width", d => d.x1 - d.x0)*/
+      .attr("fill", d => color(d.filer_ein));
 
-    // Draw nodes with improved styling (FIXED: Unique colors for each node)
-    const node = g.append("g")
-        .attr("class", "nodes")
-        .selectAll("rect")
-        .data(graph.nodes)
-        .enter()
-        .append("rect")
-        .attr("x", d => d.x0)
-        .attr("y", d => d.y0)
+  // Adds a title on the nodes.
+    rect.append("title")
+      .text(d => `${d.name}\n${formatNumber(d.outflow)}`)
         //.attr("height", d => Math.max(40, d.y1 - d.y0)) // Taller nodes for visibility
         //.attr("width", d => d.x1 - d.x0)
         /*.attr("fill", d => {
@@ -637,13 +632,36 @@ function renderSankey(g, sankey, svgRef) {
             renderSankey(g, sankey, svgRef);
         });
 
+    // Tooltips
+    rect.append("title")
+        .text(d => `${d.name || d.filer_ein}\nOutflow: ${formatNumber(outflows.get(d.filer_ein) || 0)}`);
+
+  const link = svg.append("g")
+      .attr("fill", "none")
+      .attr("stroke-opacity", 0.5)
+    .selectAll()
+    .data(links)
+    .join("g")
+      .style("mix-blend-mode", "multiply");
+
+    const gradient = link.append("linearGradient")
+        .attr("id", d => (d.uid = DOM.uid("link")).id)
+        .attr("gradientUnits", "userSpaceOnUse")
+        .attr("x1", d => d.source.x1)
+        .attr("x2", d => d.target.x0);
+    gradient.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", d => color(d.filer_ein));
+    gradient.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", d => color(d.grantee_ein));
     // Draw labels with improved wrapping and truncation
     g.selectAll("text")
         .data(graph.nodes)
         .enter()
         .append("text")
-        .attr("x", d => d.x0 + (d.x1 - d.x0) / 2)
-        .attr("y", d => d.y0 - 5)
+        /*.attr("x", d => d.x0 + (d.x1 - d.x0) / 2)
+        .attr("y", d => d.y0 - 5)*/
         .attr("text-anchor", "middle")
         .text(d => {
             const maxLength = 20; // Truncate long names
@@ -653,11 +671,26 @@ function renderSankey(g, sankey, svgRef) {
         .style("fill", "#000") // Ensure black text for contrast
         .call(wrapText, 120); // Wider wrap for labels
 
-    // Tooltips
-    node.append("title")
-        .text(d => `${d.name || d.filer_ein}\nOutflow: ${formatNumber(outflows.get(d.filer_ein) || 0)}\nValue: ${formatNumber(d.grant_amt || 0)}`);
 
-    // Initial zoom out for better overview
+   link.append("path")
+      .attr("d", d3.sankeyLinkHorizontal())
+      .attr("stroke", (d) => color(d.uid))
+      .attr("stroke-width", d => Math.max(1, d.width));
+
+  link.append("title")
+      .text(d => `${d.source.name} → ${d.target.name}\n${format(d.value)} TWh`);
+
+  // Adds labels on the nodes.
+  svg.append("g")
+    .selectAll()
+    .data(nodes)
+    .join("text")
+      /*.attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
+      .attr("y", d => (d.y1 + d.y0) / 2)
+      .attr("dy", "0.35em")
+      .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")*/
+      .text(d => d.name);
+   // Initial zoom out for better overview
     if (svgRef) {
         svgRef.call(zoom.transform, d3.zoomIdentity.scale(0.5));
     }
