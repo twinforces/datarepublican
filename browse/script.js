@@ -337,7 +337,7 @@ function formatNumber(num) {
     if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B'; // Billions
     if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M'; // Millions
     if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K'; // Thousands
-    return num.toString(); // Less than 1,000
+    return (num == null) ? "N/A" : num.toString(); // Less than 1,000
 }
 
 async function loadData() {
@@ -609,10 +609,10 @@ function renderSankey(g, sankey, svgRef) {
     .selectAll()
     .data(graph.nodes)
     .join("rect")
-      /*.attr("x", d => d.x0) 
+      .attr("x", d => d.x0) 
       .attr("y", d => d.y0)
       .attr("height", d => d.y1 - d.y0)
-      .attr("width", d => d.x1 - d.x0)*/
+      .attr("width", d => d.x1 - d.x0)
       .attr("fill", d => color(d.filer_ein));
 
   // Adds a title on the nodes.
@@ -646,7 +646,7 @@ function renderSankey(g, sankey, svgRef) {
     .join("g")
       .style("mix-blend-mode", "multiply");
 
-    const gradient = link.append("linearGradient")
+    /*const gradient = link.append("linearGradient")
         .attr("id", d => (d.uid = DOM.uid("link")).id)
         .attr("gradientUnits", "userSpaceOnUse")
         .attr("x1", d => d.source.x1)
@@ -664,14 +664,14 @@ function renderSankey(g, sankey, svgRef) {
         .append("text")
         /*.attr("x", d => d.x0 + (d.x1 - d.x0) / 2)
         .attr("y", d => d.y0 - 5)*/
-        .attr("text-anchor", "middle")
+        /*.attr("text-anchor", "middle")
         .text(d => {
             const maxLength = 20; // Truncate long names
             return d.name.length > maxLength ? d.name.substring(0, maxLength - 3) + "..." : d.name || d.filer_ein;
         })
         .style("font-size", "14px") // Larger text for readability
         .style("fill", "#000") // Ensure black text for contrast
-        .call(wrapText, 120); // Wider wrap for labels
+        .call(wrapText, 120); // Wider wrap for labels*/
 
 
    link.append("path")
@@ -680,17 +680,17 @@ function renderSankey(g, sankey, svgRef) {
       .attr("stroke-width", d => Math.max(1, d.width));
 
   link.append("title")
-      .text(d => `${d.source.name} → ${d.target.name}\n${format(d.value)} TWh`);
+      .text(d => `${d.source.name} → ${d.target.name}\n${formatNumber(d.value)}`);
 
   // Adds labels on the nodes.
   svg.append("g")
     .selectAll()
     .data(graph.nodes)
     .join("text")
-      /*.attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
+      .attr("x", d => d.x0 < d.width / 2 ? d.x1 + 6 : d.x0 - 6)
       .attr("y", d => (d.y1 + d.y0) / 2)
       .attr("dy", "0.35em")
-      .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")*/
+      .attr("text-anchor", d => d.x0 < d.width / 2 ? "start" : "end")
       .text(d => d.name);
    // Initial zoom out for better overview
     if (svgRef) {
