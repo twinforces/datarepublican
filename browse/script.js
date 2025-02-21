@@ -607,9 +607,9 @@ function renderSankey(g, sankey, svgRef) {
   const rect = svg.append("g")
       .attr("stroke", "#000")
     .selectAll()
-    .data(nodes)
+    .data(graph.nodes)
     .join("rect")
-      /*.attr("x", d => d.x0)
+      /*.attr("x", d => d.x0) 
       .attr("y", d => d.y0)
       .attr("height", d => d.y1 - d.y0)
       .attr("width", d => d.x1 - d.x0)*/
@@ -642,7 +642,7 @@ function renderSankey(g, sankey, svgRef) {
       .attr("fill", "none")
       .attr("stroke-opacity", 0.5)
     .selectAll()
-    .data(links)
+    .data(graph.links)
     .join("g")
       .style("mix-blend-mode", "multiply");
 
@@ -685,7 +685,7 @@ function renderSankey(g, sankey, svgRef) {
   // Adds labels on the nodes.
   svg.append("g")
     .selectAll()
-    .data(nodes)
+    .data(graph.nodes)
     .join("text")
       /*.attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
       .attr("y", d => (d.y1 + d.y0) / 2)
