@@ -90,20 +90,20 @@ title: ActBlue / WinRed 2024 donor lookup
 </div>
 
 <div class="mb-2">
+  <div id="legend"></div>
   <!-- The aggregator summary button + collapsed aggregator details -->
-  <div class="hidden pie-container flex-col md:flex-row gap-2 md:gap-4">
-    <div class="bg-white p-2 rounded border border-gray-200">
-      <canvas id="donationsPie" class="w-80 h-80"></canvas>
-    </div>
-    <div class="bg-white p-2 rounded border border-gray-200">
+  <div class="hidden pie-container flex-col md:flex-row gap-2 mb-4 md:gap-4">
+    <div class="bg-white p-2 rounded border border-gray-200 flex-1 flex items-center justify-center">
       <canvas id="amountsPie" class="w-80 h-80"></canvas>
+    </div>
+    <div class="bg-white p-2 rounded border border-gray-200 flex-1 flex items-center justify-center">
+      <canvas id="donationsPie" class="w-80 h-80"></canvas>
     </div>
   </div>
 
   <div class="mb-4">
     <!-- We'll fill the button text via updateAggregatorSummary() -->
     <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
-    <!-- Collapsed by default -->
     <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
       <!-- We'll fill the aggregator details (the previous "refreshGlobalAggregator" content) here -->
     </div>
@@ -1013,25 +1013,52 @@ title: ActBlue / WinRed 2024 donor lookup
     let actBluePct = totalDonations ? ((abDon / totalDonations) * 100).toFixed(1) : 0;
     let winRedPct  = totalDonations ? ((wrDon / totalDonations) * 100).toFixed(1) : 0;
 
-    // Rebuild aggregator summary
-    // Example:
-    // Overall Campaign Totals (ActBlue: 20 donations (40.0%); $123–$223 total; WinRed: 30 donations (60.0%); $100–$150 total)
-
+    // Update the toggle button text only
     const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
+    $('#globalAggBtn').html(`Overall Campaign Totals <span class="agg-toggle-button">${collapseMessage}</span>`);
 
-    let aggregatorSummary = `
-      Overall Campaign Totals   
-      <span class="agg-toggle-button">${collapseMessage}</span><br/>
-      <span style="color: black;">
-        <span class="text-blue-600">ActBlue</span>: 
-        <span id="actBlueDonations">${abDon}</span> donations (<span id="actBluePctDonations">${actBluePct}</span>%); 
-        <span id="actBlueDonationsMin">$${actBlueDonationsMin}</span>–<span id="actBlueDonationsMax">$${actBlueDonationsMax}</span> total; 
-        <span class="text-red-600">WinRed</span>: 
-        <span id="winRedDonations">${wrDon}</span> donations (<span id="winRedPctDonations">${winRedPct}</span>%); 
-        <span id="winRedDonationsMin">$${winRedDonationsMin}</span>–<span id="winRedDonationsMax">$${winRedDonationsMax}</span> total
-      </span>
+    // Update the legend separately
+    let legendHtml = `
+      <div class="bg-white p-2 border border-gray-200 rounded-md grid md:grid-cols-2 gap-2 w-full mb-2">
+        <div>
+          <div class="px-2 text-blue-600 text-sm font-bold">ActBlue</div>
+          <div class="grid grid-cols-2 gap-2">
+          
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Total</span>
+              <div>
+                <strong id="actBlueDonationsMin" class="text-sm border-b border-dashed border-gray-500 donation-total" data-min="$${actBlueDonationsMin.toLocaleString()}" data-max="$${actBlueDonationsMax.toLocaleString()}">$${actBlueDonationsMin.toLocaleString()}</strong>
+                <span class="text-xs opacity-80" id="actBluePctDonations">${actBluePct}%</span>
+              </div>
+            </div>
+
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Donations</span>
+              <strong id="actBlueDonations">${abDon}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="border-t md:border-t-0 md:border-l border-gray-200 pt-2 md:pt-0 md:pl-2">
+          <div class="px-2 text-red-600 text-sm font-bold">WinRed</div>
+          <div class="grid grid-cols-2 gap-2">
+          
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Total</span>
+              <div>
+                <strong id="winRedDonationsMin" class="text-sm border-b border-dashed border-gray-500 donation-total" data-min="$${winRedDonationsMin.toLocaleString()}" data-max="$${winRedDonationsMax.toLocaleString()}">$${winRedDonationsMin.toLocaleString()}</strong>
+                <span class="text-xs opacity-80" id="winRedPctDonations">${winRedPct}%</span>
+              </div>
+            </div>
+
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Donations</span>
+              <strong id="winRedDonations">${wrDon}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
     `;
-    $('#globalAggBtn').html(aggregatorSummary);
+    $('#legend').html(legendHtml);
   }
 
   // ----------------------------------------------------------
