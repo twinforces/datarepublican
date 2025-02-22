@@ -10,6 +10,22 @@ title: ActBlue / WinRed 2024 Donor Lookup
 <script src="chart.js"></script>
 
 <style>
+  .agg-toggle-button {
+    display: inline-block;
+    background-color: #efefef; /* Light gray background */
+    border: 1px solid #ccc;    /* Subtle border */
+    color: #333;               /* Text color */
+    padding: 4px 8px;          /* Some padding for button-like feel */
+    border-radius: 4px;        /* Rounded corners */
+    font-size: 0.875rem;       /* ~14px, tweak to taste */
+    cursor: pointer;           /* Show pointer on hover */
+    transition: background-color 0.2s;
+  }
+
+  .agg-toggle-button:hover {
+    background-color: #e2e2e2; /* Slightly darker on hover */
+  }
+
   .charts-wrapper {
     display: flex;
     flex-wrap: wrap;
@@ -160,8 +176,61 @@ title: ActBlue / WinRed 2024 Donor Lookup
   let donationsPieChart = null;
   let amountsPieChart   = null;
 
+  // Define up to 10 gradient shades for each side:
+  const actBlueColors = [
+    '#e0f2ff', // Very light
+    '#c7e7fe',
+    '#9fd7fd',
+    '#78c7fc',
+    '#36A2EB', // Crisp medium
+    '#288ad8',
+    '#1b72c5',
+    '#115cb3',
+    '#0a469f',
+    '#003380'  // Darker
+  ];
+
+  const winRedColors = [
+    '#ffe0e0', // Very light
+    '#ffc7c7',
+    '#ff9f9f',
+    '#ff7878',
+    '#FF6384', // Crisp medium
+    '#d8506e',
+    '#b33c58',
+    '#8f2843',
+    '#6d172f',
+    '#4c031d'  // Darker
+  ];
+
+  const othersColor = '#cccccc'; 
+
+  function assignColorsByLabel(labels) {
+    let actBlueIndex = 0;
+    let winRedIndex  = 0;
+
+    return labels.map(label => {
+      const lower = label.toLowerCase();
+      if (lower.includes('actblue')) {
+        // pick the next color in the ActBlue array
+        const color = actBlueColors[actBlueIndex % actBlueColors.length];
+        actBlueIndex++;
+        return color;
+      } else if (lower.includes('winred')) {
+        // pick the next color in the WinRed array
+        const color = winRedColors[winRedIndex % winRedColors.length];
+        winRedIndex++;
+        return color;
+      } else {
+        // “Others (<10%)” or not recognized
+        console.log(lower);
+        return othersColor;
+      }
+    });
+  }
+
   function condenseSmallSlices(labels, data, thresholdFraction = 0.1) {
-    // For example, thresholdFraction=0.1 -> 10%
+    // For example, thresholdFraction = 0.1 -> 10%
     
     const total = data.reduce((sum, val) => sum + val, 0);
     if (total === 0) {
@@ -171,24 +240,38 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
     const newLabels = [];
     const newData   = [];
-    let othersValue = 0;
+    
+    // Track separate "others" sums for ActBlue vs. WinRed
+    let othersActBlueValue = 0;
+    let othersWinRedValue  = 0;
 
     for (let i = 0; i < labels.length; i++) {
       const val = data[i];
       const ratio = val / total;
+      // Detect which category this label belongs to
+      const isActBlue = labels[i].startsWith('ActBlue -');
+
       if (ratio < thresholdFraction) {
-        // Merge small slice into "others" bucket
-        othersValue += val;
+        // Merge small slice into the appropriate "others" bucket
+        if (isActBlue) {
+          othersActBlueValue += val;
+        } else {
+          othersWinRedValue += val;
+        }
       } else {
         newLabels.push(labels[i]);
         newData.push(val);
       }
     }
 
-    // If any slices were merged, add a final "Others" slice
-    if (othersValue > 0) {
-      newLabels.push('Others (<10%)');
-      newData.push(othersValue);
+    // If any slices were merged, add final "Others" slices
+    if (othersActBlueValue > 0) {
+      newLabels.push('Others - ActBlue');
+      newData.push(othersActBlueValue);
+    }
+    if (othersWinRedValue > 0) {
+      newLabels.push('Others - WinRed');
+      newData.push(othersWinRedValue);
     }
 
     return {
@@ -196,7 +279,6 @@ title: ActBlue / WinRed 2024 Donor Lookup
       newData
     };
   }
-
 
   function refreshPieCharts() {
     // 1) Extract raw data from globalCampaigns
@@ -210,28 +292,31 @@ title: ActBlue / WinRed 2024 Donor Lookup
     let rawAmountsData   = [];
 
     campaigns.forEach(c => {
+      // Build the label for each campaign
       const campaignLabel = 
         (c.actBlueIndicator === '1' ? 'ActBlue' : 'WinRed') + ' - ' + c.committeeName;
-      
+
       rawLabels.push(campaignLabel);
       rawDonationsData.push(c.numDonations);
 
-      // For total amounts, use sumMin as a “low bound,” or you can average (sumMin + sumMax)/2.
-      // Here we’ll just use sumMin for simplicity:
+      // For total amounts, we can use c.sumMin for simplicity
       rawAmountsData.push(Math.round(c.sumMin));
     });
 
-    // If no campaigns exist, provide dummy data so Chart.js doesn’t complain
+    // If no campaigns exist, provide dummy data so Chart.js doesn’t error out
     if (!rawLabels.length) {
       rawLabels = ['No data'];
       rawDonationsData = [1];
       rawAmountsData   = [1];
     }
 
-    // 2) Condense small slices below 10% into "Others"
+    // 2) Condense small slices below 10% into "Others - ActBlue" and "Others - WinRed"
     const thresholdFraction = 0.1; // 10%
     const condensedDonations = condenseSmallSlices(rawLabels, rawDonationsData, thresholdFraction);
     const condensedAmounts   = condenseSmallSlices(rawLabels, rawAmountsData, thresholdFraction);
+
+    const donationsColors = assignColorsByLabel(condensedDonations.newLabels);
+    const amountsColors   = assignColorsByLabel(condensedAmounts.newLabels);
 
     // 3) Destroy existing charts if they exist
     if (donationsPieChart) {
@@ -241,7 +326,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
       amountsPieChart.destroy();
     }
 
-    // 4) Build the "Donations by Campaign (%)" pie
+    // 4) Build the "Donations by Campaign (%)" pie chart
     const ctxDonations = document.getElementById('donationsPie').getContext('2d');
     donationsPieChart = new Chart(ctxDonations, {
       type: 'pie',
@@ -250,9 +335,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
         datasets: [{
           label: '# of Donations',
           data: condensedDonations.newData,
-          backgroundColor: [
-            '#36A2EB','#FF6384','#FFCE56','#4BC0C0','#9966FF','#FF9F40'
-          ],
+          backgroundColor: donationsColors,
         }]
       },
       options: {
@@ -271,18 +354,16 @@ title: ActBlue / WinRed 2024 Donor Lookup
       }
     });
 
-    // 5) Build the "Donation Amount by Campaign (%)" pie
+    // 5) Build the "Amounts by Campaign (%)" pie chart
     const ctxAmounts = document.getElementById('amountsPie').getContext('2d');
     amountsPieChart = new Chart(ctxAmounts, {
       type: 'pie',
       data: {
         labels: condensedAmounts.newLabels,
         datasets: [{
-          label: 'Donation Amounts',
+          label: 'Total Amounts',
           data: condensedAmounts.newData,
-          backgroundColor: [
-            '#36A2EB','#FF6384','#FFCE56','#4BC0C0','#9966FF','#FF9F40'
-          ],
+          backgroundColor: amountsColors,
         }]
       },
       options: {
@@ -292,7 +373,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
         plugins: {
           title: {
             display: true,
-            text: 'Donation Amount by Campaign (%)'
+            text: 'Total Amounts by Campaign (%)'
           },
           legend: {
             display: true
@@ -301,6 +382,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
       }
     });
   }
+
 
   let chartUpdateScheduled = false;
   function scheduleChartRefresh() {
@@ -876,7 +958,8 @@ title: ActBlue / WinRed 2024 Donor Lookup
     const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
 
     let aggregatorSummary = `
-      Overall Campaign Totals <span class="text-gray-500">(${collapseMessage})</span><br/>
+      Overall Campaign Totals   
+      <span class="agg-toggle-button">${collapseMessage}</span><br/>
       <span style="color: black;">
         <span class="text-blue-600">ActBlue</span>: 
         <span id="actBlueDonations">${abDon}</span> donations (<span id="actBluePctDonations">${actBluePct}</span>%); 
