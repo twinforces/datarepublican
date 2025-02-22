@@ -20,11 +20,11 @@
   }
 
   th {
-    @apply bg-gray-100 border border-gray-200 whitespace-nowrap py-1 px-4 text-left cursor-pointer;
+    @apply bg-gray-100 hover:bg-gray-200 border border-gray-200 whitespace-nowrap font-semibold py-1 px-2 text-left cursor-pointer;
   }
 
   td {
-    @apply bg-white py-2 px-4 text-left border border-gray-200;
+    @apply bg-white py-2 px-2 text-left border border-gray-200;
   }
 
   button {
@@ -39,12 +39,18 @@
     }
   }
 
+  th.sort-asc::after,
+  th.sort-desc::after {
+    content: "⌃";
+    @apply inline-block relative transform transition-transform duration-200 mx-0.5;
+  }
+
   th.sort-asc::after {
-    content: " ▲";
+    @apply rotate-[0deg] top-[2px];
   }
 
   th.sort-desc::after {
-    content: " ▼";
+    @apply rotate-[-180deg] -top-px;
   }
 
   tbody td {
