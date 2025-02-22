@@ -15,18 +15,6 @@ title: Nonprofit Assets
     margin-bottom: 5px;
   }
 
-  th.sort-asc::after {
-    content: " ▲";
-  }
-
-  th.sort-desc::after {
-    content: " ▼";
-  }
-
-  tbody td {
-    background-color: #fff;
-  }
-
   .loading-container {
     text-align: center;
     padding: 20px;
@@ -130,34 +118,24 @@ title: Nonprofit Assets
         <th data-field="ein" data-index="0">EIN</th>
         <th data-field="name" data-index="1">Name</th>
         <th data-field="receiptAmt" data-index="2">Receipts</th>
-        <!-- Cash Contributions column REMOVED entirely -->
         <th data-field="govtAmt" data-index="3">Taxpayer dollars</th>
-        <th data-field="taxpayerPct" data-index="4">Taxpayer %</th>
-        <th data-field="travelExpenses" data-index="5">Travel expenses</th>
-        <th data-field="travelExpensesPct" data-index="6">Travel %</th>
-        <th data-field="pensionPlanContributions" data-index="7">Benefits</th>
-        <th data-field="pensionsPct" data-index="8">Benefits %</th>
-        <th data-field="otherSalaries" data-index="9">Salaries and wages</th>
-        <th data-field="otherSalariesPct" data-index="10">Salaries and wages %</th>
-        <th data-field="officerComp" data-index="11">Officer compensation</th>
-        <th data-field="officerCompPct" data-index="12">Officer comp %</th>
+        <th data-field="travelExpenses" data-index="4">Travel expenses</th>
+        <th data-field="pensionPlanContributions" data-index="5">Benefits</th>
+        <th data-field="otherSalaries" data-index="6">Salaries and wages</th>
+        <th data-field="officerComp" data-index="7">Officer compensation</th>
 
         <!-- Other Expenses (hidden by default) -->
-        <th data-field="officeExpenses" data-index="13" class="other-expenses-col bg-red/10">Office expenses</th>
-        <th data-field="officeExpensesPct" data-index="14" class="other-expenses-col bg-red/10">Office %</th>
-        <th data-field="occupancyExpenses" data-index="15" class="other-expenses-col bg-red/10">Occupancy expenses</th>
-        <th data-field="occupancyExpensesPct" data-index="16" class="other-expenses-col bg-red/10">Occupancy %</th>
-        <th data-field="memberBenefits" data-index="17" class="other-expenses-col bg-red/10">Member benefits</th>
-        <th data-field="memberBenefitsPct" data-index="18" class="other-expenses-col bg-red/10">Member benefits %</th>
-        <th data-field="techExpenses" data-index="19" class="other-expenses-col bg-red/10">IT expenses</th>
-        <th data-field="techExpenses" data-index="20" class="other-expenses-col bg-red/10">IT %</th>
+        <th data-field="officeExpenses" data-index="8" class="other-expenses-col bg-red/10 hover:bg-red/20">Office expenses</th>
+        <th data-field="occupancyExpenses" data-index="9" class="other-expenses-col bg-red/10 hover:bg-red/20">Occupancy expenses</th>
+        <th data-field="memberBenefits" data-index="10" class="other-expenses-col bg-red/10 hover:bg-red/20">Member benefits</th>
+        <th data-field="techExpenses" data-index="11" class="other-expenses-col bg-red/10 hover:bg-red/20">IT expenses</th>
 
         <!-- Assets (hidden by default) -->
-        <th data-field="totalAssets" data-index="21" class="assets-col bg-green/10">Total assets</th>
-        <th data-field="totalSavings" data-index="22" class="assets-col bg-green/10">Savings</th>
-        <th data-field="totalCash" data-index="23" class="assets-col bg-green/10">Cash</th>
-        <th data-field="totalPublicEquities" data-index="24" class="assets-col bg-green/10">Public equities</th>
-        <th data-field="totalOtherSecurities" data-index="25" class="assets-col bg-green/10">Other securities</th>
+        <th data-field="totalAssets" data-index="12" class="assets-col bg-green/10 hover:bg-green/20">Total assets</th>
+        <th data-field="totalSavings" data-index="13" class="assets-col bg-green/10 hover:bg-green/20">Savings</th>
+        <th data-field="totalCash" data-index="14" class="assets-col bg-green/10 hover:bg-green/20">Cash</th>
+        <th data-field="totalPublicEquities" data-index="15" class="assets-col bg-green/10 hover:bg-green/20">Public equities</th>
+        <th data-field="totalOtherSecurities" data-index="16" class="assets-col bg-green/10 hover:bg-green/20">Other securities</th>
       </tr>
     </thead>
     <tbody>
@@ -323,7 +301,14 @@ title: Nonprofit Assets
     return sorted;
   }
 
-  // Render table body, limit to first 1000 results
+  // Add this helper function to determine percentage styling
+  function getPercentageStyle(percentage) {
+    if (percentage >= 0.8) return 'bg-red/10 border !border-transparent text-red font-semibold';
+    if (percentage >= 0.5) return '!bg-yellow/50 border !border-transparent font-semibold';
+    return '';
+  }
+
+  // Update the renderTable function's row generation
   function renderTable(dataArray) {
     const tbody = $('#assetsTable tbody');
     tbody.empty();
@@ -356,7 +341,7 @@ title: Nonprofit Assets
 
       // Name (index 1)
       const fullName = item.name;
-      const truncatedName = fullName.length > 95 || (fullName.length > 45 && fullName.length - 45 >= 5) ? 
+      const truncatedName = fullName.length > 95 || (fullName.length > 45 && fullName.length - 45 >= 10) ? 
         `${fullName.substring(0, 45)}... <button class="frameless text-blue-600 hover:underline more-link">more</button>` : 
         fullName;
       const nameCell = $('<td data-index="1" class="whitespace-nowrap"></td>')
@@ -364,65 +349,54 @@ title: Nonprofit Assets
         .data('full-name', fullName);
       tr.append(nameCell);
 
-      // Receipts (index 2)
+      // Receipts (no percentage)
       tr.append($('<td data-index="2"></td>').text(formatCurrency(item.receiptAmt)));
 
-      // govtAmt (index 3)
-      tr.append($('<td data-index="3"></td>').text(formatCurrency(item.govtAmt)));
-      // taxpayerPct (index 4)
-      tr.append($('<td data-index="4"></td>').text(formatPercentage(item.taxpayerPct)));
+      // Helper function to create combined value + percentage cell
+      function createCombinedCell(value, percentage, index, className = '') {
+        const percentageStyle = getPercentageStyle(percentage);
+        return $(`<td data-index="${index}" class="${className} whitespace-nowrap"></td>`).html(
+          `${formatCurrency(value)} <span class="bg-gray-200 px-1 py-0.5 rounded-sm text-xs ${percentageStyle}">${formatPercentage(percentage)}</span>`
+        );
+      }
 
-      // travelExpenses (index 5)
-      tr.append($('<td data-index="5"></td>').text(formatCurrency(item.travelExpenses)));
-      // travelExpensesPct (index 6)
-      tr.append($('<td data-index="6"></td>').text(formatPercentage(item.travelExpensesPct)));
+      // Taxpayer dollars + percentage
+      tr.append(createCombinedCell(item.govtAmt, item.taxpayerPct, 3));
 
-      // pensionPlanContributions (index 7)
-      tr.append($('<td data-index="7"></td>').text(formatCurrency(item.pensionPlanContributions)));
-      // pensionsPct (index 8)
-      tr.append($('<td data-index="8"></td>').text(formatPercentage(item.pensionsPct)));
+      // Travel expenses + percentage
+      tr.append(createCombinedCell(item.travelExpenses, item.travelExpensesPct, 4));
 
-      // otherSalaries (index 9)
-      tr.append($('<td data-index="9"></td>').text(formatCurrency(item.otherSalaries)));
-      // otherSalariesPct (index 10)
-      tr.append($('<td data-index="10"></td>').text(formatPercentage(item.otherSalariesPct)));
+      // Benefits + percentage
+      tr.append(createCombinedCell(item.pensionPlanContributions, item.pensionsPct, 5));
 
-      // officerComp (index 11)
-      tr.append($('<td data-index="11"></td>').text(formatCurrency(item.officerComp)));
-      // officerCompPct (index 12)
-      tr.append($('<td data-index="12"></td>').text(formatPercentage(item.officerCompPct)));
+      // Salaries and wages + percentage
+      tr.append(createCombinedCell(item.otherSalaries, item.otherSalariesPct, 6));
 
-      // officeExpenses (index 13)
-      tr.append($('<td data-index="13" class="other-expenses-col"></td>').text(formatCurrency(item.officeExpenses)));
-      // officeExpensesPct (index 14)
-      tr.append($('<td data-index="14" class="other-expenses-col"></td>').text(formatPercentage(item.officeExpensesPct)));
+      // Officer compensation + percentage
+      tr.append(createCombinedCell(item.officerComp, item.officerCompPct, 7));
 
-      // occupancyExpenses (index 15)
-      tr.append($('<td data-index="15" class="other-expenses-col"></td>').text(formatCurrency(item.occupancyExpenses)));
-      // occupancyExpensesPct (index 16)
-      tr.append($('<td data-index="16" class="other-expenses-col"></td>').text(formatPercentage(item.occupancyExpensesPct)));
+      // Office expenses + percentage
+      tr.append(createCombinedCell(item.officeExpenses, item.officeExpensesPct, 8, 'other-expenses-col'));
 
-      // memberBenefits (index 17)
-      tr.append($('<td data-index="17" class="other-expenses-col"></td>').text(formatCurrency(item.memberBenefits)));
-      // memberBenefitsPct (index 18)
-      tr.append($('<td data-index="18" class="other-expenses-col"></td>').text(formatPercentage(item.memberBenefitsPct)));
+      // Occupancy expenses + percentage
+      tr.append(createCombinedCell(item.occupancyExpenses, item.occupancyExpensesPct, 9, 'other-expenses-col'));
 
+      // Member benefits + percentage
+      tr.append(createCombinedCell(item.memberBenefits, item.memberBenefitsPct, 10, 'other-expenses-col'));
 
-      // techExpenses (index 19)
-      tr.append($('<td data-index="19" class="other-expenses-col"></td>').text(formatCurrency(item.techExpenses)));
-      // techExpensesPct (index 20)
-      tr.append($('<td data-index="20" class="other-expenses-col"></td>').text(formatPercentage(item.techExpensesPct)));
+      // IT expenses + percentage
+      tr.append(createCombinedCell(item.techExpenses, item.techExpensesPct, 11, 'other-expenses-col'));
 
-      // totalAssets (index 21)
-      tr.append($('<td data-index="21" class="assets-col"></td>').text(formatCurrency(item.totalAssets)));
-      // totalSavings (index 22)
-      tr.append($('<td data-index="22" class="assets-col"></td>').text(formatCurrency(item.totalSavings)));
-      // totalCash (index 23)
-      tr.append($('<td data-index="23" class="assets-col"></td>').text(formatCurrency(item.totalCash)));
-      // totalPublicEquities (index 22)
-      tr.append($('<td data-index="22" class="assets-col"></td>').text(formatCurrency(item.totalPublicEquities)));
-      // totalOtherSecurities (index 23)
-      tr.append($('<td data-index="23" class="assets-col"></td>').text(formatCurrency(item.totalOtherSecurities)));
+      // totalAssets (index 12)
+      tr.append($('<td data-index="12" class="assets-col"></td>').text(formatCurrency(item.totalAssets)));
+      // totalSavings (index 13)
+      tr.append($('<td data-index="13" class="assets-col"></td>').text(formatCurrency(item.totalSavings)));
+      // totalCash (index 14)
+      tr.append($('<td data-index="14" class="assets-col"></td>').text(formatCurrency(item.totalCash)));
+      // totalPublicEquities (index 15)
+      tr.append($('<td data-index="15" class="assets-col"></td>').text(formatCurrency(item.totalPublicEquities)));
+      // totalOtherSecurities (index 16)
+      tr.append($('<td data-index="16" class="assets-col"></td>').text(formatCurrency(item.totalOtherSecurities)));
 
       tbody.append(tr);
     });
