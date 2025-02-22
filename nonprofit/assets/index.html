@@ -15,24 +15,6 @@ title: Nonprofit Assets
     margin-bottom: 5px;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    border: 1px solid #ccc;
-    padding: 6px 8px;
-    text-align: left;
-  }
-
-  th {
-    background-color: #efefef;
-    cursor: pointer;
-    position: relative;
-  }
-
   th.sort-asc::after {
     content: " ▲";
   }
@@ -54,22 +36,6 @@ title: Nonprofit Assets
     height: 48px;
   }
 
-  /* Minimal button styling */
-  button {
-    border: 1px solid #aaa;
-    padding: 5px 8px;
-    background: #f8f8f8;
-    cursor: pointer;
-    font-size: 14px;
-  }
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  button:hover:not(:disabled) {
-    background: #e8e8e8;
-  }
-
   /* Inline spinner inside a button */
   .button-text {
     display: inline-block;
@@ -81,34 +47,7 @@ title: Nonprofit Assets
     vertical-align: middle;
   }
 
-  /* Utility classes */
-  .hidden {
-    display: none !important;
-  }
-
-  /* Basic responsive container */
-  .table-wrapper {
-    overflow-x: auto;
-  }
-
   /* Slider container styling */
-  #sliderContainer {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    margin: 20px 0;
-    max-width: 600px;
-  }
-  .slider-block {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-  }
-  .slider-label {
-    min-width: 120px;
-    font-weight: bold;
-  }
   .slider-inputs {
     display: flex;
     flex-direction: column;
@@ -123,7 +62,7 @@ title: Nonprofit Assets
   }
 </style>
 
-<h1 class="mb-2">Assets and Expenses</h1>
+<h1 class="mb-2">Assets &amp; expenses</h1>
 <p class="opacity-80 text-[15px] mb-4">
   Below is a list of nonprofit EINs with their receipts, expenses, and assets. 
   Search by EIN or name to filter rows, or sort on any column. You can also use 
@@ -133,7 +72,7 @@ title: Nonprofit Assets
 <div id="warning"></div>
 
 <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3" id="filterContainer">
-  <label for="filterInput" class="font-medium">Filter EIN or Name:</label>
+  <label for="filterInput" class="font-medium">Filter EIN or name:</label>
   <div class="flex gap-2">
     <input type="text" id="filterInput" placeholder="Type your filter..." class="px-2 py-1 rounded border border-gray-300" style="min-width: 220px;">
     <button id="filterButton">
@@ -145,36 +84,36 @@ title: Nonprofit Assets
 
 <!-- Toggle checkboxes for expenses and assets -->
 <div class="flex gap-4 mb-5">
-  <label>
+  <label class="text-sm">
     <input type="checkbox" id="showOtherExpensesCheckbox" />
-    Show all expenses
+    Show all <span class="bg-red/10 px-1 rounded text-red">expenses</span>
   </label>
-  <label>
+  <label class="text-sm">
     <input type="checkbox" id="showAssetsCheckbox" />
-    Show assets
+    Show <span class="bg-green/10 px-1 rounded text-green">assets</span>
   </label>
 </div>
 
 <!-- Sliders for min/max filters -->
-<div id="sliderContainer">
-  <div class="slider-block">
-    <div class="slider-label">Filter Receipts Over:</div>
+<div id="sliderContainer" class="grid md:grid-cols-3 gap-4 mb-4 max-w-4xl">
+  <div class="flex flex-col gap-2">
+    <label class="font-bold text-sm">Filter receipts over:</label>
     <div class="slider-inputs">
       <input type="range" id="receiptsMin" min="0" max="100000000" step="100000" value="0" />
       <input type="range" id="receiptsMax" min="0" max="82040914822" value="82040914822" style="display:none;"/>
       <div class="slider-values" id="receiptsRangeLabel"></div>
     </div>
   </div>
-  <div class="slider-block">
-    <div class="slider-label">Filter Taxpayer $ Over:</div>
+  <div class="flex flex-col gap-2">
+    <label class="font-bold text-sm">Filter taxpayer funds over:</label>
     <div class="slider-inputs">
       <input type="range" id="govtAmtMin" min="0" max="100000000" step="100000" value="0" />
       <input type="range" id="govtAmtMax" min="0" max="11069708938" value="11069708938"  style="display:none;"/>
       <div class="slider-values" id="govtAmtRangeLabel"></div>
     </div>
   </div>
-  <div class="slider-block">
-    <div class="slider-label">Filter Taxpayer % Over:</div>
+  <div class="flex flex-col gap-2">
+    <label class="font-bold text-sm">Filter % of taxpayer funds over:</label>
     <div class="slider-inputs">
       <input type="range" id="taxpayerPctMin" min="0" max="1" step="0.01" value="0" />
       <input type="range" id="taxpayerPctMax" min="0" max="1" step="0.01" value="1"  style="display:none;"/>
@@ -183,7 +122,7 @@ title: Nonprofit Assets
   </div>
 </div>
 
-<div class="table-wrapper">
+<div class="w-screen md:w-auto overflow-x-auto -mx-4 px-4 xl:-mx-6 xl:px-6">
   <table id="assetsTable">
     <thead>
       <tr>
@@ -192,33 +131,33 @@ title: Nonprofit Assets
         <th data-field="name" data-index="1">Name</th>
         <th data-field="receiptAmt" data-index="2">Receipts</th>
         <!-- Cash Contributions column REMOVED entirely -->
-        <th data-field="govtAmt" data-index="3">Taxpayer Dollars</th>
+        <th data-field="govtAmt" data-index="3">Taxpayer dollars</th>
         <th data-field="taxpayerPct" data-index="4">Taxpayer %</th>
-        <th data-field="travelExpenses" data-index="5">Travel Expenses</th>
+        <th data-field="travelExpenses" data-index="5">Travel expenses</th>
         <th data-field="travelExpensesPct" data-index="6">Travel %</th>
         <th data-field="pensionPlanContributions" data-index="7">Benefits</th>
         <th data-field="pensionsPct" data-index="8">Benefits %</th>
-        <th data-field="otherSalaries" data-index="9">Salaries and Wages</th>
-        <th data-field="otherSalariesPct" data-index="10">Salaries and Wages %</th>
-        <th data-field="officerComp" data-index="11">Officer Compensation</th>
-        <th data-field="officerCompPct" data-index="12">Officer Comp %</th>
+        <th data-field="otherSalaries" data-index="9">Salaries and wages</th>
+        <th data-field="otherSalariesPct" data-index="10">Salaries and wages %</th>
+        <th data-field="officerComp" data-index="11">Officer compensation</th>
+        <th data-field="officerCompPct" data-index="12">Officer comp %</th>
 
         <!-- Other Expenses (hidden by default) -->
-        <th data-field="officeExpenses" data-index="13" class="other-expenses-col">Office Expenses</th>
-        <th data-field="officeExpensesPct" data-index="14" class="other-expenses-col">Office %</th>
-        <th data-field="occupancyExpenses" data-index="15" class="other-expenses-col">Occupancy Expenses</th>
-        <th data-field="occupancyExpensesPct" data-index="16" class="other-expenses-col">Occupancy %</th>
-        <th data-field="memberBenefits" data-index="17" class="other-expenses-col">Member Benefits</th>
-        <th data-field="memberBenefitsPct" data-index="18" class="other-expenses-col">Member Benefits %</th>
-        <th data-field="techExpenses" data-index="19" class="other-expenses-col">IT Expenses</th>
-        <th data-field="techExpenses" data-index="20" class="other-expenses-col">IT %</th>
+        <th data-field="officeExpenses" data-index="13" class="other-expenses-col bg-red/10">Office expenses</th>
+        <th data-field="officeExpensesPct" data-index="14" class="other-expenses-col bg-red/10">Office %</th>
+        <th data-field="occupancyExpenses" data-index="15" class="other-expenses-col bg-red/10">Occupancy expenses</th>
+        <th data-field="occupancyExpensesPct" data-index="16" class="other-expenses-col bg-red/10">Occupancy %</th>
+        <th data-field="memberBenefits" data-index="17" class="other-expenses-col bg-red/10">Member benefits</th>
+        <th data-field="memberBenefitsPct" data-index="18" class="other-expenses-col bg-red/10">Member benefits %</th>
+        <th data-field="techExpenses" data-index="19" class="other-expenses-col bg-red/10">IT expenses</th>
+        <th data-field="techExpenses" data-index="20" class="other-expenses-col bg-red/10">IT %</th>
 
         <!-- Assets (hidden by default) -->
-        <th data-field="totalAssets" data-index="21" class="assets-col">Total Assets</th>
-        <th data-field="totalSavings" data-index="22" class="assets-col">Savings</th>
-        <th data-field="totalCash" data-index="23" class="assets-col">Cash</th>
-        <th data-field="totalPublicEquities" data-index="24" class="assets-col">Public Equities</th>
-        <th data-field="totalOtherSecurities" data-index="25" class="assets-col">Other Securities</th>
+        <th data-field="totalAssets" data-index="21" class="assets-col bg-green/10">Total assets</th>
+        <th data-field="totalSavings" data-index="22" class="assets-col bg-green/10">Savings</th>
+        <th data-field="totalCash" data-index="23" class="assets-col bg-green/10">Cash</th>
+        <th data-field="totalPublicEquities" data-index="24" class="assets-col bg-green/10">Public equities</th>
+        <th data-field="totalOtherSecurities" data-index="25" class="assets-col bg-green/10">Other securities</th>
       </tr>
     </thead>
     <tbody>
@@ -408,15 +347,22 @@ title: Nonprofit Assets
       // EIN cell with link
       const proPublicaLink = `
         <a href="https://projects.propublica.org/nonprofits/organizations/${item.ein}/${item.xmlName}/full" 
-           target="_blank" rel="noopener noreferrer">
-          ${item.ein}
+           target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">
+          ${item.ein.slice(0, 2)}-${item.ein.slice(2)}
         </a>
       `;
       // Column index 0
       tr.append($('<td data-index="0"></td>').html(proPublicaLink));
 
       // Name (index 1)
-      tr.append($('<td data-index="1"></td>').text(item.name));
+      const fullName = item.name;
+      const truncatedName = fullName.length > 50 ? 
+        `${fullName.substring(0, 50)}... <button class="frameless text-blue-600 hover:underline more-link">more</button>` : 
+        fullName;
+      const nameCell = $('<td data-index="1" class="whitespace-nowrap"></td>')
+        .html(truncatedName)
+        .data('full-name', fullName);
+      tr.append(nameCell);
 
       // Receipts (index 2)
       tr.append($('<td data-index="2"></td>').text(formatCurrency(item.receiptAmt)));
@@ -628,6 +574,14 @@ title: Nonprofit Assets
 
     // 3) Update UI from initial parameters (hide columns, set slider positions)
     updateUIFromParams();
+
+    // Add click handler for "more" buttons in name cells
+    $(document).on('click', '.more-link', function(e) {
+      e.preventDefault();
+      const cell = $(this).closest('td');
+      const fullName = cell.data('full-name');
+      cell.html(fullName);
+    });
 
     // Sort handler: click on TH
     $('#assetsTable thead th').on('click', function () {
