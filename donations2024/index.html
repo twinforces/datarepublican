@@ -1,0 +1,1046 @@
+---
+layout: default
+title: ActBlue / WinRed 2024 Donor Lookup
+---
+
+<!-- Local JS/CSS references: note no "../" paths, all are in current directory -->
+<script src="jquery.min.js"></script>
+<script src="jszip.min.js"></script>
+<script src="papaparse.min.js"></script>
+<script src="chart.js"></script>
+
+<style>
+  .charts-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 10px;
+  }
+  .chart-container {
+    width: 300px;
+    height: 300px;
+  }
+
+  .text-red-600 {
+    color: #dc2626 !important; /* #dc2626 is Tailwind's red-600 */
+  }
+</style>  
+
+<h1 class="mb-1">2024 Donor Lookup</h1>
+<p class="opacity-80 mb-0 text-[15px]">
+  All small dollar donations (<$10) for 2024 originating from ActBlue and WinRed are included in this dataset. 
+  
+  Enter a name or ZIP code (or both). The search will parse your input into alphanumeric tokens, 
+  removing hyphens and other punctuation, but keeping numeric parts. 
+  We look for rows where <strong>all</strong> entered tokens appear.
+</p>
+
+<div class="mb-4">
+  <button class="frameless mb-2 text-base" id="howItWorksBtn">How it works</button>
+  <div class="h-[0px] overflow-hidden transition-all duration-200" id="howItWorksList">
+    <div class="p-4 border border-gray-200 rounded-md bg-white">
+      <div class="text-sm space-y-2">
+        <p>
+          You may enter partial or full names, ZIP codes, or a combination. Spaces separate tokens. 
+          For example, if you enter <code>john smith 90210</code>, we match all rows that contain 
+          the tokens <em>john</em>, <em>smith</em>, and <em>90210</em> somewhere in Name, Zip, Company, etc.
+        </p>
+        <p>
+          This is an asynchronous, streaming search over large batch files. You can press "Stop" at any time 
+          to abort processing. Partial results found up until that point remain on the screen.
+        </p>
+        <p>
+          Each matched donation is aggregated in real‐time into two sections:
+          <ul class="list-disc list-inside">
+            <li><strong>Global Summaries by Campaign</strong></li>
+            <li><strong>Per‐donor Summaries</strong> (grouped by Name + first 5 digits of ZIP + Company)</li>
+          </ul>
+          Campaigns are identified by (ActBlue=1 or WinRed=0) plus the Committee Name. Donors from WinRed appear in a pale‐red box; donors from ActBlue appear in a pale‐blue box.
+        </p>
+        <p>
+          After all batches finish, you can download the raw matching CSV rows via the "Download results" button.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="searchContainer" class="mb-2">
+  <div class="flex flex-col md:flex-row md:items-end gap-2 justify-between">
+    <form id="searchForm" class="flex flex-col gap-1 w-full">
+      
+      <div class="flex flex-col gap-1 w-full">
+        <label for="donorSearchBox" class="text-sm md:text-[15px] font-bold">
+          Enter donor name or ZIP (or both):
+        </label>
+        <input type="text"
+               id="donorSearchBox"
+               class="w-full px-2 py-1 rounded text-sm border border-gray-300"
+               placeholder="e.g. CLINTON 58801" />
+      </div>
+
+      <div class="flex items-center gap-1">
+        <span class="flex items-center gap-1">
+          <!-- The same button doubles as "Stop" during searching -->
+          <button type="submit" id="searchButton" disabled>
+            <span class="button-text">Search</span>
+            <img src="/assets/images/loading-white.svg" 
+                 class="loading-spinner size-6 mx-auto" 
+                 style="display: none;" 
+                 alt="Loading..." />
+          </button>
+        </span>
+        <span id="statusMessage"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="mb-2">
+  <!-- The aggregator summary button + collapsed aggregator details -->
+  <div class="charts-wrapper">
+    <div class="chart-container">
+      <canvas id="donationsPie"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="amountsPie"></canvas>
+    </div>
+  </div>
+
+  <div class="mb-4">
+    <!-- We’ll fill the button text via updateAggregatorSummary() -->
+    <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
+    <!-- Collapsed by default -->
+    <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
+      <!-- We'll fill the aggregator details (the previous “refreshGlobalAggregator” content) here -->
+    </div>
+  </div>
+
+  <!-- CSV download button -->
+  <button id="downloadCsvBtn" class="frameless !mt-4" style="display: none;">
+    <span class="flex items-center gap-1 text-sm text-gray-500 font-semibold">
+      <img src="/assets/images/download.svg" class="size-5" alt="Download SVG">
+      Download results as CSV
+    </span>
+  </button>
+</div>
+
+<!-- Per-donor aggregator -->
+<div id="donorAggregatorContainer" class="mb-4 space-y-2"></div>
+
+<script>
+  // ----------------------------------------------------------
+  // GLOBALS
+  // ----------------------------------------------------------
+  let KEYWORDS = [];  // from donations_reverse_index.txt
+  let BATCHES  = [];  // parallel array: KEYWORDS[i] -> BATCHES[i]
+  let searchCanceled = false;
+  let searchingInProgress = false;
+
+  // We'll store all raw matched rows for CSV download
+  let allMatchedRows = [];
+
+  // Aggregation structures
+  // 1) Global aggregator: campaignKey => { actBlueIndicator, committeeName, numDonations, sumMin, sumMax }
+  let globalCampaigns = new Map();
+
+  // 2) Donor aggregator:
+  //    donorKey => {
+  //       name, zip5, company,
+  //       campaigns: campaignKey => { numDonations, sumMin, sumMax },
+  //       totalNum: 0, sumMin: 0, sumMax: 0
+  //    }
+  let donorsMap = new Map();
+
+  // For concurrency
+  const MAX_BATCH_FETCHES = 5;
+  let aggregatorIsCollapsed = true; // default to collapsed
+
+  // Global references to the charts so we can update them
+  let donationsPieChart = null;
+  let amountsPieChart   = null;
+
+  function condenseSmallSlices(labels, data, thresholdFraction = 0.1) {
+    // For example, thresholdFraction=0.1 -> 10%
+    
+    const total = data.reduce((sum, val) => sum + val, 0);
+    if (total === 0) {
+      // If there's no data at all, return as-is
+      return { newLabels: labels, newData: data };
+    }
+
+    const newLabels = [];
+    const newData   = [];
+    let othersValue = 0;
+
+    for (let i = 0; i < labels.length; i++) {
+      const val = data[i];
+      const ratio = val / total;
+      if (ratio < thresholdFraction) {
+        // Merge small slice into "others" bucket
+        othersValue += val;
+      } else {
+        newLabels.push(labels[i]);
+        newData.push(val);
+      }
+    }
+
+    // If any slices were merged, add a final "Others" slice
+    if (othersValue > 0) {
+      newLabels.push('Others (<10%)');
+      newData.push(othersValue);
+    }
+
+    return {
+      newLabels,
+      newData
+    };
+  }
+
+
+  function refreshPieCharts() {
+    // 1) Extract raw data from globalCampaigns
+    const campaigns = Array.from(globalCampaigns.values());
+
+    // We'll track two sets of arrays:
+    // - For # of donations
+    // - For total donated amounts (using sumMin or sumMax as your preference)
+    let rawLabels = [];
+    let rawDonationsData = [];
+    let rawAmountsData   = [];
+
+    campaigns.forEach(c => {
+      const campaignLabel = 
+        (c.actBlueIndicator === '1' ? 'ActBlue' : 'WinRed') + ' - ' + c.committeeName;
+      
+      rawLabels.push(campaignLabel);
+      rawDonationsData.push(c.numDonations);
+
+      // For total amounts, use sumMin as a “low bound,” or you can average (sumMin + sumMax)/2.
+      // Here we’ll just use sumMin for simplicity:
+      rawAmountsData.push(Math.round(c.sumMin));
+    });
+
+    // If no campaigns exist, provide dummy data so Chart.js doesn’t complain
+    if (!rawLabels.length) {
+      rawLabels = ['No data'];
+      rawDonationsData = [1];
+      rawAmountsData   = [1];
+    }
+
+    // 2) Condense small slices below 10% into "Others"
+    const thresholdFraction = 0.1; // 10%
+    const condensedDonations = condenseSmallSlices(rawLabels, rawDonationsData, thresholdFraction);
+    const condensedAmounts   = condenseSmallSlices(rawLabels, rawAmountsData, thresholdFraction);
+
+    // 3) Destroy existing charts if they exist
+    if (donationsPieChart) {
+      donationsPieChart.destroy();
+    }
+    if (amountsPieChart) {
+      amountsPieChart.destroy();
+    }
+
+    // 4) Build the "Donations by Campaign (%)" pie
+    const ctxDonations = document.getElementById('donationsPie').getContext('2d');
+    donationsPieChart = new Chart(ctxDonations, {
+      type: 'pie',
+      data: {
+        labels: condensedDonations.newLabels,
+        datasets: [{
+          label: '# of Donations',
+          data: condensedDonations.newData,
+          backgroundColor: [
+            '#36A2EB','#FF6384','#FFCE56','#4BC0C0','#9966FF','#FF9F40'
+          ],
+        }]
+      },
+      options: {
+        animation: {
+          duration: 0 // Turn off animation "swoosh"
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: 'Donations by Campaign (%)'
+          },
+          legend: {
+            display: true
+          }
+        }
+      }
+    });
+
+    // 5) Build the "Donation Amount by Campaign (%)" pie
+    const ctxAmounts = document.getElementById('amountsPie').getContext('2d');
+    amountsPieChart = new Chart(ctxAmounts, {
+      type: 'pie',
+      data: {
+        labels: condensedAmounts.newLabels,
+        datasets: [{
+          label: 'Donation Amounts',
+          data: condensedAmounts.newData,
+          backgroundColor: [
+            '#36A2EB','#FF6384','#FFCE56','#4BC0C0','#9966FF','#FF9F40'
+          ],
+        }]
+      },
+      options: {
+        animation: {
+          duration: 0
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: 'Donation Amount by Campaign (%)'
+          },
+          legend: {
+            display: true
+          }
+        }
+      }
+    });
+  }
+
+  let chartUpdateScheduled = false;
+  function scheduleChartRefresh() {
+    // If we already scheduled an update, just skip
+    if (chartUpdateScheduled) return;
+    
+    chartUpdateScheduled = true;
+    
+    // Wait a short delay before actually refreshing
+    setTimeout(() => {
+      refreshPieCharts();
+      chartUpdateScheduled = false;
+    }, 500); // 500ms or however long you prefer
+  }
+
+
+  // ----------------------------------------------------------
+  // DOCUMENT READY
+  // ----------------------------------------------------------
+  $(document).ready(async function() {
+    $('#statusMessage').html('<span class="inline-flex text-[13px]">Loading data...</span>');
+    // Show spinner
+    $('#searchButton .button-text').hide();
+    $('#searchButton .loading-spinner').show();
+
+    // Hide aggregator by default
+    $('#globalAggregator').height(0);
+
+    // The aggregator toggle
+    $('#globalAggBtn').on('click', function() {
+      const $agg = $('#globalAggregator');
+
+      // Flip the state
+      aggregatorIsCollapsed = !aggregatorIsCollapsed;
+      
+      if (!aggregatorIsCollapsed) {
+        // Expand
+        $agg.css('height', 'auto');
+        const autoHeight = $agg.height();
+        $agg.height(0);
+        $agg.height(autoHeight);
+      } else {
+        // Collapse
+        $agg.height(0);
+      }
+
+      // Re-render aggregator’s content
+      refreshGlobalAggregator();
+    });
+
+    try {
+      // Load master reverse index (donations_reverse_index.txt)
+      await loadMasterReverseIndex('donations_reverse_index.txt.zip', 'donations_reverse_index.txt');
+
+      // Re-enable search UI
+      $('#searchButton .loading-spinner').hide();
+      $('#searchButton .button-text').show();
+      $('#statusMessage').hide();
+      $('#donorSearchBox').prop('disabled', false);
+      $('#searchButton').prop('disabled', false);
+
+      // "How it works" toggle
+      $('#howItWorksBtn').on('click', function() {
+        const $list = $('#howItWorksList');
+        const $btn = $(this);
+        if ($list.height() === 0) {
+          // Expand
+          $list.css('height', 'auto');
+          const autoHeight = $list.height();
+          $list.height(0);
+          $list.height(autoHeight);
+          $btn.text('Hide details');
+        } else {
+          // Collapse
+          $list.height(0);
+          $btn.text('How it works');
+        }
+      });
+
+    } catch (err) {
+      console.error(err);
+      $('#statusMessage').text('Error loading index: ' + err);
+    }
+  });
+
+  // ----------------------------------------------------------
+  // SEARCH FORM
+  // ----------------------------------------------------------
+  $('#searchForm').on('submit', async function(e) {
+    e.preventDefault();
+
+    if (searchingInProgress) {
+      // If we're in the middle of searching, let user stop.
+      searchCanceled = true;
+      return;
+    }
+
+    // Begin new search
+    searchingInProgress = true;
+    searchCanceled = false;
+    allMatchedRows = [];
+    globalCampaigns.clear();
+    donorsMap.clear();
+
+    // Clear aggregator displays
+    $('#globalAggregator').empty().height(0);
+    $('#donorAggregatorContainer').empty();
+    $('#downloadCsvBtn').hide();
+
+    // Switch button text to "Stop"
+    $('#searchButton .button-text').text('Stop');
+    $('#donorSearchBox').prop('disabled', true);
+
+    try {
+      const query = $('#donorSearchBox').val().trim();
+      if (!query) {
+        throw new Error('Please enter a name or ZIP code first.');
+      }
+
+      // Start the parallel fetch
+      await doSearch(query);
+
+    } catch (err) {
+      console.error(err);
+      alert(err.message || err);
+    }
+
+    // Clean up
+    searchingInProgress = false;
+    $('#searchButton .button-text').text('Search');
+    $('#donorSearchBox').prop('disabled', false);
+  });
+
+  // ----------------------------------------------------------
+  // MAIN SEARCH LOGIC (for single query)
+  // ----------------------------------------------------------
+  async function doSearch(query) {
+    // Tokenize input: remove non-alphanumeric except keep digits, but strip hyphens/punctuation
+    let tokens = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
+    if (!tokens.length) {
+      throw new Error('No valid tokens after removing punctuation/hyphens.');
+    }
+
+    // 1) figure out which BATCHIDs are relevant for all tokens (intersection of sets)
+    let finalBatches = null;
+    for (let t of tokens) {
+      if (searchCanceled) return;
+      let matchedSet = new Set();
+      const exIdx = exactMatchIndex(t);
+      if (exIdx !== -1) {
+        for (let b of BATCHES[exIdx]) {
+          matchedSet.add(b);
+        }
+      }
+      if (finalBatches === null) {
+        finalBatches = matchedSet;
+      } else {
+        // intersect
+        let temp = new Set();
+        for (let x of finalBatches) {
+          if (matchedSet.has(x)) temp.add(x);
+        }
+        finalBatches = temp;
+      }
+      if (!finalBatches.size) break;
+    }
+
+    if (!finalBatches || !finalBatches.size) {
+      alert('No matches found for these tokens.');
+      return;
+    }
+
+    // Sort batch IDs ascending
+    const batchIDs = Array.from(finalBatches).sort((a,b)=>a-b);
+
+    // We'll fetch them in limited concurrency
+    let batchPromises = [];
+    let index = 0;
+    let active = 0;
+    let completed = 0;
+    let total = batchIDs.length;
+
+    function spawnNext() {
+      if (searchCanceled) return;
+      if (index >= total) return;
+
+      active++;
+      const bID = batchIDs[index++];
+      let p = handleBatch(bID, tokens).finally(() => {
+        active--;
+        completed++;
+        updateProgress(completed, total);
+        spawnNext();
+      });
+      batchPromises.push(p);
+    }
+
+    // Kick off
+    for (let i = 0; i < MAX_BATCH_FETCHES && i < total; i++) {
+      spawnNext();
+    }
+
+    // Wait until all done
+    await Promise.allSettled(batchPromises);
+    if (searchCanceled) {
+      console.log('Search stopped by user.');
+      return;
+    }
+
+    // Done with all batches, show final aggregator
+    refreshGlobalAggregator();  // shows aggregator detail in #globalAggregator
+    refreshDonorAggregator();   // per-donor
+
+    // Show CSV download if results exist
+    if (allMatchedRows.length > 0) {
+      $('#downloadCsvBtn').show();
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Handle a single batch: parse its reverse index, find matching rows, parse CSV, aggregate
+  // ----------------------------------------------------------
+  async function handleBatch(bID, tokens) {
+    if (searchCanceled) return;
+
+    const revFileZip  = `donations_batch_${String(bID).padStart(3,'0')}_reverse_index.txt.zip`;
+    const revFileTxt  = `donations_batch_${String(bID).padStart(3,'0')}_reverse_index.txt`;
+    const csvFileZip  = `donations_batch_${String(bID).padStart(3,'0')}.csv.zip`;
+    const csvFileTxt  = `donations_batch_${String(bID).padStart(3,'0')}.csv`;
+
+    // 1) Load reverse index for this batch
+    let revText = await fetchAndUnzipText(revFileZip, revFileTxt);
+    let batchMap = parseBatchIndex(revText);
+
+    // 2) For each token, gather row IDs, do intersection
+    let finalRowSet = null;
+    for (let t of tokens) {
+      if (searchCanceled) return;
+      let matchedRowSet = new Set();
+
+      let chunk = batchMap.get(t);
+      if (chunk) {
+        for (let c of chunk) {
+          if (!c) continue;
+          // Check if it's a range "X-Y"
+          let match = c.match(/^(\d+)-(\d+)$/);
+          if (match) {
+            let start = parseInt(match[1], 10);
+            let end   = parseInt(match[2], 10);
+            if (!isNaN(start) && !isNaN(end)) {
+              for (let i = start; i <= end; i++) {
+                matchedRowSet.add(i);
+              }
+            }
+          } else {
+            // single number
+            let n = parseInt(c, 10);
+            if (!isNaN(n)) {
+              matchedRowSet.add(n);
+            }
+          }
+        }
+      }
+
+      // intersect with finalRowSet
+      if (finalRowSet === null) {
+        finalRowSet = matchedRowSet;
+      } else {
+        let tmp = new Set();
+        for (let x of finalRowSet) {
+          if (matchedRowSet.has(x)) tmp.add(x);
+        }
+        finalRowSet = tmp;
+      }
+      if (!finalRowSet.size) break;
+    }
+
+    if (!finalRowSet || !finalRowSet.size) return;
+
+    // 3) Load CSV
+    let csvData = await fetchAndUnzipText(csvFileZip, csvFileTxt);
+    let parsed = await parseCsv(csvData);
+
+    // 4) For each matching row ID, aggregate
+    let rowIDs = Array.from(finalRowSet).sort((a,b)=>a-b);
+    const data = parsed.data;
+    for (let rId of rowIDs) {
+      if (searchCanceled) return;
+      // rId is 1-based; row index in CSV is rId-1
+      let idx = rId - 1;
+      if (idx < 0 || idx >= data.length) continue;
+
+      let row = data[idx];
+      allMatchedRows.push(row);
+
+      updateAggregators(row);
+      // Optionally update aggregator UI in real time
+      refreshGlobalAggregator();
+      refreshDonorAggregator();
+    }
+  }
+
+  // ----------------------------------------------------------
+  // AGGREGATION
+  // ----------------------------------------------------------
+  function updateAggregators(row) {
+    let donorName     = (row['Name'] || '').trim();
+    let donorCity     = (row['City'] || '').trim();
+    let donorState    = (row['State'] || '').trim();
+    let donorZipFull  = (row['Zip']  || '').trim();
+    let donorCompany  = (row['Company'] || '').trim();
+    let actBlueInd    = row['ActBlue'] || '0';  // '1' or '0'
+    let committeeName = (row['Committee Name'] || '').trim();
+    let amountStr     = (row['Amount Donated'] || '').trim();
+
+    // Convert amount
+    let amt = parseFloat(amountStr);
+    if (isNaN(amt)) {
+      amt = 0;
+    }
+
+    // For the campaign aggregator key
+    const campaignKey = actBlueInd + '|' + committeeName;
+
+    // Update global aggregator for that campaign
+    if (!globalCampaigns.has(campaignKey)) {
+      globalCampaigns.set(campaignKey, {
+        actBlueIndicator: actBlueInd,
+        committeeName: committeeName,
+        numDonations: 0,
+        sumMin: 0,
+        sumMax: 0
+      });
+    }
+    let cAgg = globalCampaigns.get(campaignKey);
+    cAgg.numDonations += 1;
+    cAgg.sumMin += amt;
+    cAgg.sumMax += (amt + 0.99);
+
+    // Donor aggregator
+    let zip5 = donorZipFull.slice(0,5);
+    const donorKey = donorName + '|' + zip5 + '|' + donorCompany;
+    if (!donorsMap.has(donorKey)) {
+      donorsMap.set(donorKey, {
+        name: donorName,
+        city: donorCity,
+        state: donorState,
+        zip5: zip5,
+        company: donorCompany,
+        totalNum: 0,
+        sumMin: 0,
+        sumMax: 0,
+        campaigns: new Map()
+      });
+    }
+    let dAgg = donorsMap.get(donorKey);
+    dAgg.totalNum += 1;
+    dAgg.sumMin += amt;
+    dAgg.sumMax += (amt + 0.99);
+
+    // This donor's aggregator for the specific campaign
+    if (!dAgg.campaigns.has(campaignKey)) {
+      dAgg.campaigns.set(campaignKey, {
+        numDonations: 0,
+        sumMin: 0,
+        sumMax: 0,
+        actBlueIndicator: actBlueInd,
+        committeeName: committeeName
+      });
+    }
+    let dcAgg = dAgg.campaigns.get(campaignKey);
+    dcAgg.numDonations += 1;
+    dcAgg.sumMin += amt;
+    dcAgg.sumMax += (amt + 0.99);
+  }
+
+  // ----------------------------------------------------------
+  // REFRESH GLOBAL AGGREGATOR UI
+  // ----------------------------------------------------------
+
+  function refreshGlobalAggregator() {
+    let sorted = Array.from(globalCampaigns.values()).sort((a,b) => {
+      // Sort by committeeName ascending, then by actBlueIndicator
+      return a.committeeName.localeCompare(b.committeeName) 
+             || (a.actBlueIndicator - b.actBlueIndicator);
+    });
+
+    if (!sorted.length) {
+      $('#globalAggregator').html('');
+      updateAggregatorSummary(); // ensure button text is consistent
+      return;
+    }
+
+    // Build aggregator detail content
+    let html = `<div class="space-y-1 text-sm">`;
+    for (let c of sorted) {
+      let minDollar = formatDollar(c.sumMin);
+      let maxDollar = formatDollar(c.sumMax);
+      let num = c.numDonations;
+      let avgMinDollar = formatDollar(c.sumMin / num);
+      let avgMaxDollar = formatDollar(c.sumMax / num);
+      let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
+
+      html += `
+        <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
+          <span>
+            <strong>
+              ${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} 
+              - ${escapeHtml(c.committeeName)}
+            </strong>
+          </span>
+          <span class="text-[13px] md:text-sm mt-1 md:mt-0">
+            ${num} donations,
+            TOTAL AMOUNT: ${minDollar} to ${maxDollar}, 
+            AVERAGE: ${avgMinDollar} to ${avgMaxDollar}
+          </span>
+        </div>
+      `;
+    }
+    html += `</div>`;
+
+    $('#globalAggregator').html(html);
+
+    // Now gather total ActBlue / WinRed donations and amounts for the aggregatorSummary button
+    let actBlueDonations = 0, actBlueMin = 0, actBlueMax = 0;
+    let winRedDonations  = 0, winRedMin  = 0, winRedMax  = 0;
+
+    for (let c of sorted) {
+      if (c.actBlueIndicator === '1') {
+        actBlueDonations += c.numDonations;
+        actBlueMin += c.sumMin;
+        actBlueMax += c.sumMax;
+      } else {
+        winRedDonations += c.numDonations;
+        winRedMin += c.sumMin;
+        winRedMax += c.sumMax;
+      }
+    }
+
+    // Write them into hidden spans so that updateAggregatorSummary can parse them
+    // (or you can store them in data- attributes, etc.)
+    if (!$('#aggHiddenSpans').length) {
+      $('body').append(`
+        <div id="aggHiddenSpans" style="display:none;">
+          <span id="actBlueDonations"></span>
+          <span id="actBlueDonationsMin"></span>
+          <span id="actBlueDonationsMax"></span>
+          <span id="winRedDonations"></span>
+          <span id="winRedDonationsMin"></span>
+          <span id="winRedDonationsMax"></span>
+        </div>
+      `);
+    }
+    $('#actBlueDonations').text(actBlueDonations);
+    $('#actBlueDonationsMin').text('$' + formatRawInt(actBlueMin));
+    $('#actBlueDonationsMax').text('$' + formatRawInt(actBlueMax));
+
+    $('#winRedDonations').text(winRedDonations);
+    $('#winRedDonationsMin').text('$' + formatRawInt(winRedMin));
+    $('#winRedDonationsMax').text('$' + formatRawInt(winRedMax));
+
+    // Update the button label
+    updateAggregatorSummary();
+    scheduleChartRefresh();
+
+  }
+
+  // ----------------------------------------------------------
+  // REFRESH DONOR AGGREGATOR UI
+  // ----------------------------------------------------------
+  function refreshDonorAggregator() {
+    let donors = Array.from(donorsMap.values());
+    if (!donors.length) {
+      $('#donorAggregatorContainer').html('');
+      return;
+    }
+    // Sort donors by name, zip5, company
+    donors.sort((a,b) => {
+      return a.name.localeCompare(b.name) 
+             || a.zip5.localeCompare(b.zip5) 
+             || a.company.localeCompare(b.company);
+    });
+
+    let html = `<h2 class="font-bold text-base mb-2">Per-Donor Totals</h2>`;
+    for (let d of donors) {
+      let nameStr = escapeHtml(d.name);
+      let cityStr = escapeHtml(d.city);
+      let stateStr = escapeHtml(d.state);
+      let zipStr  = escapeHtml(d.zip5);
+      let compStr = escapeHtml(d.company);
+      let num     = d.totalNum;
+      let minDollar = formatDollar(d.sumMin);
+      let maxDollar = formatDollar(d.sumMax);
+      let avgMinDollar = formatDollar(d.sumMin / num);
+      let avgMaxDollar = formatDollar(d.sumMax / num);
+
+      html += `
+        <div class="border border-gray-300 rounded p-2 mb-2 bg-white text-sm">
+          <div class="flex flex-col md:flex-row md:items-center justify-between">
+            <div>
+              <strong>${nameStr}</strong>
+              <span class="ml-2 text-xs text-gray-600">CITY: ${cityStr}, ${stateStr}</span>
+              <span class="ml-2 text-xs text-gray-600">ZIP: ${zipStr}</span>
+              <span class="ml-2 text-xs text-gray-600">Company: ${compStr}</span>
+            </div>
+            <div class="mt-1 md:mt-0 text-xs md:text-sm">
+              Total: ${num} donations, AMOUNT: ${minDollar} to ${maxDollar}, AVG: ${avgMinDollar} to ${avgMaxDollar}
+            </div>
+          </div>
+          <div class="mt-2 space-y-1">
+      `;
+
+      // Per-campaign
+      let donorCampaigns = Array.from(d.campaigns.values());
+      donorCampaigns.sort((a,b) => {
+        return a.committeeName.localeCompare(b.committeeName) 
+               || (a.actBlueIndicator - b.actBlueIndicator);
+      });
+
+      for (let c of donorCampaigns) {
+        let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
+        let cdNum = c.numDonations;
+        let cdMin = formatDollar(c.sumMin);
+        let cdMax = formatDollar(c.sumMax);
+        let cdAvgMin = formatDollar(c.sumMin / cdNum);
+        let cdAvgMax = formatDollar(c.sumMax / cdNum);
+        html += `
+          <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
+            <span>
+              <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
+            </span>
+            <span class="text-[13px] md:text-sm mt-1 md:mt-0">
+              ${cdNum} donations,
+              TOTAL AMOUNT: ${cdMin} to ${cdMax}, 
+              AVERAGE: ${cdAvgMin} to ${cdAvgMax}
+            </span>
+          </div>
+        `;
+      }
+
+      html += `</div></div>`;
+    }
+
+    $('#donorAggregatorContainer').html(html);
+  }
+
+  // ----------------------------------------------------------
+  // updateAggregatorSummary
+  // Collapses all relevant spans and builds a single string for the #globalAggBtn text
+  // ----------------------------------------------------------
+  function updateAggregatorSummary() {
+    // Read in current values from the hidden spans, removing "$" or non-digits
+    let abDon = parseInt($('#actBlueDonations').text(), 10) || 0;
+    let abDonMinRaw = $('#actBlueDonationsMin').text().replace(/\D/g, '');
+    let abDonMaxRaw = $('#actBlueDonationsMax').text().replace(/\D/g, '');
+    let actBlueDonationsMin = parseInt(abDonMinRaw) || 0;
+    let actBlueDonationsMax = parseInt(abDonMaxRaw) || 0;
+
+    let wrDon = parseInt($('#winRedDonations').text(), 10) || 0;
+    let wrDonMinRaw = $('#winRedDonationsMin').text().replace(/\D/g, '');
+    let wrDonMaxRaw = $('#winRedDonationsMax').text().replace(/\D/g, '');
+    let winRedDonationsMin = parseInt(wrDonMinRaw) || 0;
+    let winRedDonationsMax = parseInt(wrDonMaxRaw) || 0;
+
+    let totalDonations = abDon + wrDon;
+    let actBluePct = totalDonations ? ((abDon / totalDonations) * 100).toFixed(1) : 0;
+    let winRedPct  = totalDonations ? ((wrDon / totalDonations) * 100).toFixed(1) : 0;
+
+    // Rebuild aggregator summary
+    // Example:
+    // Overall Campaign Totals (ActBlue: 20 donations (40.0%); $123–$223 total; WinRed: 30 donations (60.0%); $100–$150 total)
+
+    const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
+
+    let aggregatorSummary = `
+      Overall Campaign Totals <span class="text-gray-500">(${collapseMessage})</span><br/>
+      <span style="color: black;">
+        <span class="text-blue-600">ActBlue</span>: 
+        <span id="actBlueDonations">${abDon}</span> donations (<span id="actBluePctDonations">${actBluePct}</span>%); 
+        <span id="actBlueDonationsMin">$${actBlueDonationsMin}</span>–<span id="actBlueDonationsMax">$${actBlueDonationsMax}</span> total; 
+        <span class="text-red-600">WinRed</span>: 
+        <span id="winRedDonations">${wrDon}</span> donations (<span id="winRedPctDonations">${winRedPct}</span>%); 
+        <span id="winRedDonationsMin">$${winRedDonationsMin}</span>–<span id="winRedDonationsMax">$${winRedDonationsMax}</span> total
+      </span>
+    `;
+    $('#globalAggBtn').html(aggregatorSummary);
+  }
+
+  // ----------------------------------------------------------
+  // LOAD MASTER REVERSE INDEX
+  // ----------------------------------------------------------
+  async function loadMasterReverseIndex(zipUrl, innerFile) {
+    const text = await fetchAndUnzipText(zipUrl, innerFile);
+    parseMasterReverseIndex(text);
+  }
+
+  function parseMasterReverseIndex(fileData) {
+    // lines: token:batch1,batch2,...
+    const lines = fileData.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(':');
+      if (parts.length !== 2) continue;
+
+      const kw = parts[0];
+      const bStr = parts[1];
+      const bIds = bStr.split(',').map(x => parseInt(x,10)).filter(n => !isNaN(n));
+
+      KEYWORDS.push(kw);
+      BATCHES.push(bIds);
+    }
+  }
+
+  function exactMatchIndex(word) {
+    // Binary search in KEYWORDS
+    let low = 0, high = KEYWORDS.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >>> 1;
+      if (KEYWORDS[mid] === word) return mid;
+      if (KEYWORDS[mid] < word) low = mid + 1;
+      else high = mid - 1;
+    }
+    return -1;
+  }
+
+  // ----------------------------------------------------------
+  // BATCH REVERSE INDEX PARSER
+  // ----------------------------------------------------------
+  function parseBatchIndex(txt) {
+    const map = new Map();
+    const lines = txt.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(':');
+      if (parts.length !== 2) continue;
+      const kw = parts[0];
+      const arr = parts[1].split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      map.set(kw, arr);
+    }
+    return map;
+  }
+
+  // ----------------------------------------------------------
+  // FETCH + UNZIP + RETURN TEXT (using web worker)
+  // ----------------------------------------------------------
+  function fetchAndUnzipText(zipUrl, innerFilename) {
+    if (searchCanceled) return Promise.resolve('');
+    return new Promise((resolve, reject) => {
+      const worker = new Worker('unzipWorker.js');
+      worker.onmessage = (event) => {
+        const data = event.data;
+        if (data.success) {
+          resolve(data.text);
+        } else {
+          reject(data.error);
+        }
+        worker.terminate();
+      };
+      worker.onerror = (err) => {
+        reject('Worker error: ' + err.message);
+        worker.terminate();
+      };
+      // start
+      worker.postMessage({ zipUrl, innerFilename });
+    });
+  }
+
+  // ----------------------------------------------------------
+  // CSV PARSE (Papaparse)
+  // ----------------------------------------------------------
+  function parseCsv(csvData) {
+    return new Promise((resolve, reject) => {
+      Papa.parse(csvData, {
+        header: true,
+        skipEmptyLines: false,
+        dynamicTyping: false,
+        worker: true,
+        complete: (results) => {
+          resolve(results);
+        },
+        error: (err) => {
+          reject(err);
+        },
+      }); 
+    });
+  }
+
+  // ----------------------------------------------------------
+  // PROGRESS BAR / STATUS
+  // ----------------------------------------------------------
+  function updateProgress(completed, total) {
+    if (completed >= total) {
+      $('#statusMessage').text(`Done. Processed ${total} batches.`);
+    } else {
+      $('#statusMessage').text(`Processing: ${completed} of ${total} batches...`);
+    }
+  }
+
+  // ----------------------------------------------------------
+  // DOLLAR FORMATTING
+  // ----------------------------------------------------------
+  function formatDollar(value) {
+    if (isNaN(value) || !isFinite(value)) return '$0';
+    let rounded = Math.round(value);
+    return '$' + rounded.toLocaleString();
+  }
+
+  // Raw integer format for aggregator hidden fields
+  function formatRawInt(value) {
+    if (isNaN(value) || !isFinite(value)) return '0';
+    return String(Math.round(value));
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ----------------------------------------------------------
+  // CSV DOWNLOAD
+  // ----------------------------------------------------------
+  $('#downloadCsvBtn').on('click', function() {
+    if (!allMatchedRows.length) return;
+    let csvContent = Papa.unparse(allMatchedRows);
+    let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    let url = URL.createObjectURL(blob);
+    let link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'donor_lookup_results.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  });
+</script>
