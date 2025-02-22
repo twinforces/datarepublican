@@ -35,6 +35,8 @@ const TOP_N_OUTFLOWS = 5;       // Outflows per expansion
 let svg = null;
 let zoom = null;
 let topNodes = [];             // MADE GLOBAL: For coloring or logic access
+// Add this near other global variables
+let expandedOutflows = new Map(); // EIN -> array of expanded grant objects
 
 // Color scale for unique node colors (based on EIN or name)
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10); // 10 distinct colors, repeatable
@@ -715,66 +717,90 @@ function expandNode(nodeId, isInitial = false) {
     if (!node) {
         currentData.nodes.push({ filer_ein: nodeId, name: `Unknown (${nodeId})`, grant_amt: 0 });
         if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
-    } else {
-        if (!isInitial)
-                currentData.nodes.push(node);
+        return;
+    }
+
+    if (!currentData.nodes.some(n => n.filer_ein === nodeId)) {
+        currentData.nodes.push(node);
     }
 
     const grantsForNode = node.grants || [];
     const allLinks = grantsForNode.map(grant => ({
-        source: grant.filer,
-        target: grant.grantee,
+        source: grant.filer_ein,
+        target: grant.grantee_ein,
         filer: grant.filer,
         grantee: grant.grantee,
         value: grant.logRawAmt,
         rawValue: grant.rawAmt
-    })).sort((a, b) => b.value - a.value);
+    })).sort((a, b) => b.rawValue - a.rawValue);
 
-    const displayedLinks = []; //expandedOutflows.get(nodeId) || [];
-    const remainingLinks = allLinks.filter(l => !displayedLinks.some(d => d.source === l.source && d.target === l.target));
-    const newLinks = isInitial ? remainingLinks.slice(0, TOP_N_OUTFLOWS) : remainingLinks.slice(0, Math.min(TOP_N_OUTFLOWS, remainingLinks.length));
+    let displayedLinks = expandedOutflows.get(nodeId) || [];
+    const remainingLinks = allLinks.filter(l => 
+        !displayedLinks.some(d => d.target === l.target)
+    );
+
+    const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
     const othersLinks = remainingLinks.slice(newLinks.length);
 
     newLinks.forEach(l => {
-            if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
-                currentData.nodes.push(charities[l.target]);
-            }
-            if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
-                currentData.links.push({ source: l.source, target: l.target, value: l.value , filer: l.filer, grantee: l.grantee});
-            }
-            displayedLinks.push(l);
+        if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
+            currentData.nodes.push(charities[l.target]);
         }
-    );
+        if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
+            currentData.links.push({ 
+                source: l.source, 
+                target: l.target, 
+                value: l.value, 
+                rawValue: l.rawValue,
+                filer: l.filer,
+                grantee: l.grantee
+            });
+        }
+        displayedLinks.push(l);
+    });
 
     expandedOutflows.set(nodeId, displayedLinks);
 
-    const othersId = `${nodeId} (Others)`;
+    // Handle "Others" node with unique ID
+    const othersId = `${nodeId}-others-${generateUniqueId()}`; // Unique ID for this "Others" node
     if (othersLinks.length > 0 && !isInitial) {
-        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawAmt, 0);
-        const logOthersValue = Math.log2(othersValue+1);
-        const othersNode = { 
+        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
+        const logOthersValue = Math.log2(othersValue + 1);
+        const existingOthers = currentData.nodes.find(n => n.filer_ein === othersId);
+        
+        if (!existingOthers) {
+            currentData.nodes.push({ 
+                id: othersId,
                 filer_ein: othersId, 
-                name: "Others", 
-                grant_amt: othersValue ,
-                logGrantAmt: logOthersValue
-            }
-        if (!currentData.nodes.some(n => n.filer_ein === othersId)) {
-            currentData.nodes.push(othersNode);
-        }
-        if (!currentData.links.some(l => l.source === nodeId && l.target === othersId)) {
-            currentData.links.push({ 
-                source: charities[nodeId], 
-                target: othersNode, 
-                value: logOthersValue, 
-                rawAmt: othersValue
+                name: `${node.name} (Others)`, // Display parent name for clarity
+                grant_amt: othersValue,
+                logGrantAmt: logOthersValue,
+                parent_ein: nodeId // Link back to parent
             });
+        } else {
+            existingOthers.grant_amt = othersValue;
+            existingOthers.logGrantAmt = logOthersValue;
+        }
+
+        const othersLink = currentData.links.find(l => l.source === nodeId && l.target === othersId);
+        if (!othersLink) {
+            currentData.links.push({ 
+                source: nodeId, 
+                target: othersId, 
+                value: logOthersValue, 
+                rawValue: othersValue,
+                filer: charities[nodeId],
+                grantee: null
+            });
+        } else {
+            othersLink.value = logOthersValue;
+            othersLink.rawValue = othersValue;
         }
     } else {
-        currentData.nodes = currentData.nodes.filter(n => n.filer_ein !== othersId);
-        currentData.links = currentData.links.filter(l => l.target !== othersId);
+        currentData.nodes = currentData.nodes.filter(n => !n.filer_ein.startsWith(`${nodeId}-others-`));
+        currentData.links = currentData.links.filter(l => !l.target.startsWith(`${nodeId}-others-`));
     }
 
-    // Extra credit: Add clicked node to activeEINs for bookmarking
     if (!activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
         activeEINs.push(nodeId);
         renderActiveEINs();
@@ -783,14 +809,20 @@ function expandNode(nodeId, isInitial = false) {
 }
 
 function expandOthers(sourceId) {
+    // Simply call expandNode with the original source ID
     expandNode(sourceId);
+    renderSankey(svg.select('g'), d3.sankey()
+        .nodeId(d => d.filer_ein || d.id)
+        .nodeWidth(50)
+        .nodePadding(80)
+        .extent([[0, 0], [svg.node().offsetWidth - 200, svg.node().offsetHeight - 100]]), svg);
 }
-
 function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
 }
 
 function renderSankey(g, sankey, svgRef) {
+    // Configure the Sankey generator
     let sankeyG = d3.sankey()
         .nodeId(d => d.id) // Use 'id' instead of 'filer_ein'
         .extent([[0, 0], [800, 600]])
@@ -843,32 +875,51 @@ function renderSankey(g, sankey, svgRef) {
     const nodeElements = nodeGroup.selectAll('g')
         .data(graph.nodes)
         .join('g')
-        .attr('class', 'node')
+        .attr('class', d => {
+            if (d.filer_ein.includes('(Others)')) return 'node others';
+            if (!d.grants || d.grants.length === 0) return 'node no-grants';
+            return 'node';
+        })
         .attr('data-id', d => d.id);
 
-    nodeElements.append("rect")
+    // Append shapes based on grant status
+    nodeElements.each(function(d) {
+        const sel = d3.select(this);
+        if (!d.grants || d.grants.length === 0) {
+            // Circle for nodes with no grants
+            sel.append("circle")
+                .attr("cx", d => (d.x0 + d.x1) / 2)
+                .attr("cy", d => (d.y0 + d.y1) / 2)
+                .attr("r", Math.min(d.x1 - d.x0, d.y1 - d.y0) / 2)
+                .attr("fill", d => d.color)
+                .attr("stroke", "#000");
+        } else {
+            // Rectangle for nodes with grants
+            sel.append("rect")
         .attr("x", d => d.x0)
         .attr("y", d => d.y0)
         .attr("height", d => d.y1 - d.y0)
         .attr("width", d => d.x1 - d.x0)
         .attr("fill", d => d.color)
-        .attr("stroke", "#000")
-        .on('click', function(event, d) {
-            event.stopPropagation(); // Prevent event bubbling
-            zoomToFitNodes(d.source, d.target);
+                .attr("stroke", "#000");
+        }
         });
 
-    // Tooltips and click handlers for nodes
-    nodeElements.append("title")
-        .text(d => `${d.name || d.id}\nOutflow: $${formatNumber(d.grant_amt || 0)}`)
-        .on("click", (event, d) => {
-            if (d.id.includes("(Others)")) {
-                expandOthers(d.id.split(" (Others)")[0]);
+    // Click handler for nodes
+    nodeElements.on('click', function(event, d) {
+        event.stopPropagation();
+        if (d.filer_ein.includes('(Others)')) {
+            const sourceId = d.parent_ein || d.filer_ein.split(' (Others)')[0];
+            expandOthers(sourceId);
             } else {
                 expandNode(d.id);
             }
             renderSankey(g, sankey, svgRef);
         });
+
+    // Tooltips for nodes
+    nodeElements.append("title")
+        .text(d => `${d.name || d.id}\nOutflow: $${formatNumber(d.grant_amt || 0)}`);
 
     // Links (use gradients with translucent fallback) in the master group
     const link = masterGroup.append("g")
@@ -879,9 +930,9 @@ function renderSankey(g, sankey, svgRef) {
         .data(graph.links)
         .join("path")
         .attr("d", d3.sankeyLinkHorizontal())
-        .style("stroke", d => `url(#${d.gradientId})`) // Try gradients first
-        .style("stroke-opacity", 0.3) // More translucent (30% opacity, adjustable)
-        .style("stroke-width", d => Math.max(1, d.width || 1)) // Smaller minimum width
+        .style("stroke", d => `url(#${d.gradientId})`) // Use gradients
+        .style("stroke-opacity", 0.3)
+        .style("stroke-width", d => Math.max(1, d.width || 1))
         .on('click', function(event, d) {
             event.stopPropagation();
             zoomToFitNodes(d.source, d.target);
@@ -895,7 +946,7 @@ function renderSankey(g, sankey, svgRef) {
     });
 
     link.append("title")
-        .text(d => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.value)}`);
+        .text(d => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.rawValue)}`);
 
     // Labels in the master group
     masterGroup.append("g")
@@ -909,7 +960,12 @@ function renderSankey(g, sankey, svgRef) {
         .text(d => d.name)
         .on('click', function(event, d) {
             event.stopPropagation();
+            if (d.filer_ein.includes('(Others)')) {
+                const sourceId = d.parent_ein || d.filer_ein.split(' (Others)')[0];
+                expandOthers(sourceId);
+            } else {
             zoomToFitNodes(d.source, d.target);
+        }
         });
 
     // Apply zoom and pan to the master group
