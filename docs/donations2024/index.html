@@ -35,23 +35,22 @@ $(document).ready(function() {
 </script>
 
   <!-- Begin Jekyll SEO tag v2.8.0 -->
-<title>ActBlue / WinRed 2024 Donor Lookup | DataRepublican</title>
 <title>ActBlue / WinRed 2024 donor lookup | DataRepublican</title>
 <meta name="generator" content="Jekyll v3.9.5" />
 <meta property="og:title" content="ActBlue / WinRed 2024 donor lookup" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
 <meta property="og:description" content="Tracking where the money goes" />
-<link rel="canonical" href="https://datarepublican.com/donations2024/" />
-<meta property="og:url" content="https://datarepublican.com/donations2024/" />
+<link rel="canonical" href="http://localhost:4000/donations2024/" />
+<meta property="og:url" content="http://localhost:4000/donations2024/" />
 <meta property="og:site_name" content="DataRepublican" />
-<meta property="og:image" content="https://datarepublican.com/assets/images/og.png" />
+<meta property="og:image" content="http://localhost:4000/assets/images/og.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta property="twitter:image" content="https://datarepublican.com/assets/images/og.png" />
+<meta property="twitter:image" content="http://localhost:4000/assets/images/og.png" />
 <meta property="twitter:title" content="ActBlue / WinRed 2024 donor lookup" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"ActBlue / WinRed 2024 donor lookup","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/donations2024/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"ActBlue / WinRed 2024 donor lookup","image":"http://localhost:4000/assets/images/og.png","url":"http://localhost:4000/donations2024/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
@@ -458,28 +457,18 @@ $(document).ready(function() {
     background-color: #e2e2e2; /* Slightly darker on hover */
   }
 
-  .charts-wrapper {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    margin-top: 10px;
-  }
-  .chart-container {
-    width: 300px;
-    height: 300px;
-  }
-
   .text-red-600 {
     color: #dc2626 !important; /* #dc2626 is Tailwind's red-600 */
   }
 </style>  
 
-<h1 class="mb-1">2024 Donor Lookup</h1>
+<h1 class="mb-1">2024 donor lookup</h1>
 
-<p><a href="https://electionwatch.info/">Please check out ElectionWatch.info for many articles and more advanced features!</a></p>
-<p class="opacity-80 mb-0 text-[15px]">
+<p>Please check out <a href="https://electionwatch.info/">ElectionWatch.info</a> for many articles and more advanced features.</p>
+<p class="opacity-80 mb-2 text-sm">
   All small dollar donations (<$10) for 2024 originating from ActBlue and WinRed are included in this dataset. 
-  
+</p>
+<p class="opacity-80 mb-0 text-sm">
   Enter a name or ZIP code (or both). The search will parse your input into alphanumeric tokens, 
   removing hyphens and other punctuation, but keeping numeric parts. 
   We look for rows where <strong>all</strong> entered tokens appear.
@@ -516,53 +505,38 @@ $(document).ready(function() {
 </div>
 
 <div id="searchContainer" class="mb-2">
-  <div class="flex flex-col md:flex-row md:items-end gap-2 justify-between">
-    <form id="searchForm" class="flex flex-col gap-1 w-full">
-      
-      <div class="flex flex-col gap-1 w-full">
-        <label for="donorSearchBox" class="text-sm md:text-[15px] font-bold">
-          Enter donor name or ZIP (or both):
-        </label>
-        <input type="text"
-               id="donorSearchBox"
-               class="w-full px-2 py-1 rounded text-sm border border-gray-300"
-               placeholder="e.g. CLINTON 58801" />
-      </div>
+  <form id="searchForm" class="flex flex-col gap-1 md:gap-2 mb-4" id="filterContainer">
+    <label for="donorSearchBox" class="font-medium text-sm">Enter donor name and/or ZIP:</label>
+    <div class="flex gap-2">
+      <input type="text" id="donorSearchBox" placeholder="e.g. CLINTON 58801" class="px-2 py-1 rounded border border-gray-300 text-sm flex-1 md:flex-0" style="min-width: 220px;">
+      <button type="submit" id="searchButton">
+        <span class="button-text hidden">Search</span>
+        <img src="/assets/images/loading-white.svg" class="loading-spinner size-5 mx-auto" alt="Loading...">
+      </button>
+    </div>
+  </form>
 
-      <div class="flex items-center gap-1">
-        <span class="flex items-center gap-1">
-          <!-- The same button doubles as "Stop" during searching -->
-          <button type="submit" id="searchButton" disabled>
-            <span class="button-text">Search</span>
-            <img src="/assets/images/loading-white.svg" 
-                 class="loading-spinner size-6 mx-auto" 
-                 style="display: none;" 
-                 alt="Loading..." />
-          </button>
-        </span>
-        <span id="statusMessage"></span>
-      </div>
-    </form>
-  </div>
+  <span id="statusMessage"></span>
+
 </div>
 
 <div class="mb-2">
   <!-- The aggregator summary button + collapsed aggregator details -->
-  <div class="charts-wrapper">
-    <div class="chart-container">
-      <canvas id="donationsPie"></canvas>
+  <div class="hidden pie-container flex-col md:flex-row gap-2 md:gap-4">
+    <div class="bg-white p-2 rounded border border-gray-200">
+      <canvas id="donationsPie" class="w-80 h-80"></canvas>
     </div>
-    <div class="chart-container">
-      <canvas id="amountsPie"></canvas>
+    <div class="bg-white p-2 rounded border border-gray-200">
+      <canvas id="amountsPie" class="w-80 h-80"></canvas>
     </div>
   </div>
 
   <div class="mb-4">
-    <!-- We’ll fill the button text via updateAggregatorSummary() -->
+    <!-- We'll fill the button text via updateAggregatorSummary() -->
     <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
     <!-- Collapsed by default -->
     <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
-      <!-- We'll fill the aggregator details (the previous “refreshGlobalAggregator” content) here -->
+      <!-- We'll fill the aggregator details (the previous "refreshGlobalAggregator" content) here -->
     </div>
   </div>
 
@@ -656,7 +630,7 @@ $(document).ready(function() {
         winRedIndex++;
         return color;
       } else {
-        // “Others (<10%)” or not recognized
+        // "Others (<10%)" or not recognized
         console.log(lower);
         return othersColor;
       }
@@ -715,6 +689,13 @@ $(document).ready(function() {
   }
 
   function refreshPieCharts() {
+    // Show the container if we have data
+    if (globalCampaigns.size > 0) {
+      $('.pie-container').removeClass('hidden').addClass('flex');
+    } else {
+      $('.pie-container').removeClass('flex').addClass('hidden');
+    }
+
     // 1) Extract raw data from globalCampaigns
     const campaigns = Array.from(globalCampaigns.values());
 
@@ -737,7 +718,7 @@ $(document).ready(function() {
       rawAmountsData.push(Math.round(c.sumMin));
     });
 
-    // If no campaigns exist, provide dummy data so Chart.js doesn’t error out
+    // If no campaigns exist, provide dummy data so Chart.js doesn't error out
     if (!rawLabels.length) {
       rawLabels = ['No data'];
       rawDonationsData = [1];
@@ -863,7 +844,7 @@ $(document).ready(function() {
         $agg.height(0);
       }
 
-      // Re-render aggregator’s content
+      // Re-render aggregator's content
       refreshGlobalAggregator();
     });
 
@@ -920,6 +901,9 @@ $(document).ready(function() {
     allMatchedRows = [];
     globalCampaigns.clear();
     donorsMap.clear();
+
+    // Hide charts container when starting new search
+    $('.pie-container').removeClass('flex').addClass('hidden');
 
     // Clear aggregator displays
     $('#globalAggregator').empty().height(0);
@@ -1211,7 +1195,7 @@ $(document).ready(function() {
     }
 
     // Build aggregator detail content
-    let html = `<div class="space-y-1 text-sm">`;
+    let html = `<div class="space-y-1 text-sm bg-white">`;
     for (let c of sorted) {
       let minDollar = formatDollar(c.sumMin);
       let maxDollar = formatDollar(c.sumMax);
@@ -1300,7 +1284,7 @@ $(document).ready(function() {
              || a.company.localeCompare(b.company);
     });
 
-    let html = `<h2 class="font-bold text-base mb-2">Per-Donor Totals</h2>`;
+    let html = `<h2 class="font-bold text-base mb-2">Per-donor totals</h2>`;
     for (let d of donors) {
       let nameStr = escapeHtml(d.name);
       let cityStr = escapeHtml(d.city);
