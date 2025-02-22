@@ -534,6 +534,7 @@ $(document).ready(function() {
 
   <div class="mb-4">
     <!-- We'll fill the button text via updateAggregatorSummary() -->
+    <h2 class="font-bold text-base mb-2">All recipients</h2>
     <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
     <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
       <!-- We'll fill the aggregator details (the previous "refreshGlobalAggregator" content) here -->
@@ -613,6 +614,35 @@ $(document).ready(function() {
 
   const othersColor = '#cccccc'; 
 
+  // Add at the top with other globals
+  let processingComplete = false;
+  let pendingUpdates = 0;
+
+  function trackUpdate(operation) {
+    pendingUpdates++;
+    return () => {
+      pendingUpdates--;
+      if (processingComplete && pendingUpdates === 0) {
+        // Only log if this is truly the last update
+        if (!chartUpdateScheduled) {
+          logFinalTotals();
+        }
+      }
+    };
+  }
+
+  function logFinalTotals() {
+    console.log('----------------------------------------');
+    console.log('🏁 All data processing and UI updates complete!');
+    console.log(`Final totals:
+        - ${allMatchedRows.length} matching rows
+        - ${globalCampaigns.size} unique campaigns
+        - ${donorsMap.size} unique donors
+        - ActBlue donations: ${$('#actBlueDonations').text()}
+        - WinRed donations: ${$('#winRedDonations').text()}`);
+    console.log('----------------------------------------');
+  }
+
   function assignColorsByLabel(labels) {
     let actBlueIndex = 0;
     let winRedIndex  = 0;
@@ -688,12 +718,25 @@ $(document).ready(function() {
     };
   }
 
+  function scheduleChartRefresh() {
+    // If we already scheduled an update, just skip
+    if (chartUpdateScheduled) return;
+    
+    chartUpdateScheduled = true;
+    
+    // Wait a short delay before actually refreshing
+    setTimeout(() => {
+        refreshPieCharts();
+        chartUpdateScheduled = false;
+    }, 500);
+  }
+
   function refreshPieCharts() {
     // Show the container if we have data
     if (globalCampaigns.size > 0) {
-      $('.pie-container').removeClass('hidden').addClass('flex');
+        $('.pie-container').removeClass('hidden').addClass('flex');
     } else {
-      $('.pie-container').removeClass('flex').addClass('hidden');
+        $('.pie-container').removeClass('flex').addClass('hidden');
     }
 
     // 1) Extract raw data from globalCampaigns
@@ -798,26 +841,13 @@ $(document).ready(function() {
     });
   }
 
-
   let chartUpdateScheduled = false;
-  function scheduleChartRefresh() {
-    // If we already scheduled an update, just skip
-    if (chartUpdateScheduled) return;
-    
-    chartUpdateScheduled = true;
-    
-    // Wait a short delay before actually refreshing
-    setTimeout(() => {
-      refreshPieCharts();
-      chartUpdateScheduled = false;
-    }, 500); // 500ms or however long you prefer
-  }
-
 
   // ----------------------------------------------------------
   // DOCUMENT READY
   // ----------------------------------------------------------
   $(document).ready(async function() {
+    console.log('Starting to load donor lookup data...');
     $('#statusMessage').html('<span class="inline-flex text-[13px]">Loading data...</span>');
     // Show spinner
     $('#searchButton .button-text').hide();
@@ -851,6 +881,7 @@ $(document).ready(function() {
     try {
       // Load master reverse index (donations_reverse_index.txt)
       await loadMasterReverseIndex('donations_reverse_index.txt.zip', 'donations_reverse_index.txt');
+      console.log('Donor lookup data loaded successfully. Ready for searches.');
 
       // Re-enable search UI
       $('#searchButton .loading-spinner').hide();
@@ -900,6 +931,8 @@ $(document).ready(function() {
       return;
     }
 
+    console.log('Starting new search...');
+
     // Begin new search
     searchingInProgress = true;
     searchCanceled = false;
@@ -943,8 +976,12 @@ $(document).ready(function() {
   // MAIN SEARCH LOGIC (for single query)
   // ----------------------------------------------------------
   async function doSearch(query) {
+    console.log(`Processing search for query: "${query}"`);
+    
     // Tokenize input: remove non-alphanumeric except keep digits, but strip hyphens/punctuation
     let tokens = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
+    console.log('Search tokens:', tokens);
+    
     if (!tokens.length) {
       throw new Error('No valid tokens after removing punctuation/hyphens.');
     }
@@ -974,9 +1011,12 @@ $(document).ready(function() {
     }
 
     if (!finalBatches || !finalBatches.size) {
+      console.log('No matching batches found');
       alert('No matches found for these tokens.');
       return;
     }
+
+    console.log(`Found ${finalBatches.size} matching batches to process`);
 
     // Sort batch IDs ascending
     const batchIDs = Array.from(finalBatches).sort((a,b)=>a-b);
@@ -1021,7 +1061,7 @@ $(document).ready(function() {
 
     // Show CSV download if results exist
     if (allMatchedRows.length > 0) {
-      $('#downloadCsvBtn').show();
+        $('#downloadCsvBtn').show();
     }
   }
 
@@ -1195,12 +1235,27 @@ $(document).ready(function() {
 
     if (!sorted.length) {
       $('#globalAggregator').html('');
-      updateAggregatorSummary(); // ensure button text is consistent
+      updateAggregatorSummary();
       return;
     }
 
     // Build aggregator detail content
-    let html = `<div class="space-y-1 text-sm bg-white">`;
+    let html = `
+      <div class="grid grid-cols-12">
+        <div class="col-span-12 md:col-span-6 bg-white/50 text-[13px] px-2 pt-1 md:pb-1 border-t border-l border-r md:border-r-0 md:border-b border-gray-200">
+          <strong>Recipient</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 border-l md:border-l-0 flex items-start md:justify-end">
+          <strong>Total</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
+          <strong>Donations</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
+          <strong>Avg donation</strong>
+        </div>
+
+    `;
     for (let c of sorted) {
       let minDollar = formatDollar(c.sumMin);
       let maxDollar = formatDollar(c.sumMax);
@@ -1210,18 +1265,17 @@ $(document).ready(function() {
       let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
 
       html += `
-        <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
-          <span>
-            <strong>
-              ${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} 
-              - ${escapeHtml(c.committeeName)}
-            </strong>
-          </span>
-          <span class="text-[13px] md:text-sm mt-1 md:mt-0">
-            ${num} donations,
-            TOTAL AMOUNT: ${minDollar} to ${maxDollar}, 
-            AVERAGE: ${avgMinDollar} to ${avgMaxDollar}
-          </span>
+        <div class="col-span-12 md:col-span-6 bg-white/50 text-[13px] px-2 pt-1 md:pb-1 border-l border-r md:border-r-0 md:border-b border-gray-200 ${colorClass}">
+          <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 border-l md:border-l-0 flex items-start md:justify-end">
+          <span class="donation-total border-b border-dashed border-gray-500" data-min="${minDollar}" data-max="${maxDollar}">${minDollar}+</span>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
+          ${num}
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
+          ${avgMinDollar}
         </div>
       `;
     }
@@ -1270,7 +1324,6 @@ $(document).ready(function() {
     // Update the button label
     updateAggregatorSummary();
     scheduleChartRefresh();
-
   }
 
   // ----------------------------------------------------------
@@ -1289,7 +1342,7 @@ $(document).ready(function() {
              || a.company.localeCompare(b.company);
     });
 
-    let html = `<h2 class="font-bold text-base col-span-12">Per-donor totals</h2>`;
+    let html = `<h2 class="font-bold text-base col-span-12 mb-0">Individual donors</h2>`;
     for (let d of donors) {
       let nameStr = escapeHtml(d.name);
       let cityStr = escapeHtml(d.city);
@@ -1446,7 +1499,7 @@ $(document).ready(function() {
 
     // Update the toggle button text only
     const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
-    $('#globalAggBtn').html(`Overall Campaign Totals <span class="agg-toggle-button">${collapseMessage}</span>`);
+    $('#globalAggBtn').html(`<span class="agg-toggle-button">${collapseMessage}</span>`);
 
     // Update the legend separately
     let legendHtml = `
