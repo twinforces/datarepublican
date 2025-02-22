@@ -1,6 +1,7 @@
 // Full data from CSV
 let charities = {};             // EIN -> { name, receipt_amt, govt_amt, contrib_amt, grant_amt, grants: [] }
 let grants = {};                // "filer~grantee" -> { rawAmt, relOutAmt, relInAmt, filer_ein, grantee_ein, filer, grantee }
+let circularGrants = {};                // "filer~grantee" -> { rawAmt, relOutAmt, relInAmt, filer_ein, grantee_ein, filer, grantee }
 let totalCharitiesCount = 0;    // total charities read
 let totalGrantsCount = 0;       // total edges read from CSV
 
@@ -385,11 +386,64 @@ async function loadData() {
     const grantsCsvString = await grantsZip.file('grants_truncated.csv').async('string');
 
     await new Promise((resolve, reject) => {
-        Papa.parse(grantsCsvString, {
+       const gov_ein="001";
+       // government is the root, build a virtual charity for it
+       charities[gov_ein] = {
+         id: gov_ein,
+         filer_ein:gov_ein,
+         name: "US Government",
+         xml_name: "The Beast",
+         govt_amt: 0,
+         contib_amt: 4.6e12,
+         grant_amt:0,
+         grant_amt: 0,
+         grant_in_index: 0,
+         grant_out_index: 0,
+         grant_count: 0,
+         grants: [], // Array to store grants for this filer
+         grantsIn: []
+       }
+       let govGrants=0;
+       let govTotal=0;
+       let localEdges = {};
+       Object.values(charities).forEach( c => { 
+           if (c.govt_amt > 0 ) {
+                    const filer = gov_ein
+                    const grantee = c.id;
+                    let amt = c.govt_amt;
+                    if (isNaN(amt)) amt = 0;
+                    govGrants++;
+                    const key = filer + '~' + grantee;
+                    if (!localEdges[key]) {
+                        localEdges[key] = { 
+                            id: `${filer}~${grantee}`,
+                            rawAmt: 0, 
+                            relOutAmt: 0, 
+                            relInAmt: 0, 
+                            filer_ein: filer, 
+                            grantee_ein: grantee, 
+                            filer: charities[gov_ein], 
+                            grantee: charities[grantee] 
+                        };
+                    }
+                    localEdges[key].rawAmt += amt;
+                    charities[filer].grant_amt += amt;
+                    govTotal += amt;
+                    charities[filer].grant_count += 1;
+                    charities[filer].grant_out_index += 1;
+                    charities[grantee].grant_in_index += 1;
+                    // Store grant in filer's grants array
+                    charities[filer].grants.push(localEdges[key]);
+                    charities[grantee].grantsIn.push(localEdges[key])
+                }
+           });
+       charities[gov_ein].grant_amt = govTotal;
+       console.log(govGrants," Implied Government Grants Generated");
+       console.log(formatNumber(govTotal)," Gov Total");
+       Papa.parse(grantsCsvString, {
             header: true,
             skipEmptyLines: true,
             complete: results => {
-                let localEdges = {};
                 let count = 0;
                 results.data.forEach(row => {
                     const filer = (row['filer_ein'] || '').trim();
@@ -397,11 +451,12 @@ async function loadData() {
                     let amt = parseInt((row['grant_amt'] || '0').trim(), 10);
                     if (isNaN(amt)) amt = 0;
                     count++;
-                    if (charities[filer] && charities[grantee]) {
+                    if (charities[filer] && charities[grantee] && (filer != grantee) ) { // ignore self grants
                         const key = filer + '~' + grantee;
                         if (!localEdges[key]) {
                             localEdges[key] = { 
                                 id: `${filer}~${grantee}`,
+                                circular: false, 
                                 rawAmt: 0, 
                                 relOutAmt: 0, 
                                 relInAmt: 0, 
@@ -420,7 +475,8 @@ async function loadData() {
                         charities[filer].grants.push(localEdges[key]);
                         charities[grantee].grantsIn.push(localEdges[key])
                     } else {
-                        console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
+                        if (filer != grantee)
+                                console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
                     }
                 });
                 grants = localEdges;
@@ -430,11 +486,21 @@ async function loadData() {
             error: err => reject(err)
         });
     });
+    badGrants=findCircularGrants();
+    
+    badCharsCounter = new Set();
+    badGrants.forEach(g=> {
+        badCharsCounter.add(g.grantee.id);
+        g.grantee.grants = g.grantee.grants.filter(g => !g.isCycle);
+        g.grantee.grant_amt = g.grantee.grants.reduce((total, grant) => total + grant.rawAmt, 0);        //console.log(`removed circular grant ${g.id} from ${g.filer.name}->${g.grantee.name}`);
+    });
     Object.values(charities).forEach( c => { 
             c.logGrantAmt = Math.log2(c.grant_amt+1);
             c.grants = c.grants.sort( (a,b) => b.rawAmt - a.rawAmt);
             c.grantsIn = c.grantsIn.sort( (a,b) => b.rawAmt - a.rawAmt);
     });
+    console.log(`${badCharsCounter.size} charities with circular grants`);
+    
     Object.values(grants).forEach( c => { 
             c.logRawAmt = Math.log2(c.rawAmt+1);
     });
@@ -445,6 +511,73 @@ async function loadData() {
     nodeMap = charities;
     linkMap = grants;
 }
+
+function findCircularGrants() {
+    const visited = new Set();       // Fully processed charity IDs
+    const onStack = new Set();       // Charity IDs in the current DFS path
+    const cycleGrants = new Set();   // Grant objects forming cycles
+    const stack = [];                // Stack: [charity, grantIterator, parentGrant]
+
+    // Iterate over all charities in the global object
+    for (const startId in charities) {
+        if (visited.has(startId)) continue;
+
+        const startCharity = charities[startId];
+        stack.push([
+            startCharity,
+            (startCharity.grants || [])[Symbol.iterator](),
+            null // No parent grant for the root
+        ]);
+
+        while (stack.length > 0) {
+            let [charity, grantIter, parentGrant] = stack[stack.length - 1];
+            const charityId = charity.id;
+
+            if (!visited.has(charityId)) {
+                visited.add(charityId);
+                onStack.add(charityId);
+            }
+
+            // Get the next grant
+            const iterResult = grantIter.next();
+            if (!iterResult.done) {
+                const grant = iterResult.value;
+                const grantee = grant.grantee; // Direct reference to the grantee charity
+                const granteeId = grantee.id;
+
+                if (onStack.has(granteeId)) {
+                    // Cycle detected: mark the current grant
+                    cycleGrants.add(grant);
+                } else if (!visited.has(granteeId)) {
+                    // Explore the grantee next
+                    stack.push([
+                        grantee,
+                        (grantee.grants || [])[Symbol.iterator](),
+                        grant // The grant that led here
+                    ]);
+                }
+            } else {
+                // No more grants; backtrack
+                stack.pop();
+                onStack.delete(charityId);
+            }
+        }
+    }
+
+    // Mark the grants in the global charities object
+    charitiesWithBadGrants=0;
+    for (const charityId in charities) {
+        const charity = charities[charityId];
+        charity.grants.forEach(grant => {
+            grant.isCycle = cycleGrants.has(grant);
+            charitiesWithBadGrants++;
+        });
+    }
+    console.log(`${charitiesWithBadGrants} charities had bad grants`);
+    console.log(`${cycleGrants.size} bad grants`);
+    return cycleGrants; // Optional: return Set of grant objects in cycles
+}
+// Output: CharityC's grant to CharityA will be marked as isCycle: true
 
 function generateGraph() {
     console.log('1. Starting graph generation');
@@ -503,7 +636,7 @@ function generateGraph() {
         
     activeEINs.forEach( nodeId => {if (charities[nodeId]) topNodes.push(charities[nodeId]);});
 
-    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): ${formatNumber(n.grant_amt)}`)); // DEBUG: Verify selection
+    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): $${formatNumber(n.grant_amt)}`)); // DEBUG: Verify selection
     console.log('Active EINs:', activeEINs); // DEBUG: Check filters
 
     // Add top nodes
@@ -727,7 +860,7 @@ function renderSankey(g, sankey, svgRef) {
 
     // Tooltips and click handlers for nodes
     nodeElements.append("title")
-        .text(d => `${d.name || d.id}\nOutflow: ${formatNumber(d.grant_amt || 0)}`)
+        .text(d => `${d.name || d.id}\nOutflow: $${formatNumber(d.grant_amt || 0)}`)
         .on("click", (event, d) => {
             if (d.id.includes("(Others)")) {
                 expandOthers(d.id.split(" (Others)")[0]);
@@ -762,7 +895,7 @@ function renderSankey(g, sankey, svgRef) {
     });
 
     link.append("title")
-        .text(d => `${d.source.name} → ${d.target.name}\n${formatNumber(d.value)}`);
+        .text(d => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.value)}`);
 
     // Labels in the master group
     masterGroup.append("g")
