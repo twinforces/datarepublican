@@ -7,6 +7,11 @@ title: ActBlue / WinRed 2024 Donor Lookup
 <script src="jquery.min.js"></script>
 <script src="jszip.min.js"></script>
 <script src="papaparse.min.js"></script>
+<style>
+  .text-red-600 {
+    color: #dc2626 !important; /* #dc2626 is Tailwind's red-600 */
+  }
+</style>  
 
 <h1 class="mb-1">2024 Donor Lookup</h1>
 <p class="opacity-80 mb-0 text-[15px]">
@@ -22,7 +27,8 @@ title: ActBlue / WinRed 2024 Donor Lookup
   <div class="h-[0px] overflow-hidden transition-all duration-200" id="howItWorksList">
     <div class="p-4 border border-gray-200 rounded-md bg-white">
       <div class="text-sm space-y-2">
-        <p>You may enter partial or full names, ZIP codes, or a combination. Spaces separate tokens. 
+        <p>
+          You may enter partial or full names, ZIP codes, or a combination. Spaces separate tokens. 
           For example, if you enter <code>john smith 90210</code>, we match all rows that contain 
           the tokens <em>john</em>, <em>smith</em>, and <em>90210</em> somewhere in Name, Zip, Company, etc.
         </p>
@@ -65,7 +71,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
           <!-- The same button doubles as "Stop" during searching -->
           <button type="submit" id="searchButton" disabled>
             <span class="button-text">Search</span>
-            <img src="loading-white.svg" 
+            <img src="/assets/images/loading-white.svg" 
                  class="loading-spinner size-6 mx-auto" 
                  style="display: none;" 
                  alt="Loading..." />
@@ -78,8 +84,15 @@ title: ActBlue / WinRed 2024 Donor Lookup
 </div>
 
 <div class="mb-2">
-  <!-- Global aggregator results will appear here -->
-  <div id="globalAggregator" class="mb-2"></div>
+  <!-- The aggregator summary button + collapsed aggregator details -->
+  <div class="mb-4">
+    <!-- We’ll fill the button text via updateAggregatorSummary() -->
+    <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
+    <!-- Collapsed by default -->
+    <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
+      <!-- We'll fill the aggregator details (the previous “refreshGlobalAggregator” content) here -->
+    </div>
+  </div>
 
   <!-- CSV download button -->
   <button id="downloadCsvBtn" class="frameless !mt-4" style="display: none;">
@@ -119,6 +132,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
   // For concurrency
   const MAX_BATCH_FETCHES = 5;
+  let aggregatorIsCollapsed = true; // default to collapsed
 
   // ----------------------------------------------------------
   // DOCUMENT READY
@@ -128,6 +142,31 @@ title: ActBlue / WinRed 2024 Donor Lookup
     // Show spinner
     $('#searchButton .button-text').hide();
     $('#searchButton .loading-spinner').show();
+
+    // Hide aggregator by default
+    $('#globalAggregator').height(0);
+
+    // The aggregator toggle
+    $('#globalAggBtn').on('click', function() {
+      const $agg = $('#globalAggregator');
+
+      // Flip the state
+      aggregatorIsCollapsed = !aggregatorIsCollapsed;
+      
+      if (!aggregatorIsCollapsed) {
+        // Expand
+        $agg.css('height', 'auto');
+        const autoHeight = $agg.height();
+        $agg.height(0);
+        $agg.height(autoHeight);
+      } else {
+        // Collapse
+        $agg.height(0);
+      }
+
+      // Re-render aggregator’s content
+      refreshGlobalAggregator();
+    });
 
     try {
       // Load master reverse index (donations_reverse_index.txt)
@@ -182,7 +221,9 @@ title: ActBlue / WinRed 2024 Donor Lookup
     allMatchedRows = [];
     globalCampaigns.clear();
     donorsMap.clear();
-    $('#globalAggregator').empty();
+
+    // Clear aggregator displays
+    $('#globalAggregator').empty().height(0);
     $('#donorAggregatorContainer').empty();
     $('#downloadCsvBtn').hide();
 
@@ -215,9 +256,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
   // ----------------------------------------------------------
   async function doSearch(query) {
     // Tokenize input: remove non-alphanumeric except keep digits, but strip hyphens/punctuation
-    // e.g. "ZOLLNER, 98007-6321" => ["zollner", "98007", "6321"]
     let tokens = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
-
     if (!tokens.length) {
       throw new Error('No valid tokens after removing punctuation/hyphens.');
     }
@@ -289,8 +328,8 @@ title: ActBlue / WinRed 2024 Donor Lookup
     }
 
     // Done with all batches, show final aggregator
-    refreshGlobalAggregator();
-    refreshDonorAggregator();
+    refreshGlobalAggregator();  // shows aggregator detail in #globalAggregator
+    refreshDonorAggregator();   // per-donor
 
     // Show CSV download if results exist
     if (allMatchedRows.length > 0) {
@@ -314,7 +353,6 @@ title: ActBlue / WinRed 2024 Donor Lookup
     let batchMap = parseBatchIndex(revText);
 
     // 2) For each token, gather row IDs, do intersection
-    //    Note: row IDs can appear as single numbers or inclusive ranges "9-10"
     let finalRowSet = null;
     for (let t of tokens) {
       if (searchCanceled) return;
@@ -322,7 +360,6 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
       let chunk = batchMap.get(t);
       if (chunk) {
-        // chunk is an array of strings like ["1-4","6","9-10"] if the line is "word:1-4,6,9-10"
         for (let c of chunk) {
           if (!c) continue;
           // Check if it's a range "X-Y"
@@ -345,7 +382,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
         }
       }
 
-      // intersect
+      // intersect with finalRowSet
       if (finalRowSet === null) {
         finalRowSet = matchedRowSet;
       } else {
@@ -376,11 +413,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
       let row = data[idx];
       allMatchedRows.push(row);
 
-      // Row format:
-      // Name,City,State,Zip,Company,Occupation,Date Donated,Amount Donated,Transaction ID,ActBlue,Destination,Committee Name
-      // e.g. row['Name'], row['Zip'], row['Amount Donated'], row['ActBlue'], row['Committee Name'], etc.
       updateAggregators(row);
-
       // Optionally update aggregator UI in real time
       refreshGlobalAggregator();
       refreshDonorAggregator();
@@ -393,7 +426,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
   function updateAggregators(row) {
     let donorName     = (row['Name'] || '').trim();
     let donorCity     = (row['City'] || '').trim();
-    let donorState     = (row['State'] || '').trim();
+    let donorState    = (row['State'] || '').trim();
     let donorZipFull  = (row['Zip']  || '').trim();
     let donorCompany  = (row['Company'] || '').trim();
     let actBlueInd    = row['ActBlue'] || '0';  // '1' or '0'
@@ -437,7 +470,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
         totalNum: 0,
         sumMin: 0,
         sumMax: 0,
-        campaigns: new Map() // campaignKey => { numDonations, sumMin, sumMax }
+        campaigns: new Map()
       });
     }
     let dAgg = donorsMap.get(donorKey);
@@ -464,52 +497,90 @@ title: ActBlue / WinRed 2024 Donor Lookup
   // ----------------------------------------------------------
   // REFRESH GLOBAL AGGREGATOR UI
   // ----------------------------------------------------------
+
   function refreshGlobalAggregator() {
-    let html = '';
-    // Sort campaigns by name for consistent display
     let sorted = Array.from(globalCampaigns.values()).sort((a,b) => {
-      // e.g. by committeeName ascending
-      return a.committeeName.localeCompare(b.committeeName) || (a.actBlueIndicator - b.actBlueIndicator);
+      // Sort by committeeName ascending, then by actBlueIndicator
+      return a.committeeName.localeCompare(b.committeeName) 
+             || (a.actBlueIndicator - b.actBlueIndicator);
     });
 
     if (!sorted.length) {
       $('#globalAggregator').html('');
+      updateAggregatorSummary(); // ensure button text is consistent
       return;
     }
 
-    html += `<h2 class="font-bold text-base mb-2">Overall Campaign Totals</h2>`;
-    html += `<div class="space-y-1 text-sm">`;
-
+    // Build aggregator detail content
+    let html = `<div class="space-y-1 text-sm">`;
     for (let c of sorted) {
-      let min = c.sumMin;
-      let max = c.sumMax;
+      let minDollar = formatDollar(c.sumMin);
+      let maxDollar = formatDollar(c.sumMax);
       let num = c.numDonations;
-      let minDollar = formatDollar(min);
-      let maxDollar = formatDollar(max);
-      let avgMinDollar = formatDollar(min / num);
-      let avgMaxDollar = formatDollar(max / num);
-      let colorClass = (c.actBlueIndicator === '1') 
-                       ? 'bg-blue-50'   // ActBlue
-                       : 'bg-red-50';  // WinRed
+      let avgMinDollar = formatDollar(c.sumMin / num);
+      let avgMaxDollar = formatDollar(c.sumMax / num);
+      let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
 
       html += `
         <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
           <span>
             <strong>
-              ${c.actBlueIndicator === '1' ? 'ActBlue' : 'WinRed'} 
+              ${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} 
               - ${escapeHtml(c.committeeName)}
             </strong>
           </span>
           <span class="text-[13px] md:text-sm mt-1 md:mt-0">
-            ${num} donations, 
-            AMOUNT: ${minDollar} to ${maxDollar}, 
-            AVG: ${avgMinDollar} to ${avgMaxDollar}
+            ${num} donations,
+            TOTAL AMOUNT: ${minDollar} to ${maxDollar}, 
+            AVERAGE: ${avgMinDollar} to ${avgMaxDollar}
           </span>
         </div>
       `;
     }
     html += `</div>`;
+
     $('#globalAggregator').html(html);
+
+    // Now gather total ActBlue / WinRed donations and amounts for the aggregatorSummary button
+    let actBlueDonations = 0, actBlueMin = 0, actBlueMax = 0;
+    let winRedDonations  = 0, winRedMin  = 0, winRedMax  = 0;
+
+    for (let c of sorted) {
+      if (c.actBlueIndicator === '1') {
+        actBlueDonations += c.numDonations;
+        actBlueMin += c.sumMin;
+        actBlueMax += c.sumMax;
+      } else {
+        winRedDonations += c.numDonations;
+        winRedMin += c.sumMin;
+        winRedMax += c.sumMax;
+      }
+    }
+
+    // Write them into hidden spans so that updateAggregatorSummary can parse them
+    // (or you can store them in data- attributes, etc.)
+    if (!$('#aggHiddenSpans').length) {
+      $('body').append(`
+        <div id="aggHiddenSpans" style="display:none;">
+          <span id="actBlueDonations"></span>
+          <span id="actBlueDonationsMin"></span>
+          <span id="actBlueDonationsMax"></span>
+          <span id="winRedDonations"></span>
+          <span id="winRedDonationsMin"></span>
+          <span id="winRedDonationsMax"></span>
+        </div>
+      `);
+    }
+    $('#actBlueDonations').text(actBlueDonations);
+    $('#actBlueDonationsMin').text('$' + formatRawInt(actBlueMin));
+    $('#actBlueDonationsMax').text('$' + formatRawInt(actBlueMax));
+
+    $('#winRedDonations').text(winRedDonations);
+    $('#winRedDonationsMin').text('$' + formatRawInt(winRedMin));
+    $('#winRedDonationsMax').text('$' + formatRawInt(winRedMax));
+
+    // Update the button label
+    updateAggregatorSummary();
   }
 
   // ----------------------------------------------------------
@@ -521,18 +592,18 @@ title: ActBlue / WinRed 2024 Donor Lookup
       $('#donorAggregatorContainer').html('');
       return;
     }
-    // Sort donors by name for consistent display
+    // Sort donors by name, zip5, company
     donors.sort((a,b) => {
-      return a.name.localeCompare(b.name) || a.zip5.localeCompare(b.zip5) || a.company.localeCompare(b.company);
+      return a.name.localeCompare(b.name) 
+             || a.zip5.localeCompare(b.zip5) 
+             || a.company.localeCompare(b.company);
     });
 
     let html = `<h2 class="font-bold text-base mb-2">Per-Donor Totals</h2>`;
     for (let d of donors) {
       let nameStr = escapeHtml(d.name);
-      let city = escapeHtml(d.city);
-      let state = escapeHtml(d.state);
-
-      let cityStr = escapeHtml(`${city}, ${state}`)
+      let cityStr = escapeHtml(d.city);
+      let stateStr = escapeHtml(d.state);
       let zipStr  = escapeHtml(d.zip5);
       let compStr = escapeHtml(d.company);
       let num     = d.totalNum;
@@ -541,13 +612,12 @@ title: ActBlue / WinRed 2024 Donor Lookup
       let avgMinDollar = formatDollar(d.sumMin / num);
       let avgMaxDollar = formatDollar(d.sumMax / num);
 
-      // Donor summary
       html += `
         <div class="border border-gray-300 rounded p-2 mb-2 bg-white text-sm">
           <div class="flex flex-col md:flex-row md:items-center justify-between">
             <div>
               <strong>${nameStr}</strong>
-              <span class="ml-2 text-xs text-gray-600">CITY: ${cityStr}</span>
+              <span class="ml-2 text-xs text-gray-600">CITY: ${cityStr}, ${stateStr}</span>
               <span class="ml-2 text-xs text-gray-600">ZIP: ${zipStr}</span>
               <span class="ml-2 text-xs text-gray-600">Company: ${compStr}</span>
             </div>
@@ -558,11 +628,12 @@ title: ActBlue / WinRed 2024 Donor Lookup
           <div class="mt-2 space-y-1">
       `;
 
-      // Now each donor’s campaigns
+      // Per-campaign
       let donorCampaigns = Array.from(d.campaigns.values());
-      // sort by committeeName
-      donorCampaigns.sort((a,b) => a.committeeName.localeCompare(b.committeeName) 
-                                   || (a.actBlueIndicator - b.actBlueIndicator));
+      donorCampaigns.sort((a,b) => {
+        return a.committeeName.localeCompare(b.committeeName) 
+               || (a.actBlueIndicator - b.actBlueIndicator);
+      });
 
       for (let c of donorCampaigns) {
         let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
@@ -571,16 +642,15 @@ title: ActBlue / WinRed 2024 Donor Lookup
         let cdMax = formatDollar(c.sumMax);
         let cdAvgMin = formatDollar(c.sumMin / cdNum);
         let cdAvgMax = formatDollar(c.sumMax / cdNum);
-
         html += `
           <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
             <span>
-              <strong>${c.actBlueIndicator === '1' ? 'ActBlue' : 'WinRed'} - ${escapeHtml(c.committeeName)}</strong>
+              <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
             </span>
             <span class="text-[13px] md:text-sm mt-1 md:mt-0">
               ${cdNum} donations,
-              AMOUNT: ${cdMin} to ${cdMax}, 
-              AVG: ${cdAvgMin} to ${cdAvgMax}
+              TOTAL AMOUNT: ${cdMin} to ${cdMax}, 
+              AVERAGE: ${cdAvgMin} to ${cdAvgMax}
             </span>
           </div>
         `;
@@ -593,6 +663,48 @@ title: ActBlue / WinRed 2024 Donor Lookup
   }
 
   // ----------------------------------------------------------
+  // updateAggregatorSummary
+  // Collapses all relevant spans and builds a single string for the #globalAggBtn text
+  // ----------------------------------------------------------
+  function updateAggregatorSummary() {
+    // Read in current values from the hidden spans, removing "$" or non-digits
+    let abDon = parseInt($('#actBlueDonations').text(), 10) || 0;
+    let abDonMinRaw = $('#actBlueDonationsMin').text().replace(/\D/g, '');
+    let abDonMaxRaw = $('#actBlueDonationsMax').text().replace(/\D/g, '');
+    let actBlueDonationsMin = parseInt(abDonMinRaw) || 0;
+    let actBlueDonationsMax = parseInt(abDonMaxRaw) || 0;
+
+    let wrDon = parseInt($('#winRedDonations').text(), 10) || 0;
+    let wrDonMinRaw = $('#winRedDonationsMin').text().replace(/\D/g, '');
+    let wrDonMaxRaw = $('#winRedDonationsMax').text().replace(/\D/g, '');
+    let winRedDonationsMin = parseInt(wrDonMinRaw) || 0;
+    let winRedDonationsMax = parseInt(wrDonMaxRaw) || 0;
+
+    let totalDonations = abDon + wrDon;
+    let actBluePct = totalDonations ? ((abDon / totalDonations) * 100).toFixed(1) : 0;
+    let winRedPct  = totalDonations ? ((wrDon / totalDonations) * 100).toFixed(1) : 0;
+
+    // Rebuild aggregator summary
+    // Example:
+    // Overall Campaign Totals (ActBlue: 20 donations (40.0%); $123–$223 total; WinRed: 30 donations (60.0%); $100–$150 total)
+
+    const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
+
+    let aggregatorSummary = `
+      Overall Campaign Totals <span class="text-gray-500">(${collapseMessage})</span><br/>
+      <span style="color: black;">
+        <span class="text-blue-600">ActBlue</span>: 
+        <span id="actBlueDonations">${abDon}</span> donations (<span id="actBluePctDonations">${actBluePct}</span>%); 
+        <span id="actBlueDonationsMin">$${actBlueDonationsMin}</span>–<span id="actBlueDonationsMax">$${actBlueDonationsMax}</span> total; 
+        <span class="text-red-600">WinRed</span>: 
+        <span id="winRedDonations">${wrDon}</span> donations (<span id="winRedPctDonations">${winRedPct}</span>%); 
+        <span id="winRedDonationsMin">$${winRedDonationsMin}</span>–<span id="winRedDonationsMax">$${winRedDonationsMax}</span> total
+      </span>
+    `;
+    $('#globalAggBtn').html(aggregatorSummary);
+  }
+
+  // ----------------------------------------------------------
   // LOAD MASTER REVERSE INDEX
   // ----------------------------------------------------------
   async function loadMasterReverseIndex(zipUrl, innerFile) {
@@ -601,7 +713,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
   }
 
   function parseMasterReverseIndex(fileData) {
-    // lines:  token:batch1,batch2,...
+    // lines: token:batch1,batch2,...
     const lines = fileData.split(/\r?\n/);
     for (const line of lines) {
       const trimmed = line.trim();
@@ -632,8 +744,6 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
   // ----------------------------------------------------------
   // BATCH REVERSE INDEX PARSER
-  // Each line looks like "token:1-4,6,9-10"
-  // We'll store map.set(token, [ "1-4", "6", "9-10" ]) as array of strings.
   // ----------------------------------------------------------
   function parseBatchIndex(txt) {
     const map = new Map();
@@ -653,7 +763,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
   }
 
   // ----------------------------------------------------------
-  // FETCH + UNZIP + RETURN TEXT
+  // FETCH + UNZIP + RETURN TEXT (using web worker)
   // ----------------------------------------------------------
   function fetchAndUnzipText(zipUrl, innerFilename) {
     if (searchCanceled) return Promise.resolve('');
@@ -717,6 +827,12 @@ title: ActBlue / WinRed 2024 Donor Lookup
     return '$' + rounded.toLocaleString();
   }
 
+  // Raw integer format for aggregator hidden fields
+  function formatRawInt(value) {
+    if (isNaN(value) || !isFinite(value)) return '0';
+    return String(Math.round(value));
+  }
+
   function escapeHtml(str) {
     if (!str) return '';
     return str
@@ -730,12 +846,8 @@ title: ActBlue / WinRed 2024 Donor Lookup
   // CSV DOWNLOAD
   // ----------------------------------------------------------
   $('#downloadCsvBtn').on('click', function() {
-    // Output the raw rows exactly as we read them
     if (!allMatchedRows.length) return;
-
-    // "Papa.unparse" can handle arrays of objects if each object has the same set of keys.
     let csvContent = Papa.unparse(allMatchedRows);
-
     let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     let url = URL.createObjectURL(blob);
     let link = document.createElement('a');
