@@ -521,7 +521,52 @@ function generateGraph() {
     });
 
     renderSankey(g, sankey, svg);
-    $('#loading').hide();
+    // Handle zoom controls
+    document.getElementById('zoomIn').onclick = () => {
+      svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+    };
+
+    document.getElementById('zoomOut').onclick = () => {
+      svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+    };
+
+    document.getElementById('zoomFit').onclick = () => {
+      const bounds = g.node().getBBox();
+      const dx = bounds.x;
+      const dy = bounds.y;
+      const scale = 0.8 / Math.max(
+        bounds.width / width,
+        bounds.height / height
+      );
+
+      svg.transition()
+        .duration(750)
+        .call(zoom.transform,
+          d3.zoomIdentity
+            .translate(width/2, height/2)
+            .scale(scale)
+            .translate(-dx-bounds.width/2, -dy-bounds.height/2));
+    };
+
+    // Also update the initial zoom to account for the larger bounds
+    setTimeout(() => {
+      const bounds = g.node().getBBox();
+      const dx = bounds.x;
+      const dy = bounds.y;
+      const scale = 0.8 / Math.max( // Increased scale for better initial fit
+        bounds.width / width,
+        bounds.height / height
+      );
+
+      svg.transition()
+        .duration(750)
+        .call(zoom.transform,
+          d3.zoomIdentity
+            .translate(width/2, height/2)
+            .scale(scale)
+            .translate(-dx-bounds.width/2, -dy-bounds.height/2));
+    }, 1000);
+   $('#loading').hide();
     console.log('Graph generation complete');
 }
 
@@ -651,7 +696,35 @@ function renderSankey(g, sankey, svgRef) {
         .attr("y", d => d.y0)
         .attr("height", d => d.y1 - d.y0)
         .attr("width", d => d.x1 - d.x0)
-        .attr("fill", d => d.color);
+        .attr("fill", d => d.color)
+      .on('click', function(event, d) {  // Add click handler here
+        event.stopPropagation(); // Prevent event bubbling
+        zoomToFitNodes(d.source, d.target);
+      })
+     .call(d3.drag()
+        .filter(event => {
+          // Completely ignore touch events, only allow mouse events
+          if (event.sourceEvent.type.startsWith('touch')) {
+            return false;
+          }
+          // Only allow left mouse button
+          return event.button === 0;
+        })
+        .on('start', event => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          event.subject.fx = event.subject.x;
+          event.subject.fy = event.subject.y;
+        })
+        .on('drag', event => {
+          event.subject.fx = event.x;
+          event.subject.fy = event.y;
+        })
+        .on('end', event => {
+          if (!event.active) simulation.alphaTarget(0);
+          event.subject.fx = null;
+          event.subject.fy = null;
+        })
+      );
 
     // Tooltips and click handlers
     rect.append("title")
@@ -676,7 +749,11 @@ function renderSankey(g, sankey, svgRef) {
         .attr("d", d3.sankeyLinkHorizontal())
         .style("stroke", d => `url(#${d.gradientId})`) // Try gradients first
         .style("stroke-opacity", 0.3) // More translucent (30% opacity, adjustable)
-        .style("stroke-width", d => Math.max(1, d.width || 1)); // Smaller minimum width
+        .style("stroke-width", d => Math.max(1, d.width || 1)) // Smaller minimum width
+      .on('click', function(event, d) {
+        event.stopPropagation();
+        zoomToFitNodes(d.source, d.target);
+      })
 
     // Fallback to solid colors if gradients fail
     link.each(function(d) {
@@ -697,7 +774,11 @@ function renderSankey(g, sankey, svgRef) {
         .attr("y", d => (d.y1 + d.y0) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", d => d.x0 < sankeyG.nodeWidth() / 2 ? "start" : "end")
-        .text(d => d.name);
+        .text(d => d.name)
+      .on('click', function(event, d) {
+        event.stopPropagation();
+        zoomToFitNodes(d.source, d.target);
+      })
 }
 
 function wrapText(text, width) {
