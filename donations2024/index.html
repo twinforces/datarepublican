@@ -119,7 +119,7 @@ title: ActBlue / WinRed 2024 donor lookup
 </div>
 
 <!-- Per-donor aggregator -->
-<div id="donorAggregatorContainer" class="mb-4 space-y-2"></div>
+<div id="donorAggregatorContainer" class="grid grid-cols-12 mb-4"></div>
 
 <script>
   // ----------------------------------------------------------
@@ -853,7 +853,7 @@ title: ActBlue / WinRed 2024 donor lookup
              || a.company.localeCompare(b.company);
     });
 
-    let html = `<h2 class="font-bold text-base mb-2">Per-donor totals</h2>`;
+    let html = `<h2 class="font-bold text-base mb-2 col-span-12">Per-donor totals</h2>`;
     for (let d of donors) {
       let nameStr = escapeHtml(d.name);
       let cityStr = escapeHtml(d.city);
@@ -867,19 +867,22 @@ title: ActBlue / WinRed 2024 donor lookup
       let avgMaxDollar = formatDollar(d.sumMax / num);
 
       html += `
-        <div class="border border-gray-300 rounded p-2 mb-2 bg-white text-sm">
-          <div class="flex flex-col md:flex-row md:items-center justify-between">
-            <div>
-              <strong>${nameStr}</strong>
-              <span class="ml-2 text-xs text-gray-600">CITY: ${cityStr}, ${stateStr}</span>
-              <span class="ml-2 text-xs text-gray-600">ZIP: ${zipStr}</span>
-              <span class="ml-2 text-xs text-gray-600">Company: ${compStr}</span>
-            </div>
-            <div class="mt-1 md:mt-0 text-xs md:text-sm">
-              Total: ${num} donations, AMOUNT: ${minDollar} to ${maxDollar}, AVG: ${avgMinDollar} to ${avgMaxDollar}
-            </div>
-          </div>
-          <div class="mt-2 space-y-1">
+        <div class="bg-white col-span-6 mt-4 p-2 border-l border-y border-gray-200 rounded-tl text-sm">
+          <strong>${nameStr}</strong> <span class="text-xs opacity-80">${compStr}</span><br />
+          <span class="text-xs opacity-80">${cityStr}, ${stateStr} ${zipStr}
+        </div>
+        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-4 p-2 border-y border-gray-200">
+          <span class="text-[13px] opacity-80">Total</span>
+          <strong class="text-sm">${minDollar}</strong>
+        </div>
+        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-4 p-2 border-y border-gray-200">
+          <span class="text-[13px] opacity-80">Donations</span>
+          <strong class="text-sm">${num}</strong> 
+        </div>
+        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-4 p-2 border-y border-r border-gray-200 rounded-tr">
+          <span class="text-[13px] opacity-80">Avg donation</span>
+          <strong class="text-sm">${avgMinDollar}</strong>
+        </div>
       `;
 
       // Per-campaign
@@ -897,15 +900,17 @@ title: ActBlue / WinRed 2024 donor lookup
         let cdAvgMin = formatDollar(c.sumMin / cdNum);
         let cdAvgMax = formatDollar(c.sumMax / cdNum);
         html += `
-          <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
-            <span>
-              <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
-            </span>
-            <span class="text-[13px] md:text-sm mt-1 md:mt-0">
-              ${cdNum} donations,
-              TOTAL AMOUNT: ${cdMin} to ${cdMax}, 
-              AVERAGE: ${cdAvgMin} to ${cdAvgMax}
-            </span>
+          <div class="col-span-6 bg-white/50 text-[13px] px-2 py-1 border-l border-b border-gray-200 ${colorClass}">
+            <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
+          </div>
+          <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
+            ${cdMin}
+          </div>
+          <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
+            ${cdNum}
+          </div>
+          <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex justify-end">
+            ${cdAvgMin}
           </div>
         `;
       }

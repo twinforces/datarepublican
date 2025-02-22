@@ -861,6 +861,12 @@ select {
 .col-span-5 {
   grid-column: span 5 / span 5;
 }
+.col-span-6 {
+  grid-column: span 6 / span 6;
+}
+.col-span-12 {
+  grid-column: span 12 / span 12;
+}
 .float-right {
   float: right;
 }
@@ -1238,6 +1244,9 @@ select {
 .grid-cols-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
+.grid-cols-12 {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
 .flex-row-reverse {
   flex-direction: row-reverse;
 }
@@ -1258,6 +1267,9 @@ select {
 }
 .items-center {
   align-items: center;
+}
+.items-baseline {
+  align-items: baseline;
 }
 .justify-start {
   justify-content: flex-start;
@@ -1355,6 +1367,12 @@ select {
 .rounded-sm {
   border-radius: 0.125rem;
 }
+.rounded-tl {
+  border-top-left-radius: 0.25rem;
+}
+.rounded-tr {
+  border-top-right-radius: 0.25rem;
+}
 .border {
   border-width: 1px;
 }
@@ -1368,11 +1386,21 @@ select {
   border-top-width: 1px;
   border-bottom-width: 1px;
 }
+.border-x {
+  border-left-width: 1px;
+  border-right-width: 1px;
+}
 .border-b {
   border-bottom-width: 1px;
 }
 .border-t {
   border-top-width: 1px;
+}
+.border-l {
+  border-left-width: 1px;
+}
+.border-r {
+  border-right-width: 1px;
 }
 .\!border-green-light {
   --tw-border-opacity: 1 !important;
@@ -1507,6 +1535,9 @@ select {
 }
 .bg-yellow\/20 {
   background-color: rgb(226 209 52 / 0.2);
+}
+.bg-white\/50 {
+  background-color: rgb(255 255 255 / 0.5);
 }
 .bg-none {
   background-image: none;
