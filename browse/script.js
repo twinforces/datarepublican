@@ -621,35 +621,14 @@ function generateGraph() {
     const sankey = d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(50)
-        .nodePadding(80) // Fixed padding
+        .nodePadding(80)
         .extent([[0, 0], [width - 200, height - 100]]);
 
     currentData = { nodes: [], links: [] };
+    expandedOutflows.clear(); // Reset expansion state
 
-    topNodes = Object.values(charities)
-        .map(charity => ({ filer_ein: charity.filer_ein, outflow: charity.grant_amt || 0 }))
-        .filter(d => d.outflow > 0)
-        .sort((a, b) => b.outflow - a.outflow)
-        .slice(0, TOP_N_INITIAL)
-        .map(n => charities[n.filer_ein]);
-
-    activeEINs.forEach(nodeId => {
-        if (charities[nodeId] && !topNodes.some(n => n.filer_ein === nodeId)) {
-            topNodes.push(charities[nodeId]);
-        }
-    });
-
-    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): $${formatNumber(n.grant_amt)}`));
-    console.log('Active EINs:', activeEINs);
-
-    topNodes.forEach(node => {
-        expandNode(node.filer_ein, true, false);
-        if (node.grants.length > TOP_N_OUTFLOWS) {
-            expandNode(node.filer_ein, false, false);
-        }
-    });
-
-    renderSankey(g, sankey, svg, width, height);
+    // Start with "US Government" as the initial focus
+    renderFocusedSankey(g, sankey, svg, width, height, "001");
 
     document.getElementById('zoomIn').onclick = () => {
         svg.transition().duration(300).call(zoom.scaleBy, 1.3);
@@ -800,7 +779,7 @@ function expandOthers(sourceId) {
         target: grant.grantee_ein,
         filer: grant.filer,
         grantee: grant.grantee,
-        value: grant.logRawAmt, // Revert to logarithmic scaling
+        value: grant.logRawAmt,
         rawValue: grant.rawAmt
     })).sort((a, b) => b.rawValue - a.rawValue);
 
@@ -810,85 +789,18 @@ function expandOthers(sourceId) {
     );
 
     const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
-    const othersLinks = remainingLinks.slice(newLinks.length);
-
-    newLinks.forEach(l => {
-        if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
-            currentData.nodes.push(charities[l.target]);
-        }
-        if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
-            currentData.links.push({ 
-                source: l.source, 
-                target: l.target, 
-                value: l.value, 
-                rawValue: l.rawValue,
-                filer: l.filer,
-                grantee: l.grantee
-            });
-        }
-        displayedLinks.push(l);
-    });
-
+    newLinks.forEach(l => displayedLinks.push(l));
     expandedOutflows.set(sourceId, displayedLinks);
-
-    let existingOthers = currentData.nodes.find(n => n.filer_ein.includes('-others-') && n.parent_ein === sourceId);
-    let othersId = existingOthers ? existingOthers.filer_ein : `${sourceId}-others-${generateUniqueId()}`;
-
-    if (othersLinks.length > 0) {
-        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
-        const logOthersValue = Math.log2(othersValue + 1);
-
-        if (!existingOthers) {
-            existingOthers = { 
-                id: othersId,
-                filer_ein: othersId, 
-                name: "...",
-                grant_amt: othersValue,
-                logGrantAmt: logOthersValue,
-                parent_ein: sourceId
-            };
-            currentData.nodes.push(existingOthers);
-        } else {
-            existingOthers.grant_amt = othersValue;
-            existingOthers.logGrantAmt = logOthersValue;
-        }
-
-        let othersLink = currentData.links.find(l => l.source === sourceId && l.target === othersId);
-        if (!othersLink) {
-            othersLink = { 
-                source: sourceId, 
-                target: othersId, 
-                value: logOthersValue, // Use logarithmic value
-                rawValue: othersValue,
-                filer: charities[sourceId],
-                grantee: null
-            };
-            currentData.links.push(othersLink);
-        } else {
-            othersLink.value = logOthersValue;
-            othersLink.rawValue = othersValue;
-        }
-    } else if (existingOthers) {
-        currentData.nodes = currentData.nodes.filter(n => n.filer_ein !== existingOthers.filer_ein);
-        currentData.links = currentData.links.filter(l => l.target !== existingOthers.filer_ein);
-    }
-
-    // Sort nodes to place "..." at the bottom
-    currentData.nodes.sort((a, b) => {
-        if (a.filer_ein.includes('-others-') && !b.filer_ein.includes('-others-')) return 1;
-        if (!a.filer_ein.includes('-others-') && b.filer_ein.includes('-others-')) return -1;
-        return 0;
-    });
 
     const container = document.getElementById('graph-container');
     const width = container.offsetWidth;
     const height = container.offsetHeight || window.innerHeight * 0.7;
 
-    renderSankey(svg.select('g'), d3.sankey()
+    renderFocusedSankey(svg.select('g'), d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(50)
-        .nodePadding(80) // Fixed padding
-        .extent([[0, 0], [width - 200, height - 100]]), svg, width, height);
+        .nodePadding(80)
+        .extent([[0, 0], [width - 200, height - 100]]), svg, width, height, sourceId);
 }
 
 function handleSearchClick(e) {
@@ -903,7 +815,7 @@ function handleSearchClick(e) {
     const container = document.getElementById('graph-container');
     const width = container.offsetWidth;
     const height = container.offsetHeight || window.innerHeight * 0.7;
-    renderSankey(svg.select('g'), d3.sankey()
+    renderFocusedSankey(svg.select('g'), d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(50)
         .nodePadding(80)
@@ -911,6 +823,229 @@ function handleSearchClick(e) {
 }
 function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
+}
+
+function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
+    // Filter data for the selected node
+    const selectedNode = charities[selectedNodeId];
+    if (!selectedNode) return;
+
+    currentData = { nodes: [], links: [] };
+    currentData.nodes.push(selectedNode);
+
+    // Inflows (grantsIn)
+    (selectedNode.grantsIn || []).forEach(grant => {
+        if (!currentData.nodes.some(n => n.filer_ein === grant.filer_ein)) {
+            currentData.nodes.push(grant.filer);
+        }
+        currentData.links.push({
+            source: grant.filer_ein,
+            target: selectedNodeId,
+            value: grant.logRawAmt,
+            rawValue: grant.rawAmt,
+            filer: grant.filer,
+            grantee: selectedNode
+        });
+    });
+
+    // Outflows (grants)
+    const displayedLinks = expandedOutflows.get(selectedNodeId) || [];
+    const allOutLinks = (selectedNode.grants || []).map(grant => ({
+        source: grant.filer_ein,
+        target: grant.grantee_ein,
+        filer: grant.filer,
+        grantee: grant.grantee,
+        value: grant.logRawAmt,
+        rawValue: grant.rawAmt
+    })).sort((a, b) => b.rawValue - a.rawValue);
+    const remainingOutLinks = allOutLinks.filter(l => !displayedLinks.some(d => d.target === l.target));
+    const newOutLinks = remainingOutLinks.slice(0, TOP_N_OUTFLOWS);
+    const othersOutLinks = remainingOutLinks.slice(newOutLinks.length);
+
+    newOutLinks.forEach(l => {
+        if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
+            currentData.nodes.push(charities[l.target]);
+        }
+        currentData.links.push(l);
+        displayedLinks.push(l);
+    });
+
+    if (othersOutLinks.length > 0) {
+        const othersId = `${selectedNodeId}-others-${generateUniqueId()}`;
+        const othersValue = othersOutLinks.reduce((sum, l) => sum + l.rawValue, 0);
+        const logOthersValue = Math.log2(othersValue + 1);
+        currentData.nodes.push({
+            id: othersId,
+            filer_ein: othersId,
+            name: "...",
+            grant_amt: othersValue,
+            logGrantAmt: logOthersValue,
+            parent_ein: selectedNodeId
+        });
+        currentData.links.push({
+            source: selectedNodeId,
+            target: othersId,
+            value: logOthersValue,
+            rawValue: othersValue,
+            filer: selectedNode,
+            grantee: null
+        });
+    }
+
+    expandedOutflows.set(selectedNodeId, displayedLinks);
+
+    // Sort nodes: inflows, selected, outflows, "..."
+    currentData.nodes.sort((a, b) => {
+        if (a.filer_ein === selectedNodeId) return -1;
+        if (b.filer_ein === selectedNodeId) return 1;
+        if (a.filer_ein.includes('-others-') && !b.filer_ein.includes('-others-')) return 1;
+        if (!a.filer_ein.includes('-others-') && b.filer_ein.includes('-others-')) return -1;
+        return 0;
+    });
+
+    const graph = sankey(currentData);
+    const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+    g.selectAll("*").remove();
+
+    graph.nodes.forEach(d => {
+        d.id = d.filer_ein || d.id;
+        d.color = color(d.id);
+        if (d.y1 - d.y0 < 2) {
+            const mid = (d.y0 + d.y1) / 2;
+            d.y0 = mid - 1;
+            d.y1 = mid + 1;
+        }
+    });
+
+    graph.links.forEach((link, i) => {
+        link.gradientId = generateUniqueId("gradient");
+    });
+
+    const defs = svgRef.append("defs");
+    const gradients = defs.selectAll("linearGradient.dynamic")
+        .data(graph.links)
+        .enter()
+        .append("linearGradient")
+        .attr("id", d => d.gradientId)
+        .attr("gradientUnits", "userSpaceOnUse")
+        .attr("x1", d => d.source.x1)
+        .attr("x2", d => d.target.x0);
+
+    gradients.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", d => color(d.source.id));
+
+    gradients.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", d => color(d.target.id));
+
+    const masterGroup = g.append("g")
+        .attr("class", "graph-group");
+
+    const nodeGroup = masterGroup.append('g').attr('class', 'nodes');
+    const nodeElements = nodeGroup.selectAll('g')
+        .data(graph.nodes)
+        .join('g')
+        .attr('class', d => {
+            if (d.filer_ein.includes('-others-')) return 'node others';
+            if (!d.grants || d.grants.length === 0) return 'node no-grants';
+            return 'node';
+        })
+        .attr('data-id', d => d.id);
+
+    nodeElements.each(function(d) {
+        const sel = d3.select(this);
+        if (d.filer_ein.includes('-others-') || (d.grants && d.grants.length > 0)) {
+            sel.append("rect")
+                .attr("x", d => d.x0)
+                .attr("y", d => d.y0)
+                .attr("height", d => d.y1 - d.y0)
+                .attr("width", d => d.x1 - d.x0)
+                .attr("fill", d => d.color)
+                .attr("stroke", "#000");
+        } else {
+            sel.append("circle")
+                .attr("cx", d => (d.x0 + d.x1) / 2)
+                .attr("cy", d => (d.y0 + d.y1) / 2)
+                .attr("r", Math.max(2, (d.y1 - d.y0) / 2))
+                .attr("fill", d => d.color)
+                .attr("stroke", "#000");
+        }
+    });
+
+    nodeElements.on('click', function(event, d) {
+        event.stopPropagation();
+        if (event.altKey) {
+            // Reset to full graph view (optional)
+            generateGraph();
+        } else if (d.filer_ein.includes('-others-')) {
+            const sourceId = d.parent_ein;
+            expandOthers(sourceId);
+        } else {
+            // Focus on clicked node
+            renderFocusedSankey(g, sankey, svgRef, width, height, d.filer_ein);
+        }
+    });
+
+    nodeElements.append("title")
+        .text(d => `${d.name || d.id}\nInflow: $${formatNumber((d.grantsIn || []).reduce((sum, g) => sum + g.rawAmt, 0))}\nOutflow: $${formatNumber(d.grant_amt || 0)}`);
+
+    const link = masterGroup.append("g")
+        .attr("fill", "none")
+        .attr("stroke-opacity", 1)
+        .style("mix-blend-mode", "multiply")
+        .selectAll(".link")
+        .data(graph.links)
+        .join("path")
+        .attr("d", d3.sankeyLinkHorizontal())
+        .style("stroke", d => d.target.filer_ein.includes('-others-') ? "#ccc" : `url(#${d.gradientId})`)
+        .style("stroke-opacity", "0.3")
+        .style("stroke-width", d => Math.max(1, d.width))
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            zoomToFitNodes(d.source, d.target, width, height);
+        });
+
+    link.each(function(d) {
+        if (d3.select(this).style("stroke") === "none") {
+            d3.select(this).style("stroke", color(d.source.id));
+        }
+    });
+
+    link.append("title")
+        .text(d => d.target.filer_ein.includes('-others-') 
+            ? `${d.source.name} → ...\n$${formatNumber(d.rawValue)}` 
+            : `${d.source.name} → ${d.target.name}\n$${formatNumber(d.rawValue)}`);
+
+    masterGroup.append("g")
+        .selectAll()
+        .data(graph.nodes)
+        .join("text")
+        .attr("x", d => d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6)
+        .attr("y", d => (d.y1 + d.y0) / 2)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", d => d.x0 < sankey.nodeWidth() / 2 ? "start" : "end")
+        .text(d => d.name)
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            if (event.altKey) {
+                generateGraph();
+            } else if (d.filer_ein.includes('-others-')) {
+                const sourceId = d.parent_ein;
+                expandOthers(sourceId);
+            } else {
+                renderFocusedSankey(g, sankey, svgRef, width, height, d.filer_ein);
+            }
+        });
+
+    const zoom = d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => {
+            masterGroup.attr('transform', event.transform);
+        });
+
+    svgRef.call(zoom);
 }
 
 function renderSankey(g, sankey, svgRef, width, height) {
@@ -1024,13 +1159,13 @@ function renderSankey(g, sankey, svgRef, width, height) {
                     grantee: null
                 });
             }
-            renderSankey(g, sankey, svgRef, width, height);
+            renderFocusedSankey(g, sankey, svgRef, width, height);
         } else if (d.filer_ein.includes('-others-')) {
             const sourceId = d.parent_ein;
             expandOthers(sourceId);
         } else {
             expandNode(d.filer_ein, false, false);
-            renderSankey(g, sankey, svgRef, width, height);
+            renderFocusedSankey(g, sankey, svgRef, width, height);
         }
     });
 
@@ -1111,7 +1246,7 @@ function renderSankey(g, sankey, svgRef, width, height) {
                         grantee: null
                     });
                 }
-                renderSankey(g, sankey, svgRef, width, height);
+                renderFocusedSankey(g, sankey, svgRef, width, height);
             } else if (d.filer_ein.includes('-others-')) {
                 const sourceId = d.parent_ein;
                 expandOthers(sourceId);
