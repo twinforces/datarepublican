@@ -590,22 +590,20 @@ function generateGraph() {
 
     $('#loading').show();
     console.log('2. Loading icon shown');
-    $('#graph-container svg').empty();
-    console.log('3. Old graph cleared');
+    $('#graph-container svg').remove();
 
     const container = document.getElementById('graph-container');
     const width = container.offsetWidth;
     const height = container.offsetHeight || window.innerHeight * 0.7;
     console.log('4. Container dimensions calculated');
 
-    // Ensure #graph exists in DOM
     svg = d3.select('#graph-container')
         .append('svg')
         .attr('id', 'graph')
         .attr('width', '100%')
         .attr('height', '100%')
         .style('display', 'block')
-        .style('background', '#fff'); // Ensure white background
+        .style('background', '#fff');
     console.log('5. SVG created');
 
     zoom = d3.zoom()
@@ -620,102 +618,87 @@ function generateGraph() {
         .attr("transform", "translate(50, 50)");
 
     const sankey = d3.sankey()
-        .nodeId(d => d.filer_ein || d.id) // Handle missing IDs
-        .nodeWidth(50) // Wider nodes for ribbons
-        .nodePadding(80) // More space between nodes
-        .extent([[0, 0], [width - 200, height - 100]]); // More horizontal space
+        .nodeId(d => d.filer_ein || d.id)
+        .nodeWidth(50)
+        .nodePadding(80)
+        .extent([[0, 0], [width - 200, height - 100]]);
 
-    // Reset Sankey state
     currentData = { nodes: [], links: [] };
- 
-    // Initialize with top N nodes (MADE GLOBAL)
+
     topNodes = Object.values(charities)
         .map(charity => ({ filer_ein: charity.filer_ein, outflow: charity.grant_amt || 0 }))
-        .filter(d => d.outflow > 0 ) // Exclude if filters apply
+        .filter(d => d.outflow > 0)
         .sort((a, b) => b.outflow - a.outflow)
         .slice(0, TOP_N_INITIAL)
         .map(n => charities[n.filer_ein]);
-        
-    activeEINs.forEach( nodeId => {if (charities[nodeId]) topNodes.push(charities[nodeId]);});
 
-    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): $${formatNumber(n.grant_amt)}`)); // DEBUG: Verify selection
-    console.log('Active EINs:', activeEINs); // DEBUG: Check filters
-
-    // Add top nodes
-    topNodes.forEach(node => {
-        currentData.nodes.push(node);
+    activeEINs.forEach(nodeId => {
+        if (charities[nodeId] && !topNodes.some(n => n.filer_ein === nodeId)) {
+            topNodes.push(charities[nodeId]);
+        }
     });
 
-    // Add initial links for top nodes (using filer.grants, only to charities, limited to TOP_N_OUTFLOWS)
+    console.log('Top Nodes:', topNodes.map(n => `${n.name} (${n.filer_ein}): $${formatNumber(n.grant_amt)}`));
+    console.log('Active EINs:', activeEINs);
+
     topNodes.forEach(node => {
-        const grantsForNode = node.grants || [];
-        grantsForNode.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
-            currentData.links.push({
-                source: grant.filer_ein,
-                target: grant.grantee_ein,
-                value: grant.logRawAmt,
-                rawValue: grant.rawAmt,
-                filer: grant.filer,
-                grantee: grant.grantee
-            });
-            currentData.nodes.push(grant.grantee)
-        });
+        expandNode(node.filer_ein, true);
+        if (node.grants.length > TOP_N_OUTFLOWS) {
+            expandNode(node.filer_ein, false);
+        }
     });
 
-    renderSankey(g, sankey, svg);
-    // Handle zoom controls
+    renderSankey(g, sankey, svg, width, height); // Pass width and height
+
     document.getElementById('zoomIn').onclick = () => {
-      svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+        svg.transition().duration(300).call(zoom.scaleBy, 1.3);
     };
 
     document.getElementById('zoomOut').onclick = () => {
-      svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+        svg.transition().duration(300).call(zoom.scaleBy, 0.7);
     };
 
     document.getElementById('zoomFit').onclick = () => {
-      const bounds = g.node().getBBox();
-      const dx = bounds.x;
-      const dy = bounds.y;
-      const scale = 0.8 / Math.max(
-        bounds.width / width,
-        bounds.height / height
-      );
-
-      svg.transition()
-        .duration(750)
-        .call(zoom.transform,
-          d3.zoomIdentity
-            .translate(width/2, height/2)
-            .scale(scale)
-            .translate(-dx-bounds.width/2, -dy-bounds.height/2));
+        const bounds = g.node().getBBox();
+        const dx = bounds.x;
+        const dy = bounds.y;
+        const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+        svg.transition()
+            .duration(750)
+            .call(zoom.transform,
+                d3.zoomIdentity
+                    .translate(width/2, height/2)
+                    .scale(scale)
+                    .translate(-dx - bounds.width/2, -dy - bounds.height/2));
     };
 
-    // Also update the initial zoom to account for the larger bounds
     setTimeout(() => {
-      const bounds = g.node().getBBox();
-      const dx = bounds.x;
-      const dy = bounds.y;
-      const scale = 0.8 / Math.max( // Increased scale for better initial fit
-        bounds.width / width,
-        bounds.height / height
-      );
-
-      svg.transition()
-        .duration(750)
-        .call(zoom.transform,
-          d3.zoomIdentity
-            .translate(width/2, height/2)
-            .scale(scale)
-            .translate(-dx-bounds.width/2, -dy-bounds.height/2));
+        const bounds = g.node().getBBox();
+        const dx = bounds.x;
+        const dy = bounds.y;
+        const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+        svg.transition()
+            .duration(750)
+            .call(zoom.transform,
+                d3.zoomIdentity
+                    .translate(width/2, height/2)
+                    .scale(scale)
+                    .translate(-dx - bounds.width/2, -dy - bounds.height/2));
     }, 1000);
-   $('#loading').hide();
+
+    $('#loading').hide();
     console.log('Graph generation complete');
 }
 
 function expandNode(nodeId, isInitial = false) {
     const node = charities[nodeId];
     if (!node) {
-        currentData.nodes.push({ filer_ein: nodeId, name: `Unknown (${nodeId})`, grant_amt: 0 });
+        currentData.nodes.push({ 
+            id: nodeId, 
+            filer_ein: nodeId, 
+            name: `Unknown (${nodeId})`, 
+            grant_amt: 0 
+        });
         if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
         return;
     }
@@ -761,8 +744,7 @@ function expandNode(nodeId, isInitial = false) {
 
     expandedOutflows.set(nodeId, displayedLinks);
 
-    // Handle "Others" node with unique ID
-    const othersId = `${nodeId}-others-${generateUniqueId()}`; // Unique ID for this "Others" node
+    const othersId = `${nodeId}-others-${generateUniqueId()}`;
     if (othersLinks.length > 0 && !isInitial) {
         const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
         const logOthersValue = Math.log2(othersValue + 1);
@@ -772,10 +754,10 @@ function expandNode(nodeId, isInitial = false) {
             currentData.nodes.push({ 
                 id: othersId,
                 filer_ein: othersId, 
-                name: `${node.name} (Others)`, // Display parent name for clarity
+                name: "...", // Changed to "..."
                 grant_amt: othersValue,
                 logGrantAmt: logOthersValue,
-                parent_ein: nodeId // Link back to parent
+                parent_ein: nodeId
             });
         } else {
             existingOthers.grant_amt = othersValue;
@@ -801,7 +783,8 @@ function expandNode(nodeId, isInitial = false) {
         currentData.links = currentData.links.filter(l => !l.target.startsWith(`${nodeId}-others-`));
     }
 
-    if (!activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
+    // Only update activeEINs if explicitly added (not for initial topNodes)
+    if (!isInitial && !activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
         activeEINs.push(nodeId);
         renderActiveEINs();
         updateQueryParams();
@@ -809,53 +792,70 @@ function expandNode(nodeId, isInitial = false) {
 }
 
 function expandOthers(sourceId) {
-    // Simply call expandNode with the original source ID
     expandNode(sourceId);
+    const container = document.getElementById('graph-container');
+    const width = container.offsetWidth;
+    const height = container.offsetHeight || window.innerHeight * 0.7;
     renderSankey(svg.select('g'), d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(50)
         .nodePadding(80)
-        .extent([[0, 0], [svg.node().offsetWidth - 200, svg.node().offsetHeight - 100]]), svg);
+        .extent([[0, 0], [width - 200, height - 100]]), svg, width, height);
 }
+
+function handleSearchClick(e) {
+    const ein = e.target.dataset.ein;
+    if (!ein) return;
+
+    const searchInput = document.getElementById('searchInput');
+    searchInput.value = charities[ein].name;
+    document.getElementById('searchResults').classList.add('hidden');
+
+    expandNode(ein);
+    const container = document.getElementById('graph-container');
+    const width = container.offsetWidth;
+    const height = container.offsetHeight || window.innerHeight * 0.7;
+    renderSankey(svg.select('g'), d3.sankey()
+        .nodeId(d => d.filer_ein || d.id)
+        .nodeWidth(50)
+        .nodePadding(80)
+        .extent([[0, 0], [width - 200, height - 100]]), svg, width, height);
+}
+
 function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
 }
 
-function renderSankey(g, sankey, svgRef) {
-    // Configure the Sankey generator
+function renderSankey(g, sankey, svgRef, width, height) {
     let sankeyG = d3.sankey()
-        .nodeId(d => d.id) // Use 'id' instead of 'filer_ein'
-        .extent([[0, 0], [800, 600]])
-        .nodeWidth(24)
-        .nodePadding(10)
-        .linkSort((a, b) => b.value - a.value); // Sort links by value
-    
+        .nodeId(d => d.filer_ein || d.id)
+        .extent([[0, 0], [width - 200, height - 100]])
+        .nodeWidth(50)
+        .nodePadding(80)
+        .linkSort((a, b) => b.value - a.value);
+
     const graph = sankeyG(currentData);
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-    // Clear previous content
     g.selectAll("*").remove();
 
-    // Assign colors to nodes and ensure id
     graph.nodes.forEach(d => {
-        d.id = d.id || d.filer_ein; // Fallback to filer_ein if id is missing
+        d.id = d.filer_ein || d.id;
         d.color = color(d.id);
     });
 
-    // Assign unique gradient IDs to links
     graph.links.forEach((link, i) => {
         link.gradientId = generateUniqueId("gradient");
     });
 
-    // Append defs first (gradients)
-    const defs = svg.append("defs");
+    const defs = svgRef.append("defs");
     const gradients = defs.selectAll("linearGradient.dynamic")
         .data(graph.links)
         .enter()
         .append("linearGradient")
         .attr("id", d => d.gradientId)
         .attr("gradientUnits", "userSpaceOnUse")
-        .attr("x1", d => d.source.x1) // Simplify to horizontal
+        .attr("x1", d => d.source.x1)
         .attr("x2", d => d.target.x0);
 
     gradients.append("stop")
@@ -866,62 +866,54 @@ function renderSankey(g, sankey, svgRef) {
         .attr("offset", "100%")
         .attr("stop-color", d => color(d.target.id));
 
-    // Create a master group for the entire graph
     const masterGroup = g.append("g")
         .attr("class", "graph-group");
 
-    // Nodes (rects) in the master group
     const nodeGroup = masterGroup.append('g').attr('class', 'nodes');
     const nodeElements = nodeGroup.selectAll('g')
         .data(graph.nodes)
         .join('g')
         .attr('class', d => {
-            if (d.filer_ein.includes('(Others)')) return 'node others';
+            if (d.filer_ein.includes('-others-')) return 'node others';
             if (!d.grants || d.grants.length === 0) return 'node no-grants';
             return 'node';
         })
         .attr('data-id', d => d.id);
 
-    // Append shapes based on grant status
     nodeElements.each(function(d) {
         const sel = d3.select(this);
-        if (!d.grants || d.grants.length === 0) {
-            // Circle for nodes with no grants
+        if (d.filer_ein.includes('-others-') || (d.grants && d.grants.length > 0)) {
+            sel.append("rect")
+                .attr("x", d => d.x0)
+                .attr("y", d => d.y0)
+                .attr("height", d => d.y1 - d.y0)
+                .attr("width", d => d.x1 - d.x0)
+                .attr("fill", d => d.color)
+                .attr("stroke", "#000");
+        } else {
             sel.append("circle")
                 .attr("cx", d => (d.x0 + d.x1) / 2)
                 .attr("cy", d => (d.y0 + d.y1) / 2)
                 .attr("r", Math.min(d.x1 - d.x0, d.y1 - d.y0) / 2)
                 .attr("fill", d => d.color)
                 .attr("stroke", "#000");
-        } else {
-            // Rectangle for nodes with grants
-            sel.append("rect")
-        .attr("x", d => d.x0)
-        .attr("y", d => d.y0)
-        .attr("height", d => d.y1 - d.y0)
-        .attr("width", d => d.x1 - d.x0)
-        .attr("fill", d => d.color)
-                .attr("stroke", "#000");
         }
-        });
+    });
 
-    // Click handler for nodes
     nodeElements.on('click', function(event, d) {
         event.stopPropagation();
-        if (d.filer_ein.includes('(Others)')) {
-            const sourceId = d.parent_ein || d.filer_ein.split(' (Others)')[0];
+        if (d.filer_ein.includes('-others-')) {
+            const sourceId = d.parent_ein;
             expandOthers(sourceId);
-            } else {
-                expandNode(d.id);
-            }
-            renderSankey(g, sankey, svgRef);
-        });
+        } else {
+            expandNode(d.filer_ein);
+            renderSankey(g, sankey, svgRef, width, height);
+        }
+    });
 
-    // Tooltips for nodes
     nodeElements.append("title")
         .text(d => `${d.name || d.id}\nOutflow: $${formatNumber(d.grant_amt || 0)}`);
 
-    // Links (use gradients with translucent fallback) in the master group
     const link = masterGroup.append("g")
         .attr("fill", "none")
         .attr("stroke-opacity", 1)
@@ -930,15 +922,14 @@ function renderSankey(g, sankey, svgRef) {
         .data(graph.links)
         .join("path")
         .attr("d", d3.sankeyLinkHorizontal())
-        .style("stroke", d => `url(#${d.gradientId})`) // Use gradients
+        .style("stroke", d => d.target.filer_ein.includes('-others-') ? "#ccc" : `url(#${d.gradientId})`)
         .style("stroke-opacity", 0.3)
         .style("stroke-width", d => Math.max(1, d.width || 1))
         .on('click', function(event, d) {
             event.stopPropagation();
-            zoomToFitNodes(d.source, d.target);
+            zoomToFitNodes(d.source, d.target, width, height);
         });
 
-    // Fallback to solid colors if gradients fail
     link.each(function(d) {
         if (d3.select(this).style("stroke") === "none") {
             d3.select(this).style("stroke", color(d.source.id));
@@ -946,9 +937,10 @@ function renderSankey(g, sankey, svgRef) {
     });
 
     link.append("title")
-        .text(d => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.rawValue)}`);
+        .text(d => d.target.filer_ein.includes('-others-') 
+            ? `${d.source.name} → ...\n$${formatNumber(d.rawValue)}` 
+            : `${d.source.name} → ${d.target.name}\n$${formatNumber(d.rawValue)}`);
 
-    // Labels in the master group
     masterGroup.append("g")
         .selectAll()
         .data(graph.nodes)
@@ -960,22 +952,21 @@ function renderSankey(g, sankey, svgRef) {
         .text(d => d.name)
         .on('click', function(event, d) {
             event.stopPropagation();
-            if (d.filer_ein.includes('(Others)')) {
-                const sourceId = d.parent_ein || d.filer_ein.split(' (Others)')[0];
+            if (d.filer_ein.includes('-others-')) {
+                const sourceId = d.parent_ein;
                 expandOthers(sourceId);
             } else {
-            zoomToFitNodes(d.source, d.target);
-        }
+                zoomToFitNodes(d, d, width, height);
+            }
         });
 
-    // Apply zoom and pan to the master group
     const zoom = d3.zoom()
         .scaleExtent([0.1, 4])
         .on('zoom', (event) => {
             masterGroup.attr('transform', event.transform);
         });
 
-    svg.call(zoom);
+    svgRef.call(zoom);
 }
 
 function wrapText(text, width) {
@@ -1062,22 +1053,6 @@ function handleSearchBlur() {
     }
 }
 
-function handleSearchClick(e) {
-    const ein = e.target.dataset.ein;
-    if (!ein) return;
-
-    const searchInput = document.getElementById('searchInput');
-    searchInput.value = charities[ein].name;
-    document.getElementById('searchResults').classList.add('hidden');
-
-    expandNode(ein); // FIXED: Removed generateGraph() to preserve zoom
-    renderSankey(svg.select('g'), d3.sankey()
-        .nodeId(d => d.filer_ein || d.id)
-        .nodeWidth(50)
-        .nodePadding(80)
-        .extent([[0, 0], [svg.node().offsetWidth - 200, svg.node().offsetHeight - 100]]), svg);
-}
-
 function handleSearchKeydown(e) {
     const searchResults = document.getElementById('searchResults');
     if (searchResults.classList.contains('hidden')) return;
@@ -1137,9 +1112,7 @@ function handleSearchResultHover(index) {
 }
 
 
-  // Add this helper function
-  function zoomToFitNodes(node1, node2) {
-    // Get the bounding boxes of both nodes
+ function zoomToFitNodes(node1, node2, svgWidth, svgHeight) {
     const node1El = nodeElements.filter(n => n.id === node1.id).node();
     const node2El = nodeElements.filter(n => n.id === node2.id).node();
     
@@ -1148,40 +1121,30 @@ function handleSearchResultHover(index) {
     const box1 = node1El.getBBox();
     const box2 = node2El.getBBox();
     
-    // Calculate the combined bounds
-    const x1 = Math.min(node1.x - box1.width/2, node2.x - box2.width/2);
-    const y1 = Math.min(node1.y - box1.height/2, node2.y - box2.height/2);
-    const x2 = Math.max(node1.x + box1.width/2, node2.x + box2.width/2);
-    const y2 = Math.max(node1.y + box1.height/2, node2.y + box2.height/2);
+    const x1 = Math.min(node1.x0 - box1.width/2, node2.x0 - box2.width/2);
+    const y1 = Math.min(node1.y0 - box1.height/2, node2.y0 - box2.height/2);
+    const x2 = Math.max(node1.x1 + box1.width/2, node2.x1 + box2.width/2);
+    const y2 = Math.max(node1.y1 + box1.height/2, node2.y1 + box2.height/2);
     
-    // Reduce padding from 100 to 50
     const padding = 50;
     const bounds = {
-      x: x1 - padding,
-      y: y1 - padding,
-      width: (x2 - x1) + (padding * 2),
-      height: (y2 - y1) + (padding * 2)
+        x: x1 - padding,
+        y: y1 - padding,
+        width: (x2 - x1) + (padding * 2),
+        height: (y2 - y1) + (padding * 2)
     };
     
-    // Calculate the scale to fit the bounds
-    const scale = 0.9 / Math.max(
-      bounds.width / width,
-      bounds.height / height
-    );
+    const scale = 0.9 / Math.max(bounds.width / svgWidth, bounds.height / svgHeight);
     
-    // Transition to the new view
     svg.transition()
-      .duration(750)
-      .call(zoom.transform,
-        d3.zoomIdentity
-          .translate(width/2, height/2)
-          .scale(scale)
-          .translate(
-            -(bounds.x + bounds.width/2),
-            -(bounds.y + bounds.height/2)
-          )
-      );
-  }
+        .duration(750)
+        .call(zoom.transform,
+            d3.zoomIdentity
+                .translate(svgWidth/2, svgHeight/2)
+                .scale(scale)
+                .translate(-(bounds.x + bounds.width/2), -(bounds.y + bounds.height/2))
+        );
+}
 
 const extraStyle = `.node.others { fill: #ccc; cursor: pointer; }
                     .node { fill: #999; } // Default node color (light gray, overridden by unique colors)
