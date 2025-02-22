@@ -450,6 +450,11 @@ title: ActBlue / WinRed 2024 donor lookup
       console.error(err);
       $('#statusMessage').text('Error loading index: ' + err);
     }
+
+    // Create tooltip container once
+    if (!$('#tooltip').length) {
+      $('<div id="tooltip" class="tooltip"></div>').appendTo('body');
+    }
   });
 
   // ----------------------------------------------------------
@@ -853,7 +858,7 @@ title: ActBlue / WinRed 2024 donor lookup
              || a.company.localeCompare(b.company);
     });
 
-    let html = `<h2 class="font-bold text-base mb-2 col-span-12">Per-donor totals</h2>`;
+    let html = `<h2 class="font-bold text-base col-span-12">Per-donor totals</h2>`;
     for (let d of donors) {
       let nameStr = escapeHtml(d.name);
       let cityStr = escapeHtml(d.city);
@@ -867,27 +872,40 @@ title: ActBlue / WinRed 2024 donor lookup
       let avgMaxDollar = formatDollar(d.sumMax / num);
 
       html += `
-        <div class="bg-white col-span-6 mt-2 p-2 border-l border-y border-gray-200 text-sm">
+        <div class="bg-white col-span-12 md:col-span-6 mt-2 px-2 pt-2 md:pb-2 border-l border-r md:border-r-0 border-t md:border-y border-gray-200 text-sm">
           <strong>${nameStr}</strong> <span class="text-xs opacity-80">${compStr}</span><br />
           <span class="text-xs opacity-80">${cityStr}, ${stateStr} ${zipStr}</span><br />
           ${d.campaigns.size === 1 ? 
-            `<div class="text-[13px] mt-1">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
+            `<div class="hidden md:block text-[13px] mt-1">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
               '<strong class="text-blue-600">ActBlue</strong>' : 
-              '<strong class="text-red-600">WinRed</strong>'} - ${escapeHtml(Array.from(d.campaigns.values())[0].committeeName)}</div>` : 
+              '<strong class="text-red-600">WinRed</strong>'} <strong>- ${escapeHtml(Array.from(d.campaigns.values())[0].committeeName)}</strong></div>` : 
             ''}
         </div>
-        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-2 p-2 border-y border-gray-200">
+        <div class="bg-white flex flex-col gap-1 items-start md:items-end col-span-4 md:col-span-2 md:mt-2 p-2 border-l md:border-l-0 border-b md:border-y border-gray-200">
           <span class="text-[13px] opacity-80">Total</span>
-          <strong class="text-sm">${minDollar}</strong>
+          <strong class="text-sm border-b border-dashed border-gray-500 donation-total" 
+            data-min="${minDollar}" 
+            data-max="${maxDollar}">${minDollar}+</strong>
         </div>
-        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-2 p-2 border-y border-gray-200">
+        <div class="bg-white flex flex-col gap-1 items-start md:items-end col-span-4 md:col-span-2 md:mt-2 p-2 border-b md:border-y border-gray-200">
           <span class="text-[13px] opacity-80">Donations</span>
           <strong class="text-sm">${num}</strong> 
         </div>
-        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-2 p-2 border-y border-r border-gray-200">
+        <div class="bg-white flex flex-col gap-1 items-start md:items-end col-span-4 md:col-span-2 md:mt-2 p-2 border-b md:border-y border-r border-gray-200">
           <span class="text-[13px] opacity-80">Avg donation</span>
           <strong class="text-sm">${avgMinDollar}</strong>
         </div>
+        ${d.campaigns.size === 1 ? 
+            `<div class="col-span-12 p-2 text-[13px] bg-white/50 border-b border-x border-gray-200 md:hidden">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
+              '<strong class="text-blue-600">ActBlue</strong>' : 
+              '<strong class="text-red-600">WinRed</strong>'} <strong>- ${escapeHtml(Array.from(d.campaigns.values())[0].committeeName)}</strong></div>` : 
+            ''}
+
+            ${d.campaigns.size > 1 ? 
+              `<div class="col-span-12 px-2 py-1 text-[13px] bg-white border-b border-x border-gray-200 text-black/75 md:hidden">
+                Details
+              </div>` : 
+              ''}
       `;
 
       // Per-campaign
@@ -907,16 +925,16 @@ title: ActBlue / WinRed 2024 donor lookup
           let cdAvgMin = formatDollar(c.sumMin / cdNum);
           let cdAvgMax = formatDollar(c.sumMax / cdNum);
           html += `
-            <div class="col-span-6 bg-white/50 text-[13px] px-2 py-1 border-l border-b border-gray-200 ${colorClass}">
+            <div class="col-span-12 md:col-span-6 bg-white/50 text-[13px] px-2 pt-1 md:pb-1 border-l border-r md:border-r-0 md:border-b border-gray-200 ${colorClass}">
               <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
             </div>
-            <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
+            <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 border-l md:border-l-0 flex items-start md:justify-end">
               ${cdMin}
             </div>
-            <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
+            <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
               ${cdNum}
             </div>
-            <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex justify-end">
+            <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
               ${cdAvgMin}
             </div>
           `;
@@ -927,6 +945,50 @@ title: ActBlue / WinRed 2024 donor lookup
     }
 
     $('#donorAggregatorContainer').html(html);
+
+    // Add tooltip behavior to donation totals
+    $(document).on('mouseenter', '.donation-total', function(e) {
+      const $tooltip = $('#tooltip');
+      const rect = this.getBoundingClientRect();
+      const minDollar = $(this).data('min');
+      const maxDollar = $(this).data('max');
+      
+      $tooltip.html(`The total amount may range from <strong>${minDollar}-${maxDollar}</strong> as our data source only provides whole dollar amounts.`);
+      
+      // Make tooltip visible but off-screen initially so we can measure it
+      $tooltip.addClass('visible').css({
+        left: '-9999px',
+        top: '-9999px'
+      });
+      
+      // Get dimensions after tooltip is visible
+      const tooltipWidth = $tooltip.outerWidth();
+      const tooltipHeight = $tooltip.outerHeight();
+      
+      // Calculate initial position
+      let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
+      let top = rect.top - tooltipHeight - 8 + window.scrollY;
+      
+      // Adjust if tooltip would go off-screen
+      const viewportWidth = $(window).width();
+      const viewportHeight = $(window).height();
+      
+      // Keep tooltip within horizontal bounds
+      left = Math.max(10, Math.min(viewportWidth - tooltipWidth - 10, left));
+      
+      // If tooltip would go above viewport, show it below the element instead
+      if (top - window.scrollY < 10) {
+        top = rect.bottom + 8 + window.scrollY;
+      }
+      
+      // Apply final position
+      $tooltip.css({
+        left: left + 'px',
+        top: top + 'px'
+      });
+    }).on('mouseleave', '.donation-total', function() {
+      $('#tooltip').removeClass('visible');
+    });
   }
 
   // ----------------------------------------------------------
