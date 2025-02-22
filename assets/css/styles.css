@@ -783,6 +783,12 @@ select {
   border-color: rgb(209 213 219 / var(--tw-border-opacity));
   padding: 0.25rem;
 }
+.pointer-events-none {
+  pointer-events: none;
+}
+.pointer-events-auto {
+  pointer-events: auto;
+}
 .visible {
   visibility: visible;
 }
@@ -836,6 +842,15 @@ select {
 }
 .top-\[calc\(50\%-0\.75rem\)\] {
   top: calc(50% - 0.75rem);
+}
+.bottom-0 {
+  bottom: 0px;
+}
+.left-0 {
+  left: 0px;
+}
+.top-12 {
+  top: 3rem;
 }
 .z-10 {
   z-index: 10;
@@ -1069,8 +1084,20 @@ select {
 .h-full {
   height: 100%;
 }
+.h-20 {
+  height: 5rem;
+}
+.h-\[200px\] {
+  height: 200px;
+}
+.h-12 {
+  height: 3rem;
+}
 .max-h-\[50vh\] {
   max-height: 50vh;
+}
+.max-h-\[200px\] {
+  max-height: 200px;
 }
 .min-h-40 {
   min-height: 10rem;
@@ -1556,6 +1583,33 @@ select {
 }
 .bg-none {
   background-image: none;
+}
+.bg-gradient-to-t {
+  background-image: linear-gradient(to top, var(--tw-gradient-stops));
+}
+.bg-gradient-to-b {
+  background-image: linear-gradient(to bottom, var(--tw-gradient-stops));
+}
+.from-white {
+  --tw-gradient-from: #fff var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+.from-red {
+  --tw-gradient-from: #EF3E28 var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(239 62 40 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+.from-white\/50 {
+  --tw-gradient-from: rgb(255 255 255 / 0.5) var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+.to-transparent {
+  --tw-gradient-to: transparent var(--tw-gradient-to-position);
+}
+.to-gray-100 {
+  --tw-gradient-to: #f3f4f6 var(--tw-gradient-to-position);
 }
 .fill-black {
   fill: #000;
@@ -2243,6 +2297,10 @@ select {
 
   .md\:h-screen {
     height: 100vh;
+  }
+
+  .md\:h-20 {
+    height: 5rem;
   }
 
   .md\:min-h-\[50vh\] {

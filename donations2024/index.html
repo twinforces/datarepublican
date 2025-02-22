@@ -10,24 +10,17 @@ title: ActBlue / WinRed 2024 donor lookup
 <script src="chart.js"></script>
 
 <style>
-  .agg-toggle-button {
-    display: inline-block;
-    background-color: #efefef; /* Light gray background */
-    border: 1px solid #ccc;    /* Subtle border */
-    color: #333;               /* Text color */
-    padding: 4px 8px;          /* Some padding for button-like feel */
-    border-radius: 4px;        /* Rounded corners */
-    font-size: 0.875rem;       /* ~14px, tweak to taste */
-    cursor: pointer;           /* Show pointer on hover */
-    transition: background-color 0.2s;
-  }
-
-  .agg-toggle-button:hover {
-    background-color: #e2e2e2; /* Slightly darker on hover */
-  }
 
   .text-red-600 {
     color: #dc2626 !important; /* #dc2626 is Tailwind's red-600 */
+  }
+
+  #globalAggregator.expanded {
+    height: auto;
+  }
+
+  #gradientOverlay {
+    display: block;
   }
 </style>  
 
@@ -101,17 +94,37 @@ title: ActBlue / WinRed 2024 donor lookup
     </div>
   </div>
 
-  <div class="mb-4">
-    <!-- We'll fill the button text via updateAggregatorSummary() -->
+  <div class="mb-4 hidden" id="recipientsContainer">
     <h2 class="font-bold text-base mb-2">All recipients</h2>
-    <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
-    <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
-      <!-- We'll fill the aggregator details (the previous "refreshGlobalAggregator" content) here -->
+    
+    <!-- Container with relative positioning for proper layering -->
+    <div class="relative">
+      <!-- Results container with initial height limit -->
+      <div id="globalAggregator" class="transition-all duration-200 max-h-[200px] overflow-hidden">
+        <!-- Content will be inserted here dynamically -->
+      </div>
+
+      <!-- Gradient overlay + expand button (shown only when collapsed AND >10 results) -->
+      <div id="gradientOverlay" class="absolute bottom-0 left-0 right-0 h-12 md:h-20 bg-gradient-to-b from-white/50 to-gray-100 pointer-events-none">
+        <!-- Button container centered at bottom -->
+        <div class="absolute bottom-0 left-0 right-0 flex justify-center pb-2 pointer-events-auto">
+          <button id="globalAggBtn" class="agg-toggle-button">
+            Show all results
+          </button>
+        </div>
+      </div>
+
+      <!-- Collapse button (shown only when expanded AND >10 results) -->
+      <div id="collapseButtonContainer" class="hidden justify-center mt-4">
+        <button id="globalAggCollapseBtn" class="agg-toggle-button" style="display: none;">
+          Show fewer results
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- CSV download button -->
-  <button id="downloadCsvBtn" class="frameless !mt-4" style="display: none;">
+  <button id="downloadCsvBtn" class="absolute right-0 top-12 frameless !mt-4" style="display: none;">
     <span class="flex items-center gap-1 text-sm text-gray-500 font-semibold">
       <img src="/assets/images/download.svg" class="size-5" alt="Download SVG">
       Download results as CSV
@@ -422,29 +435,38 @@ title: ActBlue / WinRed 2024 donor lookup
     $('#searchButton .button-text').hide();
     $('#searchButton .loading-spinner').show();
 
-    // Hide aggregator by default
-    $('#globalAggregator').height(0);
-
-    // The aggregator toggle
+    // Toggle expand/collapse for global aggregator
     $('#globalAggBtn').on('click', function() {
       const $agg = $('#globalAggregator');
-
-      // Flip the state
-      aggregatorIsCollapsed = !aggregatorIsCollapsed;
+      const $gradientOverlay = $('#gradientOverlay');
+      const $collapseContainer = $('#collapseButtonContainer');
+      const $collapseBtn = $('#globalAggCollapseBtn');
       
-      if (!aggregatorIsCollapsed) {
-        // Expand
-        $agg.css('height', 'auto');
-        const autoHeight = $agg.height();
-        $agg.height(0);
-        $agg.height(autoHeight);
-      } else {
-        // Collapse
-        $agg.height(0);
-      }
+      // Expand
+      $agg.addClass('expanded');
+      $agg.css('max-height', 'none');
+      $gradientOverlay.css('display', 'none');  // Use css() instead of hide()
+      $('#globalAggBtn').parent().parent().hide();
+      $collapseContainer.removeClass('hidden').addClass('flex');
+      $collapseBtn.show();
+    });
 
-      // Re-render aggregator's content
-      refreshGlobalAggregator();
+    // Collapse button handler
+    $('#globalAggCollapseBtn').on('click', function() {
+      const $agg = $('#globalAggregator');
+      const $gradientOverlay = $('#gradientOverlay');
+      const $collapseContainer = $('#collapseButtonContainer');
+      const $collapseBtn = $('#globalAggCollapseBtn');
+      
+      // Collapse
+      $agg.removeClass('expanded');
+      $agg.css('max-height', '200px');
+      $gradientOverlay.css('display', 'block');  // Use css() instead of show()
+      $collapseContainer.removeClass('flex').addClass('hidden');
+      $collapseBtn.hide();
+      
+      // Scroll back to top of results
+      $agg[0].scrollTop = 0;
     });
 
     try {
@@ -513,7 +535,9 @@ title: ActBlue / WinRed 2024 donor lookup
     $('.pie-container').removeClass('flex').addClass('hidden');
 
     // Clear aggregator displays
-    $('#globalAggregator').empty().height(0);
+    $('#globalAggregator').empty().removeClass('expanded');
+    $('#gradientOverlay').css('display', 'block');
+    $('#collapseButtonContainer').removeClass('flex').addClass('hidden');
     $('#donorAggregatorContainer').empty();
     $('#downloadCsvBtn').hide();
 
@@ -797,16 +821,32 @@ title: ActBlue / WinRed 2024 donor lookup
 
   function refreshGlobalAggregator() {
     let sorted = Array.from(globalCampaigns.values()).sort((a,b) => {
-      // Sort by committeeName ascending, then by actBlueIndicator
       return a.committeeName.localeCompare(b.committeeName) 
              || (a.actBlueIndicator - b.actBlueIndicator);
     });
 
+    // Show/hide gradient and expand button based on number of results
+    if (sorted.length > 10) {
+      // Only show gradient if we're not already expanded
+      if (!$('#globalAggregator').hasClass('expanded')) {
+        $('#gradientOverlay').css('display', 'block');
+      } else {
+        $('#gradientOverlay').css('display', 'none');
+      }
+    } else {
+      $('#gradientOverlay').css('display', 'none');
+    }
+
     if (!sorted.length) {
       $('#globalAggregator').html('');
+      $('#recipientsContainer').addClass('hidden');  // Hide if no results
       updateAggregatorSummary();
       return;
     }
+
+    // Show both containers when we have results
+    $('.pie-container').removeClass('hidden').addClass('flex');
+    $('#recipientsContainer').removeClass('hidden');
 
     // Build aggregator detail content
     let html = `
@@ -893,6 +933,13 @@ title: ActBlue / WinRed 2024 donor lookup
     // Update the button label
     updateAggregatorSummary();
     scheduleChartRefresh();
+
+    // Show/hide collapse button based on number of results
+    if (sorted.length > 10) {
+      $('#globalAggCollapseBtn').show();
+    } else {
+      $('#globalAggCollapseBtn').hide();
+    }
   }
 
   // ----------------------------------------------------------
@@ -1065,10 +1112,6 @@ title: ActBlue / WinRed 2024 donor lookup
     let totalDonations = abDon + wrDon;
     let actBluePct = totalDonations ? ((abDon / totalDonations) * 100).toFixed(1) : 0;
     let winRedPct  = totalDonations ? ((wrDon / totalDonations) * 100).toFixed(1) : 0;
-
-    // Update the toggle button text only
-    const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
-    $('#globalAggBtn').html(`<span class="agg-toggle-button">${collapseMessage}</span>`);
 
     // Update the legend separately
     let legendHtml = `
