@@ -7,7 +7,20 @@ title: ActBlue / WinRed 2024 Donor Lookup
 <script src="jquery.min.js"></script>
 <script src="jszip.min.js"></script>
 <script src="papaparse.min.js"></script>
+<script src="chart.js"></script>
+
 <style>
+  .charts-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 10px;
+  }
+  .chart-container {
+    width: 300px;
+    height: 300px;
+  }
+
   .text-red-600 {
     color: #dc2626 !important; /* #dc2626 is Tailwind's red-600 */
   }
@@ -85,6 +98,15 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
 <div class="mb-2">
   <!-- The aggregator summary button + collapsed aggregator details -->
+  <div class="charts-wrapper">
+    <div class="chart-container">
+      <canvas id="donationsPie"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="amountsPie"></canvas>
+    </div>
+  </div>
+
   <div class="mb-4">
     <!-- We’ll fill the button text via updateAggregatorSummary() -->
     <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
@@ -133,6 +155,167 @@ title: ActBlue / WinRed 2024 Donor Lookup
   // For concurrency
   const MAX_BATCH_FETCHES = 5;
   let aggregatorIsCollapsed = true; // default to collapsed
+
+  // Global references to the charts so we can update them
+  let donationsPieChart = null;
+  let amountsPieChart   = null;
+
+  function condenseSmallSlices(labels, data, thresholdFraction = 0.1) {
+    // For example, thresholdFraction=0.1 -> 10%
+    
+    const total = data.reduce((sum, val) => sum + val, 0);
+    if (total === 0) {
+      // If there's no data at all, return as-is
+      return { newLabels: labels, newData: data };
+    }
+
+    const newLabels = [];
+    const newData   = [];
+    let othersValue = 0;
+
+    for (let i = 0; i < labels.length; i++) {
+      const val = data[i];
+      const ratio = val / total;
+      if (ratio < thresholdFraction) {
+        // Merge small slice into "others" bucket
+        othersValue += val;
+      } else {
+        newLabels.push(labels[i]);
+        newData.push(val);
+      }
+    }
+
+    // If any slices were merged, add a final "Others" slice
+    if (othersValue > 0) {
+      newLabels.push('Others (<10%)');
+      newData.push(othersValue);
+    }
+
+    return {
+      newLabels,
+      newData
+    };
+  }
+
+
+  function refreshPieCharts() {
+    // 1) Extract raw data from globalCampaigns
+    const campaigns = Array.from(globalCampaigns.values());
+
+    // We'll track two sets of arrays:
+    // - For # of donations
+    // - For total donated amounts (using sumMin or sumMax as your preference)
+    let rawLabels = [];
+    let rawDonationsData = [];
+    let rawAmountsData   = [];
+
+    campaigns.forEach(c => {
+      const campaignLabel = 
+        (c.actBlueIndicator === '1' ? 'ActBlue' : 'WinRed') + ' - ' + c.committeeName;
+      
+      rawLabels.push(campaignLabel);
+      rawDonationsData.push(c.numDonations);
+
+      // For total amounts, use sumMin as a “low bound,” or you can average (sumMin + sumMax)/2.
+      // Here we’ll just use sumMin for simplicity:
+      rawAmountsData.push(Math.round(c.sumMin));
+    });
+
+    // If no campaigns exist, provide dummy data so Chart.js doesn’t complain
+    if (!rawLabels.length) {
+      rawLabels = ['No data'];
+      rawDonationsData = [1];
+      rawAmountsData   = [1];
+    }
+
+    // 2) Condense small slices below 10% into "Others"
+    const thresholdFraction = 0.1; // 10%
+    const condensedDonations = condenseSmallSlices(rawLabels, rawDonationsData, thresholdFraction);
+    const condensedAmounts   = condenseSmallSlices(rawLabels, rawAmountsData, thresholdFraction);
+
+    // 3) Destroy existing charts if they exist
+    if (donationsPieChart) {
+      donationsPieChart.destroy();
+    }
+    if (amountsPieChart) {
+      amountsPieChart.destroy();
+    }
+
+    // 4) Build the "Donations by Campaign (%)" pie
+    const ctxDonations = document.getElementById('donationsPie').getContext('2d');
+    donationsPieChart = new Chart(ctxDonations, {
+      type: 'pie',
+      data: {
+        labels: condensedDonations.newLabels,
+        datasets: [{
+          label: '# of Donations',
+          data: condensedDonations.newData,
+          backgroundColor: [
+            '#36A2EB','#FF6384','#FFCE56','#4BC0C0','#9966FF','#FF9F40'
+          ],
+        }]
+      },
+      options: {
+        animation: {
+          duration: 0 // Turn off animation "swoosh"
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: 'Donations by Campaign (%)'
+          },
+          legend: {
+            display: true
+          }
+        }
+      }
+    });
+
+    // 5) Build the "Donation Amount by Campaign (%)" pie
+    const ctxAmounts = document.getElementById('amountsPie').getContext('2d');
+    amountsPieChart = new Chart(ctxAmounts, {
+      type: 'pie',
+      data: {
+        labels: condensedAmounts.newLabels,
+        datasets: [{
+          label: 'Donation Amounts',
+          data: condensedAmounts.newData,
+          backgroundColor: [
+            '#36A2EB','#FF6384','#FFCE56','#4BC0C0','#9966FF','#FF9F40'
+          ],
+        }]
+      },
+      options: {
+        animation: {
+          duration: 0
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: 'Donation Amount by Campaign (%)'
+          },
+          legend: {
+            display: true
+          }
+        }
+      }
+    });
+  }
+
+  let chartUpdateScheduled = false;
+  function scheduleChartRefresh() {
+    // If we already scheduled an update, just skip
+    if (chartUpdateScheduled) return;
+    
+    chartUpdateScheduled = true;
+    
+    // Wait a short delay before actually refreshing
+    setTimeout(() => {
+      refreshPieCharts();
+      chartUpdateScheduled = false;
+    }, 500); // 500ms or however long you prefer
+  }
+
 
   // ----------------------------------------------------------
   // DOCUMENT READY
@@ -581,6 +764,8 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
     // Update the button label
     updateAggregatorSummary();
+    scheduleChartRefresh();
+
   }
 
   // ----------------------------------------------------------
