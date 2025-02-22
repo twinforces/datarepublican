@@ -133,7 +133,7 @@ $(document).ready(function() {
 
 function addEINFromInput() {
     let val = $('#einInput').val().trim();
-    val = val.replace(/[-\s]/g, ''); // Remove hyphens and spaces first
+    val = val.replace(/[-\s]/g, '');
     
     if (!/^\d{9}$/.test(val)) {
         alert("EIN must be 9 digits after removing dashes/spaces.");
@@ -148,6 +148,7 @@ function addEINFromInput() {
     $('#einInput').val('');
     renderActiveEINs();
     updateQueryParams();
+    expandNode(val, false, true); // Add to activeEINs
     generateGraph();
 }
 
@@ -644,7 +645,7 @@ function generateGraph() {
     topNodes.forEach(node => {
         expandNode(node.filer_ein, true);
         if (node.grants.length > TOP_N_OUTFLOWS) {
-            expandNode(node.filer_ein, false);
+            expandNode(node.filer_ein, false, false);
         }
     });
 
@@ -690,7 +691,7 @@ function generateGraph() {
     console.log('Graph generation complete');
 }
 
-function expandNode(nodeId, isInitial = false) {
+function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     const node = charities[nodeId];
     if (!node) {
         currentData.nodes.push({ 
@@ -754,7 +755,7 @@ function expandNode(nodeId, isInitial = false) {
             currentData.nodes.push({ 
                 id: othersId,
                 filer_ein: othersId, 
-                name: "...", // Changed to "..."
+                name: "...",
                 grant_amt: othersValue,
                 logGrantAmt: logOthersValue,
                 parent_ein: nodeId
@@ -783,8 +784,8 @@ function expandNode(nodeId, isInitial = false) {
         currentData.links = currentData.links.filter(l => !l.target.startsWith(`${nodeId}-others-`));
     }
 
-    // Only update activeEINs if explicitly added (not for initial topNodes)
-    if (!isInitial && !activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
+    // Only add to activeEINs if explicitly requested
+    if (addToActiveEINs && !activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
         activeEINs.push(nodeId);
         renderActiveEINs();
         updateQueryParams();
@@ -792,7 +793,7 @@ function expandNode(nodeId, isInitial = false) {
 }
 
 function expandOthers(sourceId) {
-    expandNode(sourceId);
+    expandNode(sourceId, false, false); // Don’t add to activeEINs
     const container = document.getElementById('graph-container');
     const width = container.offsetWidth;
     const height = container.offsetHeight || window.innerHeight * 0.7;
@@ -802,7 +803,6 @@ function expandOthers(sourceId) {
         .nodePadding(80)
         .extent([[0, 0], [width - 200, height - 100]]), svg, width, height);
 }
-
 function handleSearchClick(e) {
     const ein = e.target.dataset.ein;
     if (!ein) return;
@@ -811,7 +811,7 @@ function handleSearchClick(e) {
     searchInput.value = charities[ein].name;
     document.getElementById('searchResults').classList.add('hidden');
 
-    expandNode(ein);
+    expandNode(ein, false, true); // Add to activeEINs
     const container = document.getElementById('graph-container');
     const width = container.offsetWidth;
     const height = container.offsetHeight || window.innerHeight * 0.7;
@@ -821,7 +821,6 @@ function handleSearchClick(e) {
         .nodePadding(80)
         .extent([[0, 0], [width - 200, height - 100]]), svg, width, height);
 }
-
 function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
 }
@@ -902,11 +901,49 @@ function renderSankey(g, sankey, svgRef, width, height) {
 
     nodeElements.on('click', function(event, d) {
         event.stopPropagation();
-        if (d.filer_ein.includes('-others-')) {
+        if (event.altKey) { // Option (Alt) key pressed
+            // Reset currentData to just this node and its immediate children
+            currentData = { nodes: [], links: [] };
+            currentData.nodes.push(charities[d.filer_ein]);
+            const grants = charities[d.filer_ein].grants || [];
+            grants.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
+                currentData.nodes.push(grant.grantee);
+                currentData.links.push({
+                    source: grant.filer_ein,
+                    target: grant.grantee_ein,
+                    value: grant.logRawAmt,
+                    rawValue: grant.rawAmt,
+                    filer: grant.filer,
+                    grantee: grant.grantee
+                });
+            });
+            if (grants.length > TOP_N_OUTFLOWS) {
+                const othersId = `${d.filer_ein}-others-${generateUniqueId()}`;
+                const othersValue = grants.slice(TOP_N_OUTFLOWS).reduce((sum, g) => sum + g.rawAmt, 0);
+                const logOthersValue = Math.log2(othersValue + 1);
+                currentData.nodes.push({
+                    id: othersId,
+                    filer_ein: othersId,
+                    name: "...",
+                    grant_amt: othersValue,
+                    logGrantAmt: logOthersValue,
+                    parent_ein: d.filer_ein
+                });
+                currentData.links.push({
+                    source: d.filer_ein,
+                    target: othersId,
+                    value: logOthersValue,
+                    rawValue: othersValue,
+                    filer: charities[d.filer_ein],
+                    grantee: null
+                });
+            }
+            renderSankey(g, sankey, svgRef, width, height);
+        } else if (d.filer_ein.includes('-others-')) {
             const sourceId = d.parent_ein;
             expandOthers(sourceId);
         } else {
-            expandNode(d.filer_ein);
+            expandNode(d.filer_ein, false, false);
             renderSankey(g, sankey, svgRef, width, height);
         }
     });
@@ -952,7 +989,44 @@ function renderSankey(g, sankey, svgRef, width, height) {
         .text(d => d.name)
         .on('click', function(event, d) {
             event.stopPropagation();
-            if (d.filer_ein.includes('-others-')) {
+            if (event.altKey) { // Option (Alt) key pressed
+                currentData = { nodes: [], links: [] };
+                currentData.nodes.push(charities[d.filer_ein]);
+                const grants = charities[d.filer_ein].grants || [];
+                grants.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
+                    currentData.nodes.push(grant.grantee);
+                    currentData.links.push({
+                        source: grant.filer_ein,
+                        target: grant.grantee_ein,
+                        value: grant.logRawAmt,
+                        rawValue: grant.rawAmt,
+                        filer: grant.filer,
+                        grantee: grant.grantee
+                    });
+                });
+                if (grants.length > TOP_N_OUTFLOWS) {
+                    const othersId = `${d.filer_ein}-others-${generateUniqueId()}`;
+                    const othersValue = grants.slice(TOP_N_OUTFLOWS).reduce((sum, g) => sum + g.rawAmt, 0);
+                    const logOthersValue = Math.log2(othersValue + 1);
+                    currentData.nodes.push({
+                        id: othersId,
+                        filer_ein: othersId,
+                        name: "...",
+                        grant_amt: othersValue,
+                        logGrantAmt: logOthersValue,
+                        parent_ein: d.filer_ein
+                    });
+                    currentData.links.push({
+                        source: d.filer_ein,
+                        target: othersId,
+                        value: logOthersValue,
+                        rawValue: othersValue,
+                        filer: charities[d.filer_ein],
+                        grantee: null
+                    });
+                }
+                renderSankey(g, sankey, svgRef, width, height);
+            } else if (d.filer_ein.includes('-others-')) {
                 const sourceId = d.parent_ein;
                 expandOthers(sourceId);
             } else {
