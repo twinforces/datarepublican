@@ -648,8 +648,6 @@ function renderSankey(g, sankey, svgRef) {
         .extent([[0, 0], [800, 600]])
         .nodeWidth(24)
         .nodePadding(10)
-//        .nodeAlign(d3[d3.sankeyCenter])
-//        .nodeSort((a,b) => b.grant_amt-a.grant_amt)
         .linkSort((a, b) => b.value - a.value); // Sort links by value
     
     const graph = sankeyG(currentData);
@@ -688,51 +686,31 @@ function renderSankey(g, sankey, svgRef) {
         .attr("offset", "100%")
         .attr("stop-color", d => color(d.target.id));
 
-     const nodeGroup = g.append('g').attr('class', 'nodes');
-    nodeElements = nodeGroup.selectAll('g')
-      .data(graph.nodes)
-      .join('g')
-      .attr('class', 'node')
-      .attr('data-id', d => d.id)
-         .attr("stroke", "#000")
-        .selectAll()
+    // Create a master group for the entire graph
+    const masterGroup = g.append("g")
+        .attr("class", "graph-group");
+
+    // Nodes (rects) in the master group
+    const nodeGroup = masterGroup.append('g').attr('class', 'nodes');
+    const nodeElements = nodeGroup.selectAll('g')
         .data(graph.nodes)
-        .join("rect")
+        .join('g')
+        .attr('class', 'node')
+        .attr('data-id', d => d.id);
+
+    nodeElements.append("rect")
         .attr("x", d => d.x0)
         .attr("y", d => d.y0)
         .attr("height", d => d.y1 - d.y0)
         .attr("width", d => d.x1 - d.x0)
         .attr("fill", d => d.color)
-      .on('click', function(event, d) {  // Add click handler here
-        event.stopPropagation(); // Prevent event bubbling
-        zoomToFitNodes(d.source, d.target);
-      })
-     .call(d3.drag()
-        .filter(event => {
-          // Completely ignore touch events, only allow mouse events
-          if (event.sourceEvent.type.startsWith('touch')) {
-            return false;
-          }
-          // Only allow left mouse button
-          return event.button === 0;
-        })
-        .on('start', event => {
-          if (!event.active) simulation.alphaTarget(0.3).restart();
-          event.subject.fx = event.subject.x;
-          event.subject.fy = event.subject.y;
-        })
-        .on('drag', event => {
-          event.subject.fx = event.x;
-          event.subject.fy = event.y;
-        })
-        .on('end', event => {
-          if (!event.active) simulation.alphaTarget(0);
-          event.subject.fx = null;
-          event.subject.fy = null;
-        })
-      );
+        .attr("stroke", "#000")
+        .on('click', function(event, d) {
+            event.stopPropagation(); // Prevent event bubbling
+            zoomToFitNodes(d.source, d.target);
+        });
 
-    // Tooltips and click handlers
+    // Tooltips and click handlers for nodes
     nodeElements.append("title")
         .text(d => `${d.name || d.id}\nOutflow: ${formatNumber(d.grant_amt || 0)}`)
         .on("click", (event, d) => {
@@ -744,8 +722,8 @@ function renderSankey(g, sankey, svgRef) {
             renderSankey(g, sankey, svgRef);
         });
 
-    // Links (use gradients with translucent fallback)
-    const link = svg.append("g")
+    // Links (use gradients with translucent fallback) in the master group
+    const link = masterGroup.append("g")
         .attr("fill", "none")
         .attr("stroke-opacity", 1)
         .style("mix-blend-mode", "multiply")
@@ -756,10 +734,10 @@ function renderSankey(g, sankey, svgRef) {
         .style("stroke", d => `url(#${d.gradientId})`) // Try gradients first
         .style("stroke-opacity", 0.3) // More translucent (30% opacity, adjustable)
         .style("stroke-width", d => Math.max(1, d.width || 1)) // Smaller minimum width
-      .on('click', function(event, d) {
-        event.stopPropagation();
-        zoomToFitNodes(d.source, d.target);
-      })
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            zoomToFitNodes(d.source, d.target);
+        });
 
     // Fallback to solid colors if gradients fail
     link.each(function(d) {
@@ -771,8 +749,8 @@ function renderSankey(g, sankey, svgRef) {
     link.append("title")
         .text(d => `${d.source.name} → ${d.target.name}\n${formatNumber(d.value)}`);
 
-    // Labels
-    svg.append("g")
+    // Labels in the master group
+    masterGroup.append("g")
         .selectAll()
         .data(graph.nodes)
         .join("text")
@@ -781,10 +759,19 @@ function renderSankey(g, sankey, svgRef) {
         .attr("dy", "0.35em")
         .attr("text-anchor", d => d.x0 < sankeyG.nodeWidth() / 2 ? "start" : "end")
         .text(d => d.name)
-      .on('click', function(event, d) {
-        event.stopPropagation();
-        zoomToFitNodes(d.source, d.target);
-      })
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            zoomToFitNodes(d.source, d.target);
+        });
+
+    // Apply zoom and pan to the master group
+    const zoom = d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => {
+            masterGroup.attr('transform', event.transform);
+        });
+
+    svg.call(zoom);
 }
 
 function wrapText(text, width) {
