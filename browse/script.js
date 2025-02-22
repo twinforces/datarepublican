@@ -621,7 +621,7 @@ function generateGraph() {
     const sankey = d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(50)
-        .nodePadding(80)
+        .nodePadding(80) // Fixed padding
         .extent([[0, 0], [width - 200, height - 100]]);
 
     currentData = { nodes: [], links: [] };
@@ -643,13 +643,13 @@ function generateGraph() {
     console.log('Active EINs:', activeEINs);
 
     topNodes.forEach(node => {
-        expandNode(node.filer_ein, true);
+        expandNode(node.filer_ein, true, false);
         if (node.grants.length > TOP_N_OUTFLOWS) {
             expandNode(node.filer_ein, false, false);
         }
     });
 
-    renderSankey(g, sankey, svg, width, height); // Pass width and height
+    renderSankey(g, sankey, svg, width, height);
 
     document.getElementById('zoomIn').onclick = () => {
         svg.transition().duration(300).call(zoom.scaleBy, 1.3);
@@ -714,7 +714,7 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         target: grant.grantee_ein,
         filer: grant.filer,
         grantee: grant.grantee,
-        value: grant.logRawAmt,
+        value: grant.logRawAmt, // Revert to logarithmic scaling
         rawValue: grant.rawAmt
     })).sort((a, b) => b.rawValue - a.rawValue);
 
@@ -770,7 +770,7 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
             currentData.links.push({ 
                 source: nodeId, 
                 target: othersId, 
-                value: logOthersValue, 
+                value: logOthersValue, // Use logarithmic value
                 rawValue: othersValue,
                 filer: charities[nodeId],
                 grantee: null
@@ -784,25 +784,113 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         currentData.links = currentData.links.filter(l => !l.target.startsWith(`${nodeId}-others-`));
     }
 
-    // Only add to activeEINs if explicitly requested
     if (addToActiveEINs && !activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
         activeEINs.push(nodeId);
         renderActiveEINs();
         updateQueryParams();
     }
 }
-
 function expandOthers(sourceId) {
-    expandNode(sourceId, false, false); // Don’t add to activeEINs
+    const node = charities[sourceId];
+    if (!node) return;
+
+    const grantsForNode = node.grants || [];
+    const allLinks = grantsForNode.map(grant => ({
+        source: grant.filer_ein,
+        target: grant.grantee_ein,
+        filer: grant.filer,
+        grantee: grant.grantee,
+        value: grant.logRawAmt, // Revert to logarithmic scaling
+        rawValue: grant.rawAmt
+    })).sort((a, b) => b.rawValue - a.rawValue);
+
+    let displayedLinks = expandedOutflows.get(sourceId) || [];
+    const remainingLinks = allLinks.filter(l => 
+        !displayedLinks.some(d => d.target === l.target)
+    );
+
+    const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
+    const othersLinks = remainingLinks.slice(newLinks.length);
+
+    newLinks.forEach(l => {
+        if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
+            currentData.nodes.push(charities[l.target]);
+        }
+        if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
+            currentData.links.push({ 
+                source: l.source, 
+                target: l.target, 
+                value: l.value, 
+                rawValue: l.rawValue,
+                filer: l.filer,
+                grantee: l.grantee
+            });
+        }
+        displayedLinks.push(l);
+    });
+
+    expandedOutflows.set(sourceId, displayedLinks);
+
+    let existingOthers = currentData.nodes.find(n => n.filer_ein.includes('-others-') && n.parent_ein === sourceId);
+    let othersId = existingOthers ? existingOthers.filer_ein : `${sourceId}-others-${generateUniqueId()}`;
+
+    if (othersLinks.length > 0) {
+        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
+        const logOthersValue = Math.log2(othersValue + 1);
+
+        if (!existingOthers) {
+            existingOthers = { 
+                id: othersId,
+                filer_ein: othersId, 
+                name: "...",
+                grant_amt: othersValue,
+                logGrantAmt: logOthersValue,
+                parent_ein: sourceId
+            };
+            currentData.nodes.push(existingOthers);
+        } else {
+            existingOthers.grant_amt = othersValue;
+            existingOthers.logGrantAmt = logOthersValue;
+        }
+
+        let othersLink = currentData.links.find(l => l.source === sourceId && l.target === othersId);
+        if (!othersLink) {
+            othersLink = { 
+                source: sourceId, 
+                target: othersId, 
+                value: logOthersValue, // Use logarithmic value
+                rawValue: othersValue,
+                filer: charities[sourceId],
+                grantee: null
+            };
+            currentData.links.push(othersLink);
+        } else {
+            othersLink.value = logOthersValue;
+            othersLink.rawValue = othersValue;
+        }
+    } else if (existingOthers) {
+        currentData.nodes = currentData.nodes.filter(n => n.filer_ein !== existingOthers.filer_ein);
+        currentData.links = currentData.links.filter(l => l.target !== existingOthers.filer_ein);
+    }
+
+    // Sort nodes to place "..." at the bottom
+    currentData.nodes.sort((a, b) => {
+        if (a.filer_ein.includes('-others-') && !b.filer_ein.includes('-others-')) return 1;
+        if (!a.filer_ein.includes('-others-') && b.filer_ein.includes('-others-')) return -1;
+        return 0;
+    });
+
     const container = document.getElementById('graph-container');
     const width = container.offsetWidth;
     const height = container.offsetHeight || window.innerHeight * 0.7;
+
     renderSankey(svg.select('g'), d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(50)
-        .nodePadding(80)
+        .nodePadding(80) // Fixed padding
         .extent([[0, 0], [width - 200, height - 100]]), svg, width, height);
 }
+
 function handleSearchClick(e) {
     const ein = e.target.dataset.ein;
     if (!ein) return;
@@ -826,14 +914,7 @@ function generateUniqueId(prefix = "gradient") {
 }
 
 function renderSankey(g, sankey, svgRef, width, height) {
-    let sankeyG = d3.sankey()
-        .nodeId(d => d.filer_ein || d.id)
-        .extent([[0, 0], [width - 200, height - 100]])
-        .nodeWidth(50)
-        .nodePadding(80)
-        .linkSort((a, b) => b.value - a.value);
-
-    const graph = sankeyG(currentData);
+    const graph = sankey(currentData);
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
     g.selectAll("*").remove();
@@ -841,6 +922,12 @@ function renderSankey(g, sankey, svgRef, width, height) {
     graph.nodes.forEach(d => {
         d.id = d.filer_ein || d.id;
         d.color = color(d.id);
+        // Ensure minimum height of 2 pixels
+        if (d.y1 - d.y0 < 2) {
+            const mid = (d.y0 + d.y1) / 2;
+            d.y0 = mid - 1;
+            d.y1 = mid + 1;
+        }
     });
 
     graph.links.forEach((link, i) => {
@@ -893,7 +980,7 @@ function renderSankey(g, sankey, svgRef, width, height) {
             sel.append("circle")
                 .attr("cx", d => (d.x0 + d.x1) / 2)
                 .attr("cy", d => (d.y0 + d.y1) / 2)
-                .attr("r", Math.min(d.x1 - d.x0, d.y1 - d.y0) / 2)
+                .attr("r", Math.max(2, (d.y1 - d.y0) / 2)) // Minimum radius of 2
                 .attr("fill", d => d.color)
                 .attr("stroke", "#000");
         }
@@ -901,8 +988,7 @@ function renderSankey(g, sankey, svgRef, width, height) {
 
     nodeElements.on('click', function(event, d) {
         event.stopPropagation();
-        if (event.altKey) { // Option (Alt) key pressed
-            // Reset currentData to just this node and its immediate children
+        if (event.altKey) {
             currentData = { nodes: [], links: [] };
             currentData.nodes.push(charities[d.filer_ein]);
             const grants = charities[d.filer_ein].grants || [];
@@ -960,8 +1046,8 @@ function renderSankey(g, sankey, svgRef, width, height) {
         .join("path")
         .attr("d", d3.sankeyLinkHorizontal())
         .style("stroke", d => d.target.filer_ein.includes('-others-') ? "#ccc" : `url(#${d.gradientId})`)
-        .style("stroke-opacity", 0.3)
-        .style("stroke-width", d => Math.max(1, d.width || 1))
+        .style("stroke-opacity", "0.3")
+        .style("stroke-width", d => Math.max(1, d.width))
         .on('click', function(event, d) {
             event.stopPropagation();
             zoomToFitNodes(d.source, d.target, width, height);
@@ -982,14 +1068,14 @@ function renderSankey(g, sankey, svgRef, width, height) {
         .selectAll()
         .data(graph.nodes)
         .join("text")
-        .attr("x", d => d.x0 < sankeyG.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6)
+        .attr("x", d => d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6)
         .attr("y", d => (d.y1 + d.y0) / 2)
         .attr("dy", "0.35em")
-        .attr("text-anchor", d => d.x0 < sankeyG.nodeWidth() / 2 ? "start" : "end")
+        .attr("text-anchor", d => d.x0 < sankey.nodeWidth() / 2 ? "start" : "end")
         .text(d => d.name)
         .on('click', function(event, d) {
             event.stopPropagation();
-            if (event.altKey) { // Option (Alt) key pressed
+            if (event.altKey) {
                 currentData = { nodes: [], links: [] };
                 currentData.nodes.push(charities[d.filer_ein]);
                 const grants = charities[d.filer_ein].grants || [];
