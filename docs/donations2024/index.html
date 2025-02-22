@@ -550,7 +550,7 @@ $(document).ready(function() {
 </div>
 
 <!-- Per-donor aggregator -->
-<div id="donorAggregatorContainer" class="grid grid-cols-12 mb-4"></div>
+<div id="donorAggregatorContainer" class="grid grid-cols-12"></div>
 
 <script>
   // ----------------------------------------------------------
@@ -1298,19 +1298,24 @@ $(document).ready(function() {
       let avgMaxDollar = formatDollar(d.sumMax / num);
 
       html += `
-        <div class="bg-white col-span-6 mt-4 p-2 border-l border-y border-gray-200 rounded-tl text-sm">
+        <div class="bg-white col-span-6 mt-2 p-2 border-l border-y border-gray-200 text-sm">
           <strong>${nameStr}</strong> <span class="text-xs opacity-80">${compStr}</span><br />
-          <span class="text-xs opacity-80">${cityStr}, ${stateStr} ${zipStr}
+          <span class="text-xs opacity-80">${cityStr}, ${stateStr} ${zipStr}</span><br />
+          ${d.campaigns.size === 1 ? 
+            `<div class="text-[13px] mt-1">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
+              '<strong class="text-blue-600">ActBlue</strong>' : 
+              '<strong class="text-red-600">WinRed</strong>'} - ${escapeHtml(Array.from(d.campaigns.values())[0].committeeName)}</div>` : 
+            ''}
         </div>
-        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-4 p-2 border-y border-gray-200">
+        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-2 p-2 border-y border-gray-200">
           <span class="text-[13px] opacity-80">Total</span>
           <strong class="text-sm">${minDollar}</strong>
         </div>
-        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-4 p-2 border-y border-gray-200">
+        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-2 p-2 border-y border-gray-200">
           <span class="text-[13px] opacity-80">Donations</span>
           <strong class="text-sm">${num}</strong> 
         </div>
-        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-4 p-2 border-y border-r border-gray-200 rounded-tr">
+        <div class="bg-white flex flex-col gap-1 items-end col-span-2 mt-2 p-2 border-y border-r border-gray-200">
           <span class="text-[13px] opacity-80">Avg donation</span>
           <strong class="text-sm">${avgMinDollar}</strong>
         </div>
@@ -1323,27 +1328,30 @@ $(document).ready(function() {
                || (a.actBlueIndicator - b.actBlueIndicator);
       });
 
-      for (let c of donorCampaigns) {
-        let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
-        let cdNum = c.numDonations;
-        let cdMin = formatDollar(c.sumMin);
-        let cdMax = formatDollar(c.sumMax);
-        let cdAvgMin = formatDollar(c.sumMin / cdNum);
-        let cdAvgMax = formatDollar(c.sumMax / cdNum);
-        html += `
-          <div class="col-span-6 bg-white/50 text-[13px] px-2 py-1 border-l border-b border-gray-200 ${colorClass}">
-            <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
-          </div>
-          <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
-            ${cdMin}
-          </div>
-          <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
-            ${cdNum}
-          </div>
-          <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex justify-end">
-            ${cdAvgMin}
-          </div>
-        `;
+      // Per-campaign breakdown - only show if multiple campaigns
+      if (donorCampaigns.length > 1) {
+        for (let c of donorCampaigns) {
+          let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
+          let cdNum = c.numDonations;
+          let cdMin = formatDollar(c.sumMin);
+          let cdMax = formatDollar(c.sumMax);
+          let cdAvgMin = formatDollar(c.sumMin / cdNum);
+          let cdAvgMax = formatDollar(c.sumMax / cdNum);
+          html += `
+            <div class="col-span-6 bg-white/50 text-[13px] px-2 py-1 border-l border-b border-gray-200 ${colorClass}">
+              <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
+            </div>
+            <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
+              ${cdMin}
+            </div>
+            <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex justify-end">
+              ${cdNum}
+            </div>
+            <div class="col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex justify-end">
+              ${cdAvgMin}
+            </div>
+          `;
+        }
       }
 
       html += `</div></div>`;
