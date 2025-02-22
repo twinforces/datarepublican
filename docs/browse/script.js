@@ -416,8 +416,6 @@ async function loadData() {
                         charities[filer].grant_count += 1;
                         charities[filer].grant_out_index += 1;
                         charities[grantee].grant_in_index += 1;
-                        localEdges[key].relOutAmt += amt / (charities[grantee].govt_amt + charities[grantee].contrib_amt);
-                        localEdges[key].relInAmt += amt / (charities[filer].govt_amt + charities[filer].contrib_amt);
                         // Store grant in filer's grants array
                         charities[filer].grants.push(localEdges[key]);
                         charities[grantee].grantsIn.push(localEdges[key])
@@ -431,6 +429,14 @@ async function loadData() {
             },
             error: err => reject(err)
         });
+    });
+    Object.values(charities).forEach( c => { 
+            c.logGrantAmt = Math.log2(c.grant_amt+1);
+            c.grants = c.grants.sort( (a,b) => b.rawAmt - a.rawAmt);
+            c.grantsIn = c.grantsIn.sort( (a,b) => b.rawAmt - a.rawAmt);
+    });
+    Object.values(grants).forEach( c => { 
+            c.logRawAmt = Math.log2(c.rawAmt+1);
     });
     console.log(totalCharitiesCount, "501c3s loaded");
     console.log(totalGrantsCount, "grants loaded");
@@ -512,7 +518,8 @@ function generateGraph() {
             currentData.links.push({
                 source: grant.filer_ein,
                 target: grant.grantee_ein,
-                value: grant.rawAmt,
+                value: grant.logRawAmt,
+                rawValue: grant.rawAmt,
                 filer: grant.filer,
                 grantee: grant.grantee
             });
@@ -586,7 +593,8 @@ function expandNode(nodeId, isInitial = false) {
         target: grant.grantee,
         filer: grant.filer,
         grantee: grant.grantee,
-        value: grant.rawAmt
+        value: grant.logRawAmt,
+        rawValue: grant.rawAmt
     })).sort((a, b) => b.value - a.value);
 
     const displayedLinks = []; //expandedOutflows.get(nodeId) || [];
@@ -610,16 +618,23 @@ function expandNode(nodeId, isInitial = false) {
     const othersId = `${nodeId} (Others)`;
     if (othersLinks.length > 0 && !isInitial) {
         const othersValue = othersLinks.reduce((sum, l) => sum + l.rawAmt, 0);
+        const logOthersValue = Math.log2(othersValue+1);
         const othersNode = { 
                 filer_ein: othersId, 
                 name: "Others", 
-                grant_amt: othersValue 
+                grant_amt: othersValue ,
+                logGrantAmt: logOthersValue
             }
         if (!currentData.nodes.some(n => n.filer_ein === othersId)) {
             currentData.nodes.push(othersNode);
         }
         if (!currentData.links.some(l => l.source === nodeId && l.target === othersId)) {
-            currentData.links.push({ source: charities[nodeId], target: othersNode, value: othersValue });
+            currentData.links.push({ 
+                source: charities[nodeId], 
+                target: othersNode, 
+                value: logOthersValue, 
+                rawAmt: othersValue
+            });
         }
     } else {
         currentData.nodes = currentData.nodes.filter(n => n.filer_ein !== othersId);
