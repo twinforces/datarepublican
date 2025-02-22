@@ -1,20 +1,7 @@
 ---
 layout: default
-title: Nonprofit Assets
+title: Nonprofit assets
 ---
-
-<style>
-  /* Container for the filter input */
-  #filterContainer {
-    margin-bottom: 10px;
-  }
-
-  #warning {
-    font-size: 13px;
-    opacity: 0.75;
-    margin-bottom: 5px;
-  }
-</style>
 
 <h1 class="mb-2">Assets &amp; expenses</h1>
 <p class="opacity-80 text-[15px] mb-4">
@@ -23,29 +10,15 @@ title: Nonprofit Assets
   the sliders to filter out organizations outside the specified ranges.
 </p>
 
-<div id="warning"></div>
-
-<div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3" id="filterContainer">
+<div class="flex flex-col sm:flex-row sm:items-center gap-1 md:gap-3 mb-4" id="filterContainer">
   <label for="filterInput" class="font-medium text-sm">Search EIN or name:</label>
   <div class="flex gap-2">
-    <input type="text" id="filterInput" placeholder="Type your filter..." class="px-2 py-1 rounded border border-gray-300 text-sm" style="min-width: 220px;">
+    <input type="text" id="filterInput" placeholder="Type your filter..." class="px-2 py-1 rounded border border-gray-300 text-sm flex-1" style="min-width: 220px;">
     <button id="filterButton">
-      <span class="button-text">Filter</span>
-      <img src="/assets/images/loading-white.svg" class="loading-spinner size-5" alt="Loading...">
+      <span class="button-text hidden">Filter</span>
+      <img src="/assets/images/loading-white.svg" class="loading-spinner size-5 mx-auto" alt="Loading...">
     </button>
   </div>
-</div>
-
-<!-- Toggle checkboxes for expenses and assets -->
-<div class="flex gap-4 mb-5">
-  <label class="text-sm">
-    <input type="checkbox" id="showOtherExpensesCheckbox" />
-    Show <span class="bg-red/10 px-1 rounded text-red">expenses</span>
-  </label>
-  <label class="text-sm">
-    <input type="checkbox" id="showAssetsCheckbox" />
-    Show <span class="bg-green/10 px-1 rounded text-green">assets</span>
-  </label>
 </div>
 
 <!-- Sliders for min/max filters -->
@@ -83,6 +56,23 @@ title: Nonprofit Assets
       <input type="range" class="" id="taxpayerPctMax" min="0" max="1" step="0.01" value="1"  style="display:none;"/>
     </div>
   </div>
+</div>
+
+<div class="flex flex-col-reverse md:flex-row justify-between gap-4 mb-4">
+  <div>
+    <div id="warning" class="empty:hidden text-sm opacity-80"></div>
+  </div>
+  <div class="flex gap-4">
+    <label class="text-sm">
+      <input type="checkbox" id="showOtherExpensesCheckbox" />
+      Show <span class="bg-red/10 px-1 rounded text-red">expenses</span>
+    </label>
+    <label class="text-sm">
+      <input type="checkbox" id="showAssetsCheckbox" />
+      Show <span class="bg-green/10 px-1 rounded text-green">assets</span>
+    </label>
+  </div>
+
 </div>
 
 <div class="w-screen md:w-auto overflow-x-auto -mx-4 px-4 xl:-mx-6 xl:px-6">

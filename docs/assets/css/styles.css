@@ -1247,6 +1247,9 @@ select {
 .flex-col {
   flex-direction: column;
 }
+.flex-col-reverse {
+  flex-direction: column-reverse;
+}
 .flex-wrap {
   flex-wrap: wrap;
 }
@@ -2279,6 +2282,10 @@ select {
 
   .md\:gap-8 {
     gap: 2rem;
+  }
+
+  .md\:gap-3 {
+    gap: 0.75rem;
   }
 
   .md\:gap-y-1\.5 {
