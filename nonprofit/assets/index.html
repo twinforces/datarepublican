@@ -14,40 +14,6 @@ title: Nonprofit Assets
     opacity: 0.75;
     margin-bottom: 5px;
   }
-
-  .loading-container {
-    text-align: center;
-    padding: 20px;
-  }
-  .loading-container img {
-    width: 48px;
-    height: 48px;
-  }
-
-  /* Inline spinner inside a button */
-  .button-text {
-    display: inline-block;
-  }
-  .loading-spinner {
-    display: none;
-    width: 16px;
-    height: 16px;
-    vertical-align: middle;
-  }
-
-  /* Slider container styling */
-  .slider-inputs {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .slider-values {
-    font-size: 13px;
-    opacity: 0.8;
-  }
-  input[type="range"] {
-    width: 200px;
-  }
 </style>
 
 <h1 class="mb-2">Assets &amp; expenses</h1>
@@ -60,12 +26,12 @@ title: Nonprofit Assets
 <div id="warning"></div>
 
 <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3" id="filterContainer">
-  <label for="filterInput" class="font-medium">Filter EIN or name:</label>
+  <label for="filterInput" class="font-medium text-sm">Search EIN or name:</label>
   <div class="flex gap-2">
-    <input type="text" id="filterInput" placeholder="Type your filter..." class="px-2 py-1 rounded border border-gray-300" style="min-width: 220px;">
+    <input type="text" id="filterInput" placeholder="Type your filter..." class="px-2 py-1 rounded border border-gray-300 text-sm" style="min-width: 220px;">
     <button id="filterButton">
       <span class="button-text">Filter</span>
-      <img src="/assets/images/loading-white.svg" class="loading-spinner" alt="Loading...">
+      <img src="/assets/images/loading-white.svg" class="loading-spinner size-5" alt="Loading...">
     </button>
   </div>
 </div>
@@ -74,7 +40,7 @@ title: Nonprofit Assets
 <div class="flex gap-4 mb-5">
   <label class="text-sm">
     <input type="checkbox" id="showOtherExpensesCheckbox" />
-    Show all <span class="bg-red/10 px-1 rounded text-red">expenses</span>
+    Show <span class="bg-red/10 px-1 rounded text-red">expenses</span>
   </label>
   <label class="text-sm">
     <input type="checkbox" id="showAssetsCheckbox" />
@@ -83,29 +49,38 @@ title: Nonprofit Assets
 </div>
 
 <!-- Sliders for min/max filters -->
-<div id="sliderContainer" class="grid md:grid-cols-3 gap-4 mb-4 max-w-4xl">
-  <div class="flex flex-col gap-2">
-    <label class="font-bold text-sm">Filter receipts over:</label>
-    <div class="slider-inputs">
-      <input type="range" id="receiptsMin" min="0" max="100000000" step="100000" value="0" />
-      <input type="range" id="receiptsMax" min="0" max="82040914822" value="82040914822" style="display:none;"/>
-      <div class="slider-values" id="receiptsRangeLabel"></div>
+<div id="sliderContainer" class="grid md:grid-cols-3 gap-4 mb-6 max-w-4xl">
+  <div class="flex flex-col gap-2 w-full md:max-w-56">
+    <div class="flex justify-between">
+      <label class="text-sm">Min receipts</label>
+      <div class="text-sm" id="receiptsRangeLabel"></div>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <input type="range" class="" id="receiptsMin" min="0" max="100000000" step="100000" value="0" />
+      <input type="range" class="" id="receiptsMax" min="0" max="82040914822" value="82040914822" style="display:none;"/>
     </div>
   </div>
-  <div class="flex flex-col gap-2">
-    <label class="font-bold text-sm">Filter taxpayer funds over:</label>
-    <div class="slider-inputs">
-      <input type="range" id="govtAmtMin" min="0" max="100000000" step="100000" value="0" />
-      <input type="range" id="govtAmtMax" min="0" max="11069708938" value="11069708938"  style="display:none;"/>
-      <div class="slider-values" id="govtAmtRangeLabel"></div>
+  <div class="flex flex-col gap-2 w-full md:max-w-56">
+    <div class="flex justify-between">
+      <label class="text-sm">Min taxpayer funds</label>
+      <div class="text-sm" id="govtAmtRangeLabel"></div>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <input type="range" class="" id="govtAmtMin" min="0" max="100000000" step="100000" value="0" />
+      <input type="range" class="" id="govtAmtMax" min="0" max="11069708938" value="11069708938"  style="display:none;"/>
     </div>
   </div>
-  <div class="flex flex-col gap-2">
-    <label class="font-bold text-sm">Filter % of taxpayer funds over:</label>
-    <div class="slider-inputs">
-      <input type="range" id="taxpayerPctMin" min="0" max="1" step="0.01" value="0" />
-      <input type="range" id="taxpayerPctMax" min="0" max="1" step="0.01" value="1"  style="display:none;"/>
-      <div class="slider-values" id="taxpayerPctRangeLabel"></div>
+  <div class="flex flex-col gap-2 w-full md:max-w-56">
+    <div class="flex justify-between">
+      <label class="text-sm">Min % of taxpayer funds</label>
+      <div class="text-sm" id="taxpayerPctRangeLabel"></div>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <input type="range" class="" id="taxpayerPctMin" min="0" max="1" step="0.01" value="0" />
+      <input type="range" class="" id="taxpayerPctMax" min="0" max="1" step="0.01" value="1"  style="display:none;"/>
     </div>
   </div>
 </div>
@@ -118,7 +93,7 @@ title: Nonprofit Assets
         <th data-field="ein" data-index="0">EIN</th>
         <th data-field="name" data-index="1">Name</th>
         <th data-field="receiptAmt" data-index="2">Receipts</th>
-        <th data-field="govtAmt" data-index="3">Taxpayer dollars</th>
+        <th data-field="govtAmt" data-index="3">Taxpayer funds</th>
         <th data-field="travelExpenses" data-index="4">Travel expenses</th>
         <th data-field="pensionPlanContributions" data-index="5">Benefits</th>
         <th data-field="otherSalaries" data-index="6">Salaries and wages</th>
@@ -141,9 +116,12 @@ title: Nonprofit Assets
     <tbody>
       <tr>
         <!-- 24 columns total now -->
-        <td colspan="24" style="text-align: center; padding: 20px;">
-          <div class="loading-container">
-            <img src="/assets/images/loading.svg" alt="Loading..." class="mx-auto">
+        <td colspan="100%" style="text-align: center; padding: 20px;">
+          <div class="loading-container text-black">
+            <div class="flex items-center gap-1">
+              <img src="/assets/images/loading.svg" alt="Loading..." class="size-5">
+              <span class="text-base">Loading...</span>
+            </div>
           </div>
         </td>
       </tr>
@@ -514,9 +492,9 @@ title: Nonprofit Assets
     $('#taxpayerPctMax').val(taxpayerPctMaxVal);
 
     // Update slider labels
-    $('#receiptsRangeLabel').text(`Min: ${formatCurrency(receiptsMinVal)}`);
-    $('#govtAmtRangeLabel').text(`Min: ${formatCurrency(govtAmtMinVal)}`);
-    $('#taxpayerPctRangeLabel').text(`Min: ${(taxpayerPctMinVal * 100).toFixed(2)}%`);
+    $('#receiptsRangeLabel').html(`<span class="font-bold">${formatCurrency(receiptsMinVal)}</span>`);
+    $('#govtAmtRangeLabel').html(`<span class="font-bold">${formatCurrency(govtAmtMinVal)}</span>`);
+    $('#taxpayerPctRangeLabel').html(`<span class="font-bold">${(taxpayerPctMinVal * 100)}%</span>`);
   }
 
   // Save checkbox states / slider values to query params
@@ -610,15 +588,9 @@ title: Nonprofit Assets
       taxpayerPctMinVal = parseFloat($('#taxpayerPctMin').val());
       taxpayerPctMaxVal = parseFloat($('#taxpayerPctMax').val());
 
-      $('#receiptsRangeLabel').text(
-        `Min: ${formatCurrency(receiptsMinVal)}`
-      );
-      $('#govtAmtRangeLabel').text(
-        `Min: ${formatCurrency(govtAmtMinVal)}`
-      );
-      $('#taxpayerPctRangeLabel').text(
-        `Min: ${(taxpayerPctMinVal * 100).toFixed(2)}% - Max: ${(taxpayerPctMaxVal * 100).toFixed(2)}%`
-      );
+      $('#receiptsRangeLabel').html(`<span class="font-semibold">${formatCurrency(receiptsMinVal)}</span>`);
+      $('#govtAmtRangeLabel').html(`<span class="font-semibold">${formatCurrency(govtAmtMinVal)}</span>`);
+      $('#taxpayerPctRangeLabel').html(`<span class="font-semibold">${(taxpayerPctMinVal * 100)}%</span>`);
     }
 
     // 1) Listen for "input" on the range sliders to update the display label only
