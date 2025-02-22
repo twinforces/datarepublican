@@ -646,8 +646,10 @@ function renderSankey(g, sankey, svgRef) {
     let sankeyG = d3.sankey()
         .nodeId(d => d.id) // Use 'id' instead of 'filer_ein'
         .extent([[0, 0], [800, 600]])
-        .nodeWidth(15)
+        .nodeWidth(24)
         .nodePadding(10)
+//        .nodeAlign(d3[d3.sankeyCenter])
+//        .nodeSort((a,b) => b.grant_amt-a.grant_amt)
         .linkSort((a, b) => b.value - a.value); // Sort links by value
     
     const graph = sankeyG(currentData);
@@ -686,9 +688,13 @@ function renderSankey(g, sankey, svgRef) {
         .attr("offset", "100%")
         .attr("stop-color", d => color(d.target.id));
 
-    // Nodes (rects)
-    const rect = svg.append("g")
-        .attr("stroke", "#000")
+     const nodeGroup = g.append('g').attr('class', 'nodes');
+    nodeElements = nodeGroup.selectAll('g')
+      .data(graph.nodes)
+      .join('g')
+      .attr('class', 'node')
+      .attr('data-id', d => d.id)
+         .attr("stroke", "#000")
         .selectAll()
         .data(graph.nodes)
         .join("rect")
@@ -727,7 +733,7 @@ function renderSankey(g, sankey, svgRef) {
       );
 
     // Tooltips and click handlers
-    rect.append("title")
+    nodeElements.append("title")
         .text(d => `${d.name || d.id}\nOutflow: ${formatNumber(d.grant_amt || 0)}`)
         .on("click", (event, d) => {
             if (d.id.includes("(Others)")) {
@@ -938,6 +944,53 @@ function handleSearchResultHover(index) {
     selectedSearchIndex = index;
     updateSearchSelection(document.querySelectorAll('[data-index]'));
 }
+
+
+  // Add this helper function
+  function zoomToFitNodes(node1, node2) {
+    // Get the bounding boxes of both nodes
+    const node1El = nodeElements.filter(n => n.id === node1.id).node();
+    const node2El = nodeElements.filter(n => n.id === node2.id).node();
+    
+    if (!node1El || !node2El) return;
+    
+    const box1 = node1El.getBBox();
+    const box2 = node2El.getBBox();
+    
+    // Calculate the combined bounds
+    const x1 = Math.min(node1.x - box1.width/2, node2.x - box2.width/2);
+    const y1 = Math.min(node1.y - box1.height/2, node2.y - box2.height/2);
+    const x2 = Math.max(node1.x + box1.width/2, node2.x + box2.width/2);
+    const y2 = Math.max(node1.y + box1.height/2, node2.y + box2.height/2);
+    
+    // Reduce padding from 100 to 50
+    const padding = 50;
+    const bounds = {
+      x: x1 - padding,
+      y: y1 - padding,
+      width: (x2 - x1) + (padding * 2),
+      height: (y2 - y1) + (padding * 2)
+    };
+    
+    // Calculate the scale to fit the bounds
+    const scale = 0.9 / Math.max(
+      bounds.width / width,
+      bounds.height / height
+    );
+    
+    // Transition to the new view
+    svg.transition()
+      .duration(750)
+      .call(zoom.transform,
+        d3.zoomIdentity
+          .translate(width/2, height/2)
+          .scale(scale)
+          .translate(
+            -(bounds.x + bounds.width/2),
+            -(bounds.y + bounds.height/2)
+          )
+      );
+  }
 
 const extraStyle = `.node.others { fill: #ccc; cursor: pointer; }
                     .node { fill: #999; } // Default node color (light gray, overridden by unique colors)
