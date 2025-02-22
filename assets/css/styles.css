@@ -673,7 +673,7 @@ button {
   }
 th.sort-asc::after,
   th.sort-desc::after {
-    content: " ⌃ ";
+    content: "⌃";
     position: relative;
     margin-left: 0.125rem;
     margin-right: 0.125rem;
@@ -975,6 +975,12 @@ select {
 }
 .mt-8 {
   margin-top: 2rem;
+}
+.mt-auto {
+  margin-top: auto;
+}
+.mb-6 {
+  margin-bottom: 1.5rem;
 }
 .block {
   display: block;
@@ -2196,6 +2202,10 @@ select {
 
   .md\:max-w-xs {
     max-width: 20rem;
+  }
+
+  .md\:max-w-56 {
+    max-width: 14rem;
   }
 
   .md\:flex-\[0_0_300px\] {
