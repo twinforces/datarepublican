@@ -787,8 +787,8 @@ $(document).ready(function() {
 
       // Name (index 1)
       const fullName = item.name;
-      const truncatedName = fullName.length > 50 ? 
-        `${fullName.substring(0, 50)}... <button class="frameless text-blue-600 hover:underline more-link">more</button>` : 
+      const truncatedName = fullName.length > 95 || (fullName.length > 45 && fullName.length - 45 >= 5) ? 
+        `${fullName.substring(0, 45)}... <button class="frameless text-blue-600 hover:underline more-link">more</button>` : 
         fullName;
       const nameCell = $('<td data-index="1" class="whitespace-nowrap"></td>')
         .html(truncatedName)
