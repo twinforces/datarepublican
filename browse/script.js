@@ -25,9 +25,9 @@ let selectedSearchIndex = 0;    // Track selected search result
 let currentData = { nodes: [], links: [] };
 let nodeMap = null;             // Will be EIN -> charity object
 let linkMap = null;             // Will be "filer~grantee" -> grant object
-let expandedOutflows = new Map(); // Tracks displayed outflows per source
-let outflows = new Map();       // EIN -> total outflow
-const TOP_N_INITIAL = 3;        // Top nodes to start with
+let expanded = new Map();       // EIN -> total outflow
+let compacted = new Map();       // EIN -> total outflow
+const TOP_N_INITIAL = 5;        // Top nodes to start with
 const TOP_N_OUTFLOWS = 5;       // Outflows per expansion
 
 // Global references
@@ -486,7 +486,6 @@ function generateGraph() {
 
     // Reset Sankey state
     currentData = { nodes: [], links: [] };
-    expandedOutflows.clear();
  
     // Initialize with top N nodes (MADE GLOBAL)
     topNodes = Object.values(charities)
@@ -545,7 +544,7 @@ function expandNode(nodeId, isInitial = false) {
         value: grant.rawAmt
     })).sort((a, b) => b.value - a.value);
 
-    const displayedLinks = expandedOutflows.get(nodeId) || [];
+    const displayedLinks = []; //expandedOutflows.get(nodeId) || [];
     const remainingLinks = allLinks.filter(l => !displayedLinks.some(d => d.source === l.source && d.target === l.target));
     const newLinks = isInitial ? remainingLinks.slice(0, TOP_N_OUTFLOWS) : remainingLinks.slice(0, Math.min(TOP_N_OUTFLOWS, remainingLinks.length));
     const othersLinks = remainingLinks.slice(newLinks.length);
@@ -594,108 +593,111 @@ function expandOthers(sourceId) {
     expandNode(sourceId);
 }
 
+function generateUniqueId(prefix = "gradient") {
+    return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
+}
+
 function renderSankey(g, sankey, svgRef) {
     let sankeyG = d3.sankey()
-        .nodeId(d => d.filer_ein);
-        //.nodeAlign(d3.sankeyRight);
+        .nodeId(d => d.id) // Use 'id' instead of 'filer_ein'
+        .extent([[0, 0], [800, 600]])
+        .nodeWidth(15)
+        .nodePadding(10)
+        .linkSort((a, b) => b.value - a.value); // Sort links by value
+    
     const graph = sankeyG(currentData);
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
+    // Clear previous content
     g.selectAll("*").remove();
 
-   // Creates the rects that represent the nodes.
-  const rect = svg.append("g")
-      .attr("stroke", "#000")
-    .selectAll()
-    .data(graph.nodes)
-    .join("rect")
-      .attr("x", d => d.x0) 
-      .attr("y", d => d.y0)
-      .attr("height", d => d.y1 - d.y0)
-      .attr("width", d => d.x1 - d.x0)
-      .attr("fill", d => color(d.filer_ein));
+    // Assign colors to nodes and ensure id
+    graph.nodes.forEach(d => {
+        d.id = d.id || d.filer_ein; // Fallback to filer_ein if id is missing
+        d.color = color(d.id);
+    });
 
-  // Adds a title on the nodes.
+    // Assign unique gradient IDs to links
+    graph.links.forEach((link, i) => {
+        link.gradientId = generateUniqueId("gradient");
+    });
+
+    // Append defs first (gradients)
+    const defs = svg.append("defs");
+    const gradients = defs.selectAll("linearGradient.dynamic")
+        .data(graph.links)
+        .enter()
+        .append("linearGradient")
+        .attr("id", d => d.gradientId)
+        .attr("gradientUnits", "userSpaceOnUse")
+        .attr("x1", d => d.source.x1) // Simplify to horizontal
+        .attr("x2", d => d.target.x0);
+
+    gradients.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", d => color(d.source.id));
+
+    gradients.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", d => color(d.target.id));
+
+    // Nodes (rects)
+    const rect = svg.append("g")
+        .attr("stroke", "#000")
+        .selectAll()
+        .data(graph.nodes)
+        .join("rect")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("height", d => d.y1 - d.y0)
+        .attr("width", d => d.x1 - d.x0)
+        .attr("fill", d => d.color);
+
+    // Tooltips and click handlers
     rect.append("title")
-      .text(d => `${d.name}\n${formatNumber(d.outflow)}`)
-        //.attr("height", d => Math.max(40, d.y1 - d.y0)) // Taller nodes for visibility
-        //.attr("width", d => d.x1 - d.x0)
-        /*.attr("fill", d => {
-            if (d.filer_ein.includes("(Others)")) return "#ccc";
-            return colorScale(d.filer_ein || d.name); // Unique color per node (EIN or name)
-        })
-        .attr("class", d => d.filer_ein.includes("(Others)") ? "node others" : "node")*/
-        .on("click", (event, d) => { // Maintain click handler
-            if (d.filer_ein.includes("(Others)")) {
-                expandOthers(d.filer_ein.split(" (Others)")[0]);
+        .text(d => `${d.name || d.id}\nOutflow: ${formatNumber(d.grant_amt || 0)}`)
+        .on("click", (event, d) => {
+            if (d.id.includes("(Others)")) {
+                expandOthers(d.id.split(" (Others)")[0]);
             } else {
-                expandNode(d.filer_ein);
+                expandNode(d.id);
             }
             renderSankey(g, sankey, svgRef);
         });
 
-    // Tooltips
-    rect.append("title")
-        .text(d => `${d.name || d.filer_ein}\nOutflow: ${formatNumber(outflows.get(d.filer_ein) || 0)}`);
+    // Links (use gradients with translucent fallback)
+    const link = svg.append("g")
+        .attr("fill", "none")
+        .attr("stroke-opacity", 1)
+        .style("mix-blend-mode", "multiply")
+        .selectAll(".link")
+        .data(graph.links)
+        .join("path")
+        .attr("d", d3.sankeyLinkHorizontal())
+        .style("stroke", d => `url(#${d.gradientId})`) // Try gradients first
+        .style("stroke-opacity", 0.3) // More translucent (30% opacity, adjustable)
+        .style("stroke-width", d => Math.max(1, d.width || 1)); // Smaller minimum width
 
-  const link = svg.append("g")
-      .attr("fill", "none")
-      .attr("stroke-opacity", 0.5)
-    .selectAll()
-    .data(graph.links)
-    .join("g")
-      .style("mix-blend-mode", "multiply");
+    // Fallback to solid colors if gradients fail
+    link.each(function(d) {
+        if (d3.select(this).style("stroke") === "none") {
+            d3.select(this).style("stroke", color(d.source.id));
+        }
+    });
 
-    /*const gradient = link.append("linearGradient")
-        .attr("id", d => (d.uid = DOM.uid("link")).id)
-        .attr("gradientUnits", "userSpaceOnUse")
-        .attr("x1", d => d.source.x1)
-        .attr("x2", d => d.target.x0);
-    gradient.append("stop")
-        .attr("offset", "0%")
-        .attr("stop-color", d => color(d.filer_ein));
-    gradient.append("stop")
-        .attr("offset", "100%")
-        .attr("stop-color", d => color(d.grantee_ein));
-    // Draw labels with improved wrapping and truncation
-    g.selectAll("text")
+    link.append("title")
+        .text(d => `${d.source.name} → ${d.target.name}\n${formatNumber(d.value)}`);
+
+    // Labels
+    svg.append("g")
+        .selectAll()
         .data(graph.nodes)
-        .enter()
-        .append("text")
-        /*.attr("x", d => d.x0 + (d.x1 - d.x0) / 2)
-        .attr("y", d => d.y0 - 5)*/
-        /*.attr("text-anchor", "middle")
-        .text(d => {
-            const maxLength = 20; // Truncate long names
-            return d.name.length > maxLength ? d.name.substring(0, maxLength - 3) + "..." : d.name || d.filer_ein;
-        })
-        .style("font-size", "14px") // Larger text for readability
-        .style("fill", "#000") // Ensure black text for contrast
-        .call(wrapText, 120); // Wider wrap for labels*/
-
-
-   link.append("path")
-      .attr("d", d3.sankeyLinkHorizontal())
-      .attr("stroke", (d) => color(d.uid))
-      .attr("stroke-width", d => Math.max(1, d.width));
-
-  link.append("title")
-      .text(d => `${d.source.name} → ${d.target.name}\n${formatNumber(d.value)}`);
-
-  // Adds labels on the nodes.
-  svg.append("g")
-    .selectAll()
-    .data(graph.nodes)
-    .join("text")
-      .attr("x", d => d.x0 < d.width / 2 ? d.x1 + 6 : d.x0 - 6)
-      .attr("y", d => (d.y1 + d.y0) / 2)
-      .attr("dy", "0.35em")
-      .attr("text-anchor", d => d.x0 < d.width / 2 ? "start" : "end")
-      .text(d => d.name);
-   // Initial zoom out for better overview
-    if (svgRef) {
-        svgRef.call(zoom.transform, d3.zoomIdentity.scale(0.5));
-    }
+        .join("text")
+        .attr("x", d => d.x0 < sankeyG.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6)
+        .attr("y", d => (d.y1 + d.y0) / 2)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", d => d.x0 < sankeyG.nodeWidth() / 2 ? "start" : "end")
+        .text(d => d.name);
 }
 
 function wrapText(text, width) {
