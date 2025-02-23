@@ -30,10 +30,13 @@ title: ActBlue / WinRed 2024 donor lookup
 <p class="opacity-80 mb-2 text-sm">
   All small dollar donations (<$10) for 2024 originating from ActBlue and WinRed are included in this dataset. 
 </p>
-<p class="opacity-80 mb-0 text-sm">
+<p class="opacity-80 mb-2 text-sm">
   Enter a name or ZIP code (or both). The search will parse your input into alphanumeric tokens, 
   removing hyphens and other punctuation, but keeping numeric parts. 
   We look for rows where <strong>all</strong> entered tokens appear.
+</p>
+<p class="opacity-80 mb-0 text-sm">
+  Donors indicated with <strong class="text-red-600 inline-block px-1 rounded border border-red">High donation volume</strong> (>25 donations to a single campaign) may be victims of donation fraud and are called out <span class="font-bold text-red">in red</span>.
 </p>
 
 <div class="mb-4">
@@ -82,7 +85,7 @@ title: ActBlue / WinRed 2024 donor lookup
 
 </div>
 
-<div class="mb-2">
+<div class="mb-2 relative">
   <div id="legend"></div>
   <!-- The aggregator summary button + collapsed aggregator details -->
   <div class="hidden pie-container flex-col md:flex-row gap-2 mb-4 md:gap-4">
@@ -124,7 +127,7 @@ title: ActBlue / WinRed 2024 donor lookup
   </div>
 
   <!-- CSV download button -->
-  <button id="downloadCsvBtn" class="absolute right-0 top-12 frameless !mt-4" style="display: none;">
+  <button id="downloadCsvBtn" class="absolute right-0 -bottom-16 frameless !mt-4" style="display: none;">
     <span class="flex items-center gap-1 text-sm text-gray-500 font-semibold">
       <img src="/assets/images/download.svg" class="size-5" alt="Download SVG">
       Download results as CSV
@@ -970,10 +973,16 @@ title: ActBlue / WinRed 2024 donor lookup
       let maxDollar = formatDollar(d.sumMax);
       let avgMinDollar = formatDollar(d.sumMin / num);
       let avgMaxDollar = formatDollar(d.sumMax / num);
-
+      
+      // Check if any campaign has >9 donations
+      let hasHighDonations = Array.from(d.campaigns.values()).some(c => c.numDonations > 20);
+      
       html += `
         <div class="bg-white col-span-12 md:col-span-6 mt-2 px-2 pt-2 md:pb-2 border-l border-r md:border-r-0 border-t md:border-y border-gray-200 text-sm">
-          <strong>${nameStr}</strong> <span class="text-xs opacity-80">${compStr}</span><br />
+          <strong>${nameStr}</strong> 
+          <span class="text-xs opacity-80">${compStr}</span>
+          ${hasHighDonations ? '<span class="text-xs text-red-600 inline-block px-1 rounded border border-red font-bold">High donation volume</span>' : ''}
+          <br />
           <span class="text-xs opacity-80">${cityStr}, ${stateStr} ${zipStr}</span><br />
           ${d.campaigns.size === 1 ? 
             `<div class="hidden md:block text-[13px] mt-1">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
@@ -1032,7 +1041,7 @@ title: ActBlue / WinRed 2024 donor lookup
               ${cdMin}
             </div>
             <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
-              ${cdNum}
+              <span class="${cdNum >= 50 ? 'text-red-600 font-bold' : (cdNum >= 10 ? 'text-orange-500 font-bold' : '')}">${cdNum}</span>
             </div>
             <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
               ${cdAvgMin}
