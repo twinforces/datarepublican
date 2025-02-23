@@ -40,6 +40,9 @@ let expandedOutflows = new Map(); // EIN -> array of expanded grant objects
 
 const NODE_WIDTH = 24;
 const NODE_PADDING = 10;
+
+const POWER_LAW = .3; // scaling factor
+
 // Color scale for unique node colors (based on EIN or name)
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10); // 10 distinct colors, repeatable
 
@@ -347,7 +350,8 @@ function formatNumber(num) {
 }
 
 function calculateLogValue(rawAmt) {
-    return Math.log2(rawAmt + 1);
+    // PTW3, too stteep return Math.log2(rawAmt + 1);
+    return Math.pow(rawAmt, POWER_LAW);
 }
 
 function logPropBuilderRawAmt(obj) {
@@ -381,6 +385,73 @@ function logPropBuilderValue(obj) {
         });
 }
 
+function sumPropBuilderGrantsIn(obj) {
+
+       Object.defineProperty(obj, 'grantsInTotal', {
+            get: function() {
+                return this.grantsIn.reduce((total,g) => total+g.rawAmt,0);
+            },
+            enumerable: true,
+            configurable: true
+        });
+
+}
+
+function sumPropBuilderGrantsTotal(obj) {
+
+       Object.defineProperty(obj, 'grantsTotal', {
+            get: function() {
+                return this.grants.reduce((total,g) => total+g.rawAmt,0);
+            },
+            enumerable: true,
+            configurable: true
+        });
+
+}
+
+function logPropBuilderGrantsIn(obj) {
+
+       Object.defineProperty(obj, 'logGrantsInTotal', {
+            get: function() {
+                return calculateLogValue(this.grantsInTotal);
+            },
+            enumerable: true,
+            configurable: true
+        });
+
+}
+
+function logPropBuilderGrantsTotal(obj) {
+
+       Object.defineProperty(obj, 'logGrantsTotal', {
+            get: function() {
+                return calculateLogValue(this.grantsTotal);
+            },
+            enumerable: true,
+            configurable: true
+        });
+
+}
+
+function applyCharityProps(obj){
+
+        logPropBuilderRawAmt(obj);
+        logPropBuilderGrantAmt(obj);
+        sumPropBuilderGrantsIn(obj);
+        sumPropBuilderGrantsTotal(obj);
+        logPropBuilderGrantsIn(obj);
+        logPropBuilderGrantsTotal(obj);
+        return obj; 
+}
+
+function applyGrantProps(obj) 
+{
+        logPropBuilderValue(obj);
+        return obj;
+
+}
+
+
 async function loadData() {
     $('#status').html('<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading..."> Loading data...</span>');
 
@@ -399,7 +470,7 @@ async function loadData() {
                     let rAmt = parseInt((row['receipt_amt'] || '0').trim(), 10);
                     if (isNaN(rAmt)) rAmt = 0;
                     // Define charity with logGrantAmt as a getter
-                    charities[ein] = {
+                    charities[ein] = applyCharityProps({
                         id: ein,
                         filer_ein: ein,
                         name: (row['filer_name'] || '').trim(),
@@ -412,10 +483,10 @@ async function loadData() {
                         grant_out_index: 0,
                         grant_count: 0,
                         grants: [], // Array to store grants for this filer
-                        grantsIn: []
-                    };
+                        grantsIn: [],
+                        loopbacks: []
+                    });
                     // Define logGrantAmt as a getter
-                    logPropBuilderGrantAmt(charities[ein]);
                 });
                 totalCharitiesCount = Object.keys(charities).length;
                 resolve();
@@ -431,7 +502,7 @@ async function loadData() {
     await new Promise((resolve, reject) => {
        const gov_ein="001";
        // government is the root, build a virtual charity for it
-       charities[gov_ein] = {
+       charities[gov_ein] = applyCharityProps({
          id: gov_ein,
          filer_ein:gov_ein,
          name: "US Government",
@@ -444,9 +515,8 @@ async function loadData() {
          grant_count: 0,
          grants: [], // Array to store grants for this filer
          grantsIn: []
-       };
+       });
        // Define logGrantAmt as a getter for the government
-       logPropBuilderGrantAmt(charities[gov_ein]);
        let govGrants=0;
        let govTotal=0;
        let localEdges = {};
@@ -459,16 +529,17 @@ async function loadData() {
                     govGrants++;
                     const key = filer + '~' + grantee;
                     if (!localEdges[key]) {
-                        localEdges[key] = { 
+                        localEdges[key] = applyGrantProps({ 
                             id: `${filer}~${grantee}`,
                             rawAmt: 0, 
                             relOutAmt: 0, 
                             relInAmt: 0, 
                             filer_ein: filer, 
                             grantee_ein: grantee, 
+                            loopback: 0,
                             filer: charities[gov_ein], 
                             grantee: charities[grantee] 
-                        };
+                        });
                         // Define logRawAmt as a getter
                      logPropBuilderRawAmt(localEdges[key]);
                     }
@@ -500,7 +571,7 @@ async function loadData() {
                     if (charities[filer] && charities[grantee] && (filer != grantee)) { // ignore self grants
                         const key = filer + '~' + grantee;
                         if (!localEdges[key]) {
-                            localEdges[key] = { 
+                            localEdges[key] = applyGrantProps({ 
                                 id: `${filer}~${grantee}`,
                                 circular: false, 
                                 rawAmt: 0, 
@@ -510,9 +581,8 @@ async function loadData() {
                                 grantee_ein: grantee, 
                                 filer: charities[filer], 
                                 grantee: charities[grantee] 
-                            };
+                            });
                             // Define logRawAmt as a getter
-                            logPropBuilderRawAmt(localEdges[key]);
                         }
                         localEdges[key].rawAmt += amt;
                         charities[filer].grant_amt += amt;
@@ -539,8 +609,12 @@ async function loadData() {
     badCharsCounter = new Set();
     badGrants.forEach(g => {
         badCharsCounter.add(g.grantee.id);
+        g.filer.loopbacks.push(g);
+        g.grantee.loopbacks.push(g);
+        g.grantee.loopback = g.grantee.grants.filter(g=> g.isCycle).reduce((total,g) => total+g.rawAmt,0);
         g.grantee.grants = g.grantee.grants.filter(g => !g.isCycle);
         g.grantee.grant_amt = g.grantee.grants.reduce((total, grant) => total + grant.rawAmt, 0);
+        
         //console.log(`removed circular grant ${g.id} from ${g.filer.name}->${g.grantee.name}`);
     });
     // No need to set logGrantAmt here, as it's now a getter for all charities
@@ -710,12 +784,15 @@ function generateGraph() {
 function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     const node = charities[nodeId];
     if (!node) {
-        currentData.nodes.push({ 
+        currentData.nodes.push(applyCharityProps({ 
             id: nodeId, 
             filer_ein: nodeId, 
             name: `Unknown (${nodeId})`, 
-            grant_amt: 0 
-        });
+            grant_amt: 0,
+            grants: [], 
+            grantsIn: []
+            
+        }));
         if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
         return;
     }
@@ -725,17 +802,7 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     }
 
     const grantsForNode = node.grants || [];
-    const allLinks = grantsForNode.map(grant => {
-            const g= {
-                source: grant.filer_ein,
-                target: grant.grantee_ein,
-                filer: grant.filer,
-                grantee: grant.grantee,
-                 rawValue: grant.rawAmt
-            };
-            logPropBuilderRawAmt(g);
-            return g;
-    }).sort((a, b) => b.rawValue - a.rawValue);
+    const allLinks = node.grants.sort((a, b) => b.rawValue - a.rawValue);
 
     let displayedLinks = expandedOutflows.get(nodeId) || [];
     const remainingLinks = allLinks.filter(l => 
@@ -747,18 +814,17 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
 
     newLinks.forEach(l => {
         if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
-            currentData.nodes.push(charities[l.target]);
+            currentData.nodes.push(applyCharityProps(charities[l.target]));
         }
         if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
-            const l={ 
+            const l=applyGrantProps({ 
                 source: l.source, 
                 target: l.target, 
                 value: l.value, 
                 rawValue: l.rawValue,
                 filer: l.filer,
                 grantee: l.grantee
-            };
-           logPropBuilderValue(g);
+            });
            currentData.links.push(l);
         }
         displayedLinks.push(l);
@@ -773,32 +839,34 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         const existingOthers = currentData.nodes.find(n => n.filer_ein === othersId);
         
         if (!existingOthers) {
-            const c={ 
+            const c=applyCharityProps({ 
                 id: othersId,
                 filer_ein: othersId, 
                 name: "...",
                 grant_amt: othersValue,
-                parent_ein: nodeId
-            };
-           logPropBuilderGrantAmt(g);
+                parent_ein: nodeId,
+                grants: [], 
+                grantsIn: []
+            });
 
            currentData.nodes.push(c);
            
         } else {
         existingOthers.grant_amt = othersValue;
-           logPropBuilderGrantAmt(existingOthers);
+           applyCharityProps(existingOthers);
         }
 
         const othersLink = currentData.links.find(l => l.source === nodeId && l.target === othersId);
         if (!othersLink) {
-            let c={ 
+            let c=applyCharityProps({ 
                 id: othersId,
                 filer_ein: othersId, 
                 name: "...",
                 grant_amt: othersValue,
-                parent_ein: nodeId
-            };
-            logPropBuilderGrantAmt(c);
+                parent_ein: nodeId,
+                grants: [], 
+                grantsIn: []
+            });
             currentData.links.push(c);
         } else {
             logPropBuilderValue(othersLink);
@@ -878,11 +946,6 @@ function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
 }
 
-function generateTrapezoidPath(x0, x1, y0In, y1In, y0Out, y1Out) {
-    // Ensure ">" shape: narrower inflow on left (y0In < y1In), wider outflow on right (y0Out > y1Out)
-    return `M${x0},${y0In} L${x1},${y0Out} L${x1},${y1Out} L${x0},${y1In} Z`;
-}
-
 function calculateScale(graph, width, height) {
     // Calculate the bounding box of the Sankey layout
     const nodes = graph.nodes;
@@ -930,29 +993,15 @@ function calculateScale(graph, width, height) {
     return scale;
 }
 
-function generateTrapezoidPath(x0, x1, y0, y1, scale) {
-    // Calculate midX and midY from x0, x1, y0, y1
-    const midX = (x0 + x1) / 2;
-    const midY = (y0 + y1) / 2;
+function generateTrapezoidPath(d) {
 
-    // Determine inflowHeight and outflowHeight based on node position
-    // Assume inflow is on the left (x0) and outflow is on the right (x1)
-    // Use y0 and y1 to estimate heights, ensuring ">" shape (narrower inflow, wider outflow)
-    const nodeWidth = x1 - x0; // Dynamic node width from x0, x1
-    const inflowHeight = Math.max(2, (y1 - y0) / scale); // Use y range for inflow height, scaled
-    const outflowHeight = Math.max(2, (y1 - y0) / scale); // Use y range for outflow height, scaled (adjust if needed based on grants)
+  const midY = (d.y0 + d.y1) / 2;
+  const y0In = midY - d.inflowHeight / 2;  // Left = inflow (0 for USG)
+  const y1In = midY + d.inflowHeight / 2;
+  const y0Out = midY - d.outflowHeight / 2; // Right = outflow (367 for USG)
+  const y1Out = midY + d.outflowHeight / 2;
+  return `M${d.x0},${y0In} L${d.x0},${y1In} L${d.x1},${y1Out} L${d.x1},${y0Out} Z`;
 
-    // Ensure ">" shape: narrower inflow on left, wider outflow on right
-    // Inflow (left side) is narrower at top, wider at bottom
-    // Outflow (right side) is wider at top, narrower at bottom
-    const y0In = midY + (inflowHeight / 2/ scale) ; // Top of narrow inflow (narrower at top)
-    const y1In = midY - (inflowHeight / 2/ scale) ; // Bottom of narrow inflow (y0In > y1In)
-    const y0Out = midY - (outflowHeight / 2/ scale); // Top of wide outflow (wider at top)
-    const y1Out = midY + (outflowHeight / 2/ scale); // Bottom of wide outflow (y0Out < y1Out)
-
-    // Return path string with scaled coordinates
-    //return `M${x0},${y0In} L${x1},${y0Out} L${x1},${y1Out} L${x0},${y1In} Z`;
-    return `M${x0},${y0In} L${x1},${y1Out}  L${x1},${y0Out}  L${x0},${y1In} Z`;
 }
 
 function calculateScale(graph, width, height) {
@@ -999,20 +1048,31 @@ function calculateScale(graph, width, height) {
 }
 
 function calculateNodePositions(nodes, kyHeight, scale, height) {
-    nodes.forEach(d => {
-        // Use rawAmt sum for inflows, then apply log2, no downward clipping
-        const inflowSum = (d.grantsIn || []).reduce((sum, g) => sum + g.logRawAmt, 0);
-        d.inflowHeight = Math.max(2, kyHeight * inflowSum); // Unscaled height for inflow
-        // Ensure outflowHeight uses grant_amt correctly, no downward clipping
-        const grantAmt = d.grant_amt || 0;
-        d.outflowHeight = Math.max(2, kyHeight * (d.logGrantAmt)); // Unscaled height for outflow
-        // Store original positions for path generation
-        d.x0Original = d.x0;
-        d.x1Original = d.x1;
-        d.y0Original = d.y0;
-        d.y1Original = d.y1;
-    });
+  nodes.forEach(d => {
+     // Inflows: Use sourceLinks if available, else grantsIn
+    const sourceData = d.sourceLinks.length > 0 ? d.sourceLinks : (d.grantsIn || []);
+    d.logGrantsInTotal = calculateLogValue(d3.sum(sourceData, l => l.value || 0));
+
+    // Outflows: Use targetLinks if available, else grants
+    const targetData = d.targetLinks.length > 0 ? d.targetLinks : (d.grants || []);
+    d.logGrantsTotal = calculateLogValue(d3.sum(targetData, g => g.amount || g.value || 0));
+
+    // Scale heights to fit y1 - y0
+    const sankeyHeight = d.y1 - d.y0;
+    const totalScaledValue = (d.logGrantsInTotal + d.logGrantsTotal) || 1; // Sum for ratio
+    const scaleFactor = sankeyHeight / totalScaledValue;
+    d.inflowHeight = d.logGrantsInTotal * scaleFactor;
+    d.outflowHeight = d.logGrantsTotal * scaleFactor;
+
+    d.x0Original = d.x0;
+    d.x1Original = d.x1;
+    d.y0Original = d.y0;
+    d.y1Original = d.y1;
+    console.log(d.name, "inflowHeight:", d.inflowHeight, "outflowHeight:", d.outflowHeight, 
+                "logGrantsInTotal:", d.logGrantsInTotal, "logGrantsTotal:", d.logGrantsTotal);
+   });
 }
+
 
 function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     const selectedNode = charities[selectedNodeId];
@@ -1032,7 +1092,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         }
         // Debug: Check grant data
         const rawAmt = grant.rawAmt || 0;
-        console.log("Grant In:", grant.filer_ein, "Raw Amount:", rawAmt);
+        //console.log("Grant In:", grant.filer_ein, "Raw Amount:", rawAmt);
         currentData.links.push({
             source: grant.filer_ein,
             target: selectedNodeId,
@@ -1072,23 +1132,23 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     if (othersOutLinks.length > 0) {
         const othersId = `${selectedNodeId}-others-${generateUniqueId()}`;
         const othersValue = othersOutLinks.reduce((sum, l) => sum + l.rawValue, 0);
-             const   c={
+             const   c=applyCharityProps({
             id: othersId,
             filer_ein: othersId,
             name: "...",
             grant_amt: othersValue,
-            parent_ein: selectedNodeId
-        };
-        logPropBuilderGrantAmt(c);
+            parent_ein: selectedNodeId,
+            grants:[],
+            grantsIn:[]
+        });
         currentData.nodes.push(c);
-        const l={
+        const l=applyGrantProps({
             source: selectedNodeId,
             target: othersId,
             rawValue: othersValue,
             filer: selectedNode,
             grantee: null
-        };
-        logPropBuilderValue(l)       
+        });
         currentData.links.push(l);
     }
 
@@ -1198,20 +1258,20 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         const sel = d3.select(this);
         if (d.filer_ein.includes('-others-') || (!d.grants || d.grants.length === 0)) {
             sel.append("circle")
-                .attr("cx", d => (d.x0Original + d.x1Original) / 2 * scale)
-                .attr("cy", d => (d.y0Original + d.y1Original) / 2 * scale)
-                .attr("r", Math.max(2, (d.logGrantAmt))) // Scale radius, minimum 2 pixels, adjust for transform
+                .attr("cx", d => (d.x0 + d.x1) / 2)
+                .attr("cy", d => (d.y0 + d.y1) / 2)
+                .attr("r", Math.min(10,Math.max(2, (d.logGrantAmt)))) // Scale radius, minimum 2 pixels, adjust for transform
                 .attr("fill", d => color(d.id))
                 .attr("stroke", "#000");
         } else {
             sel.append("path")
-                .attr("d", d => generateTrapezoidPath(d.x0Original, d.x1Original, d.y0Original, d.y1Original, scale))
+                .attr("d", d => generateTrapezoidPath(d))
                 .attr("fill", d => color(d.id))
                 .attr("stroke", "#000");
         }
     });
-
-    nodeElements.on('click', function(event, d) {
+    
+    function nodeClick(event,d) {
         event.stopPropagation();
         if (event.altKey) {
             generateGraph();
@@ -1222,10 +1282,16 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
             console.log("Switching to node:", d.filer_ein);
             renderFocusedSankey(g, sankey, svgRef, width, height, d.filer_ein);
         }
-    });
+    }
+
+    nodeElements.on('click', nodeClick);
 
     nodeElements.append("title")
-        .text(d => `${d.name || d.id}\nInflow: $${formatNumber((d.grantsIn || []).reduce((sum, g) => sum + g.rawAmt, 0))}\nOutflow: $${formatNumber(d.grant_amt || 0)}`);
+        .text(d => {
+                const top = `${d.name || d.id}\nInflow: $${formatNumber((d.grantsIn || []).reduce((sum, g) => sum + g.rawAmt, 0))}\nOutflow: $${formatNumber(d.grant_amt || 0)}`;
+                if (d.loopback) return `{top}\nLoop: $${formatNumber(d.loopback || 0)}`;
+                return top
+        });
 
     const link = masterGroup.append("g")
         .attr("fill", "none")
@@ -1240,6 +1306,14 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("stroke-width", d => Math.max(1, d.width || 1))
         .on('click', function(event, d) {
             event.stopPropagation();
+            if (event.shiftKey)
+            {
+                nodeClick(event,d.source);
+            }
+            else
+            {
+                nodeClick(event,d.target);
+            }
             zoomToFitNodes(d.source, d.target, width, height);
         });
 
@@ -1345,31 +1419,30 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         const existingOthers = currentData.nodes.find(n => n.filer_ein === othersId);
         
         if (!existingOthers) {
-            const n={ 
+            const n=applyCharityProps({ 
                 id: othersId,
                 filer_ein: othersId, 
                 name: "...",
                 grant_amt: othersValue,
-                parent_ein: nodeId
-            };
-            logPropBuilderGrantAmt(n);
+                parent_ein: nodeId,
+                grants:[],
+                grantsIn:[]
+            });
             currentData.nodes.push(n);
         } else {
             existingOthers.grant_amt = othersValue;
-            logPropBuilderGrantAmt(existingOthers);
+            applyCharityProps(existingOthers);
         }
 
         const othersLink = currentData.links.find(l => l.source === nodeId && l.target === othersId);
         if (!othersLink) {
-                const l={ 
+                const l=applyGrantProps({ 
                         source: nodeId, 
                         target: othersId, 
                         rawValue: othersValue,
                         filer: charities[nodeId],
                         grantee: null
-                };
-                logPropBuilderValue(l);
-        
+                });        
                 currentData.links.push(l);
         } else {
                 logPropBuilderValue(othersLink);
