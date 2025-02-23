@@ -1,6 +1,6 @@
 ---
 layout: default
-title: ActBlue / WinRed 2024 Donor Lookup
+title: ActBlue / WinRed 2024 donor lookup
 ---
 
 <!-- Local JS/CSS references: note no "../" paths, all are in current directory -->
@@ -10,47 +10,33 @@ title: ActBlue / WinRed 2024 Donor Lookup
 <script src="chart.js"></script>
 
 <style>
-  .agg-toggle-button {
-    display: inline-block;
-    background-color: #efefef; /* Light gray background */
-    border: 1px solid #ccc;    /* Subtle border */
-    color: #333;               /* Text color */
-    padding: 4px 8px;          /* Some padding for button-like feel */
-    border-radius: 4px;        /* Rounded corners */
-    font-size: 0.875rem;       /* ~14px, tweak to taste */
-    cursor: pointer;           /* Show pointer on hover */
-    transition: background-color 0.2s;
-  }
-
-  .agg-toggle-button:hover {
-    background-color: #e2e2e2; /* Slightly darker on hover */
-  }
-
-  .charts-wrapper {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    margin-top: 10px;
-  }
-  .chart-container {
-    width: 300px;
-    height: 300px;
-  }
 
   .text-red-600 {
     color: #dc2626 !important; /* #dc2626 is Tailwind's red-600 */
   }
+
+  #globalAggregator.expanded {
+    height: auto;
+  }
+
+  #gradientOverlay {
+    display: block;
+  }
 </style>  
 
-<h1 class="mb-1">2024 Donor Lookup</h1>
+<h1 class="mb-1">2024 donor lookup</h1>
 
-<p><a href="https://electionwatch.info/">Please check out ElectionWatch.info for many articles and more advanced features!</a></p>
-<p class="opacity-80 mb-0 text-[15px]">
+<p>Please check out <a href="https://electionwatch.info/">ElectionWatch.info</a> for many articles and more advanced features.</p>
+<p class="opacity-80 mb-2 text-sm">
   All small dollar donations (<$10) for 2024 originating from ActBlue and WinRed are included in this dataset. 
-  
+</p>
+<p class="opacity-80 mb-2 text-sm">
   Enter a name or ZIP code (or both). The search will parse your input into alphanumeric tokens, 
   removing hyphens and other punctuation, but keeping numeric parts. 
   We look for rows where <strong>all</strong> entered tokens appear.
+</p>
+<p class="opacity-80 mb-0 text-sm">
+  Donors indicated with <strong class="text-red-600 inline-block px-1 rounded border border-red">High donation volume</strong> (>25 donations to a single campaign) may be victims of donation fraud and are called out <span class="font-bold text-red">in red</span>.
 </p>
 
 <div class="mb-4">
@@ -84,58 +70,64 @@ title: ActBlue / WinRed 2024 Donor Lookup
 </div>
 
 <div id="searchContainer" class="mb-2">
-  <div class="flex flex-col md:flex-row md:items-end gap-2 justify-between">
-    <form id="searchForm" class="flex flex-col gap-1 w-full">
-      
-      <div class="flex flex-col gap-1 w-full">
-        <label for="donorSearchBox" class="text-sm md:text-[15px] font-bold">
-          Enter donor name or ZIP (or both):
-        </label>
-        <input type="text"
-               id="donorSearchBox"
-               class="w-full px-2 py-1 rounded text-sm border border-gray-300"
-               placeholder="e.g. CLINTON 58801" />
-      </div>
+  <form id="searchForm" class="flex flex-col gap-1 md:gap-2 mb-4" id="filterContainer">
+    <label for="donorSearchBox" class="font-medium text-sm">Enter donor name and/or ZIP:</label>
+    <div class="flex gap-2">
+      <input type="text" id="donorSearchBox" placeholder="e.g. CLINTON 58801" class="px-2 py-1 rounded border border-gray-300 text-sm flex-1 md:flex-0" style="min-width: 220px;">
+      <button type="submit" id="searchButton">
+        <span class="button-text hidden">Search</span>
+        <img src="/assets/images/loading-white.svg" class="loading-spinner size-5 mx-auto" alt="Loading...">
+      </button>
+    </div>
+  </form>
 
-      <div class="flex items-center gap-1">
-        <span class="flex items-center gap-1">
-          <!-- The same button doubles as "Stop" during searching -->
-          <button type="submit" id="searchButton" disabled>
-            <span class="button-text">Search</span>
-            <img src="/assets/images/loading-white.svg" 
-                 class="loading-spinner size-6 mx-auto" 
-                 style="display: none;" 
-                 alt="Loading..." />
-          </button>
-        </span>
-        <span id="statusMessage"></span>
-      </div>
-    </form>
-  </div>
+  <span id="statusMessage"></span>
+
 </div>
 
-<div class="mb-2">
+<div class="mb-2 relative">
+  <div id="legend"></div>
   <!-- The aggregator summary button + collapsed aggregator details -->
-  <div class="charts-wrapper">
-    <div class="chart-container">
-      <canvas id="donationsPie"></canvas>
+  <div class="hidden pie-container flex-col md:flex-row gap-2 mb-4 md:gap-4">
+    <div class="bg-white p-2 rounded border border-gray-200 flex-1 flex items-center justify-center">
+      <canvas id="amountsPie" class="w-80 h-80"></canvas>
     </div>
-    <div class="chart-container">
-      <canvas id="amountsPie"></canvas>
+    <div class="bg-white p-2 rounded border border-gray-200 flex-1 flex items-center justify-center">
+      <canvas id="donationsPie" class="w-80 h-80"></canvas>
     </div>
   </div>
 
-  <div class="mb-4">
-    <!-- We’ll fill the button text via updateAggregatorSummary() -->
-    <button class="frameless mb-2 text-base" id="globalAggBtn"></button>
-    <!-- Collapsed by default -->
-    <div class="h-[0px] overflow-hidden transition-all duration-200" id="globalAggregator">
-      <!-- We'll fill the aggregator details (the previous “refreshGlobalAggregator” content) here -->
+  <div class="mb-4 hidden" id="recipientsContainer">
+    <h2 class="font-bold text-base mb-2">All recipients</h2>
+    
+    <!-- Container with relative positioning for proper layering -->
+    <div class="relative">
+      <!-- Results container with initial height limit -->
+      <div id="globalAggregator" class="transition-all duration-200 max-h-[200px] overflow-hidden">
+        <!-- Content will be inserted here dynamically -->
+      </div>
+
+      <!-- Gradient overlay + expand button (shown only when collapsed AND >10 results) -->
+      <div id="gradientOverlay" class="absolute bottom-0 left-0 right-0 h-12 md:h-20 bg-gradient-to-b from-white/50 to-gray-100 pointer-events-none">
+        <!-- Button container centered at bottom -->
+        <div class="absolute bottom-0 left-0 right-0 flex justify-center pb-2 pointer-events-auto">
+          <button id="globalAggBtn" class="agg-toggle-button">
+            Show all results
+          </button>
+        </div>
+      </div>
+
+      <!-- Collapse button (shown only when expanded AND >10 results) -->
+      <div id="collapseButtonContainer" class="hidden justify-center mt-4">
+        <button id="globalAggCollapseBtn" class="agg-toggle-button" style="display: none;">
+          Show fewer results
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- CSV download button -->
-  <button id="downloadCsvBtn" class="frameless !mt-4" style="display: none;">
+  <button id="downloadCsvBtn" class="absolute right-0 -bottom-16 frameless !mt-4" style="display: none;">
     <span class="flex items-center gap-1 text-sm text-gray-500 font-semibold">
       <img src="/assets/images/download.svg" class="size-5" alt="Download SVG">
       Download results as CSV
@@ -144,7 +136,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
 </div>
 
 <!-- Per-donor aggregator -->
-<div id="donorAggregatorContainer" class="mb-4 space-y-2"></div>
+<div id="donorAggregatorContainer" class="grid grid-cols-12"></div>
 
 <script>
   // ----------------------------------------------------------
@@ -207,6 +199,35 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
   const othersColor = '#cccccc'; 
 
+  // Add at the top with other globals
+  let processingComplete = false;
+  let pendingUpdates = 0;
+
+  function trackUpdate(operation) {
+    pendingUpdates++;
+    return () => {
+      pendingUpdates--;
+      if (processingComplete && pendingUpdates === 0) {
+        // Only log if this is truly the last update
+        if (!chartUpdateScheduled) {
+          logFinalTotals();
+        }
+      }
+    };
+  }
+
+  function logFinalTotals() {
+    console.log('----------------------------------------');
+    console.log('🏁 All data processing and UI updates complete!');
+    console.log(`Final totals:
+        - ${allMatchedRows.length} matching rows
+        - ${globalCampaigns.size} unique campaigns
+        - ${donorsMap.size} unique donors
+        - ActBlue donations: ${$('#actBlueDonations').text()}
+        - WinRed donations: ${$('#winRedDonations').text()}`);
+    console.log('----------------------------------------');
+  }
+
   function assignColorsByLabel(labels) {
     let actBlueIndex = 0;
     let winRedIndex  = 0;
@@ -224,7 +245,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
         winRedIndex++;
         return color;
       } else {
-        // “Others (<10%)” or not recognized
+        // "Others (<10%)" or not recognized
         console.log(lower);
         return othersColor;
       }
@@ -282,7 +303,27 @@ title: ActBlue / WinRed 2024 Donor Lookup
     };
   }
 
+  function scheduleChartRefresh() {
+    // If we already scheduled an update, just skip
+    if (chartUpdateScheduled) return;
+    
+    chartUpdateScheduled = true;
+    
+    // Wait a short delay before actually refreshing
+    setTimeout(() => {
+        refreshPieCharts();
+        chartUpdateScheduled = false;
+    }, 500);
+  }
+
   function refreshPieCharts() {
+    // Show the container if we have data
+    if (globalCampaigns.size > 0) {
+        $('.pie-container').removeClass('hidden').addClass('flex');
+    } else {
+        $('.pie-container').removeClass('flex').addClass('hidden');
+    }
+
     // 1) Extract raw data from globalCampaigns
     const campaigns = Array.from(globalCampaigns.values());
 
@@ -305,7 +346,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
       rawAmountsData.push(Math.round(c.sumMin));
     });
 
-    // If no campaigns exist, provide dummy data so Chart.js doesn’t error out
+    // If no campaigns exist, provide dummy data so Chart.js doesn't error out
     if (!rawLabels.length) {
       rawLabels = ['No data'];
       rawDonationsData = [1];
@@ -385,59 +426,56 @@ title: ActBlue / WinRed 2024 Donor Lookup
     });
   }
 
-
   let chartUpdateScheduled = false;
-  function scheduleChartRefresh() {
-    // If we already scheduled an update, just skip
-    if (chartUpdateScheduled) return;
-    
-    chartUpdateScheduled = true;
-    
-    // Wait a short delay before actually refreshing
-    setTimeout(() => {
-      refreshPieCharts();
-      chartUpdateScheduled = false;
-    }, 500); // 500ms or however long you prefer
-  }
-
 
   // ----------------------------------------------------------
   // DOCUMENT READY
   // ----------------------------------------------------------
   $(document).ready(async function() {
+    console.log('Starting to load donor lookup data...');
     $('#statusMessage').html('<span class="inline-flex text-[13px]">Loading data...</span>');
     // Show spinner
     $('#searchButton .button-text').hide();
     $('#searchButton .loading-spinner').show();
 
-    // Hide aggregator by default
-    $('#globalAggregator').height(0);
-
-    // The aggregator toggle
+    // Toggle expand/collapse for global aggregator
     $('#globalAggBtn').on('click', function() {
       const $agg = $('#globalAggregator');
-
-      // Flip the state
-      aggregatorIsCollapsed = !aggregatorIsCollapsed;
+      const $gradientOverlay = $('#gradientOverlay');
+      const $collapseContainer = $('#collapseButtonContainer');
+      const $collapseBtn = $('#globalAggCollapseBtn');
       
-      if (!aggregatorIsCollapsed) {
-        // Expand
-        $agg.css('height', 'auto');
-        const autoHeight = $agg.height();
-        $agg.height(0);
-        $agg.height(autoHeight);
-      } else {
-        // Collapse
-        $agg.height(0);
-      }
+      // Expand
+      $agg.addClass('expanded');
+      $agg.css('max-height', 'none');
+      $gradientOverlay.css('display', 'none');  // Use css() instead of hide()
+      $('#globalAggBtn').parent().parent().hide();
+      $collapseContainer.removeClass('hidden').addClass('flex');
+      $collapseBtn.show();
+    });
 
-      // Re-render aggregator’s content
-      refreshGlobalAggregator();
+    // Collapse button handler
+    $('#globalAggCollapseBtn').on('click', function() {
+      const $agg = $('#globalAggregator');
+      const $gradientOverlay = $('#gradientOverlay');
+      const $collapseContainer = $('#collapseButtonContainer');
+      const $collapseBtn = $('#globalAggCollapseBtn');
+      
+      // Collapse
+      $agg.removeClass('expanded');
+      $agg.css('max-height', '200px');
+      $gradientOverlay.css('display', 'block');  // Use css() instead of show()
+      $collapseContainer.removeClass('flex').addClass('hidden');
+      $collapseBtn.hide();
+      
+      // Scroll back to top of results
+      $agg[0].scrollTop = 0;
     });
 
     try {
       // Load master reverse index (donations_reverse_index.txt)
       await loadMasterReverseIndex('donations_reverse_index.txt.zip', 'donations_reverse_index.txt');
+      console.log('Donor lookup data loaded successfully. Ready for searches.');
 
       // Re-enable search UI
       $('#searchButton .loading-spinner').hide();
@@ -468,6 +506,11 @@ title: ActBlue / WinRed 2024 Donor Lookup
       console.error(err);
       $('#statusMessage').text('Error loading index: ' + err);
     }
+
+    // Create tooltip container once
+    if (!$('#tooltip').length) {
+      $('<div id="tooltip" class="tooltip"></div>').appendTo('body');
+    }
   });
 
   // ----------------------------------------------------------
@@ -482,6 +525,8 @@ title: ActBlue / WinRed 2024 Donor Lookup
       return;
     }
 
+    console.log('Starting new search...');
+
     // Begin new search
     searchingInProgress = true;
     searchCanceled = false;
@@ -489,8 +534,13 @@ title: ActBlue / WinRed 2024 Donor Lookup
     globalCampaigns.clear();
     donorsMap.clear();
 
+    // Hide charts container when starting new search
+    $('.pie-container').removeClass('flex').addClass('hidden');
+
     // Clear aggregator displays
-    $('#globalAggregator').empty().height(0);
+    $('#globalAggregator').empty().removeClass('expanded');
+    $('#gradientOverlay').css('display', 'block');
+    $('#collapseButtonContainer').removeClass('flex').addClass('hidden');
     $('#donorAggregatorContainer').empty();
     $('#downloadCsvBtn').hide();
 
@@ -522,8 +572,12 @@ title: ActBlue / WinRed 2024 Donor Lookup
   // MAIN SEARCH LOGIC (for single query)
   // ----------------------------------------------------------
   async function doSearch(query) {
+    console.log(`Processing search for query: "${query}"`);
+    
     // Tokenize input: remove non-alphanumeric except keep digits, but strip hyphens/punctuation
     let tokens = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
+    console.log('Search tokens:', tokens);
+    
     if (!tokens.length) {
       throw new Error('No valid tokens after removing punctuation/hyphens.');
     }
@@ -553,9 +607,12 @@ title: ActBlue / WinRed 2024 Donor Lookup
     }
 
     if (!finalBatches || !finalBatches.size) {
+      console.log('No matching batches found');
       alert('No matches found for these tokens.');
       return;
     }
+
+    console.log(`Found ${finalBatches.size} matching batches to process`);
 
     // Sort batch IDs ascending
     const batchIDs = Array.from(finalBatches).sort((a,b)=>a-b);
@@ -600,7 +657,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
     // Show CSV download if results exist
     if (allMatchedRows.length > 0) {
-      $('#downloadCsvBtn').show();
+        $('#downloadCsvBtn').show();
     }
   }
 
@@ -767,19 +824,50 @@ title: ActBlue / WinRed 2024 Donor Lookup
 
   function refreshGlobalAggregator() {
     let sorted = Array.from(globalCampaigns.values()).sort((a,b) => {
-      // Sort by committeeName ascending, then by actBlueIndicator
       return a.committeeName.localeCompare(b.committeeName) 
              || (a.actBlueIndicator - b.actBlueIndicator);
     });
 
+    // Show/hide gradient and expand button based on number of results
+    if (sorted.length > 10) {
+      // Only show gradient if we're not already expanded
+      if (!$('#globalAggregator').hasClass('expanded')) {
+        $('#gradientOverlay').css('display', 'block');
+      } else {
+        $('#gradientOverlay').css('display', 'none');
+      }
+    } else {
+      $('#gradientOverlay').css('display', 'none');
+    }
+
     if (!sorted.length) {
       $('#globalAggregator').html('');
-      updateAggregatorSummary(); // ensure button text is consistent
+      $('#recipientsContainer').addClass('hidden');  // Hide if no results
+      updateAggregatorSummary();
       return;
     }
 
+    // Show both containers when we have results
+    $('.pie-container').removeClass('hidden').addClass('flex');
+    $('#recipientsContainer').removeClass('hidden');
+
     // Build aggregator detail content
-    let html = `<div class="space-y-1 text-sm">`;
+    let html = `
+      <div class="grid grid-cols-12">
+        <div class="col-span-12 md:col-span-6 bg-white/50 text-[13px] px-2 pt-1 md:pb-1 border-t border-l border-r md:border-r-0 md:border-b border-gray-200">
+          <strong>Recipient</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 border-l md:border-l-0 flex items-start md:justify-end">
+          <strong>Total</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
+          <strong>Donations</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
+          <strong>Avg donation</strong>
+        </div>
+
+    `;
     for (let c of sorted) {
       let minDollar = formatDollar(c.sumMin);
       let maxDollar = formatDollar(c.sumMax);
@@ -789,18 +877,17 @@ title: ActBlue / WinRed 2024 Donor Lookup
       let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
 
       html += `
-        <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
-          <span>
-            <strong>
-              ${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} 
-              - ${escapeHtml(c.committeeName)}
-            </strong>
-          </span>
-          <span class="text-[13px] md:text-sm mt-1 md:mt-0">
-            ${num} donations,
-            TOTAL AMOUNT: ${minDollar} to ${maxDollar}, 
-            AVERAGE: ${avgMinDollar} to ${avgMaxDollar}
-          </span>
+        <div class="col-span-12 md:col-span-6 bg-white/50 text-[13px] px-2 pt-1 md:pb-1 border-l border-r md:border-r-0 md:border-b border-gray-200 ${colorClass}">
+          <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 border-l md:border-l-0 flex items-start md:justify-end">
+          <span class="donation-total border-b border-dashed border-gray-500" data-min="${minDollar}" data-max="${maxDollar}">${minDollar}+</span>
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
+          ${num}
+        </div>
+        <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
+          ${avgMinDollar}
         </div>
       `;
     }
@@ -850,6 +937,12 @@ title: ActBlue / WinRed 2024 Donor Lookup
     updateAggregatorSummary();
     scheduleChartRefresh();
 
+    // Show/hide collapse button based on number of results
+    if (sorted.length > 10) {
+      $('#globalAggCollapseBtn').show();
+    } else {
+      $('#globalAggCollapseBtn').hide();
+    }
   }
 
   // ----------------------------------------------------------
@@ -868,7 +961,7 @@ title: ActBlue / WinRed 2024 Donor Lookup
              || a.company.localeCompare(b.company);
     });
 
-    let html = `<h2 class="font-bold text-base mb-2">Per-Donor Totals</h2>`;
+    let html = `<h2 class="font-bold text-base col-span-12 mb-0">Individual donors</h2>`;
     for (let d of donors) {
       let nameStr = escapeHtml(d.name);
       let cityStr = escapeHtml(d.city);
@@ -880,21 +973,48 @@ title: ActBlue / WinRed 2024 Donor Lookup
       let maxDollar = formatDollar(d.sumMax);
       let avgMinDollar = formatDollar(d.sumMin / num);
       let avgMaxDollar = formatDollar(d.sumMax / num);
-
+      
+      // Check if any campaign has >9 donations
+      let hasHighDonations = Array.from(d.campaigns.values()).some(c => c.numDonations > 20);
+      
       html += `
-        <div class="border border-gray-300 rounded p-2 mb-2 bg-white text-sm">
-          <div class="flex flex-col md:flex-row md:items-center justify-between">
-            <div>
-              <strong>${nameStr}</strong>
-              <span class="ml-2 text-xs text-gray-600">CITY: ${cityStr}, ${stateStr}</span>
-              <span class="ml-2 text-xs text-gray-600">ZIP: ${zipStr}</span>
-              <span class="ml-2 text-xs text-gray-600">Company: ${compStr}</span>
-            </div>
-            <div class="mt-1 md:mt-0 text-xs md:text-sm">
-              Total: ${num} donations, AMOUNT: ${minDollar} to ${maxDollar}, AVG: ${avgMinDollar} to ${avgMaxDollar}
-            </div>
-          </div>
-          <div class="mt-2 space-y-1">
+        <div class="bg-white col-span-12 md:col-span-6 mt-2 px-2 pt-2 md:pb-2 border-l border-r md:border-r-0 border-t md:border-y border-gray-200 text-sm">
+          <strong>${nameStr}</strong> 
+          <span class="text-xs opacity-80">${compStr}</span>
+          ${hasHighDonations ? '<span class="text-xs text-red-600 inline-block px-1 rounded border border-red font-bold">High donation volume</span>' : ''}
+          <br />
+          <span class="text-xs opacity-80">${cityStr}, ${stateStr} ${zipStr}</span><br />
+          ${d.campaigns.size === 1 ? 
+            `<div class="hidden md:block text-[13px] mt-1">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
+              '<strong class="text-blue-600">ActBlue</strong>' : 
+              '<strong class="text-red-600">WinRed</strong>'} <strong>- ${escapeHtml(Array.from(d.campaigns.values())[0].committeeName)}</strong></div>` : 
+            ''}
+        </div>
+        <div class="bg-white flex flex-col gap-1 items-start md:items-end col-span-4 md:col-span-2 md:mt-2 p-2 border-l md:border-l-0 border-b md:border-y border-gray-200">
+          <span class="text-[13px] opacity-80">Total</span>
+          <strong class="text-sm border-b border-dashed border-gray-500 donation-total" 
+            data-min="${minDollar}" 
+            data-max="${maxDollar}">${minDollar}+</strong>
+        </div>
+        <div class="bg-white flex flex-col gap-1 items-start md:items-end col-span-4 md:col-span-2 md:mt-2 p-2 border-b md:border-y border-gray-200">
+          <span class="text-[13px] opacity-80">Donations</span>
+          <strong class="text-sm">${num}</strong> 
+        </div>
+        <div class="bg-white flex flex-col gap-1 items-start md:items-end col-span-4 md:col-span-2 md:mt-2 p-2 border-b md:border-y border-r border-gray-200">
+          <span class="text-[13px] opacity-80">Avg donation</span>
+          <strong class="text-sm">${avgMinDollar}</strong>
+        </div>
+        ${d.campaigns.size === 1 ? 
+            `<div class="col-span-12 p-2 text-[13px] bg-white/50 border-b border-x border-gray-200 md:hidden">${Array.from(d.campaigns.values())[0].actBlueIndicator === '1' ? 
+              '<strong class="text-blue-600">ActBlue</strong>' : 
+              '<strong class="text-red-600">WinRed</strong>'} <strong>- ${escapeHtml(Array.from(d.campaigns.values())[0].committeeName)}</strong></div>` : 
+            ''}
+
+            ${d.campaigns.size > 1 ? 
+              `<div class="col-span-12 px-2 py-1 text-[13px] bg-white border-b border-x border-gray-200 text-black/75 md:hidden">
+                Details
+              </div>` : 
+              ''}
       `;
 
       // Per-campaign
@@ -904,31 +1024,80 @@ title: ActBlue / WinRed 2024 Donor Lookup
                || (a.actBlueIndicator - b.actBlueIndicator);
       });
 
-      for (let c of donorCampaigns) {
-        let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
-        let cdNum = c.numDonations;
-        let cdMin = formatDollar(c.sumMin);
-        let cdMax = formatDollar(c.sumMax);
-        let cdAvgMin = formatDollar(c.sumMin / cdNum);
-        let cdAvgMax = formatDollar(c.sumMax / cdNum);
-        html += `
-          <div class="p-1 ${colorClass} rounded border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center">
-            <span>
+      // Per-campaign breakdown - only show if multiple campaigns
+      if (donorCampaigns.length > 1) {
+        for (let c of donorCampaigns) {
+          let colorClass = (c.actBlueIndicator === '1') ? 'bg-blue-50' : 'bg-red-50';
+          let cdNum = c.numDonations;
+          let cdMin = formatDollar(c.sumMin);
+          let cdMax = formatDollar(c.sumMax);
+          let cdAvgMin = formatDollar(c.sumMin / cdNum);
+          let cdAvgMax = formatDollar(c.sumMax / cdNum);
+          html += `
+            <div class="col-span-12 md:col-span-6 bg-white/50 text-[13px] px-2 pt-1 md:pb-1 border-l border-r md:border-r-0 md:border-b border-gray-200 ${colorClass}">
               <strong>${c.actBlueIndicator === '1' ? '<span class="text-blue-600">ActBlue</span>' : '<span class="text-red-600">WinRed</span>'} - ${escapeHtml(c.committeeName)}</strong>
-            </span>
-            <span class="text-[13px] md:text-sm mt-1 md:mt-0">
-              ${cdNum} donations,
-              TOTAL AMOUNT: ${cdMin} to ${cdMax}, 
-              AVERAGE: ${cdAvgMin} to ${cdAvgMax}
-            </span>
-          </div>
-        `;
+            </div>
+            <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 border-l md:border-l-0 flex items-start md:justify-end">
+              ${cdMin}
+            </div>
+            <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-gray-200 flex items-start md:justify-end">
+              <span class="${cdNum >= 50 ? 'text-red-600 font-bold' : (cdNum >= 10 ? 'text-orange-500 font-bold' : '')}">${cdNum}</span>
+            </div>
+            <div class="col-span-4 md:col-span-2 bg-white/50 text-[13px] px-2 py-1 border-b border-r border-gray-200 flex items-start md:justify-end">
+              ${cdAvgMin}
+            </div>
+          `;
+        }
       }
 
       html += `</div></div>`;
     }
 
     $('#donorAggregatorContainer').html(html);
+
+    // Add tooltip behavior to donation totals
+    $(document).on('mouseenter', '.donation-total', function(e) {
+      const $tooltip = $('#tooltip');
+      const rect = this.getBoundingClientRect();
+      const minDollar = $(this).data('min');
+      const maxDollar = $(this).data('max');
+      
+      $tooltip.html(`The total amount may range from <strong>${minDollar}-${maxDollar}</strong> as our data source only provides whole dollar amounts.`);
+      
+      // Make tooltip visible but off-screen initially so we can measure it
+      $tooltip.addClass('visible').css({
+        left: '-9999px',
+        top: '-9999px'
+      });
+      
+      // Get dimensions after tooltip is visible
+      const tooltipWidth = $tooltip.outerWidth();
+      const tooltipHeight = $tooltip.outerHeight();
+      
+      // Calculate initial position
+      let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
+      let top = rect.top - tooltipHeight - 8 + window.scrollY;
+      
+      // Adjust if tooltip would go off-screen
+      const viewportWidth = $(window).width();
+      const viewportHeight = $(window).height();
+      
+      // Keep tooltip within horizontal bounds
+      left = Math.max(10, Math.min(viewportWidth - tooltipWidth - 10, left));
+      
+      // If tooltip would go above viewport, show it below the element instead
+      if (top - window.scrollY < 10) {
+        top = rect.bottom + 8 + window.scrollY;
+      }
+      
+      // Apply final position
+      $tooltip.css({
+        left: left + 'px',
+        top: top + 'px'
+      });
+    }).on('mouseleave', '.donation-total', function() {
+      $('#tooltip').removeClass('visible');
+    });
   }
 
   // ----------------------------------------------------------
@@ -953,25 +1122,48 @@ title: ActBlue / WinRed 2024 Donor Lookup
     let actBluePct = totalDonations ? ((abDon / totalDonations) * 100).toFixed(1) : 0;
     let winRedPct  = totalDonations ? ((wrDon / totalDonations) * 100).toFixed(1) : 0;
 
-    // Rebuild aggregator summary
-    // Example:
-    // Overall Campaign Totals (ActBlue: 20 donations (40.0%); $123–$223 total; WinRed: 30 donations (60.0%); $100–$150 total)
+    // Update the legend separately
+    let legendHtml = `
+      <div class="bg-white p-2 border border-gray-200 rounded-md grid md:grid-cols-2 gap-2 w-full mb-2">
+        <div>
+          <div class="px-2 text-blue-600 text-sm font-bold">ActBlue</div>
+          <div class="grid grid-cols-2 gap-2">
+          
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Total</span>
+              <div>
+                <strong id="actBlueDonationsMin" class="text-sm border-b border-dashed border-gray-500 donation-total" data-min="$${actBlueDonationsMin.toLocaleString()}" data-max="$${actBlueDonationsMax.toLocaleString()}">$${actBlueDonationsMin.toLocaleString()}</strong>
+                <span class="text-xs opacity-80" id="actBluePctDonations">${actBluePct}%</span>
+              </div>
+            </div>
 
-    const collapseMessage = aggregatorIsCollapsed ? 'Click to Expand' : 'Collapse';
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Donations</span>
+              <strong id="actBlueDonations">${abDon}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="border-t md:border-t-0 md:border-l border-gray-200 pt-2 md:pt-0 md:pl-2">
+          <div class="px-2 text-red-600 text-sm font-bold">WinRed</div>
+          <div class="grid grid-cols-2 gap-2">
+          
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Total</span>
+              <div>
+                <strong id="winRedDonationsMin" class="text-sm border-b border-dashed border-gray-500 donation-total" data-min="$${winRedDonationsMin.toLocaleString()}" data-max="$${winRedDonationsMax.toLocaleString()}">$${winRedDonationsMin.toLocaleString()}</strong>
+                <span class="text-xs opacity-80" id="winRedPctDonations">${winRedPct}%</span>
+              </div>
+            </div>
 
-    let aggregatorSummary = `
-      Overall Campaign Totals   
-      <span class="agg-toggle-button">${collapseMessage}</span><br/>
-      <span style="color: black;">
-        <span class="text-blue-600">ActBlue</span>: 
-        <span id="actBlueDonations">${abDon}</span> donations (<span id="actBluePctDonations">${actBluePct}</span>%); 
-        <span id="actBlueDonationsMin">$${actBlueDonationsMin}</span>–<span id="actBlueDonationsMax">$${actBlueDonationsMax}</span> total; 
-        <span class="text-red-600">WinRed</span>: 
-        <span id="winRedDonations">${wrDon}</span> donations (<span id="winRedPctDonations">${winRedPct}</span>%); 
-        <span id="winRedDonationsMin">$${winRedDonationsMin}</span>–<span id="winRedDonationsMax">$${winRedDonationsMax}</span> total
-      </span>
+            <div class="bg-white flex flex-col items-start p-2">
+              <span class="text-[13px] opacity-80">Donations</span>
+              <strong id="winRedDonations">${wrDon}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
     `;
-    $('#globalAggBtn').html(aggregatorSummary);
+    $('#legend').html(legendHtml);
   }
 
   // ----------------------------------------------------------
