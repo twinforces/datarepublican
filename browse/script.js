@@ -38,6 +38,8 @@ let topNodes = [];             // MADE GLOBAL: For coloring or logic access
 // Add this near other global variables
 let expandedOutflows = new Map(); // EIN -> array of expanded grant objects
 
+const NODE_WIDTH = 24;
+const NODE_PADDING = 10;
 // Color scale for unique node colors (based on EIN or name)
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10); // 10 distinct colors, repeatable
 
@@ -160,7 +162,7 @@ function renderActiveEINs() {
     activeEINs.forEach(ein => {
         const $tag = $('<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>');
         const $text = $('<span></span>').text(ein.slice(0,2) + '-' + ein.slice(2));
-        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer">{% include close.html %}</span>').attr('data-ein', ein);
+        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>').attr('data-ein', ein);
         $rm.on('click', function() {
             const rem = $(this).attr('data-ein');
             activeEINs = activeEINs.filter(x => x !== rem);
@@ -192,7 +194,7 @@ function renderActiveKeywords() {
     activeKeywords.forEach(kw => {
         const $tag = $('<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>');
         const $text = $('<span></span>').text(kw);
-        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer">{% include close.html %}</span>').attr('data-kw', kw);
+        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>').attr('data-kw', kw);
         $rm.on('click', function() {
             const rem = $(this).attr('data-kw');
             activeKeywords = activeKeywords.filter(x => x !== rem);
@@ -344,6 +346,41 @@ function formatNumber(num) {
     return (num == null) ? "N/A" : num.toString(); // Less than 1,000
 }
 
+function calculateLogValue(rawAmt) {
+    return Math.log2(rawAmt + 1);
+}
+
+function logPropBuilderRawAmt(obj) {
+
+        Object.defineProperty(obj, 'logRawAmt', {
+            get: function() {
+                return calculateLogValue(this.rawAmt);
+            },
+            enumerable: true,
+            configurable: true
+        });
+}
+function logPropBuilderGrantAmt(obj) {
+
+        Object.defineProperty(obj, 'logGrantAmt', {
+            get: function() {
+                return calculateLogValue(this.grant_amt);
+            },
+            enumerable: true,
+            configurable: true
+        });
+}
+function logPropBuilderValue(obj) {
+
+        Object.defineProperty(obj, 'value', {
+            get: function() {
+                return calculateLogValue(this.rawValue);
+            },
+            enumerable: true,
+            configurable: true
+        });
+}
+
 async function loadData() {
     $('#status').html('<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading..."> Loading data...</span>');
 
@@ -361,6 +398,7 @@ async function loadData() {
                     if (!ein) return;
                     let rAmt = parseInt((row['receipt_amt'] || '0').trim(), 10);
                     if (isNaN(rAmt)) rAmt = 0;
+                    // Define charity with logGrantAmt as a getter
                     charities[ein] = {
                         id: ein,
                         filer_ein: ein,
@@ -376,6 +414,8 @@ async function loadData() {
                         grants: [], // Array to store grants for this filer
                         grantsIn: []
                     };
+                    // Define logGrantAmt as a getter
+                    logPropBuilderGrantAmt(charities[ein]);
                 });
                 totalCharitiesCount = Object.keys(charities).length;
                 resolve();
@@ -398,14 +438,15 @@ async function loadData() {
          xml_name: "The Beast",
          govt_amt: 0,
          contib_amt: 4.6e12,
-         grant_amt:0,
          grant_amt: 0,
          grant_in_index: 0,
          grant_out_index: 0,
          grant_count: 0,
          grants: [], // Array to store grants for this filer
          grantsIn: []
-       }
+       };
+       // Define logGrantAmt as a getter for the government
+       logPropBuilderGrantAmt(charities[gov_ein]);
        let govGrants=0;
        let govTotal=0;
        let localEdges = {};
@@ -428,6 +469,8 @@ async function loadData() {
                             filer: charities[gov_ein], 
                             grantee: charities[grantee] 
                         };
+                        // Define logRawAmt as a getter
+                     logPropBuilderRawAmt(localEdges[key]);
                     }
                     localEdges[key].rawAmt += amt;
                     charities[filer].grant_amt += amt;
@@ -454,7 +497,7 @@ async function loadData() {
                     let amt = parseInt((row['grant_amt'] || '0').trim(), 10);
                     if (isNaN(amt)) amt = 0;
                     count++;
-                    if (charities[filer] && charities[grantee] && (filer != grantee) ) { // ignore self grants
+                    if (charities[filer] && charities[grantee] && (filer != grantee)) { // ignore self grants
                         const key = filer + '~' + grantee;
                         if (!localEdges[key]) {
                             localEdges[key] = { 
@@ -468,6 +511,8 @@ async function loadData() {
                                 filer: charities[filer], 
                                 grantee: charities[grantee] 
                             };
+                            // Define logRawAmt as a getter
+                            logPropBuilderRawAmt(localEdges[key]);
                         }
                         localEdges[key].rawAmt += amt;
                         charities[filer].grant_amt += amt;
@@ -479,7 +524,7 @@ async function loadData() {
                         charities[grantee].grantsIn.push(localEdges[key])
                     } else {
                         if (filer != grantee)
-                                console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
+                            console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
                     }
                 });
                 grants = localEdges;
@@ -489,24 +534,16 @@ async function loadData() {
             error: err => reject(err)
         });
     });
-    badGrants=findCircularGrants();
+    badGrants = findCircularGrants();
     
     badCharsCounter = new Set();
-    badGrants.forEach(g=> {
+    badGrants.forEach(g => {
         badCharsCounter.add(g.grantee.id);
         g.grantee.grants = g.grantee.grants.filter(g => !g.isCycle);
-        g.grantee.grant_amt = g.grantee.grants.reduce((total, grant) => total + grant.rawAmt, 0);        //console.log(`removed circular grant ${g.id} from ${g.filer.name}->${g.grantee.name}`);
+        g.grantee.grant_amt = g.grantee.grants.reduce((total, grant) => total + grant.rawAmt, 0);
+        //console.log(`removed circular grant ${g.id} from ${g.filer.name}->${g.grantee.name}`);
     });
-    Object.values(charities).forEach( c => { 
-            c.logGrantAmt = Math.log2(c.grant_amt+1);
-            c.grants = c.grants.sort( (a,b) => b.rawAmt - a.rawAmt);
-            c.grantsIn = c.grantsIn.sort( (a,b) => b.rawAmt - a.rawAmt);
-    });
-    console.log(`${badCharsCounter.size} charities with circular grants`);
-    
-    Object.values(grants).forEach( c => { 
-            c.logRawAmt = Math.log2(c.rawAmt+1);
-    });
+    // No need to set logGrantAmt here, as it's now a getter for all charities
     console.log(totalCharitiesCount, "501c3s loaded");
     console.log(totalGrantsCount, "grants loaded");
 
@@ -688,14 +725,17 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     }
 
     const grantsForNode = node.grants || [];
-    const allLinks = grantsForNode.map(grant => ({
-        source: grant.filer_ein,
-        target: grant.grantee_ein,
-        filer: grant.filer,
-        grantee: grant.grantee,
-        value: grant.logRawAmt, // Revert to logarithmic scaling
-        rawValue: grant.rawAmt
-    })).sort((a, b) => b.rawValue - a.rawValue);
+    const allLinks = grantsForNode.map(grant => {
+            const g= {
+                source: grant.filer_ein,
+                target: grant.grantee_ein,
+                filer: grant.filer,
+                grantee: grant.grantee,
+                 rawValue: grant.rawAmt
+            };
+            logPropBuilderRawAmt(g);
+            return g;
+    }).sort((a, b) => b.rawValue - a.rawValue);
 
     let displayedLinks = expandedOutflows.get(nodeId) || [];
     const remainingLinks = allLinks.filter(l => 
@@ -710,14 +750,16 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
             currentData.nodes.push(charities[l.target]);
         }
         if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
-            currentData.links.push({ 
+            const l={ 
                 source: l.source, 
                 target: l.target, 
                 value: l.value, 
                 rawValue: l.rawValue,
                 filer: l.filer,
                 grantee: l.grantee
-            });
+            };
+           logPropBuilderValue(g);
+           currentData.links.push(l);
         }
         displayedLinks.push(l);
     });
@@ -727,35 +769,39 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     const othersId = `${nodeId}-others-${generateUniqueId()}`;
     if (othersLinks.length > 0 && !isInitial) {
         const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
-        const logOthersValue = Math.log2(othersValue + 1);
+        const logOthersValue = calculateLogRawAmt(othersValue); // Use function
         const existingOthers = currentData.nodes.find(n => n.filer_ein === othersId);
         
         if (!existingOthers) {
-            currentData.nodes.push({ 
+            const c={ 
                 id: othersId,
                 filer_ein: othersId, 
                 name: "...",
                 grant_amt: othersValue,
-                logGrantAmt: logOthersValue,
                 parent_ein: nodeId
-            });
+            };
+           logPropBuilderGrantAmt(g);
+
+           currentData.nodes.push(c);
+           
         } else {
-            existingOthers.grant_amt = othersValue;
-            existingOthers.logGrantAmt = logOthersValue;
+        existingOthers.grant_amt = othersValue;
+           logPropBuilderGrantAmt(existingOthers);
         }
 
         const othersLink = currentData.links.find(l => l.source === nodeId && l.target === othersId);
         if (!othersLink) {
-            currentData.links.push({ 
-                source: nodeId, 
-                target: othersId, 
-                value: logOthersValue, // Use logarithmic value
-                rawValue: othersValue,
-                filer: charities[nodeId],
-                grantee: null
-            });
+            let c={ 
+                id: othersId,
+                filer_ein: othersId, 
+                name: "...",
+                grant_amt: othersValue,
+                parent_ein: nodeId
+            };
+            logPropBuilderGrantAmt(c);
+            currentData.links.push(c);
         } else {
-            othersLink.value = logOthersValue;
+            logPropBuilderValue(othersLink);
             othersLink.rawValue = othersValue;
         }
     } else {
@@ -769,19 +815,26 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         updateQueryParams();
     }
 }
+
 function expandOthers(sourceId) {
     const node = charities[sourceId];
     if (!node) return;
 
     const grantsForNode = node.grants || [];
-    const allLinks = grantsForNode.map(grant => ({
-        source: grant.filer_ein,
-        target: grant.grantee_ein,
-        filer: grant.filer,
-        grantee: grant.grantee,
-        value: grant.logRawAmt,
-        rawValue: grant.rawAmt
-    })).sort((a, b) => b.rawValue - a.rawValue);
+    const allLinks = grantsForNode.map(grant => {
+    
+        const g= {
+                source: grant.filer_ein,
+                target: grant.grantee_ein,
+                filer: grant.filer,
+                grantee: grant.grantee,
+                value: grant.logRawAmt , // Use function
+                rawValue: grant.rawAmt
+        };
+        logPropBuilderValue(g);
+        return g;        
+    
+    }).sort((a, b) => b.rawValue - a.rawValue);
 
     let displayedLinks = expandedOutflows.get(sourceId) || [];
     const remainingLinks = allLinks.filter(l => 
@@ -798,9 +851,9 @@ function expandOthers(sourceId) {
 
     renderFocusedSankey(svg.select('g'), d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
-        .nodeWidth(50)
-        .nodePadding(80)
-        .extent([[0, 0], [width - 200, height - 100]]), svg, width, height, sourceId);
+        .nodeWidth(NODE_WIDTH)
+        .nodeWidth(NODE_PADDING)
+        .extent([[0, 0], [width, height]]), svg, width, height, sourceId);
 }
 
 function handleSearchClick(e) {
@@ -825,39 +878,185 @@ function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`; // Short, random ID
 }
 
+function generateTrapezoidPath(x0, x1, y0In, y1In, y0Out, y1Out) {
+    // Ensure ">" shape: narrower inflow on left (y0In < y1In), wider outflow on right (y0Out > y1Out)
+    return `M${x0},${y0In} L${x1},${y0Out} L${x1},${y1Out} L${x0},${y1In} Z`;
+}
+
+function calculateScale(graph, width, height) {
+    // Calculate the bounding box of the Sankey layout
+    const nodes = graph.nodes;
+    const links = graph.links;
+
+    if (!nodes.length || !links.length) {
+        return 1; // Default scale if no data
+    }
+
+    // Find the min and max x and y coordinates of nodes and links
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    nodes.forEach(node => {
+        minX = Math.min(minX, node.x0);
+        maxX = Math.max(maxX, node.x1);
+        minY = Math.min(minY, node.y0);
+        maxY = Math.max(maxY, node.y1);
+    });
+
+    links.forEach(link => {
+        const path = d3.sankeyLinkHorizontal()(link);
+        const points = path.match(/[ML][\d.]+,[\d.]+/g).map(p => p.slice(1).split(',').map(Number));
+        points.forEach(([x, y]) => {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        });
+    });
+
+    // Calculate the layout dimensions
+    const layoutWidth = maxX - minX;
+    const layoutHeight = maxY - minY;
+
+    // Ensure non-zero dimensions to avoid division by zero
+    const actualWidth = Math.max(layoutWidth, 1);
+    const actualHeight = Math.max(layoutHeight, 1);
+
+    // Calculate scale to fit within SVG while maintaining aspect ratio
+    const scaleX = width / actualWidth;
+    const scaleY = height / actualHeight;
+    const scale = Math.min(scaleX, scaleY, 1); // Ensure scale doesn't exceed 1 (no zoom-in)
+
+    return scale;
+}
+
+function generateTrapezoidPath(x0, x1, y0, y1, scale) {
+    // Calculate midX and midY from x0, x1, y0, y1
+    const midX = (x0 + x1) / 2;
+    const midY = (y0 + y1) / 2;
+
+    // Determine inflowHeight and outflowHeight based on node position
+    // Assume inflow is on the left (x0) and outflow is on the right (x1)
+    // Use y0 and y1 to estimate heights, ensuring ">" shape (narrower inflow, wider outflow)
+    const nodeWidth = x1 - x0; // Dynamic node width from x0, x1
+    const inflowHeight = Math.max(2, (y1 - y0) / scale); // Use y range for inflow height, scaled
+    const outflowHeight = Math.max(2, (y1 - y0) / scale); // Use y range for outflow height, scaled (adjust if needed based on grants)
+
+    // Ensure ">" shape: narrower inflow on left, wider outflow on right
+    // Inflow (left side) is narrower at top, wider at bottom
+    // Outflow (right side) is wider at top, narrower at bottom
+    const y0In = midY + (inflowHeight / 2/ scale) ; // Top of narrow inflow (narrower at top)
+    const y1In = midY - (inflowHeight / 2/ scale) ; // Bottom of narrow inflow (y0In > y1In)
+    const y0Out = midY - (outflowHeight / 2/ scale); // Top of wide outflow (wider at top)
+    const y1Out = midY + (outflowHeight / 2/ scale); // Bottom of wide outflow (y0Out < y1Out)
+
+    // Return path string with scaled coordinates
+    //return `M${x0},${y0In} L${x1},${y0Out} L${x1},${y1Out} L${x0},${y1In} Z`;
+    return `M${x0},${y0In} L${x1},${y1Out}  L${x1},${y0Out}  L${x0},${y1In} Z`;
+}
+
+function calculateScale(graph, width, height) {
+    // Calculate the bounding box of the Sankey layout
+    const nodes = graph.nodes;
+    const links = graph.links;
+
+    if (!nodes.length || !links.length) {
+        return 1; // Default scale if no data
+    }
+
+    // Find the min and max x and y coordinates of nodes and links
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    nodes.forEach(node => {
+        minX = Math.min(minX, node.x0);
+        maxX = Math.max(maxX, node.x1);
+        minY = Math.min(minY, node.y0);
+        maxY = Math.max(maxY, node.y1);
+    });
+
+    links.forEach(link => {
+        const path = d3.sankeyLinkHorizontal()(link);
+        const points = path.match(/[ML][\d.]+,[\d.]+/g).map(p => p.slice(1).split(',').map(Number));
+        points.forEach(([x, y]) => {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        });
+    });
+
+    // Calculate the layout dimensions, ensuring non-zero values
+    const layoutWidth = Math.max(maxX - minX, 1);
+    const layoutHeight = Math.max(maxY - minY, 1);
+
+    // Calculate scale to fit within SVG while maintaining aspect ratio, no cap at 1
+    const scaleX = width / layoutWidth;
+    const scaleY = height / layoutHeight;
+    const scale = Math.min(scaleX, scaleY); // Use the smaller scale to fit, no upper limit
+
+    return scale;
+}
+
+function calculateNodePositions(nodes, kyHeight, scale, height) {
+    nodes.forEach(d => {
+        // Use rawAmt sum for inflows, then apply log2, no downward clipping
+        const inflowSum = (d.grantsIn || []).reduce((sum, g) => sum + g.logRawAmt, 0);
+        d.inflowHeight = Math.max(2, kyHeight * inflowSum); // Unscaled height for inflow
+        // Ensure outflowHeight uses grant_amt correctly, no downward clipping
+        const grantAmt = d.grant_amt || 0;
+        d.outflowHeight = Math.max(2, kyHeight * (d.logGrantAmt)); // Unscaled height for outflow
+        // Store original positions for path generation
+        d.x0Original = d.x0;
+        d.x1Original = d.x1;
+        d.y0Original = d.y0;
+        d.y1Original = d.y1;
+    });
+}
+
 function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
-    // Filter data for the selected node
     const selectedNode = charities[selectedNodeId];
     if (!selectedNode) return;
 
     currentData = { nodes: [], links: [] };
     currentData.nodes.push(selectedNode);
 
-    // Inflows (grantsIn)
+    // Debug: Check selectedNode data
+    console.log("Selected Node:", selectedNodeId, selectedNode);
+    console.log("Grant Amount (raw):", selectedNode.grant_amt);
+
+    // Inflows
     (selectedNode.grantsIn || []).forEach(grant => {
         if (!currentData.nodes.some(n => n.filer_ein === grant.filer_ein)) {
             currentData.nodes.push(grant.filer);
         }
+        // Debug: Check grant data
+        const rawAmt = grant.rawAmt || 0;
+        console.log("Grant In:", grant.filer_ein, "Raw Amount:", rawAmt);
         currentData.links.push({
             source: grant.filer_ein,
             target: selectedNodeId,
-            value: grant.logRawAmt,
-            rawValue: grant.rawAmt,
+            value: grant.logRawAmt, // Use getter
+            rawValue: rawAmt, // Keep raw value for tooltips
             filer: grant.filer,
             grantee: selectedNode
         });
     });
 
-    // Outflows (grants)
+    // Outflows
     const displayedLinks = expandedOutflows.get(selectedNodeId) || [];
-    const allOutLinks = (selectedNode.grants || []).map(grant => ({
-        source: grant.filer_ein,
-        target: grant.grantee_ein,
-        filer: grant.filer,
-        grantee: grant.grantee,
-        value: grant.logRawAmt,
-        rawValue: grant.rawAmt
-    })).sort((a, b) => b.rawValue - a.rawValue);
+    const allOutLinks = (selectedNode.grants || []).map(grant => {
+        // Debug: Check grant data
+        const rawAmt = grant.rawAmt || 0;
+        return {
+            source: grant.filer_ein,
+            target: grant.grantee_ein,
+            filer: grant.filer,
+            grantee: grant.grantee,
+            value: grant.logRawAmt, // Use getter
+            rawValue: rawAmt // Keep raw value for tooltips
+        };
+    }).sort((a, b) => b.rawValue - a.rawValue);
     const remainingOutLinks = allOutLinks.filter(l => !displayedLinks.some(d => d.target === l.target));
     const newOutLinks = remainingOutLinks.slice(0, TOP_N_OUTFLOWS);
     const othersOutLinks = remainingOutLinks.slice(newOutLinks.length);
@@ -873,28 +1072,28 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     if (othersOutLinks.length > 0) {
         const othersId = `${selectedNodeId}-others-${generateUniqueId()}`;
         const othersValue = othersOutLinks.reduce((sum, l) => sum + l.rawValue, 0);
-        const logOthersValue = Math.log2(othersValue + 1);
-        currentData.nodes.push({
+             const   c={
             id: othersId,
             filer_ein: othersId,
             name: "...",
             grant_amt: othersValue,
-            logGrantAmt: logOthersValue,
             parent_ein: selectedNodeId
-        });
-        currentData.links.push({
+        };
+        logPropBuilderGrantAmt(c);
+        currentData.nodes.push(c);
+        const l={
             source: selectedNodeId,
             target: othersId,
-            value: logOthersValue,
             rawValue: othersValue,
             filer: selectedNode,
             grantee: null
-        });
+        };
+        logPropBuilderValue(l)       
+        currentData.links.push(l);
     }
 
     expandedOutflows.set(selectedNodeId, displayedLinks);
 
-    // Sort nodes: inflows, selected, outflows, "..."
     currentData.nodes.sort((a, b) => {
         if (a.filer_ein === selectedNodeId) return -1;
         if (b.filer_ein === selectedNodeId) return 1;
@@ -903,20 +1102,60 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         return 0;
     });
 
+    // Configure D3 Sankey for proper node spacing and centering
+    sankey.nodeWidth(NODE_WIDTH) // Set node width to 15 pixels
+        .nodeWidth(NODE_PADDING) // Set padding between nodes to 10 pixels
+        .extent([[0, 0], [width, height]]) // Define the layout extent
+        .nodeAlign(d3.sankeyCenter); // Center nodes vertically
+
+    // First pass: Compute initial layout
     const graph = sankey(currentData);
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-    g.selectAll("*").remove();
+    // Dynamically calculate scale based on layout and SVG dimensions
+    const scale = calculateScale(graph, width, height);
 
+    // Dynamically calculate maximum log values for scaling
+    const maxLogGrant = d3.max(currentData.nodes, d => d.logGrantAmt);
+    const maxLogRaw = d3.max(currentData.links, d => d.value);
+
+    // Calculate maximum nodes per column for height scaling (D3 Sankey logic)
+    const maxNodesPerColumn = d3.max(graph.nodes, d => d.layer === undefined ? 0 : d.layer) + 1 || 1;
+    const availableHeight = height - (sankey.nodePadding() * (maxNodesPerColumn - 1));
+    const totalLogGrant = d3.sum(currentData.nodes, d => d.logGrantAmt);
+    const kyHeight = availableHeight / (totalLogGrant || 1); // D3 Sankey’s ky for heights
+
+    // Calculate available width for link scaling (D3 Sankey logic)
+    const availableWidth = width - sankey.nodeWidth();
+    const totalLogRaw = d3.sum(currentData.links, d => d.value);
+    const kyWidth = availableWidth / (totalLogRaw || 1); // D3 Sankey’s ky for widths, ensuring ~45 pixels for $11.1B untransformed
+
+    // Calculate node positions before logging or rendering
+    calculateNodePositions(graph.nodes, kyHeight, scale, height);
+
+    // Log node details after positions are calculated, including original positions
     graph.nodes.forEach(d => {
-        d.id = d.filer_ein || d.id;
-        d.color = color(d.id);
-        if (d.y1 - d.y0 < 2) {
-            const mid = (d.y0 + d.y1) / 2;
-            d.y0 = mid - 1;
-            d.y1 = mid + 1;
-        }
+        console.log("Node:", d.name, "Grant Amount (raw):", d.grant_amt || 0, "x0:", d.x0Original, "x1:", d.x1Original, "y0:", d.y0Original, "y1:", d.y1Original);
     });
+
+    // Explicitly set y0/y1 for selected node based on inflows/outflows, ensuring y0Out/y1Out are used
+    if (selectedNode) {
+        const inflowLinks = graph.links.filter(l => l.target.id === selectedNodeId);
+        if (inflowLinks.length > 0) {
+            selectedNode.y0 = selectedNode.y0In || selectedNode.y0;
+            selectedNode.y1 = selectedNode.y1In || selectedNode.y1;
+        }
+        const outflowLinks = graph.links.filter(l => l.source.id === selectedNodeId);
+        if (outflowLinks.length > 0) {
+            selectedNode.y0 = selectedNode.y0Out || selectedNode.y0;
+            selectedNode.y1 = selectedNode.y1Out || selectedNode.y1;
+        }
+    }
+
+    // Recompute link positions with adjusted y0/y1
+    sankey.update(graph); // Update link coordinates based on new y0/y1
+
+    g.selectAll("*").remove();
 
     graph.links.forEach((link, i) => {
         link.gradientId = generateUniqueId("gradient");
@@ -929,8 +1168,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .append("linearGradient")
         .attr("id", d => d.gradientId)
         .attr("gradientUnits", "userSpaceOnUse")
-        .attr("x1", d => d.source.x1)
-        .attr("x2", d => d.target.x0);
+        .attr("x1", d => d.source.x1 * scale)
+        .attr("x2", d => d.target.x0 * scale);
 
     gradients.append("stop")
         .attr("offset", "0%")
@@ -941,7 +1180,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("stop-color", d => color(d.target.id));
 
     const masterGroup = g.append("g")
-        .attr("class", "graph-group");
+        .attr("class", "graph-group")
+        .attr("transform", `scale(${scale})`); // Apply single dynamic scale
 
     const nodeGroup = masterGroup.append('g').attr('class', 'nodes');
     const nodeElements = nodeGroup.selectAll('g')
@@ -956,20 +1196,17 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
 
     nodeElements.each(function(d) {
         const sel = d3.select(this);
-        if (d.filer_ein.includes('-others-') || (d.grants && d.grants.length > 0)) {
-            sel.append("rect")
-                .attr("x", d => d.x0)
-                .attr("y", d => d.y0)
-                .attr("height", d => d.y1 - d.y0)
-                .attr("width", d => d.x1 - d.x0)
-                .attr("fill", d => d.color)
+        if (d.filer_ein.includes('-others-') || (!d.grants || d.grants.length === 0)) {
+            sel.append("circle")
+                .attr("cx", d => (d.x0Original + d.x1Original) / 2 * scale)
+                .attr("cy", d => (d.y0Original + d.y1Original) / 2 * scale)
+                .attr("r", Math.max(2, (d.logGrantAmt))) // Scale radius, minimum 2 pixels, adjust for transform
+                .attr("fill", d => color(d.id))
                 .attr("stroke", "#000");
         } else {
-            sel.append("circle")
-                .attr("cx", d => (d.x0 + d.x1) / 2)
-                .attr("cy", d => (d.y0 + d.y1) / 2)
-                .attr("r", Math.max(2, (d.y1 - d.y0) / 2))
-                .attr("fill", d => d.color)
+            sel.append("path")
+                .attr("d", d => generateTrapezoidPath(d.x0Original, d.x1Original, d.y0Original, d.y1Original, scale))
+                .attr("fill", d => color(d.id))
                 .attr("stroke", "#000");
         }
     });
@@ -977,13 +1214,12 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     nodeElements.on('click', function(event, d) {
         event.stopPropagation();
         if (event.altKey) {
-            // Reset to full graph view (optional)
             generateGraph();
         } else if (d.filer_ein.includes('-others-')) {
             const sourceId = d.parent_ein;
             expandOthers(sourceId);
         } else {
-            // Focus on clicked node
+            console.log("Switching to node:", d.filer_ein);
             renderFocusedSankey(g, sankey, svgRef, width, height, d.filer_ein);
         }
     });
@@ -1001,7 +1237,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("d", d3.sankeyLinkHorizontal())
         .style("stroke", d => d.target.filer_ein.includes('-others-') ? "#ccc" : `url(#${d.gradientId})`)
         .style("stroke-opacity", "0.3")
-        .style("stroke-width", d => Math.max(1, d.width))
+        .attr("stroke-width", d => Math.max(1, d.width || 1))
         .on('click', function(event, d) {
             event.stopPropagation();
             zoomToFitNodes(d.source, d.target, width, height);
@@ -1022,10 +1258,10 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .selectAll()
         .data(graph.nodes)
         .join("text")
-        .attr("x", d => d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6)
-        .attr("y", d => (d.y1 + d.y0) / 2)
+        .attr("x", d => (d.x0Original < sankey.nodeWidth() / 2 ? d.x1Original + 6 : d.x0Original - 6) * scale)
+        .attr("y", d => ((d.y1Original + d.y0Original) / 2) * scale)
         .attr("dy", "0.35em")
-        .attr("text-anchor", d => d.x0 < sankey.nodeWidth() / 2 ? "start" : "end")
+        .attr("text-anchor", d => d.x0Original < sankey.nodeWidth() / 2 ? "start" : "end")
         .text(d => d.name)
         .on('click', function(event, d) {
             event.stopPropagation();
@@ -1035,6 +1271,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
                 const sourceId = d.parent_ein;
                 expandOthers(sourceId);
             } else {
+                console.log("Text click switching to node:", d.filer_ein);
                 renderFocusedSankey(g, sankey, svgRef, width, height, d.filer_ein);
             }
         });
@@ -1042,253 +1279,146 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     const zoom = d3.zoom()
         .scaleExtent([0.1, 4])
         .on('zoom', (event) => {
-            masterGroup.attr('transform', event.transform);
+            masterGroup.attr('transform', `scale(${scale * event.transform.k}) translate(${event.transform.x / scale},${event.transform.y / scale})`);
         });
 
     svgRef.call(zoom);
 }
 
-function renderSankey(g, sankey, svgRef, width, height) {
-    const graph = sankey(currentData);
-    const color = d3.scaleOrdinal(d3.schemeCategory10);
+function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
+    const node = charities[nodeId];
+    if (!node) {
+        currentData.nodes.push({ 
+            id: nodeId, 
+            filer_ein: nodeId, 
+            name: `Unknown (${nodeId})`, 
+            grant_amt: 0 
+        });
+        if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
+        return;
+    }
 
-    g.selectAll("*").remove();
+    if (!currentData.nodes.some(n => n.filer_ein === nodeId)) {
+        currentData.nodes.push(node);
+    }
 
-    graph.nodes.forEach(d => {
-        d.id = d.filer_ein || d.id;
-        d.color = color(d.id);
-        // Ensure minimum height of 2 pixels
-        if (d.y1 - d.y0 < 2) {
-            const mid = (d.y0 + d.y1) / 2;
-            d.y0 = mid - 1;
-            d.y1 = mid + 1;
+    const grantsForNode = node.grants || [];
+    const allLinks = grantsForNode.map(grant => ({
+        source: grant.filer_ein,
+        target: grant.grantee_ein,
+        filer: grant.filer,
+        grantee: grant.grantee,
+        value: grant.logRawAmt, // Use log-scaled accessor for widths
+        rawValue: grant.rawAmt // Keep raw value for tooltips and linear scaling
+    })).sort((a, b) => b.rawValue - a.rawValue);
+
+    let displayedLinks = expandedOutflows.get(nodeId) || [];
+    const remainingLinks = allLinks.filter(l => 
+        !displayedLinks.some(d => d.target === l.target)
+    );
+
+    const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
+    const othersLinks = remainingLinks.slice(newLinks.length);
+
+    newLinks.forEach(l => {
+        if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
+            currentData.nodes.push(charities[l.target]);
         }
-    });
-
-    graph.links.forEach((link, i) => {
-        link.gradientId = generateUniqueId("gradient");
-    });
-
-    const defs = svgRef.append("defs");
-    const gradients = defs.selectAll("linearGradient.dynamic")
-        .data(graph.links)
-        .enter()
-        .append("linearGradient")
-        .attr("id", d => d.gradientId)
-        .attr("gradientUnits", "userSpaceOnUse")
-        .attr("x1", d => d.source.x1)
-        .attr("x2", d => d.target.x0);
-
-    gradients.append("stop")
-        .attr("offset", "0%")
-        .attr("stop-color", d => color(d.source.id));
-
-    gradients.append("stop")
-        .attr("offset", "100%")
-        .attr("stop-color", d => color(d.target.id));
-
-    const masterGroup = g.append("g")
-        .attr("class", "graph-group");
-
-    const nodeGroup = masterGroup.append('g').attr('class', 'nodes');
-    const nodeElements = nodeGroup.selectAll('g')
-        .data(graph.nodes)
-        .join('g')
-        .attr('class', d => {
-            if (d.filer_ein.includes('-others-')) return 'node others';
-            if (!d.grants || d.grants.length === 0) return 'node no-grants';
-            return 'node';
-        })
-        .attr('data-id', d => d.id);
-
-    nodeElements.each(function(d) {
-        const sel = d3.select(this);
-        if (d.filer_ein.includes('-others-') || (d.grants && d.grants.length > 0)) {
-            sel.append("rect")
-                .attr("x", d => d.x0)
-                .attr("y", d => d.y0)
-                .attr("height", d => d.y1 - d.y0)
-                .attr("width", d => d.x1 - d.x0)
-                .attr("fill", d => d.color)
-                .attr("stroke", "#000");
-        } else {
-            sel.append("circle")
-                .attr("cx", d => (d.x0 + d.x1) / 2)
-                .attr("cy", d => (d.y0 + d.y1) / 2)
-                .attr("r", Math.max(2, (d.y1 - d.y0) / 2)) // Minimum radius of 2
-                .attr("fill", d => d.color)
-                .attr("stroke", "#000");
-        }
-    });
-
-    nodeElements.on('click', function(event, d) {
-        event.stopPropagation();
-        if (event.altKey) {
-            currentData = { nodes: [], links: [] };
-            currentData.nodes.push(charities[d.filer_ein]);
-            const grants = charities[d.filer_ein].grants || [];
-            grants.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
-                currentData.nodes.push(grant.grantee);
-                currentData.links.push({
-                    source: grant.filer_ein,
-                    target: grant.grantee_ein,
-                    value: grant.logRawAmt,
-                    rawValue: grant.rawAmt,
-                    filer: grant.filer,
-                    grantee: grant.grantee
-                });
+        if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
+            currentData.links.push({ 
+                source: l.source, 
+                target: l.target, 
+                value: l.value, // Use log-scaled value
+                rawValue: l.rawValue, // Keep raw value
+                filer: l.filer,
+                grantee: l.grantee
             });
-            if (grants.length > TOP_N_OUTFLOWS) {
-                const othersId = `${d.filer_ein}-others-${generateUniqueId()}`;
-                const othersValue = grants.slice(TOP_N_OUTFLOWS).reduce((sum, g) => sum + g.rawAmt, 0);
-                const logOthersValue = Math.log2(othersValue + 1);
-                currentData.nodes.push({
-                    id: othersId,
-                    filer_ein: othersId,
-                    name: "...",
-                    grant_amt: othersValue,
-                    logGrantAmt: logOthersValue,
-                    parent_ein: d.filer_ein
-                });
-                currentData.links.push({
-                    source: d.filer_ein,
-                    target: othersId,
-                    value: logOthersValue,
-                    rawValue: othersValue,
-                    filer: charities[d.filer_ein],
-                    grantee: null
-                });
-            }
-            renderFocusedSankey(g, sankey, svgRef, width, height);
-        } else if (d.filer_ein.includes('-others-')) {
-            const sourceId = d.parent_ein;
-            expandOthers(sourceId);
+        }
+        displayedLinks.push(l);
+    });
+
+    expandedOutflows.set(nodeId, displayedLinks);
+
+    const othersId = `${nodeId}-others-${generateUniqueId()}`;
+    if (othersLinks.length > 0 && !isInitial) {
+        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
+        const existingOthers = currentData.nodes.find(n => n.filer_ein === othersId);
+        
+        if (!existingOthers) {
+            const n={ 
+                id: othersId,
+                filer_ein: othersId, 
+                name: "...",
+                grant_amt: othersValue,
+                parent_ein: nodeId
+            };
+            logPropBuilderGrantAmt(n);
+            currentData.nodes.push(n);
         } else {
-            expandNode(d.filer_ein, false, false);
-            renderFocusedSankey(g, sankey, svgRef, width, height);
+            existingOthers.grant_amt = othersValue;
+            logPropBuilderGrantAmt(existingOthers);
         }
-    });
 
-    nodeElements.append("title")
-        .text(d => `${d.name || d.id}\nOutflow: $${formatNumber(d.grant_amt || 0)}`);
-
-    const link = masterGroup.append("g")
-        .attr("fill", "none")
-        .attr("stroke-opacity", 1)
-        .style("mix-blend-mode", "multiply")
-        .selectAll(".link")
-        .data(graph.links)
-        .join("path")
-        .attr("d", d3.sankeyLinkHorizontal())
-        .style("stroke", d => d.target.filer_ein.includes('-others-') ? "#ccc" : `url(#${d.gradientId})`)
-        .style("stroke-opacity", "0.3")
-        .style("stroke-width", d => Math.max(1, d.width))
-        .on('click', function(event, d) {
-            event.stopPropagation();
-            zoomToFitNodes(d.source, d.target, width, height);
-        });
-
-    link.each(function(d) {
-        if (d3.select(this).style("stroke") === "none") {
-            d3.select(this).style("stroke", color(d.source.id));
-        }
-    });
-
-    link.append("title")
-        .text(d => d.target.filer_ein.includes('-others-') 
-            ? `${d.source.name} → ...\n$${formatNumber(d.rawValue)}` 
-            : `${d.source.name} → ${d.target.name}\n$${formatNumber(d.rawValue)}`);
-
-    masterGroup.append("g")
-        .selectAll()
-        .data(graph.nodes)
-        .join("text")
-        .attr("x", d => d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6)
-        .attr("y", d => (d.y1 + d.y0) / 2)
-        .attr("dy", "0.35em")
-        .attr("text-anchor", d => d.x0 < sankey.nodeWidth() / 2 ? "start" : "end")
-        .text(d => d.name)
-        .on('click', function(event, d) {
-            event.stopPropagation();
-            if (event.altKey) {
-                currentData = { nodes: [], links: [] };
-                currentData.nodes.push(charities[d.filer_ein]);
-                const grants = charities[d.filer_ein].grants || [];
-                grants.slice(0, TOP_N_OUTFLOWS).forEach(grant => {
-                    currentData.nodes.push(grant.grantee);
-                    currentData.links.push({
-                        source: grant.filer_ein,
-                        target: grant.grantee_ein,
-                        value: grant.logRawAmt,
-                        rawValue: grant.rawAmt,
-                        filer: grant.filer,
-                        grantee: grant.grantee
-                    });
-                });
-                if (grants.length > TOP_N_OUTFLOWS) {
-                    const othersId = `${d.filer_ein}-others-${generateUniqueId()}`;
-                    const othersValue = grants.slice(TOP_N_OUTFLOWS).reduce((sum, g) => sum + g.rawAmt, 0);
-                    const logOthersValue = Math.log2(othersValue + 1);
-                    currentData.nodes.push({
-                        id: othersId,
-                        filer_ein: othersId,
-                        name: "...",
-                        grant_amt: othersValue,
-                        logGrantAmt: logOthersValue,
-                        parent_ein: d.filer_ein
-                    });
-                    currentData.links.push({
-                        source: d.filer_ein,
-                        target: othersId,
-                        value: logOthersValue,
+        const othersLink = currentData.links.find(l => l.source === nodeId && l.target === othersId);
+        if (!othersLink) {
+                const l={ 
+                        source: nodeId, 
+                        target: othersId, 
                         rawValue: othersValue,
-                        filer: charities[d.filer_ein],
+                        filer: charities[nodeId],
                         grantee: null
-                    });
-                }
-                renderFocusedSankey(g, sankey, svgRef, width, height);
-            } else if (d.filer_ein.includes('-others-')) {
-                const sourceId = d.parent_ein;
-                expandOthers(sourceId);
-            } else {
-                zoomToFitNodes(d, d, width, height);
-            }
-        });
+                };
+                logPropBuilderValue(l);
+        
+                currentData.links.push(l);
+        } else {
+                logPropBuilderValue(othersLink);
+            othersLink.rawValue = othersValue;
+        }
+    } else {
+        currentData.nodes = currentData.nodes.filter(n => !n.filer_ein.startsWith(`${nodeId}-others-`));
+        currentData.links = currentData.links.filter(l => !l.target.startsWith(`${nodeId}-others-`));
+    }
 
-    const zoom = d3.zoom()
-        .scaleExtent([0.1, 4])
-        .on('zoom', (event) => {
-            masterGroup.attr('transform', event.transform);
-        });
-
-    svgRef.call(zoom);
+    if (addToActiveEINs && !activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
+        activeEINs.push(nodeId);
+        renderActiveEINs();
+        updateQueryParams();
+    }
 }
 
-function wrapText(text, width) {
-    text.each(function() {
-        const text = d3.select(this);
-        const words = text.text().split(/\s+/).reverse();
-        let word;
-        let line = [];
-        let lineHeight = 1.1; // ems
-        let y = text.attr("y");
-        let tspan = text.text(null).append("tspan").attr("x", text.attr("x")).attr("y", y);
+function expandOthers(sourceId) {
+    const node = charities[sourceId];
+    if (!node) return;
 
-        while (word = words.pop()) {
-            line.push(word);
-            tspan.text(line.join(" "));
-            if (tspan.node().getComputedTextLength() > width) {
-                line.pop();
-                tspan.text(line.join(" "));
-                line = [word];
-                tspan = text.append("tspan")
-                    .attr("x", text.attr("x"))
-                    .attr("y", y)
-                    .attr("dy", lineHeight + "em")
-                    .text(word);
-            }
-        }
-    });
+    const grantsForNode = node.grants || [];
+    const allLinks = grantsForNode.map(grant => ({
+        source: grant.filer_ein,
+        target: grant.grantee_ein,
+        filer: grant.filer,
+        grantee: grant.grantee,
+        value: grant.logRawAmt, // Use log-scaled accessor
+        rawValue: grant.rawAmt // Keep raw value
+    })).sort((a, b) => b.rawValue - a.rawValue);
+
+    let displayedLinks = expandedOutflows.get(sourceId) || [];
+    const remainingLinks = allLinks.filter(l => 
+        !displayedLinks.some(d => d.target === l.target)
+    );
+
+    const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
+    newLinks.forEach(l => displayedLinks.push(l));
+    expandedOutflows.set(sourceId, displayedLinks);
+
+    const container = document.getElementById('graph-container');
+    const width = container.offsetWidth;
+    const height = container.offsetHeight || window.innerHeight * 0.7;
+
+    renderFocusedSankey(svg.select('g'), d3.sankey()
+        .nodeId(d => d.filer_ein || d.id)
+        .nodeWidth(NODE_WIDTH)
+        .nodeWidth(NODE_PADDING)
+        .extent([[0, 0], [width, height]]), svg, width, height, sourceId);
 }
 
 function getTextWidth(text, font) {
