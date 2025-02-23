@@ -813,6 +813,9 @@ select {
 .inset-0 {
   inset: 0px;
 }
+.-bottom-16 {
+  bottom: -4rem;
+}
 .bottom-0 {
   bottom: 0px;
 }
@@ -840,9 +843,6 @@ select {
 .top-1\/2 {
   top: 50%;
 }
-.top-12 {
-  top: 3rem;
-}
 .top-4 {
   top: 1rem;
 }
@@ -851,9 +851,6 @@ select {
 }
 .top-\[calc\(50\%-0\.75rem\)\] {
   top: calc(50% - 0.75rem);
-}
-.-bottom-16 {
-  bottom: -4rem;
 }
 .z-10 {
   z-index: 10;
@@ -1092,6 +1089,9 @@ select {
 }
 .max-h-\[50vh\] {
   max-height: 50vh;
+}
+.max-h-\[208px\] {
+  max-height: 208px;
 }
 .min-h-40 {
   min-height: 10rem;
