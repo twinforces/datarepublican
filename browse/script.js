@@ -1049,27 +1049,25 @@ function calculateScale(graph, width, height) {
 
 function calculateNodePositions(nodes, kyHeight, scale, height) {
   nodes.forEach(d => {
-     // Inflows: Use sourceLinks if available, else grantsIn
-    const sourceData = d.sourceLinks.length > 0 ? d.sourceLinks : (d.grantsIn || []);
+   const sourceData = d.sourceLinks.length > 0 ? d.sourceLinks : (d.grantsIn || []);
     d.logGrantsInTotal = calculateLogValue(d3.sum(sourceData, l => l.value || 0));
-
-    // Outflows: Use targetLinks if available, else grants
+    
     const targetData = d.targetLinks.length > 0 ? d.targetLinks : (d.grants || []);
     d.logGrantsTotal = calculateLogValue(d3.sum(targetData, g => g.amount || g.value || 0));
 
-    // Scale heights to fit y1 - y0
     const sankeyHeight = d.y1 - d.y0;
-    const totalScaledValue = (d.logGrantsInTotal + d.logGrantsTotal) || 1; // Sum for ratio
-    const scaleFactor = sankeyHeight / totalScaledValue;
-    d.inflowHeight = d.logGrantsInTotal * scaleFactor;
-    d.outflowHeight = d.logGrantsTotal * scaleFactor;
+    d.outflowHeight = Math.min(sankeyHeight, d.logGrantsTotal * kyHeight);
+    const inflowScaleFactor = d.logGrantsInTotal / (d.logGrantsTotal || 1);
+    d.inflowHeight = d.outflowHeight * inflowScaleFactor;
+    if (d.inflowHeight > sankeyHeight) {
+      d.inflowHeight = sankeyHeight;
+      d.outflowHeight = sankeyHeight / inflowScaleFactor;
+    }
 
     d.x0Original = d.x0;
     d.x1Original = d.x1;
     d.y0Original = d.y0;
     d.y1Original = d.y1;
-    console.log(d.name, "inflowHeight:", d.inflowHeight, "outflowHeight:", d.outflowHeight, 
-                "logGrantsInTotal:", d.logGrantsInTotal, "logGrantsTotal:", d.logGrantsTotal);
    });
 }
 
