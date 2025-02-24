@@ -749,30 +749,30 @@ const addendum = `
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#2563EB');
 
-    // Source arrow (normal) - this is reversed
+    // Source arrow (normal) - this should point away from the source
     defs.append('marker')
       .attr('id', 'arrow-source')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 5)
+      .attr('refX', 0) // Position at start of path
       .attr('refY', 0)
       .attr('markerWidth', 8)
       .attr('markerHeight', 8)
-      .attr('orient', 'auto-start-reverse')
+      .attr('orient', 'auto') // Change from auto-start-reverse to auto
       .append('path')
-      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('d', 'M0,-5L10,0L0,5') // Same shape as target arrow
       .attr('fill', '#CBD5E1');
 
-    // Source arrow (hover) - this is reversed
+    // Source arrow (hover) - also pointing away from source
     defs.append('marker')
       .attr('id', 'arrow-source-hover')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 5)
+      .attr('refX', 0) // Position at start of path
       .attr('refY', 0)
       .attr('markerWidth', 8)
       .attr('markerHeight', 8)
-      .attr('orient', 'auto-start-reverse')
+      .attr('orient', 'auto') // Change from auto-start-reverse to auto
       .append('path')
-      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('d', 'M0,-5L10,0L0,5') // Same shape as target arrow
       .attr('fill', '#2563EB');
 
     // Update the link creation
@@ -2547,4 +2547,15 @@ labelloc="t";\n`;
 
   // Remove the illegal return statement and conditional at the bottom of the file (lines 3008-3022)
   // That code is already properly integrated in the tick function for handling self-loops
+
+  // After logging the marker IDs and right before the end of the generateGraph function
+  // Add this code in the correct context
+
+  // Move the arrowPaths removal code to the generateGraph function
+  // This should be after we've confirmed the markers are working
+  console.log('Removing redundant arrow paths...');
+  linkElements.selectAll('.arrow-path').remove();
+
+  // We should also update any mouseover/mouseout handlers that might reference arrowPaths
+  // by ensuring we're only updating the .link elements
 </script>
