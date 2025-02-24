@@ -1084,14 +1084,11 @@ select {
 .h-full {
   height: 100%;
 }
-.max-h-\[200px\] {
-  max-height: 200px;
+.max-h-\[208px\] {
+  max-height: 208px;
 }
 .max-h-\[50vh\] {
   max-height: 50vh;
-}
-.max-h-\[208px\] {
-  max-height: 208px;
 }
 .min-h-40 {
   min-height: 10rem;
