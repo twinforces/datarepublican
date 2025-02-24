@@ -1003,7 +1003,22 @@ function generateTrapezoidPath(d) {
   return `M${d.x0},${y0In} L${d.x0},${y1In} L${d.x1},${y1Out} L${d.x1},${y0Out} Z`;
 
 }
+function generateOctagonPath(d) {
+ const cx = (d.x0 + d.x1) / 2;
+  const cy = (d.y0 + d.y1) / 2;
+  const radius = d.inflowHeight / 2;
+  const r = radius;
+  const s = radius * Math.SQRT2 / 2; // ≈ 0.707 * r
 
+  return `M${cx + r},${cy} ` +           // 0°
+         `L${cx + s},${cy + s} ` +       // 45°
+         `L${cx},${cy + r} ` +           // 90°
+         `L${cx - s},${cy + s} ` +       // 135°
+         `L${cx - r},${cy} ` +           // 180°
+         `L${cx - s},${cy - s} ` +       // 225°
+         `L${cx},${cy - r} ` +           // 270°
+         `L${cx + s},${cy - s} Z`;       // 315°
+}
 function calculateScale(graph, width, height) {
     // Calculate the bounding box of the Sankey layout
     const nodes = graph.nodes;
@@ -1063,6 +1078,11 @@ function calculateNodePositions(nodes, kyHeight, scale, height) {
       d.inflowHeight = sankeyHeight;
       d.outflowHeight = sankeyHeight / inflowScaleFactor;
     }
+    // Ensure inflowHeight for no-outflow nodes
+    if (d.logGrantsTotal === 0) {
+      d.inflowHeight = sankeyHeight; // Full height for inflows
+      d.outflowHeight = 0;
+    }
 
     d.x0Original = d.x0;
     d.x1Original = d.x1;
@@ -1079,9 +1099,6 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     currentData = { nodes: [], links: [] };
     currentData.nodes.push(selectedNode);
 
-    // Debug: Check selectedNode data
-    console.log("Selected Node:", selectedNodeId, selectedNode);
-    console.log("Grant Amount (raw):", selectedNode.grant_amt);
 
     // Inflows
     (selectedNode.grantsIn || []).forEach(grant => {
@@ -1191,11 +1208,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     // Calculate node positions before logging or rendering
     calculateNodePositions(graph.nodes, kyHeight, scale, height);
 
-    // Log node details after positions are calculated, including original positions
-    graph.nodes.forEach(d => {
-        console.log("Node:", d.name, "Grant Amount (raw):", d.grant_amt || 0, "x0:", d.x0Original, "x1:", d.x1Original, "y0:", d.y0Original, "y1:", d.y1Original);
-    });
-
+ 
     // Explicitly set y0/y1 for selected node based on inflows/outflows, ensuring y0Out/y1Out are used
     if (selectedNode) {
         const inflowLinks = graph.links.filter(l => l.target.id === selectedNodeId);
@@ -1255,10 +1268,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     nodeElements.each(function(d) {
         const sel = d3.select(this);
         if (d.filer_ein.includes('-others-') || (!d.grants || d.grants.length === 0)) {
-            sel.append("circle")
-                .attr("cx", d => (d.x0 + d.x1) / 2)
-                .attr("cy", d => (d.y0 + d.y1) / 2)
-                .attr("r", Math.min(10,Math.max(2, (d.logGrantAmt)))) // Scale radius, minimum 2 pixels, adjust for transform
+            sel.append("path")
+                .attr("d", generateOctagonPath) // Scale radius, minimum 2 pixels, adjust for transform
                 .attr("fill", d => color(d.id))
                 .attr("stroke", "#000");
         } else {
