@@ -260,22 +260,50 @@ title: Charity graph - multi-root BFS & taxpayer totals
     // side can be 'top', 'bottom', 'left', 'right'
     return edges.filter(edge => {
       if (side === 'top' || side === 'bottom') {
-        // For source node connections
-        if (edge.source.id !== nodeId) return false;
-        const sourceY = edge.source.y - getNodeHeight(edge.source)/2;
-        const targetY = edge.target.y - getNodeHeight(edge.target)/2;
-        return side === 'top' ? 
-          targetY + getNodeHeight(edge.target)/2 < sourceY + getNodeHeight(edge.source)/2 :
-          targetY + getNodeHeight(edge.target)/2 >= sourceY + getNodeHeight(edge.source)/2;
-      } else {
-        // For target node connections
-        if (edge.target.id !== nodeId) return false;
-        const sourceX = edge.source.x - getNodeWidth(edge.source)/2;
-        const targetX = edge.target.x - getNodeWidth(edge.target)/2;
-        return side === 'left' ?
-          sourceX + getNodeWidth(edge.source)/2 >= targetX + getNodeWidth(edge.target)/2 :
-          sourceX + getNodeWidth(edge.source)/2 < targetX + getNodeWidth(edge.target)/2;
+        // For connections from the top or bottom of the node
+        if ((edge.source.id === nodeId && (side === 'top' || side === 'bottom')) ||
+            (edge.target.id === nodeId && (side === 'top' || side === 'bottom'))) {
+          
+          // Determine if this is a source or target connection
+          const isSource = edge.source.id === nodeId;
+          const thisNode = isSource ? edge.source : edge.target;
+          const otherNode = isSource ? edge.target : edge.source;
+          
+          // For top connections, the other node should be above this node
+          if (side === 'top') {
+            return otherNode.y < thisNode.y;
+          } 
+          // For bottom connections, the other node should be below this node
+          else {
+            return otherNode.y > thisNode.y;
+          }
+        }
+        return false;
+      } 
+      else if (side === 'left' || side === 'right') {
+        // For connections from the left or right of the node
+        if ((edge.source.id === nodeId && (side === 'left' || side === 'right')) ||
+            (edge.target.id === nodeId && (side === 'left' || side === 'right'))) {
+          
+          // Determine if this is a source or target connection
+          const isSource = edge.source.id === nodeId;
+          const thisNode = isSource ? edge.source : edge.target;
+          const otherNode = isSource ? edge.target : edge.source;
+          
+          // For left connections, the other node should be to the left of this node
+          if (side === 'left') {
+            return otherNode.x < thisNode.x;
+          } 
+          // For right connections, the other node should be to the right of this node
+          else {
+            return otherNode.x > thisNode.x;
+          }
+        }
+        return false;
       }
+      
+      // Default case should not happen
+      return false;
     });
   }
 
@@ -1296,63 +1324,113 @@ const addendum = `
         links.attr('d', d => {
           if (!d.source || !d.target) return '';
 
+          // Handle self-loops (when source and target are the same node)
+          if (d.source.id === d.target.id) {
+            const nodeWidth = getNodeWidth(d.source);
+            const nodeHeight = getNodeHeight(d.source);
+            const offset = 60; // Distance the loop extends from the node
+            
+            // Create a loop on the right side of the node
+            return `
+              M ${d.source.x + nodeWidth/2},${d.source.y - nodeHeight/4} 
+              C ${d.source.x + nodeWidth/2 + offset},${d.source.y - nodeHeight/4} 
+                ${d.source.x + nodeWidth/2 + offset},${d.source.y + nodeHeight/4} 
+                ${d.source.x + nodeWidth/2},${d.source.y + nodeHeight/4}
+            `;
+          }
+
           // Get all connections for this source/target to calculate spacing
           const topConnections = getConnectionsToSide(edges, d.source.id, 'top')
             .sort((a, b) => a.target.x - b.target.x);
           const bottomConnections = getConnectionsToSide(edges, d.source.id, 'bottom')
             .sort((a, b) => a.target.x - b.target.x);
+          const leftConnections = getConnectionsToSide(edges, d.source.id, 'left')
+            .sort((a, b) => a.target.y - b.target.y);
+          const rightConnections = getConnectionsToSide(edges, d.source.id, 'right')
+            .sort((a, b) => a.target.y - b.target.y);
 
-          // Determine if this should be a top or bottom connection
-          const isTopConnection = d.target.y < d.source.y;
-          const connections = isTopConnection ? topConnections : bottomConnections;
-          const connectionIndex = connections.indexOf(d);
+          // Determine the best side to connect from based on relative positions
+          let sourceSide, targetSide;
+          let sourceConnections, targetConnections;
+          
+          // Calculate angle between nodes to determine optimal connection sides
+          const dx = d.target.x - d.source.x;
+          const dy = d.target.y - d.source.y;
+          const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+          
+          // Determine source side based on angle
+          if (angle > -45 && angle < 45) {
+            // Target is to the right
+            sourceSide = 'right';
+            sourceConnections = rightConnections;
+            targetSide = 'left';
+          } else if (angle >= 45 && angle < 135) {
+            // Target is below
+            sourceSide = 'bottom';
+            sourceConnections = bottomConnections;
+            targetSide = 'top';
+          } else if (angle >= 135 || angle < -135) {
+            // Target is to the left
+            sourceSide = 'left';
+            sourceConnections = leftConnections;
+            targetSide = 'right';
+          } else {
+            // Target is above
+            sourceSide = 'top';
+            sourceConnections = topConnections;
+            targetSide = 'bottom';
+          }
+
+          const connectionIndex = sourceConnections.indexOf(d);
 
           // Get distributed connection points
           const sourcePoint = getSpacedConnectionPoint(
             d.source,
-            connections,
+            sourceConnections,
             connectionIndex,
-            isTopConnection ? 'top' : 'bottom',
+            sourceSide,
             getNodeWidth(d.source)
           );
 
-          const targetPoint = {
-            x: d.target.x,
-            y: d.target.y
-          };
+          // Get the target connection point at the appropriate edge
+          const targetConnectionIndex = getConnectionsToSide(edges, d.target.id, targetSide).indexOf(d);
+          // Use the already declared targetConnections variable instead of redeclaring it
+          targetConnections = getConnectionsToSide(edges, d.target.id, targetSide);
+          
+          const targetPoint = getSpacedConnectionPoint(
+            d.target,
+            targetConnections,
+            Math.max(0, targetConnectionIndex), // Ensure index is at least 0
+            targetSide,
+            getNodeWidth(d.target)
+          );
 
           return generatePath(
             sourcePoint, 
             targetPoint, 
-            isTopConnection,
-            connectionIndex,    // Pass the connection index
-            connections.length  // Pass total number of connections
+            sourceSide === 'top' || targetSide === 'bottom',
+            connectionIndex,
+            sourceConnections.length
           );
         });
 
         // Update the arrow paths similarly
-        arrowPaths.attr('d', d => {
-          // Use the same connection point calculation as above
-          const isTopConnection = d.target.y < d.source.y;
-          const connections = isTopConnection ? 
-            getConnectionsToSide(edges, d.source.id, 'top') :
-            getConnectionsToSide(edges, d.source.id, 'bottom');
-          const connectionIndex = connections.indexOf(d);
-
-          const sourcePoint = getSpacedConnectionPoint(
-            d.source,
-            connections,
-            connectionIndex,
-            isTopConnection ? 'top' : 'bottom',
-            getNodeWidth(d.source)
-          );
-
-          const targetPoint = {
-            x: d.target.x,
-            y: d.target.y
-          };
-
-          // Get the path for this connection
+        arrowPaths.attr('d', function(d) {
+          if (d.source.id === d.target.id) {
+            // For self-loops, create a shorter arrow path near the end of the loop
+            const nodeWidth = getNodeWidth(d.source);
+            const nodeHeight = getNodeHeight(d.source);
+            const offset = 50; // Slightly less than the loop offset
+            
+            // Create a small directed segment for the arrow near the return point
+            return `
+              M ${d.source.x + nodeWidth/2 + offset},${d.source.y + nodeHeight/8}
+              L ${d.source.x + nodeWidth/2 + offset - 5},${d.source.y + nodeHeight/5}
+            `;
+          }
+          
+          // Use the same logic as above to get the path for this connection...
+          // Instead of duplicating all the code, get the path from the link
           const pathNode = d3.select(this.parentNode).select('.link').node();
           if (!pathNode) return '';
           
@@ -1373,6 +1451,15 @@ const addendum = `
         // In the tick function, after updating the paths, add:
         // Update link labels with background
         linkLabels.attr('transform', function(d) {
+          if (d.source.id === d.target.id) {
+            // Handle self-loop labels
+            const nodeWidth = getNodeWidth(d.source);
+            const nodeHeight = getNodeHeight(d.source);
+            
+            // Position the label to the right of the node, centered on the loop
+            return `translate(${d.source.x + nodeWidth/2 + 80}, ${d.source.y})`;
+          }
+          
           // Find the corresponding link path using the data, not DOM selection
           const pathNode = linkElements
             .filter(l => l.source === d.source && l.target === d.target)
@@ -1387,7 +1474,7 @@ const addendum = `
           
           // Remove vertical offset to center on line
           const mx = midPoint.x;
-          const my = midPoint.y;  // Removed the -15 offset
+          const my = midPoint.y;
           
           // Get the text width to size the background
           const text = d3.select(this).select('text');
@@ -1397,7 +1484,7 @@ const addendum = `
           // Update background size and position to center vertically
           d3.select(this).select('.label-bg')
             .attr('x', -textWidth/2 - 8)
-            .attr('y', -12)  // Changed from -22 to -12 to center vertically
+            .attr('y', -12)
             .attr('width', textWidth + 16)
             .attr('height', 24);
           
@@ -2266,35 +2353,42 @@ labelloc="t";\n`;
     }
   }
 
-  // Update the path generation with better routing and minimal curves
-  function generatePath(sourcePoint, targetPoint, isTopConnection, connectionIndex = 0, totalConnections = 1) {
-    const nodeLength = 60;      // Base length for segments
-    const radius = 40;          // Corner radius
+  // Update the generatePath function to handle all sides
+  function generatePath(sourcePoint, targetPoint, isVertical, connectionIndex = 0, totalConnections = 1) {
+    // For very close nodes, create a more direct line
+    const dx = targetPoint.x - sourcePoint.x;
+    const dy = targetPoint.y - sourcePoint.y;
+    const distance = Math.sqrt(dx*dx + dy*dy);
     
-    // Calculate distances
-    const verticalDistance = targetPoint.y - sourcePoint.y;
-    const horizontalDistance = targetPoint.x - sourcePoint.x;
-    const shouldRouteUp = verticalDistance < 0;
+    // Set radius and control point distance based on path length
+    const radius = Math.min(40, distance / 4);
+    const controlDistance = Math.min(Math.abs(dx/2), Math.abs(dy/2), 80);
     
     // Calculate a proportional midpoint with variation based on connection index
-    const baseSpacing = Math.min(Math.abs(horizontalDistance/6), 100);
-    // Add variation - middle paths go further out than edge paths
     const variation = totalConnections > 1 ? 
-      (connectionIndex - (totalConnections-1)/2) * 40 : 0;
+      (connectionIndex - (totalConnections-1)/2) * 30 : 0;
     
-    const midY = shouldRouteUp ?
-      Math.min(sourcePoint.y, targetPoint.y) - baseSpacing + variation :
-      Math.max(sourcePoint.y, targetPoint.y) + baseSpacing + variation;
-    
-    // Generate path with varied heights
-    return `
-      M ${sourcePoint.x},${sourcePoint.y}
-      L ${sourcePoint.x},${shouldRouteUp ? midY + radius : midY - radius}
-      Q ${sourcePoint.x},${midY} ${sourcePoint.x + Math.sign(horizontalDistance) * radius},${midY}
-      L ${targetPoint.x - Math.sign(horizontalDistance) * radius},${midY}
-      Q ${targetPoint.x},${midY} ${targetPoint.x},${shouldRouteUp ? midY + radius : midY - radius}
-      L ${targetPoint.x},${targetPoint.y}
-    `.trim();
+    if (isVertical) {
+      // Vertical path (top to bottom or bottom to top)
+      const midX = sourcePoint.x + dx/2 + variation;
+      
+      return `
+        M ${sourcePoint.x},${sourcePoint.y}
+        C ${sourcePoint.x},${sourcePoint.y + Math.sign(dy) * controlDistance}
+          ${midX},${targetPoint.y - Math.sign(dy) * controlDistance}
+          ${targetPoint.x},${targetPoint.y}
+      `.trim();
+    } else {
+      // Horizontal path (left to right or right to left)
+      const midY = sourcePoint.y + dy/2 + variation;
+      
+      return `
+        M ${sourcePoint.x},${sourcePoint.y}
+        C ${sourcePoint.x + Math.sign(dx) * controlDistance},${sourcePoint.y}
+          ${targetPoint.x - Math.sign(dx) * controlDistance},${midY}
+          ${targetPoint.x},${targetPoint.y}
+      `.trim();
+    }
   }
 
   // Update the connection point spacing logic to spread points along node height
@@ -2303,8 +2397,15 @@ labelloc="t";\n`;
     const nodeHeight = getNodeHeight(node);
     const padding = 40; // Padding from edges
     
-    // Calculate usable width for connection points
+    // If no connections, use the center of the side
+    if (connections.length === 0) {
+      index = 0;
+      connections = [null]; // Create a dummy array with one element
+    }
+    
+    // Calculate usable dimensions for connection points
     const usableWidth = nodeWidth - (padding * 2);
+    const usableHeight = nodeHeight - (padding * 2);
     
     if (side === 'top' || side === 'bottom') {
       // Spread points horizontally along top/bottom
@@ -2317,10 +2418,8 @@ labelloc="t";\n`;
       };
     } else {
       // For left/right sides, spread vertically
-      const verticalPadding = 20;
-      const usableHeight = nodeHeight - (verticalPadding * 2);
       const verticalSpacing = usableHeight / (connections.length + 1);
-      const y = node.y - (nodeHeight/2) + verticalPadding + ((index + 1) * verticalSpacing);
+      const y = node.y - (nodeHeight/2) + padding + ((index + 1) * verticalSpacing);
       
       return {
         x: node.x + (side === 'left' ? -nodeWidth/2 : nodeWidth/2),
