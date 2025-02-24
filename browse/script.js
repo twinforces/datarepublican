@@ -469,7 +469,6 @@ async function loadData() {
                     if (!ein) return;
                     let rAmt = parseInt((row['receipt_amt'] || '0').trim(), 10);
                     if (isNaN(rAmt)) rAmt = 0;
-                    // Define charity with logGrantAmt as a getter
                     charities[ein] = applyCharityProps({
                         id: ein,
                         filer_ein: ein,
@@ -482,11 +481,10 @@ async function loadData() {
                         grant_in_index: 0,
                         grant_out_index: 0,
                         grant_count: 0,
-                        grants: [], // Array to store grants for this filer
+                        grants: [],
                         grantsIn: [],
                         loopbacks: []
                     });
-                    // Define logGrantAmt as a getter
                 });
                 totalCharitiesCount = Object.keys(charities).length;
                 resolve();
@@ -500,64 +498,63 @@ async function loadData() {
     const grantsCsvString = await grantsZip.file('grants_truncated.csv').async('string');
 
     await new Promise((resolve, reject) => {
-       const gov_ein="001";
-       // government is the root, build a virtual charity for it
-       charities[gov_ein] = applyCharityProps({
-         id: gov_ein,
-         filer_ein:gov_ein,
-         name: "US Government",
-         xml_name: "The Beast",
-         govt_amt: 0,
-         contib_amt: 4.6e12,
-         grant_amt: 0,
-         grant_in_index: 0,
-         grant_out_index: 0,
-         grant_count: 0,
-         grants: [], // Array to store grants for this filer
-         grantsIn: []
-       });
-       // Define logGrantAmt as a getter for the government
-       let govGrants=0;
-       let govTotal=0;
-       let localEdges = {};
-       Object.values(charities).forEach( c => { 
-           if (c.govt_amt > 0 ) {
-                    const filer = gov_ein
-                    const grantee = c.id;
-                    let amt = c.govt_amt;
-                    if (isNaN(amt)) amt = 0;
-                    govGrants++;
-                    const key = filer + '~' + grantee;
-                    if (!localEdges[key]) {
-                        localEdges[key] = applyGrantProps({ 
-                            id: `${filer}~${grantee}`,
-                            rawAmt: 0, 
-                            relOutAmt: 0, 
-                            relInAmt: 0, 
-                            filer_ein: filer, 
-                            grantee_ein: grantee, 
-                            loopback: 0,
-                            filer: charities[gov_ein], 
-                            grantee: charities[grantee] 
-                        });
-                        // Define logRawAmt as a getter
-                     logPropBuilderRawAmt(localEdges[key]);
-                    }
-                    localEdges[key].rawAmt += amt;
-                    charities[filer].grant_amt += amt;
-                    govTotal += amt;
-                    charities[filer].grant_count += 1;
-                    charities[filer].grant_out_index += 1;
-                    charities[grantee].grant_in_index += 1;
-                    // Store grant in filer's grants array
-                    charities[filer].grants.push(localEdges[key]);
-                    charities[grantee].grantsIn.push(localEdges[key])
+        const gov_ein = "001";
+        charities[gov_ein] = applyCharityProps({
+            id: gov_ein,
+            filer_ein: gov_ein,
+            name: "US Government",
+            xml_name: "The Beast",
+            govt_amt: 0,
+            contrib_amt: 4.6e12,
+            grant_amt: 0,
+            grant_in_index: 0,
+            grant_out_index: 0,
+            grant_count: 0,
+            grants: [],
+            grantsIn: []
+        });
+
+        let govGrants = 0;
+        let govTotal = 0;
+        let localEdges = {};
+        Object.values(charities).forEach(c => {
+            if (c.govt_amt > 0) {
+                const filer = gov_ein;
+                const grantee = c.id;
+                let amt = c.govt_amt;
+                if (isNaN(amt)) amt = 0;
+                govGrants++;
+                const key = filer + '~' + grantee;
+                if (!localEdges[key]) {
+                    localEdges[key] = applyGrantProps({
+                        id: `${filer}~${grantee}`,
+                        rawAmt: 0,
+                        relOutAmt: 0,
+                        relInAmt: 0,
+                        filer_ein: filer,
+                        grantee_ein: grantee,
+                        loopback: 0,
+                        filer: charities[gov_ein],
+                        grantee: charities[grantee]
+                    });
+                    logPropBuilderRawAmt(localEdges[key]);
                 }
-           });
-       charities[gov_ein].grant_amt = govTotal;
-       console.log(govGrants," Implied Government Grants Generated");
-       console.log(formatNumber(govTotal)," Gov Total");
-       Papa.parse(grantsCsvString, {
+                localEdges[key].rawAmt += amt;
+                charities[filer].grant_amt += amt;
+                govTotal += amt;
+                charities[filer].grant_count += 1;
+                charities[filer].grant_out_index += 1;
+                charities[grantee].grant_in_index += 1;
+                charities[filer].grants.push(localEdges[key]);
+                charities[grantee].grantsIn.push(localEdges[key]);
+            }
+        });
+        charities[gov_ein].grant_amt = govTotal;
+        console.log(`${govGrants} Implied Government Grants Generated`);
+        console.log(`Gov Total: ${formatNumber(govTotal)}`);
+        console.log(`USG grants count: ${charities[gov_ein].grants.length}, sample:`, charities[gov_ein].grants.slice(0, 5).map(g => ({ target: g.grantee_ein, rawAmt: g.rawAmt })));
+
+        Papa.parse(grantsCsvString, {
             header: true,
             skipEmptyLines: true,
             complete: results => {
@@ -568,33 +565,30 @@ async function loadData() {
                     let amt = parseInt((row['grant_amt'] || '0').trim(), 10);
                     if (isNaN(amt)) amt = 0;
                     count++;
-                    if (charities[filer] && charities[grantee] && (filer != grantee)) { // ignore self grants
+                    if (charities[filer] && charities[grantee] && (filer !== grantee)) {
                         const key = filer + '~' + grantee;
                         if (!localEdges[key]) {
-                            localEdges[key] = applyGrantProps({ 
+                            localEdges[key] = applyGrantProps({
                                 id: `${filer}~${grantee}`,
-                                circular: false, 
-                                rawAmt: 0, 
-                                relOutAmt: 0, 
-                                relInAmt: 0, 
-                                filer_ein: filer, 
-                                grantee_ein: grantee, 
-                                filer: charities[filer], 
-                                grantee: charities[grantee] 
+                                circular: false,
+                                rawAmt: 0,
+                                relOutAmt: 0,
+                                relInAmt: 0,
+                                filer_ein: filer,
+                                grantee_ein: grantee,
+                                filer: charities[filer],
+                                grantee: charities[grantee]
                             });
-                            // Define logRawAmt as a getter
                         }
                         localEdges[key].rawAmt += amt;
                         charities[filer].grant_amt += amt;
                         charities[filer].grant_count += 1;
                         charities[filer].grant_out_index += 1;
                         charities[grantee].grant_in_index += 1;
-                        // Store grant in filer's grants array
                         charities[filer].grants.push(localEdges[key]);
-                        charities[grantee].grantsIn.push(localEdges[key])
-                    } else {
-                        if (filer != grantee)
-                            console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
+                        charities[grantee].grantsIn.push(localEdges[key]);
+                    } else if (filer !== grantee) {
+                        console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
                     }
                 });
                 grants = localEdges;
@@ -604,6 +598,7 @@ async function loadData() {
             error: err => reject(err)
         });
     });
+
     badGrants = findCircularGrants();
     
     badCharsCounter = new Set();
@@ -611,21 +606,17 @@ async function loadData() {
         badCharsCounter.add(g.grantee.id);
         g.filer.loopbacks.push(g);
         g.grantee.loopbacks.push(g);
-        g.grantee.loopback = g.grantee.grants.filter(g=> g.isCycle).reduce((total,g) => total+g.rawAmt,0);
+        g.grantee.loopback = g.grantee.grants.filter(g => g.isCycle).reduce((total, g) => total + g.rawAmt, 0);
         g.grantee.grants = g.grantee.grants.filter(g => !g.isCycle);
         g.grantee.grant_amt = g.grantee.grants.reduce((total, grant) => total + grant.rawAmt, 0);
-        
-        //console.log(`removed circular grant ${g.id} from ${g.filer.name}->${g.grantee.name}`);
     });
-    // No need to set logGrantAmt here, as it's now a getter for all charities
+
     console.log(totalCharitiesCount, "501c3s loaded");
     console.log(totalGrantsCount, "grants loaded");
 
-    // Initialize Sankey maps after data load
     nodeMap = charities;
     linkMap = grants;
 }
-
 function findCircularGrants() {
     const visited = new Set();       // Fully processed charity IDs
     const onStack = new Set();       // Charity IDs in the current DFS path
@@ -735,63 +726,59 @@ function generateGraph() {
         .nodePadding(80)
         .extent([[0, 0], [width - 200, height - 100]]);
 
+    // Reset state and ensure initial expansion
     currentData = { nodes: [], links: [] };
-    expandedOutflows.clear(); // Reset expansion state
-
-    // Start with "US Government" as the initial focus
+    expandedOutflows.clear();
+    expandNode("001", true); // Explicitly populate initial data
     renderFocusedSankey(g, sankey, svg, width, height, "001");
 
-    document.getElementById('zoomIn').onclick = () => {
-        svg.transition().duration(300).call(zoom.scaleBy, 1.3);
-    };
-
-    document.getElementById('zoomOut').onclick = () => {
-        svg.transition().duration(300).call(zoom.scaleBy, 0.7);
-    };
-
+    document.getElementById('zoomIn').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+    document.getElementById('zoomOut').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 0.7);
     document.getElementById('zoomFit').onclick = () => {
         const bounds = g.node().getBBox();
+        if (!isFinite(bounds.width) || bounds.width <= 0 || !isFinite(bounds.height) || bounds.height <= 0) return;
         const dx = bounds.x;
         const dy = bounds.y;
         const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
         svg.transition()
             .duration(750)
-            .call(zoom.transform,
-                d3.zoomIdentity
-                    .translate(width/2, height/2)
-                    .scale(scale)
-                    .translate(-dx - bounds.width/2, -dy - bounds.height/2));
+            .call(zoom.transform, d3.zoomIdentity
+                .translate(width/2, height/2)
+                .scale(scale)
+                .translate(-dx - bounds.width/2, -dy - bounds.height/2));
     };
 
     setTimeout(() => {
         const bounds = g.node().getBBox();
+        if (!isFinite(bounds.width) || bounds.width <= 0 || !isFinite(bounds.height) || bounds.height <= 0) {
+            console.error("Invalid bounds for zoom:", bounds);
+            return;
+        }
         const dx = bounds.x;
         const dy = bounds.y;
         const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
         svg.transition()
             .duration(750)
-            .call(zoom.transform,
-                d3.zoomIdentity
-                    .translate(width/2, height/2)
-                    .scale(scale)
-                    .translate(-dx - bounds.width/2, -dy - bounds.height/2));
+            .call(zoom.transform, d3.zoomIdentity
+                .translate(width/2, height/2)
+                .scale(scale)
+                .translate(-dx - bounds.width/2, -dy - bounds.height/2));
     }, 1000);
 
     $('#loading').hide();
-    console.log('Graph generation complete');
 }
 
 function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     const node = charities[nodeId];
     if (!node) {
+        console.error(`No charity for ${nodeId}`);
         currentData.nodes.push(applyCharityProps({ 
             id: nodeId, 
             filer_ein: nodeId, 
             name: `Unknown (${nodeId})`, 
             grant_amt: 0,
-            grants: [], 
+            grants: [],
             grantsIn: []
-            
         }));
         if (!nodeMap.hasOwnProperty(nodeId)) nodeMap[nodeId] = currentData.nodes[currentData.nodes.length - 1];
         return;
@@ -801,31 +788,59 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         currentData.nodes.push(node);
     }
 
-    const grantsForNode = node.grants || [];
-    const allLinks = node.grants.sort((a, b) => b.rawValue - a.rawValue);
+    console.log(`Expanding ${nodeId}: grants=${node.grants.length}, sample=`, node.grants.slice(0, 5).map(g => ({ target: g.grantee_ein, rawAmt: g.rawAmt })));
 
-    let displayedLinks = expandedOutflows.get(nodeId) || [];
-    const remainingLinks = allLinks.filter(l => 
-        !displayedLinks.some(d => d.target === l.target)
-    );
-
-    const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
-    const othersLinks = remainingLinks.slice(newLinks.length);
-
-    newLinks.forEach(l => {
-        if (!currentData.nodes.some(n => n.filer_ein === l.target)) {
-            currentData.nodes.push(applyCharityProps(charities[l.target]));
+    (node.grantsIn || []).forEach(grant => {
+        if (!currentData.nodes.some(n => n.filer_ein === grant.filer_ein)) {
+            currentData.nodes.push(grant.filer);
         }
-        if (!currentData.links.some(link => link.source === l.source && link.target === l.target)) {
-            const l=applyGrantProps({ 
-                source: l.source, 
-                target: l.target, 
-                value: l.value, 
-                rawValue: l.rawValue,
-                filer: l.filer,
-                grantee: l.grantee
+        const value = grant.logRawAmt || calculateLogValue(grant.rawAmt || 0);
+        if (!isFinite(value)) {
+            console.warn(`Invalid inflow value for ${grant.filer_ein} → ${nodeId}: rawAmt=${grant.rawAmt}`);
+            return;
+        }
+        if (!currentData.links.some(link => link.source.filer_ein === grant.filer_ein && link.target.filer_ein === nodeId)) {
+            currentData.links.push({
+                source: grant.filer,
+                target: node,
+                value: value,
+                rawValue: grant.rawAmt || 0,
+                filer: grant.filer,
+                grantee: node
             });
-           currentData.links.push(l);
+        }
+    });
+
+    const totalOutflow = (node.grants || []).reduce((sum, g) => sum + (g.rawAmt || 0), 0);
+    const allLinks = (node.grants || []).map(grant => {
+        const value = grant.logRawAmt || calculateLogValue(grant.rawAmt || 0);
+        return {
+            source: grant.filer,
+            target: grant.grantee,
+            filer: grant.filer,
+            grantee: grant.grantee,
+            value: isFinite(value) ? value : 1,
+            rawValue: grant.rawAmt || 0
+        };
+    }).sort((a, b) => b.rawValue - a.rawValue);
+
+    console.log(`allLinks for ${nodeId}: totalOutflow=${formatNumber(totalOutflow)}, sample=`, allLinks.slice(0, 5).map(l => ({ target: l.target.filer_ein, rawValue: l.rawValue })));
+
+    let displayedLinks = [];
+    const initialLinks = allLinks.slice(0, 5);
+    const remainingLinks = allLinks.slice(5);
+
+    initialLinks.forEach(l => {
+        if (!currentData.nodes.some(n => n.filer_ein === l.target.filer_ein)) {
+            const targetNode = charities[l.target.filer_ein];
+            if (!targetNode) {
+                console.warn(`Missing target node for ${l.target.filer_ein}`);
+                return;
+            }
+            currentData.nodes.push(targetNode);
+        }
+        if (!currentData.links.some(link => link.source.filer_ein === l.source.filer_ein && link.target.filer_ein === l.target.filer_ein)) {
+            currentData.links.push(l);
         }
         displayedLinks.push(l);
     });
@@ -833,48 +848,27 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
     expandedOutflows.set(nodeId, displayedLinks);
 
     const othersId = `${nodeId}-others-${generateUniqueId()}`;
-    if (othersLinks.length > 0 && !isInitial) {
-        const othersValue = othersLinks.reduce((sum, l) => sum + l.rawValue, 0);
-        const logOthersValue = calculateLogRawAmt(othersValue); // Use function
-        const existingOthers = currentData.nodes.find(n => n.filer_ein === othersId);
-        
-        if (!existingOthers) {
-            const c=applyCharityProps({ 
-                id: othersId,
-                filer_ein: othersId, 
-                name: "...",
-                grant_amt: othersValue,
-                parent_ein: nodeId,
-                grants: [], 
-                grantsIn: []
-            });
-
-           currentData.nodes.push(c);
-           
-        } else {
-        existingOthers.grant_amt = othersValue;
-           applyCharityProps(existingOthers);
-        }
-
-        const othersLink = currentData.links.find(l => l.source === nodeId && l.target === othersId);
-        if (!othersLink) {
-            let c=applyCharityProps({ 
-                id: othersId,
-                filer_ein: othersId, 
-                name: "...",
-                grant_amt: othersValue,
-                parent_ein: nodeId,
-                grants: [], 
-                grantsIn: []
-            });
-            currentData.links.push(c);
-        } else {
-            logPropBuilderValue(othersLink);
-            othersLink.rawValue = othersValue;
-        }
-    } else {
-        currentData.nodes = currentData.nodes.filter(n => !n.filer_ein.startsWith(`${nodeId}-others-`));
-        currentData.links = currentData.links.filter(l => !l.target.startsWith(`${nodeId}-others-`));
+    if (remainingLinks.length > 0) {
+        const othersValue = remainingLinks.reduce((sum, l) => sum + l.rawValue, 0);
+        const c = applyCharityProps({
+            id: othersId,
+            filer_ein: othersId,
+            name: "...",
+            grant_amt: othersValue,
+            parent_ein: nodeId,
+            grants: [],
+            grantsIn: [],
+            isOther: true // Explicitly mark as "OTHER"
+        });
+        currentData.nodes.push(c);
+        currentData.links.push(applyGrantProps({
+            source: node,
+            target: c,
+            rawValue: othersValue,
+            value: calculateLogValue(othersValue),
+            filer: node,
+            grantee: null
+        }));
     }
 
     if (addToActiveEINs && !activeEINs.includes(nodeId) && nodeMap.hasOwnProperty(nodeId)) {
@@ -882,46 +876,92 @@ function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
         renderActiveEINs();
         updateQueryParams();
     }
+
+    console.log(`Post-expandNode for ${nodeId}: nodes=${currentData.nodes.length}, links=${currentData.links.length}, displayed=${formatNumber(displayedLinks.reduce((sum, l) => sum + l.rawValue, 0))}, remaining=${formatNumber(remainingLinks.reduce((sum, l) => sum + l.rawValue, 0))}`);
 }
-
 function expandOthers(sourceId) {
-    const node = charities[sourceId];
-    if (!node) return;
+    let node = charities[sourceId];
+    let parentId = sourceId;
+    if (!node && sourceId.includes('-others-')) {
+        parentId = sourceId.split('-others-')[0];
+        node = charities[parentId];
+    }
+    if (!node) {
+        console.error(`No node for ${sourceId}`);
+        return;
+    }
 
-    const grantsForNode = node.grants || [];
-    const allLinks = grantsForNode.map(grant => {
-    
-        const g= {
-                source: grant.filer_ein,
-                target: grant.grantee_ein,
-                filer: grant.filer,
-                grantee: grant.grantee,
-                value: grant.logRawAmt , // Use function
-                rawValue: grant.rawAmt
-        };
-        logPropBuilderValue(g);
-        return g;        
-    
-    }).sort((a, b) => b.rawValue - a.rawValue);
+    const allLinks = (node.grants || []).map(grant => ({
+        source: grant.filer,
+        target: grant.grantee,
+        filer: grant.filer,
+        grantee: grant.grantee,
+        value: grant.logRawAmt || calculateLogValue(grant.rawAmt || 0),
+        rawValue: grant.rawAmt || 0
+    })).sort((a, b) => b.rawValue - a.rawValue);
 
-    let displayedLinks = expandedOutflows.get(sourceId) || [];
-    const remainingLinks = allLinks.filter(l => 
-        !displayedLinks.some(d => d.target === l.target)
-    );
+    let displayedLinks = expandedOutflows.get(parentId) || [];
+    const remainingLinks = allLinks.filter(l => !displayedLinks.some(d => d.target.filer_ein === l.target.filer_ein));
+    const newLinks = remainingLinks.slice(0, 5);
+    const newRemainingLinks = remainingLinks.slice(5);
 
-    const newLinks = remainingLinks.slice(0, TOP_N_OUTFLOWS);
-    newLinks.forEach(l => displayedLinks.push(l));
-    expandedOutflows.set(sourceId, displayedLinks);
+    newLinks.forEach(link => {
+        if (!link.target || !link.target.filer_ein) {
+            console.warn(`Invalid link target: ${JSON.stringify({ source: link.source.filer_ein, target: link.target })}`);
+            return;
+        }
+        if (!currentData.nodes.some(n => n.filer_ein === link.target.filer_ein)) {
+            const targetNode = charities[link.target.filer_ein];
+            if (!targetNode) {
+                console.warn(`Missing charity for target EIN: ${link.target.filer_ein}`);
+                return;
+            }
+            currentData.nodes.push(targetNode);
+        }
+        if (!currentData.links.some(existing => existing.source.filer_ein === link.source.filer_ein && existing.target.filer_ein === link.target.filer_ein)) {
+            currentData.links.push(link);
+        }
+        displayedLinks.push(link);
+    });
 
-    const container = document.getElementById('graph-container');
-    const width = container.offsetWidth;
-    const height = container.offsetHeight || window.innerHeight * 0.7;
+    currentData.nodes = currentData.nodes.filter(n => !n.isOther || n.parent_ein !== parentId);
+    currentData.links = currentData.links.filter(link => !link.target.isOther || link.source.filer_ein !== parentId);
 
+    const othersId = `${parentId}-others-${generateUniqueId()}`;
+    if (newRemainingLinks.length > 0) {
+        const othersValue = newRemainingLinks.reduce((sum, l) => sum + l.rawValue, 0);
+        const c = applyCharityProps({
+            id: othersId,
+            filer_ein: othersId,
+            name: "...",
+            grant_amt: othersValue,
+            parent_ein: parentId,
+            grants: [],
+            grantsIn: [],
+            isOther: true
+        });
+        currentData.nodes.push(c);
+        currentData.links.push(applyGrantProps({
+            source: node,
+            target: c,
+            rawValue: othersValue,
+            value: calculateLogValue(othersValue),
+            filer: node,
+            grantee: null
+        }));
+    }
+
+    expandedOutflows.set(parentId, displayedLinks);
+
+    const width = document.getElementById('graph-container').offsetWidth;
+    const height = document.getElementById('graph-container').offsetHeight || window.innerHeight * 0.7;
     renderFocusedSankey(svg.select('g'), d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
         .nodeWidth(NODE_WIDTH)
-        .nodeWidth(NODE_PADDING)
-        .extent([[0, 0], [width, height]]), svg, width, height, sourceId);
+        .nodePadding(NODE_PADDING)
+        .extent([[0, 0], [width, height]]), svg, width, height, parentId);
+
+    console.log(`Post-expandOthers for ${parentId}: nodes=${currentData.nodes.length}, links=${currentData.links.length}, displayed=${formatNumber(displayedLinks.reduce((sum, l) => sum + l.rawValue, 0))}`);
 }
 
 function handleSearchClick(e) {
@@ -1004,21 +1044,22 @@ function generateTrapezoidPath(d) {
 
 }
 function generateOctagonPath(d) {
- const cx = (d.x0 + d.x1) / 2;
-  const cy = (d.y0 + d.y1) / 2;
-  const radius = d.inflowHeight / 2;
-  const r = radius;
-  const s = radius * Math.SQRT2 / 2; // ≈ 0.707 * r
+    const radius = d.inflowHeight / 2 || 10;
+    const cx = d.x1; // Align center with path end
+    const cy = (d.y0 + d.y1) / 2;
+    const r = radius;
+    const s = radius * Math.SQRT2 / 2;
 
-  return `M${cx + r},${cy} ` +           // 0°
-         `L${cx + s},${cy + s} ` +       // 45°
-         `L${cx},${cy + r} ` +           // 90°
-         `L${cx - s},${cy + s} ` +       // 135°
-         `L${cx - r},${cy} ` +           // 180°
-         `L${cx - s},${cy - s} ` +       // 225°
-         `L${cx},${cy - r} ` +           // 270°
-         `L${cx + s},${cy - s} Z`;       // 315°
+    return `M${cx + r},${cy} ` +
+           `L${cx + s},${cy + s} ` +
+           `L${cx},${cy + r} ` +
+           `L${cx - s},${cy + s} ` +
+           `L${cx - r},${cy} ` +
+           `L${cx - s},${cy - s} ` +
+           `L${cx},${cy - r} ` +
+           `L${cx + s},${cy - s} Z`;
 }
+
 function calculateScale(graph, width, height) {
      const nodes = graph.nodes;
 
