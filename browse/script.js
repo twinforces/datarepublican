@@ -1020,15 +1020,13 @@ function generateOctagonPath(d) {
          `L${cx + s},${cy - s} Z`;       // 315°
 }
 function calculateScale(graph, width, height) {
-    // Calculate the bounding box of the Sankey layout
-    const nodes = graph.nodes;
-    const links = graph.links;
+     const nodes = graph.nodes;
 
-    if (!nodes.length || !links.length) {
+    if (!nodes.length) {
         return 1; // Default scale if no data
     }
 
-    // Find the min and max x and y coordinates of nodes and links
+    // Find min and max x and y from node coordinates
     let minX = Infinity, maxX = -Infinity;
     let minY = Infinity, maxY = -Infinity;
 
@@ -1039,27 +1037,14 @@ function calculateScale(graph, width, height) {
         maxY = Math.max(maxY, node.y1);
     });
 
-    links.forEach(link => {
-        const path = d3.sankeyLinkHorizontal()(link);
-        const points = path.match(/[ML][\d.]+,[\d.]+/g).map(p => p.slice(1).split(',').map(Number));
-        points.forEach(([x, y]) => {
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-        });
-    });
-
-    // Calculate the layout dimensions, ensuring non-zero values
+    // Calculate layout dimensions, ensure non-zero
     const layoutWidth = Math.max(maxX - minX, 1);
     const layoutHeight = Math.max(maxY - minY, 1);
 
-    // Calculate scale to fit within SVG while maintaining aspect ratio, no cap at 1
+    // Scale to fit SVG, maintaining aspect ratio
     const scaleX = width / layoutWidth;
     const scaleY = height / layoutHeight;
-    const scale = Math.min(scaleX, scaleY); // Use the smaller scale to fit, no upper limit
-
-    return scale;
+    return Math.min(scaleX, scaleY); // No cap at 1, fits to smaller dimension
 }
 
 function calculateNodePositions(nodes, kyHeight, scale, height) {
