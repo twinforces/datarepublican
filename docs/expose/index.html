@@ -2845,7 +2845,7 @@ labelloc="t";\n`;
     }
   }
 
-  // Replace the existing generatePath function with this orthogonal path generator
+  // Update the orthogonal path generator to ensure better connections
   function generateOrthogonalPath(sourcePoint, targetPoint, sourceSide, targetSide, connectionIndex = 0, totalConnections = 1) {
     // Calculate path parameters
     const dx = targetPoint.x - sourcePoint.x;
@@ -2858,39 +2858,65 @@ labelloc="t";\n`;
     // Create points for an orthogonal path
     let path = `M ${sourcePoint.x},${sourcePoint.y}`;
     
+    // Check if points are very close (could cause rendering issues)
+    const closeThreshold = 10; // pixels
+    const isClose = Math.abs(dx) < closeThreshold || Math.abs(dy) < closeThreshold;
+    
     // Different path logic based on which sides we're connecting
     if ((sourceSide === 'right' && targetSide === 'left') || 
         (sourceSide === 'left' && targetSide === 'right')) {
       // Horizontal connection (left to right or right to left)
-      const midX = sourcePoint.x + dx/2;
-      path += ` L ${midX},${sourcePoint.y}`;
-      path += ` L ${midX},${targetPoint.y + variation}`;
-      path += ` L ${targetPoint.x},${targetPoint.y + variation}`;
+      
+      // Check if the target is directly aligned with the source
+      if (Math.abs(sourcePoint.y - targetPoint.y) < closeThreshold) {
+        // Direct horizontal connection
+        path += ` L ${targetPoint.x},${targetPoint.y}`;
+      } else {
+        const midX = sourcePoint.x + dx/2;
+        path += ` L ${midX},${sourcePoint.y}`;
+        path += ` L ${midX},${targetPoint.y}`;
+        path += ` L ${targetPoint.x},${targetPoint.y}`;
+      }
     } 
     else if ((sourceSide === 'top' && targetSide === 'bottom') || 
              (sourceSide === 'bottom' && targetSide === 'top')) {
       // Vertical connection (top to bottom or bottom to top)
-      const midY = sourcePoint.y + dy/2;
-      path += ` L ${sourcePoint.x},${midY}`;
-      path += ` L ${targetPoint.x + variation},${midY}`;
-      path += ` L ${targetPoint.x + variation},${targetPoint.y}`;
-    }
-    else {
-      // Mixed sides (e.g., right to top, left to bottom, etc.)
-      // Use a two-segment path with a corner
-      const midX = sourcePoint.x + dx * 0.6;
-      const midY = sourcePoint.y + dy * 0.6;
       
-      if (sourceSide === 'right' || sourceSide === 'left') {
-        // First move horizontally, then vertically
-        path += ` L ${midX},${sourcePoint.y}`;
-        path += ` L ${midX},${targetPoint.y}`;
+      // Check if the target is directly aligned with the source
+      if (Math.abs(sourcePoint.x - targetPoint.x) < closeThreshold) {
+        // Direct vertical connection
         path += ` L ${targetPoint.x},${targetPoint.y}`;
       } else {
-        // First move vertically, then horizontally
+        const midY = sourcePoint.y + dy/2;
         path += ` L ${sourcePoint.x},${midY}`;
         path += ` L ${targetPoint.x},${midY}`;
         path += ` L ${targetPoint.x},${targetPoint.y}`;
+      }
+    }
+    else {
+      // Mixed sides (e.g., right to top, left to bottom, etc.)
+      // Use a three-segment path for better connections
+      
+      // Determine the extension distances
+      const extensionX = Math.min(Math.abs(dx) * 0.3, 60);
+      const extensionY = Math.min(Math.abs(dy) * 0.3, 60);
+      
+      if (sourceSide === 'right' || sourceSide === 'left') {
+        // First horizontal, then vertical, then horizontal
+        const sign = sourceSide === 'right' ? 1 : -1;
+        const midX1 = sourcePoint.x + (sign * extensionX);
+        
+        path += ` L ${midX1},${sourcePoint.y}`; // First horizontal segment
+        path += ` L ${midX1},${targetPoint.y}`; // Vertical segment
+        path += ` L ${targetPoint.x},${targetPoint.y}`; // Final horizontal to target
+      } else {
+        // First vertical, then horizontal, then vertical
+        const sign = sourceSide === 'bottom' ? 1 : -1;
+        const midY1 = sourcePoint.y + (sign * extensionY);
+        
+        path += ` L ${sourcePoint.x},${midY1}`; // First vertical segment
+        path += ` L ${targetPoint.x},${midY1}`; // Horizontal segment
+        path += ` L ${targetPoint.x},${targetPoint.y}`; // Final vertical to target
       }
     }
     
