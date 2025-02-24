@@ -4,7 +4,7 @@ title: Charity graph - multi-root BFS & taxpayer totals
 ---
     <svg></svg>
 <script src="../expose/jquery.min.js"></script>
-
+<script>let nodes=[],edges=[];</script><!-- work aroudn for crash with vis.js -->
 <!-- Viz.js (core + full render) -->
 <script src="../expose/viz.js"></script>
 <script src="../expose/full.render.js"></script>
@@ -138,21 +138,6 @@ title: Charity graph - multi-root BFS & taxpayer totals
     </div>
   </div>
 
-  <!-- Legend -->
-  <div class="absolute bottom-4 left-4 z-10 bg-white p-3 rounded-md shadow-md border border-gray-200 flex flex-col md:flex-row gap-2 md:gap-4">
-    <div class="flex items-center gap-2">
-      <div class="w-4 h-4 bg-[#FEE2E2] rounded-sm border-2 border-[#DC2626]"></div>
-      <span class="text-[13px]">🚨 High taxpayer funds (>$10M)</span>
-    </div>
-    <div class="flex items-center gap-2">
-      <div class="w-4 h-4 bg-[#FEF3C7] rounded-sm border-2 border-[#D97706]"></div>
-      <span class="text-[13px]">Medium taxpayer funds ($1M-$10M)</span>
-    </div>
-    <div class="flex items-center gap-2">
-      <div class="w-4 h-4 bg-[#F3F4F6] rounded-sm border-2 border-[#94A3B8]"></div>
-      <span class="text-[13px]">Low/No taxpayer funds</span>
-    </div>
-  </div>
 
   <!-- Zoom Controls -->
   <div class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
