@@ -723,11 +723,11 @@ const addendum = `
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#2563EB');
 
-    // Target arrow (normal)
+    // Target arrow (normal) - adjusted position
     defs.append('marker')
       .attr('id', 'arrow-target')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 5)
+      .attr('refX', 25) // Increased from 5 to move inward away from target
       .attr('refY', 0)
       .attr('markerWidth', 8)
       .attr('markerHeight', 8)
@@ -736,11 +736,11 @@ const addendum = `
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#CBD5E1');
 
-    // Target arrow (hover)
+    // Target arrow (hover) - adjusted position
     defs.append('marker')
       .attr('id', 'arrow-target-hover')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 5)
+      .attr('refX', 25) // Increased from 5 to move inward away from target
       .attr('refY', 0)
       .attr('markerWidth', 8)
       .attr('markerHeight', 8)
@@ -749,30 +749,30 @@ const addendum = `
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#2563EB');
 
-    // Source arrow (normal) - this should point away from the source
+    // Source arrow (normal) - adjusted position
     defs.append('marker')
       .attr('id', 'arrow-source')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 0) // Position at start of path
+      .attr('refX', 15) // Increased from 0 to move inward away from source
       .attr('refY', 0)
       .attr('markerWidth', 8)
       .attr('markerHeight', 8)
-      .attr('orient', 'auto') // Change from auto-start-reverse to auto
+      .attr('orient', 'auto')
       .append('path')
-      .attr('d', 'M0,-5L10,0L0,5') // Same shape as target arrow
+      .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#CBD5E1');
 
-    // Source arrow (hover) - also pointing away from source
+    // Source arrow (hover) - adjusted position
     defs.append('marker')
       .attr('id', 'arrow-source-hover')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 0) // Position at start of path
+      .attr('refX', 15) // Increased from 0 to move inward away from source
       .attr('refY', 0)
       .attr('markerWidth', 8)
       .attr('markerHeight', 8)
-      .attr('orient', 'auto') // Change from auto-start-reverse to auto
+      .attr('orient', 'auto')
       .append('path')
-      .attr('d', 'M0,-5L10,0L0,5') // Same shape as target arrow
+      .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#2563EB');
 
     // Update the link creation
@@ -1370,18 +1370,18 @@ const addendum = `
           if (d.source.id === d.target.id) {
             const nodeWidth = getNodeWidth(d.source);
             const nodeHeight = getNodeHeight(d.source);
-            const offset = 60; // Distance the loop extends from the node
+            const offset = 60;
             
-            // Create a loop on the right side of the node
+            // Create a more rectangular loop with straight segments
             return `
               M ${d.source.x + nodeWidth/2},${d.source.y - nodeHeight/4} 
-              C ${d.source.x + nodeWidth/2 + offset},${d.source.y - nodeHeight/4} 
-                ${d.source.x + nodeWidth/2 + offset},${d.source.y + nodeHeight/4} 
-                ${d.source.x + nodeWidth/2},${d.source.y + nodeHeight/4}
+              L ${d.source.x + nodeWidth/2 + offset},${d.source.y - nodeHeight/4}
+              L ${d.source.x + nodeWidth/2 + offset},${d.source.y + nodeHeight/4}
+              L ${d.source.x + nodeWidth/2},${d.source.y + nodeHeight/4}
             `;
           }
 
-          // Get all connections for this source/target to calculate spacing
+          // Get all connections for this source/target (same code as before)
           const topConnections = getConnectionsToSide(edges, d.source.id, 'top')
             .sort((a, b) => a.target.x - b.target.x);
           const bottomConnections = getConnectionsToSide(edges, d.source.id, 'bottom')
@@ -1400,24 +1400,20 @@ const addendum = `
           const dy = d.target.y - d.source.y;
           const angle = Math.atan2(dy, dx) * 180 / Math.PI;
           
-          // Determine source side based on angle
+          // Determine source side based on angle (same code as before)
           if (angle > -45 && angle < 45) {
-            // Target is to the right
             sourceSide = 'right';
             sourceConnections = rightConnections;
             targetSide = 'left';
           } else if (angle >= 45 && angle < 135) {
-            // Target is below
             sourceSide = 'bottom';
             sourceConnections = bottomConnections;
             targetSide = 'top';
           } else if (angle >= 135 || angle < -135) {
-            // Target is to the left
             sourceSide = 'left';
             sourceConnections = leftConnections;
             targetSide = 'right';
           } else {
-            // Target is above
             sourceSide = 'top';
             sourceConnections = topConnections;
             targetSide = 'bottom';
@@ -1435,22 +1431,23 @@ const addendum = `
           );
 
           // Get the target connection point at the appropriate edge
-          const targetConnectionIndex = getConnectionsToSide(edges, d.target.id, targetSide).indexOf(d);
-          // Use the already declared targetConnections variable instead of redeclaring it
           targetConnections = getConnectionsToSide(edges, d.target.id, targetSide);
+          const targetConnectionIndex = targetConnections.indexOf(d);
           
           const targetPoint = getSpacedConnectionPoint(
             d.target,
             targetConnections,
-            Math.max(0, targetConnectionIndex), // Ensure index is at least 0
+            Math.max(0, targetConnectionIndex),
             targetSide,
             getNodeWidth(d.target)
           );
 
-          return generatePath(
+          // Generate orthogonal path instead of curved path
+          return generateOrthogonalPath(
             sourcePoint, 
-            targetPoint, 
-            sourceSide === 'top' || targetSide === 'bottom',
+            targetPoint,
+            sourceSide,
+            targetSide,
             connectionIndex,
             sourceConnections.length
           );
@@ -2395,80 +2392,110 @@ labelloc="t";\n`;
     }
   }
 
-  // Update the generatePath function to handle all sides
-  function generatePath(sourcePoint, targetPoint, isVertical, connectionIndex = 0, totalConnections = 1) {
-    // For very close nodes, create a more direct line
+  // Replace the existing generatePath function with this orthogonal path generator
+  function generateOrthogonalPath(sourcePoint, targetPoint, sourceSide, targetSide, connectionIndex = 0, totalConnections = 1) {
+    // Calculate path parameters
     const dx = targetPoint.x - sourcePoint.x;
     const dy = targetPoint.y - sourcePoint.y;
-    const distance = Math.sqrt(dx*dx + dy*dy);
     
-    // Set radius and control point distance based on path length
-    const radius = Math.min(40, distance / 4);
-    const controlDistance = Math.min(Math.abs(dx/2), Math.abs(dy/2), 80);
-    
-    // Calculate a proportional midpoint with variation based on connection index
+    // Add variation for multiple connections between the same points
     const variation = totalConnections > 1 ? 
       (connectionIndex - (totalConnections-1)/2) * 30 : 0;
     
-    if (isVertical) {
-      // Vertical path (top to bottom or bottom to top)
-      const midX = sourcePoint.x + dx/2 + variation;
-      
-      return `
-        M ${sourcePoint.x},${sourcePoint.y}
-        C ${sourcePoint.x},${sourcePoint.y + Math.sign(dy) * controlDistance}
-          ${midX},${targetPoint.y - Math.sign(dy) * controlDistance}
-          ${targetPoint.x},${targetPoint.y}
-      `.trim();
-    } else {
-      // Horizontal path (left to right or right to left)
-      const midY = sourcePoint.y + dy/2 + variation;
-      
-      return `
-        M ${sourcePoint.x},${sourcePoint.y}
-        C ${sourcePoint.x + Math.sign(dx) * controlDistance},${sourcePoint.y}
-          ${targetPoint.x - Math.sign(dx) * controlDistance},${midY}
-          ${targetPoint.x},${targetPoint.y}
-      `.trim();
+    // Create points for an orthogonal path
+    let path = `M ${sourcePoint.x},${sourcePoint.y}`;
+    
+    // Different path logic based on which sides we're connecting
+    if ((sourceSide === 'right' && targetSide === 'left') || 
+        (sourceSide === 'left' && targetSide === 'right')) {
+      // Horizontal connection (left to right or right to left)
+      const midX = sourcePoint.x + dx/2;
+      path += ` L ${midX},${sourcePoint.y}`;
+      path += ` L ${midX},${targetPoint.y + variation}`;
+      path += ` L ${targetPoint.x},${targetPoint.y + variation}`;
+    } 
+    else if ((sourceSide === 'top' && targetSide === 'bottom') || 
+             (sourceSide === 'bottom' && targetSide === 'top')) {
+      // Vertical connection (top to bottom or bottom to top)
+      const midY = sourcePoint.y + dy/2;
+      path += ` L ${sourcePoint.x},${midY}`;
+      path += ` L ${targetPoint.x + variation},${midY}`;
+      path += ` L ${targetPoint.x + variation},${targetPoint.y}`;
     }
+    else {
+      // Mixed sides (e.g., right to top, left to bottom, etc.)
+      // Use a two-segment path with a corner
+      const midX = sourcePoint.x + dx * 0.6;
+      const midY = sourcePoint.y + dy * 0.6;
+      
+      if (sourceSide === 'right' || sourceSide === 'left') {
+        // First move horizontally, then vertically
+        path += ` L ${midX},${sourcePoint.y}`;
+        path += ` L ${midX},${targetPoint.y}`;
+        path += ` L ${targetPoint.x},${targetPoint.y}`;
+      } else {
+        // First move vertically, then horizontally
+        path += ` L ${sourcePoint.x},${midY}`;
+        path += ` L ${targetPoint.x},${midY}`;
+        path += ` L ${targetPoint.x},${targetPoint.y}`;
+      }
+    }
+    
+    return path;
   }
 
-  // Update the connection point spacing logic to spread points along node height
-  function getSpacedConnectionPoint(node, connections, index, side, totalWidth) {
-    const nodeWidth = getNodeWidth(node);
-    const nodeHeight = getNodeHeight(node);
-    const padding = 40; // Padding from edges
-    
-    // If no connections, use the center of the side
-    if (connections.length === 0) {
-      index = 0;
-      connections = [null]; // Create a dummy array with one element
-    }
-    
-    // Calculate usable dimensions for connection points
-    const usableWidth = nodeWidth - (padding * 2);
-    const usableHeight = nodeHeight - (padding * 2);
-    
-    if (side === 'top' || side === 'bottom') {
-      // Spread points horizontally along top/bottom
-      const horizontalSpacing = usableWidth / (connections.length + 1);
-      const x = node.x - (nodeWidth/2) + padding + ((index + 1) * horizontalSpacing);
-      
-      return {
-        x: x,
-        y: node.y + (side === 'top' ? -nodeHeight/2 : nodeHeight/2)
-      };
-    } else {
-      // For left/right sides, spread vertically
-      const verticalSpacing = usableHeight / (connections.length + 1);
-      const y = node.y - (nodeHeight/2) + padding + ((index + 1) * verticalSpacing);
-      
-      return {
-        x: node.x + (side === 'left' ? -nodeWidth/2 : nodeWidth/2),
-        y: y
-      };
-    }
-  }
+  // Update the marker positions to be more visible along the straight segments
+  // Source arrow (normal) - moved further along the path
+  defs.append('marker')
+    .attr('id', 'arrow-source')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 30) // Increased from 15 to 30 to move further along the path
+    .attr('refY', 0)
+    .attr('markerWidth', 10) // Slightly larger markers
+    .attr('markerHeight', 10)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-5L10,0L0,5')
+    .attr('fill', '#CBD5E1');
+
+  // Source arrow (hover) - moved further along the path
+  defs.append('marker')
+    .attr('id', 'arrow-source-hover')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 30) // Increased from 15 to 30
+    .attr('refY', 0)
+    .attr('markerWidth', 10)
+    .attr('markerHeight', 10)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-5L10,0L0,5')
+    .attr('fill', '#2563EB');
+
+  // Target arrow (normal) - moved further from target node
+  defs.append('marker')
+    .attr('id', 'arrow-target')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 35) // Increased from 25 to 35
+    .attr('refY', 0)
+    .attr('markerWidth', 10)
+    .attr('markerHeight', 10)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-5L10,0L0,5')
+    .attr('fill', '#CBD5E1');
+
+  // Target arrow (hover) - moved further from target node
+  defs.append('marker')
+    .attr('id', 'arrow-target-hover')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 35) // Increased from 25 to 35
+    .attr('refY', 0)
+    .attr('markerWidth', 10)
+    .attr('markerHeight', 10)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-5L10,0L0,5')
+    .attr('fill', '#2563EB');
 
   // Add this helper function
   function zoomToFitNodes(node1, node2) {
@@ -2558,4 +2585,43 @@ labelloc="t";\n`;
 
   // We should also update any mouseover/mouseout handlers that might reference arrowPaths
   // by ensuring we're only updating the .link elements
+
+  // Add back the getSpacedConnectionPoint function that was accidentally removed
+
+  // Update the connection point spacing logic to spread points along node height/width
+  function getSpacedConnectionPoint(node, connections, index, side, totalWidth) {
+    const nodeWidth = getNodeWidth(node);
+    const nodeHeight = getNodeHeight(node);
+    const padding = 40; // Padding from edges
+    
+    // If no connections, use the center of the side
+    if (connections.length === 0) {
+      index = 0;
+      connections = [null]; // Create a dummy array with one element
+    }
+    
+    // Calculate usable dimensions for connection points
+    const usableWidth = nodeWidth - (padding * 2);
+    const usableHeight = nodeHeight - (padding * 2);
+    
+    if (side === 'top' || side === 'bottom') {
+      // Spread points horizontally along top/bottom
+      const horizontalSpacing = usableWidth / (connections.length + 1);
+      const x = node.x - (nodeWidth/2) + padding + ((index + 1) * horizontalSpacing);
+      
+      return {
+        x: x,
+        y: node.y + (side === 'top' ? -nodeHeight/2 : nodeHeight/2)
+      };
+    } else {
+      // For left/right sides, spread vertically
+      const verticalSpacing = usableHeight / (connections.length + 1);
+      const y = node.y - (nodeHeight/2) + padding + ((index + 1) * verticalSpacing);
+      
+      return {
+        x: node.x + (side === 'left' ? -nodeWidth/2 : nodeWidth/2),
+        y: y
+      };
+    }
+  }
 </script>
