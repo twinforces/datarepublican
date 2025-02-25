@@ -1,4 +1,4 @@
-export const POWER_LAW = 0.3;
+ const POWER_LAW = 0.3;
 
  function scaleValue(amt) {
     return Math.pow(amt, POWER_LAW);
@@ -22,6 +22,9 @@ export const POWER_LAW = 0.3;
     static registerCharity(ein, c) {
         Charity.charityLookup[ein] = c;
     }
+    static visibleCharities() {
+        return Object.values(Charity.charityLookup).filter(g => g.isVisible);
+    }
 
     static getCharityCount() {
         return Object.keys(Charity.charityLookup).length;
@@ -35,6 +38,7 @@ export const POWER_LAW = 0.3;
         contrib_amt = 0, 
         receipt_amt = 0,
         isVisible = false,
+        isOther=false,
         grants = [], 
         grantsIn = [], 
         loopbackgrants = [], 
@@ -56,6 +60,7 @@ export const POWER_LAW = 0.3;
         this.isVisible = isVisible;
         this.isOrganized = false;
         this.isGov = false;
+        this.isOther = isOther;
         Charity.registerCharity(ein, this);
     }
 
@@ -189,6 +194,8 @@ export const POWER_LAW = 0.3;
             xml_name: "The Beast",
             contrib_amt: 4.6e12,
         };
+        // have to build before grants so they can wire themselves in!
+        const govChar = new Charity(gov_proto);
         let govGrants = 0;
         let govTotal = 0;
         Object.values(Charity.charityLookup).forEach(c => {
@@ -207,7 +214,6 @@ export const POWER_LAW = 0.3;
             }
         });
 
-        const govChar = new Charity(gov_proto);
         console.log(`${govGrants} Implied Government Grants Generated`);
         console.log(`Gov Total: ${formatNumber(govTotal)}`);
         console.log(`USG grants count: ${govChar.grants.length}, sample:`, 
@@ -281,6 +287,11 @@ export const POWER_LAW = 0.3;
         console.log(`${cycleGrants.size} bad grants`);
         return cycleGrants;
     }
+    
+    static getRootCharities()
+    {
+        return Object.values(Charity.charityLookup).filter(c => !c.grantsIn.length);
+    }
 }
 
  class Grant {
@@ -292,6 +303,10 @@ export const POWER_LAW = 0.3;
 
     static registerGrant(g) {
         Grant.grantLookup[g.id] = g;
+    }
+    
+    static visibleGrants() {
+        return Object.values(Grant.grantLookup).filter(g => g.isVisible);
     }
 
     static checkGrantMatch(filer_ein, grantee_ein) {
@@ -333,17 +348,19 @@ export const POWER_LAW = 0.3;
     }
 
     constructor({ filer_ein, grantee_ein, amt = 0, isCircular = false, isVisible = false }) {
+        this.registered=false;
         this.id = `${filer_ein}~${grantee_ein}`;
-        this.isCircular = isCircular;
         this.amt = amt;
         this.filer_ein = filer_ein;
         this.grantee_ein = grantee_ein;
         this.filer = Charity.getCharity(filer_ein);
         this.grantee = Charity.getCharity(grantee_ein);
-        this.isVisible = isVisible;
         Grant.registerGrant(this);
         Charity.addGrant(this);
-    }
+        this.registered=true;
+        this.isVisible = isVisible;
+        this._isCircular = isCircular;
+   }
 
     get relativeInAmount() {
         return this.amt / (this.filer.grantTotal + 1);
@@ -361,6 +378,10 @@ export const POWER_LAW = 0.3;
         this.filer.isOrganized = false;
         this.grantee.isOrganized = false;
     }
+    
+    get isVisible() {
+        return this._isVisible;
+    }
 
     set isVisible(v) {
         this._isVisible = v;
@@ -368,11 +389,12 @@ export const POWER_LAW = 0.3;
     }
 
     set isCircular(value) {
-        if (value !== this.isCircular) {
+        if (value !== this.isCircular && this.registered) { // avoid race condition
             Charity.circularGrant(this);
         }
-        this.isCircular = value;
+        this._isCircular = value;
     }
+    
 }
 
  async function loadData() {
