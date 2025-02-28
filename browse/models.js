@@ -65,6 +65,7 @@
         otherdown=null
     }) {
         this.id = ein;
+        this.ein = ein;
         this.filer_ein = ein;
         this.name = name;
         this.xml_name = xml_name;
@@ -83,9 +84,11 @@
         this.isOther = isOther;
         this.expanded = false;
         this._valueCache={};
+        this.sourceLinks=[]; //work around for sankey issue;
+        this.targetLinks=[]; //work around for sankey issue;
         Charity.registerCharity(ein, this);
     }
-    
+        
     get isVisible() {
         return this._isVisible;
     
@@ -406,29 +409,17 @@
     
     handleClick(e) {
     
-        if (e.altKey)
+        if (this.expanded)
         {
-                if (e.shiftKey) 
-                {
-                        this.shrink(e);
-                }
-                else
-                {
-                        this.expandUp(e);
-                }
+                this.shrink(d);
         
         }
-        else {
-                if (!this.hasVisibleGrants())
-                {
-                        this.expandDown(e);
-        
-                }
-                else
-                {
-                        this.shrink(e);
-                }       
-        
+        else
+        {
+                if (!this.otherUp)
+                        this.expandDown();
+                if (!this.otherDown)
+                        this.expandUp();
         }
      
     }
@@ -526,12 +517,15 @@
     
     }
     
+    /* show node and appropriate number of grants*/
     static placeNode( startEin) {
     
         const c = Charity.getCharity(startEin);
         if (c) {
         
                 c.isVisible=true;
+                c.expandDown({});
+                c.expanded=true;
                 
         }
         else
@@ -540,10 +534,31 @@
                         system.log(`Couldn't place ${startEin}'`);
 
         }
+        return c;
     
     }
     
-    
+    static buildSankeyData() {
+        const data = {nodes: [], links:[]};
+        data.links = Grant.visibleGrants();
+        data.links.forEach(g=> {
+                if (!g.grantee.isVisible)
+                {
+                        g.grantee.isVisible=true; 
+                        console.log(`Not visible grantee ${g.grantee_ein}`);
+                        
+                }
+                if (!g.filer.isVisible)
+                {
+                        g.filer.isVisible=true; 
+                        console.log(`Not visible filer ${g.filer_ein}`);
+                        
+                }
+        });
+        data.nodes = Charity.visibleCharities();
+          return data;
+        
+    }
 }
 
 /**
@@ -570,6 +585,7 @@ class DownstreamOther extends Charity
                         parent.removeGrant(g);
                         g.filer=this;
                 });
+                this.parent.grants.forEach(g => g.isVisible=true);
         
         }
         handleClick() { // every time we get clicked on, 3 more get shown
@@ -619,6 +635,7 @@ class UpstreamOther extends Charity
                         parent.removeGrantIn(g);
                         g.grantee=this;
                 });
+                this.parent.grantsIn.forEach(g => g.isVisible=true);
         
         }
         handleClick() { // every time we get clicked on, 3 more get shown
@@ -690,6 +707,29 @@ class UpstreamOther extends Charity
         }
         return null;
     }
+    
+    
+    /* next few accessors implement the sankey API*/
+    get source() { // name alias for sankey
+        return this._source || this.filer_ein;
+    }
+    
+    set source(s)
+    {
+        this._source = s;
+    }
+    
+    get target() {
+        return this._target || this.grantee_ein; //name alias for sankey
+    }
+    
+    set target(t) {
+        this._target = t;
+   }
+    
+    get value() {
+        return scaleValue(this.amt);
+    }
 
     addAmt(amt) {
         this.amt += amt;
@@ -746,21 +786,7 @@ class UpstreamOther extends Charity
         }
         this._isCircular = value;
     }
-    
-    /** the links in the sankey have to have a specific interface */
-    buildSankeyLink() {
-    
-        return {
-             source: this.filer,
-             target: this.grantee,
-             value: scaleValue(this.amt),
-             rawValue: this.amt || 0,
-             filer: this.filer,
-             grantee: this.grantee,
-             grant: this
-         };
-    }
-    
+        
 }
 
  async function loadData() {

@@ -33,8 +33,9 @@ let zoom = null;
 let topNodes = [];
 let expandedOutflows = new Map();
 
-const NODE_WIDTH = 24;
+const NODE_WIDTH = 50;
 const NODE_PADDING = 10;
+const MIN_LINK_HEIGHT = 5;
 
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
 
@@ -361,6 +362,13 @@ function expandNode(ein, param1, param2) {
 
 }
 
+function compareCharities( a, b)
+{
+        return (b.govt_amt - a.govt_amt) || 
+                (b.grantsInTotal - a.grantsInTotal) || 
+                        (a.name.localeCompare(b.name));
+}
+
 function generateGraph() {
     console.log('1. Starting graph generation');
     if (!dataReady) {
@@ -398,10 +406,14 @@ function generateGraph() {
         .attr("transform", "translate(50, 50)");
 
     const sankey = d3.sankey()
-        .nodeId(d => d.filer_ein || d.id)
+        .nodeId(d => d.id )
         .nodeWidth(NODE_WIDTH)
         .nodePadding(NODE_PADDING)
-        .extent([[0, 0], [width - 100, height - 100]]);
+        .linkSort((a,b) => b.value-a.value)
+        .nodeId(d => d.id)
+        .nodeAlign(d3.sankeyJustify)
+        .nodeSort(compareCharities)
+        .size([width - 100, height - 100]);
 
     if (!customGraphEdges && activeEINs.length === 0) {
         const usGov = Charity.getCharity("001");
@@ -513,10 +525,10 @@ function calculateNodePositions(nodes, kyHeight, scale, height) {
         const totalOutflow = d.grants.filter(g => g.isVisible).reduce((sum, g) => sum + (g.amt || 0), 0);
         //d.logGrantsTotal = scaleValue(totalOutflow || 1);
 
-        const sankeyHeight = Math.max(50, d.y1 - d.y0);
-        d.outflowHeight = Math.max(50, Math.min(sankeyHeight, d.logGrantsTotal * kyHeight));
+        const sankeyHeight = Math.max(MIN_LINK_HEIGHT, d.y1 - d.y0);
+        d.outflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.logGrantsTotal * kyHeight));
         const inflowScaleFactor = d.logGrantsInTotal / (d.logGrantsTotal || 1);
-        d.inflowHeight = Math.max(50, Math.min(sankeyHeight, d.outflowHeight * inflowScaleFactor));
+        d.inflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.outflowHeight * inflowScaleFactor));
         if (d.inflowHeight > sankeyHeight) {
             d.inflowHeight = sankeyHeight;
             d.outflowHeight = sankeyHeight / inflowScaleFactor;
@@ -548,32 +560,19 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     }
 
     // Brute-force build currentData from visible nodes and grants
-    currentData = { nodes: [], links: [] };
-
-    // Add all visible charities
-    Charity.visibleCharities().forEach(charity => {
-        if (charity.isVisible) {
-            currentData.nodes.push(charity);
-        }
-    });
-
-    // Add all visible grants as links
-    Grant.visibleGrants().forEach(grant => {
-         const value = scaleValue(grant.amt || 0);
-         if (!isFinite(value)) {
-             console.warn(`Invalid value for grant ${grant.id}: amt=${grant.amt}`);
-             return;
-         }
-         let other=null
-         
-         currentData.links.push(grant.buildSankeyLink());
-    });
+    currentData = Charity.buildSankeyData();
 
     console.log(`Pre-sankey for ${selectedNodeId}: nodes=${currentData.nodes.length}, links=${currentData.links.length}`);
 
     const graph = sankey(currentData);
     const scale = calculateScale(graph, width, height);
-    calculateNodePositions(graph.nodes, 1.0, scale, height);
+console.log(graph.nodes.map(n => ({
+  id: n.id,
+  depth: n.depth,
+  sourceLinks: n.sourceLinks.length,
+  targetLinks: n.targetLinks.length,
+  x0: n.x0
+})));   calculateNodePositions(graph.nodes, 1.0, scale, height);
 
     graph.nodes.forEach(n => {
         if (!isFinite(n.x0) || !isFinite(n.y0) || !isFinite(n.x1) || !isFinite(n.y1)) {
