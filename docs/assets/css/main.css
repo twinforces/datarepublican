@@ -16,15 +16,15 @@
   }
 
   table {
-    @apply border-collapse mb-5;
+    @apply border-collapse mb-5 w-full text-sm;
   }
 
-  table, th, td {
-    @apply border border-black;
+  th {
+    @apply bg-gray-100 hover:bg-gray-200 border border-gray-200 whitespace-nowrap font-semibold py-1 px-2 text-left cursor-pointer;
   }
 
   td {
-    @apply p-5;
+    @apply bg-white py-2 px-2 text-left border border-gray-200;
   }
 
   button {
@@ -37,6 +37,24 @@
     &.frameless {
       @apply bg-transparent text-[13px] text-blue p-0 m-0 border-none min-w-0;
     }
+  }
+
+  th.sort-asc::after,
+  th.sort-desc::after {
+    content: "⌃";
+    @apply inline-block relative transform transition-transform duration-200 mx-0.5;
+  }
+
+  th.sort-asc::after {
+    @apply rotate-[0deg] top-[2px];
+  }
+
+  th.sort-desc::after {
+    @apply rotate-[-180deg] -top-px;
+  }
+
+  tbody td {
+    background-color: #fff;
   }
 
   a {
@@ -104,10 +122,6 @@
   select {
     @apply border border-gray-300 p-1 rounded-sm;
   }
-}
-
-table {
-  @apply text-sm;
 }
 
 .tooltip {
