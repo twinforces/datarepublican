@@ -104,7 +104,7 @@ $(document).ready(function() {
 
     newSearchInput.addEventListener('input', handleSearch);
     newSearchInput.addEventListener('blur', handleSearchBlur);
-    newSearchResults.addEventListener('click', handleSearchClick);
+    //newSearchResults.addEventListener('click', handleSearchClick);
     newSearchInput.addEventListener('keydown', handleSearchKeydown);
 
     newClearButton.addEventListener('click', () => {
@@ -137,7 +137,7 @@ function addEINFromInput() {
     $('#einInput').val('');
     renderActiveEINs();
     updateQueryParams();
-    expandNode(val, false, true);
+    Charity.placeNode(val);
     generateGraph();
 }
 
@@ -220,18 +220,16 @@ function parseQueryParams() {
     const customParam = params.get('custom_graph');
     if (customParam) {
         const trimmed = customParam.replace(/;+$/, '');
-        const segments = trimmed.split(';');
+        const segments = trimmed.split('&');
         let edgeList = [];
-
-        segments.forEach(s => {
-            const parts = s.split(',');
-            if (parts.length !== 3) return;
-            let [filer, grantee, amt] = parts.map(x => x.trim());
-            filer = filer.replace(/[-\s]/g, '');
-            grantee = grantee.replace(/[-\s]/g, '');
-            const num = parseInt(amt, 10);
-            if (!isNaN(num)) {
-                edgeList.push({ filer, grantee, amt: num });
+        let search = "";
+        
+        segments.forEach(segment => {
+            if (segment.startsWith("search=")) {
+                search = segment.replace("search=", "");
+            }
+            if (segment.startsWith("ein=")) {
+                edgeList.push(segment.replace("ein=", ""));
             }
         });
         customGraphEdges = edgeList;
@@ -358,6 +356,11 @@ function updateQueryParams() {
     window.history.replaceState({}, '', newUrl);
 }
 
+function expandNode(ein, param1, param2) {
+        Charity.placeNode(ein);
+
+}
+
 function generateGraph() {
     console.log('1. Starting graph generation');
     if (!dataReady) {
@@ -396,9 +399,9 @@ function generateGraph() {
 
     const sankey = d3.sankey()
         .nodeId(d => d.filer_ein || d.id)
-        .nodeWidth(50)
-        .nodePadding(80)
-        .extent([[0, 0], [width - 200, height - 100]]);
+        .nodeWidth(NODE_WIDTH)
+        .nodePadding(NODE_PADDING)
+        .extent([[0, 0], [width - 100, height - 100]]);
 
     if (!customGraphEdges && activeEINs.length === 0) {
         const usGov = Charity.getCharity("001");
@@ -444,112 +447,7 @@ function generateGraph() {
     $('#loading').hide();
 }
 
-function collapseNode(nodeId)
-{
-    const node = Charity.getCharity(nodeId);
-    node.isVisible=false;
-    node.grantsIn.forEach( f => f.isVisible=false);
-    node.grantsOut.forEach( f => f.isVisible=false);
 
-}
-
-function expandNode(nodeId, isInitial = false, addToActiveEINs = false) {
-    const node = Charity.getCharity(nodeId);
-    if (!node) {
-        console.error(`No charity for ${nodeId}`);
-        return;
-    }
-
-    node.isVisible = true;
-    console.log(`Marked ${nodeId} as visible`);
-
-    // Get already visible grants
-    const visibleGrants = node.grants.filter(g => g.isVisible);
-    const remainingGrants = node.grants.filter(g => !g.isVisible);
-    const grantsToShow = remainingGrants.slice(0, TOP_N_OUTFLOWS);
-
-    // Mark the next batch of grants and their grantees as visible
-    grantsToShow.forEach(grant => {
-        grant.isVisible = true;
-        grant.grantee.isVisible = true;
-    });
-
-    // Create "OTHER" node if there are remaining grants
-    const hiddenGrants = remainingGrants.slice(TOP_N_OUTFLOWS);
-    if (hiddenGrants.length > 0) {
-        const othersId = `${nodeId}-others-${generateUniqueId()}`;
-        const othersValue = hiddenGrants.reduce((sum, g) => sum + g.amt, 0);
-        const othersNode = new Charity({
-            ein: othersId,
-            name: "...",
-            grant_amt: othersValue,
-            parent_ein: nodeId,
-            grants: [],
-            grantsIn: [],
-            isOther: true,
-            isVisible: true
-        });
-        // No need to create a virtual grant since renderFocusedSankey will handle visibility
-    }
-
-    if (addToActiveEINs && !activeEINs.includes(nodeId)) {
-        activeEINs.push(nodeId);
-        renderActiveEINs();
-        updateQueryParams();
-    }
-
-    console.log(`Expanded ${nodeId}: ${grantsToShow.length} new grants visible, ${hiddenGrants.length} remaining`);
-}
-
-function expandOthers(sourceId) {
-    let parentId = sourceId;
-    if (sourceId.includes('-others-')) {
-        parentId = sourceId.split('-others-')[0];
-    }
-    const node = Charity.getCharity(parentId);
-    if (!node) {
-        console.error(`No node for ${parentId}`);
-        return;
-    }
-
-    // Get already visible grants
-    const visibleGrants = node.grants.filter(g => g.isVisible);
-    const remainingGrants = node.grants.filter(g => !g.isVisible);
-    const grantsToShow = remainingGrants.slice(0, TOP_N_OUTFLOWS);
-
-    // Mark the next batch of grants and their grantees as visible
-    grantsToShow.forEach(grant => {
-        grant.isVisible = true;
-        grant.grantee.isVisible = true;
-    });
-
-    // Update "OTHER" node if there are still remaining grants
-    const hiddenGrants = remainingGrants.slice(TOP_N_OUTFLOWS);
-    const othersNodes = Object.values(Charity.charityLookup).filter(c => c.isOther && c.parent_ein === parentId);
-    othersNodes.forEach(other => {
-        if (hiddenGrants.length > 0) {
-            const othersValue = hiddenGrants.reduce((sum, g) => sum + g.amt, 0);
-            other.grant_amt = othersValue;
-            other.isVisible = true;
-        } else {
-            other.isVisible = false; // Hide "OTHER" if no grants remain
-        }
-    });
-
-    console.log(`Expanded others for ${parentId}: ${grantsToShow.length} new grants visible, ${hiddenGrants.length} remaining`);
-}
-
-function handleSearchClick(e) {
-    const ein = e.target.dataset.ein;
-    if (!ein) return;
-
-    const searchInput = document.getElementById('searchInput');
-    searchInput.value = Charity.getCharity(ein).name;
-    document.getElementById('searchResults').classList.add('hidden');
-
-    expandNode(ein, false, true);
-    generateGraph();
-}
 
 function generateUniqueId(prefix = "gradient") {
     return `${prefix}-${Math.random().toString(36).substr(2, 9)}`;
@@ -599,7 +497,7 @@ function generateOctagonPath(d) {
 }
 
 function generatePlusPath(d) {
-    const size = 20;
+    const size = d.inflowHeight;
     const cx = d.x1;
     const cy = (d.y0 + d.y1) / 2;
     return `M${cx - size / 2},${cy - size / 6} L${cx + size / 2},${cy - size / 6} L${cx + size / 2},${cy + size / 6} L${cx - size / 2},${cy + size / 6} Z
@@ -666,14 +564,9 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
              console.warn(`Invalid value for grant ${grant.id}: amt=${grant.amt}`);
              return;
          }
-         currentData.links.push({
-             source: grant.filer,
-             target: grant.grantee,
-             value: value,
-             rawValue: grant.amt || 0,
-             filer: grant.filer,
-             grantee: grant.grantee
-         });
+         let other=null
+         
+         currentData.links.push(grant.buildSankeyLink());
     });
 
     console.log(`Pre-sankey for ${selectedNodeId}: nodes=${currentData.nodes.length}, links=${currentData.links.length}`);
@@ -717,6 +610,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     const masterGroup = g.append("g")
         .attr("class", "graph-group")
         .attr("transform", `scale(${scale})`);
+        
+   
 
     const link = masterGroup.append("g")
         .attr("fill", "none")
@@ -731,11 +626,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("stroke-width", d => Math.max(1, d.width || 1))
         .on('click', function(event, d) {
             event.stopPropagation();
-            if (event.shiftKey) {
-                expandNode(d.source.filer_ein);
-            } else {
-                expandNode(d.target.filer_ein);
-            }
+            handlePathClick(d);
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         });
 
@@ -756,8 +647,9 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .join('g')
         .attr('class', d => {
             if (d.isOther) return 'node others';
-            if (!d.grants || d.grants.every(g => !g.isVisible)) return 'node no-grants';
-            return 'node';
+            if (d.willShrink) return 'node shrink';
+            if (!d.grants || !d.grants.length) return 'node no-grants';
+            return 'node expand';
         })
         .attr('data-id', d => d.id);
 
@@ -769,12 +661,12 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
                 .attr("d", generatePlusPath(d))
                 .attr("fill", "#ccc")
                 .attr("stroke", "#000");
-        } else if (!d.grants || d.grants.every(g => !g.isVisible)) {
+        } else if (!d.grants || !d.grants.length) { // terminal nodes
             sel.append("path")
                 .attr("d", generateOctagonPath(d))
                 .attr("fill", d => colorScale(d.id))
                 .attr("stroke", "#000");
-        } else {
+        } else {  // typical, grants in, grants out
             sel.append("path")
                 .attr("d", generateTrapezoidPath(d))
                 .attr("fill", d => colorScale(d.id))
@@ -789,13 +681,28 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         } else if (d.isOther === true) {
             const sourceId = d.id;
             console.log(`Expanding "OTHER" for ${sourceId}`);
-            expandOthers(sourceId);
+            d.charity.handleClick(event)
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         } else {
             console.log(`Expanding node: ${d.filer_ein}`);
-            expandNode(d.filer_ein);
+            d.charity.handleClick(event)
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         }
+    }
+    
+    function handlePathClick(e,d) {
+    
+        if (d.source.isOther) 
+        {
+                d.source.handleGrantClick(e, d.grant)
+        } else if (d.target.isOther) {
+                d.target.handleGrantClick(e, d.grant);
+        }
+        else {
+                d.source.handleGrantClick(e, d.grant);
+                d.target.handleGrantClick(e, d.grant);
+        }
+    
     }
 
     nodeElements.on('click', nodeClick);
@@ -826,11 +733,11 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
             } else if (d.isOther === true) {
                 const sourceId = d.parent_ein;
                 console.log(`Text expanding "OTHER" for ${sourceId}`);
-                expandOthers(sourceId);
+                d.handleClick(event);
                 renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
             } else {
                 console.log(`Text expanding node: ${d.filer_ein}`);
-                expandNode(d.filer_ein);
+                d.handleClick(event);
                 renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
             }
         });
@@ -987,8 +894,10 @@ function zoomToFitNodes(node1, node2, svgWidth, svgHeight) {
         );
 }
 
-const extraStyle = `.node.others { fill: #ccc; cursor: pointer; }
+const extraStyle = `.node.others { fill: #ccc; cursor: plus; }
                     .node { fill: #999; }
+                    .node.expand {cursor: plus}
+                    .node.shrink {cursor: minus}
                     .link { stroke: #ccc; stroke-opacity: 0.5; }
                     #graph { background: #fff !important; }
                     text { fill: #000; }
