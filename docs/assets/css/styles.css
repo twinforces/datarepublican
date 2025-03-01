@@ -1379,6 +1379,9 @@ body > div#main-content {
 .gap-4 {
   gap: 1rem;
 }
+.gap-px {
+  gap: 1px;
+}
 .gap-x-2 {
   -moz-column-gap: 0.5rem;
        column-gap: 0.5rem;

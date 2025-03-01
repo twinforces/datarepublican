@@ -47,68 +47,113 @@
       </button>
     </div>
     <div id="menu-items" class="hidden p-4 md:p-0 md:visible md:flex flex-1 flex-col justify-between md:gap-1 sm:gap-2 fixed md:static right-0 w-full md:w-auto md:h-auto bg-navy z-50 transition-transform duration-300 translate-x-full md:translate-x-0">
-      <div class="flex-1 flex flex-col 4">
+      <div class="flex-1 flex flex-col gap-px">
 
-        <div class="flex-1 flex flex-col gap-0.5">
-          {% include nav-section.html title="Charity funding &amp; financials" %}
-          {% include nav-link.html 
-            title="Charity graph"
-            subtitle="Track where the money flows"
-            url="/expose"
-            classes=""
-          %}
-          {% include nav-link.html 
-            title="Charity funding"
-            subtitle="Discover % of taxpayer funds used"
-            url="/nonprofit"
-            classes=""
-          %}
-          {% include nav-link.html 
-            title="Nonprofit financials"
-            subtitle="Analyze expenses & assets"
-            url="/nonprofit/assets"
-            classes=""
-            new="true"
-          %}
+        <div class="flex flex-col gap-0.5">
+          <button 
+            id="charity-funding-dropdown-button"
+            class="nav-dropdown-button flex flex-col text-white no-underline py-1.5 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mb-1 mr-0 {% if page.url contains '/expose' or page.url contains '/nonprofit' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
+          >
+            <strong class="text-base md:text-sm w-full md:w-auto text-left">Charity funding &amp; financials</strong>
+            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Track money flows and financials</span>
+            <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
+              {% include icon-chevron.html %}
+            </span>
+          </button>
+          
+          <div 
+            id="charity-funding-dropdown"
+            class="nav-dropdown-content h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+          >
+            {% include nav-link.html 
+              title="Charity graph"
+              subtitle="Track where the money flows"
+              url="/expose"
+              classes=""
+            %}
+            {% include nav-link.html 
+              title="Charity funding"
+              subtitle="Discover % of taxpayer funds used"
+              url="/nonprofit"
+              classes=""
+            %}
+            {% include nav-link.html 
+              title="Nonprofit financials"
+              subtitle="Analyze expenses & assets"
+              url="/nonprofit/assets"
+              classes=""
+              new="true"
+            %}
+          </div>
         </div>
 
-        <div class="flex-1 flex flex-col gap-0.5">
-        {% include nav-section.html title="Officers &amp; salaries" %}
-        {% include nav-link.html 
-          title="Principal officer search"
-          subtitle="Search for NGO officers and salaries"
-          url="/officers"
-          classes=""
-        %}
-        {% include nav-link.html 
-          title="Bulk NGO officer search"
-          subtitle="Search and cross-reference names"
-          url="/officers/bulk"
-          classes=""
-          new="true"
-        %}
+        <div class="flex flex-col gap-0.5">
+          <button 
+            id="officers-dropdown-button"
+            class="nav-dropdown-button flex flex-col text-white no-underline py-1.5 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mb-1 mr-0 {% if page.url contains '/officers' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
+          >
+            <strong class="text-base md:text-sm w-full md:w-auto text-left">Officers &amp; salaries</strong>
+            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Search NGO officers and salaries</span>
+            <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
+              {% include icon-chevron.html %}
+            </span>
+          </button>
+          
+          <div 
+            id="officers-dropdown"
+            class="nav-dropdown-content h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+          >
+            {% include nav-link.html 
+              title="Principal officer search"
+              subtitle="Search for NGO officers and salaries"
+              url="/officers"
+              classes=""
+            %}
+            {% include nav-link.html 
+              title="Bulk NGO officer search"
+              subtitle="Search and cross-reference names"
+              url="/officers/bulk"
+              classes=""
+              new="true"
+            %}
+          </div>
         </div>
 
-        <div class="flex-1 flex flex-col gap-0.5">
-
-        {% include nav-section.html title="Political &amp; government funding" %}
-        {% include nav-link.html 
-          title="Small dollar donations"
-          subtitle="ActBlue & WinRed donations"
-          url="/donations2024"
-          classes=""
-          new="true"
-        %}
-        {% include nav-link.html 
-          title="Federal grant search"
-          subtitle="Map funds to connected orgs"
-          url="/award_search"
-          classes=""
-        %}
+        <div class="flex flex-col gap-0.5">
+          <button 
+            id="political-funding-dropdown-button"
+            class="nav-dropdown-button flex flex-col text-white no-underline py-1.5 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mb-1 mr-0 {% if page.url contains '/donations2024' or page.url contains '/award_search' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
+          >
+            <strong class="text-base md:text-sm w-full md:w-auto text-left">Political &amp; government funding</strong>
+            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Donations and federal grants</span>
+            <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
+              {% include icon-chevron.html %}
+            </span>
+          </button>
+          
+          <div 
+            id="political-funding-dropdown"
+            class="nav-dropdown-content h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+          >
+            {% include nav-link.html 
+              title="Small dollar donations"
+              subtitle="ActBlue & WinRed donations"
+              url="/donations2024"
+              classes=""
+              new="true"
+            %}
+            {% include nav-link.html 
+              title="Federal grant search"
+              subtitle="Map funds to connected orgs"
+              url="/award_search"
+              classes=""
+            %}
+          </div>
         </div>
+
       <button 
         id="election-results-dropdown-button"
-        class="flex flex-col text-white no-underline py-1.5 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mb-1 mr-0 {% if page.url contains '/florida' or page.url contains '/northcarolina' or page.url contains '/pennsylvania' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
+        class="nav-dropdown-button flex flex-col text-white no-underline py-1.5 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mb-1 mr-0 {% if page.url contains '/florida' or page.url contains '/northcarolina' or page.url contains '/pennsylvania' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
         {% if include.target %}target="{{ include.target }}"{% endif %}
       >
         <strong class="text-base md:text-sm w-full md:w-auto text-left">Voter turnout analysis</strong>
@@ -120,7 +165,7 @@
 
       <div 
         id="election-results-dropdown"
-        class="h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+        class="nav-dropdown-content h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
       >
         {% include nav-link.html 
           title="Florida"
@@ -180,9 +225,6 @@
 
 <script>
   $(document).ready(function() {
-    const $dropdownButton = $('#election-results-dropdown-button');
-    const $dropdownContent = $('#election-results-dropdown');
-    const $chevron = $dropdownButton.find('span:last-child');
     const $menuButton = $('#mobile-menu-button');
     const $menuItems = $('#menu-items');
     const $header = $('header');
@@ -209,20 +251,43 @@
       $expandButton.addClass('hidden');
     }
     
-    // Get the full height of the hidden content
-    $dropdownContent.css('height', 'auto');
-    const expandedHeight = $dropdownContent.outerHeight();
-    
-    // Check if we're on an election results page
-    const isElectionPage = $dropdownButton.hasClass('is-active');
-    
-    // Set initial state
-    if (isElectionPage) {
-      $dropdownContent.removeClass('h-0').css('height', expandedHeight);
-      $chevron.toggleClass('rotate-90 -rotate-90');
-    } else {
-      $dropdownContent.css('height', 0);
+    // Function to handle dropdown menus
+    function setupDropdowns() {
+      $('.nav-dropdown-button').each(function() {
+        const $button = $(this);
+        const $content = $('#' + $button.attr('id').replace('-button', ''));
+        const $chevron = $button.find('span:last-child');
+        
+        // Get the full height of the hidden content
+        $content.css('height', 'auto');
+        const expandedHeight = $content.outerHeight();
+        
+        // Check if we're on a page that should have this dropdown expanded
+        const isActive = $button.hasClass('is-active');
+        
+        // Set initial state
+        if (isActive) {
+          $content.removeClass('h-0').css('height', expandedHeight);
+          $chevron.toggleClass('rotate-90 -rotate-90');
+        } else {
+          $content.css('height', 0);
+        }
+        
+        // Add click event
+        $button.on('click', function() {
+          const isExpanded = $content.height() !== 0;
+          
+          // Toggle the dropdown
+          $content.css('height', isExpanded ? 0 : expandedHeight);
+          
+          // Toggle the chevron rotation classes
+          $chevron.toggleClass('rotate-90 -rotate-90');
+        });
+      });
     }
+    
+    // Initialize dropdowns
+    setupDropdowns();
 
     // Function to update menu position and height
     function updateMenuPosition() {
@@ -279,19 +344,8 @@
         hideMenu();
       }
     });
-
-    $dropdownButton.on('click', function() {
-      const isExpanded = $dropdownContent.height() !== 0;
-      
-      // Toggle the dropdown
-      $dropdownContent.css('height', isExpanded ? 0 : expandedHeight);
-      $dropdownContent.toggleClass('h-0');
-      
-      // Toggle the chevron rotation classes
-      $chevron.toggleClass('rotate-90 -rotate-90');
-    });
     
-    // New functions for collapse/expand functionality
+    // Functions for collapse/expand functionality
     function collapseMenu() {
       $header.addClass('collapsed');
       $menuContents.addClass('hidden');
