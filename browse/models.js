@@ -405,7 +405,9 @@
     // charities with no grants in are "root"
     static getRootCharities()
     {
-        return Object.values(Charity.charityLookup).filter(c => !c.grantsIn.length && !c.govt_amt && c.grants.length);
+        return Object.values(Charity.charityLookup)
+                .filter(c => !c.grantsIn.length && !c.govt_amt && c.grants.length)
+                .sort((a,b)=> (b.grantsTotal - a.grantsTotal));
     }
     
     // are the gramts downstrea visible?

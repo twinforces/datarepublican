@@ -24,7 +24,7 @@ let nodeMap = Charity.charityLookup;
 let linkMap = Grant.grantLookup;
 let expanded = new Map();
 let compacted = new Map();
-const TOP_N_INITIAL = 5;
+const TOP_N_INITIAL = 3;
 const TOP_N_OUTFLOWS = 5;
 
 // Global references
@@ -561,24 +561,18 @@ function generatePlusPath(d) {
     return fullPath;
 }
 
-function calculateNodePositions(nodes, kyHeight, scale, height) {
+function calculateNodePositions(nodes, scale, height) {
     nodes.forEach(d => {
-        const sourceData = d.sourceLinks.length > 0 ? d.sourceLinks : d.grantsIn.filter(g => g.isVisible);
-        //d.logGrantsInTotal = scaleValue(d3.sum(sourceData, l => l.value || l.amt || 0));
-        
-        const targetData = d.targetLinks.length > 0 ? d.targetLinks : d.grants.filter(g => g.isVisible);
-        const totalOutflow = d.grants.filter(g => g.isVisible).reduce((sum, g) => sum + (g.amt || 0), 0);
-        //d.logGrantsTotal = scaleValue(totalOutflow || 1);
 
+        let scaleFactor = 100; // placeholder for 0,0
         const sankeyHeight = Math.max(MIN_LINK_HEIGHT, d.y1 - d.y0);
-        d.outflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.logGrantsTotal * kyHeight));
-        const inflowScaleFactor = d.logGrantsInTotal / (d.logGrantsTotal || 1);
-        d.inflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.outflowHeight * inflowScaleFactor));
-        if (d.inflowHeight > sankeyHeight) {
-            d.inflowHeight = sankeyHeight;
-            d.outflowHeight = sankeyHeight / inflowScaleFactor;
-        }
-        if (d.logGrantsTotal === 0) {
+        if (d.logGrantsInTotal > d.logGrantsTotal)
+                scaleFactor = sankeyHeight/d.logGrantsInTotal; // we know its greater so must be not zero
+        else
+                scaleFactor = sankeyHeight/d.logGrantsTotal;
+        d.outflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.logGrantsTotal * scaleFactor));
+        d.inflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.logGrantsInTotal * scaleFactor));
+        if (d.grantsTotal === 0) {
             d.inflowHeight = sankeyHeight;
             d.outflowHeight = 0;
         }
@@ -610,7 +604,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
 
     const graph = sankey(currentData);
     const scale = calculateScale(graph, width, height);
-    calculateNodePositions(graph.nodes, 1.0, scale, height);
+    calculateNodePositions(graph.nodes, scale, height);
 
     graph.nodes.forEach(n => {
         if (!isFinite(n.x0) || !isFinite(n.y0) || !isFinite(n.x1) || !isFinite(n.y1)) {
@@ -751,7 +745,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .text(d => {
             const inflow = d.origIn;
             const outflow = d.origOut;
-            const top = `${d.name || d.id}\nInflow: $${formatNumber(inflow)}\nOutflow: $${formatNumber(outflow)}`;
+            const top = `${d.name || d.id}\nEIN:${d.id}\nInflow: $${formatNumber(inflow)}\nOutflow: $${formatNumber(outflow)}`;
             const loopback = d.loopbackgrants.reduce((sum, g) => sum + g.amt, 0);
             if (loopback) return `${top}\nLoop: $${formatNumber(loopback)}`;
             return top;
