@@ -217,9 +217,12 @@ title: Nonprofits
   // Filter data by EIN or name (case-insensitive)
   function filterData(dataArray, query) {
     const q = query.toLowerCase().trim();
+    // Remove hyphens from the query for EIN matching
+    const cleanQuery = q.replace(/-/g, '');
+    
     if (!q) return dataArray; // No filter
     return dataArray.filter(item =>
-      item.ein.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
+      item.ein.toLowerCase().includes(cleanQuery) || item.name.toLowerCase().includes(q)
     );
   }
 
@@ -357,7 +360,7 @@ title: Nonprofits
 
     // 4) Filter actions. Instead of reloading data, we just re-filter in-memory & update URL
     $('#filterButton').on('click', function (e) {
-      e.preventDefault(); // Don’t submit form
+      e.preventDefault(); // Don't submit form
       const newFilter = $('#filterInput').val().trim();
       updateQueryStringParam('filter', newFilter);
       applyFilterAndSort();
