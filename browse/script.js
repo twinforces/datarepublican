@@ -366,8 +366,8 @@ function compareLinks(a,b)
         //sort other links to bottom
         if (a.isOther) return 1;
         if (b.isOther) return -1;
-        return (a.index-b.index);
-        //return (b.value-a.value);
+        //return (a.index-b.index);
+        return (b.value-a.value);
 
 }
 
@@ -411,7 +411,7 @@ function generateGraph() {
         .nodeId(d => d.id )
         .nodeWidth(NODE_WIDTH)
         .nodePadding(NODE_PADDING)
-        .linkSort(compareLinks)
+        .linkSort(linkCompare)
         .nodeId(d => d.id)
         .nodeAlign(d3.sankeyCenter)
         .nodeSort(compareCharities)
@@ -557,35 +557,50 @@ function generatePlusPath(d) {
     const fullPath = `${circlePath} ${plusPath}`;
     return fullPath;
 }
+function linkCompare(a,b) {
 
+       const aIsOther = a.isOther || false;
+        const bIsOther = b.isOther || false;
+        if (aIsOther && !bIsOther) return 1; // "Other" goes to the bottom
+        if (!aIsOther && bIsOther) return -1;
+        return b.value - a.value; // Sort by value (descending)
+}
+function sortLinks(links, getNode) {
+    return links.sort(linkCompare);
+}
 
 function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
     return function(link) {
         // Source position (right edge of source node)
         const source = link.source;
-        // Sort sourceLinks by value (descending) to match SVG
-        source.sourceLinks.sort((a, b) => b.value - a.value);
+        // Sort sourceLinks: "Other" links go to the bottom, others by value (descending)
+        const originalSourceLinks = [...source.sourceLinks];
+        sortLinks(source.sourceLinks, link => link.source);
         const outflowIndex = source.sourceLinks.indexOf(link);
         const cumulativeOutflowHeight = d3.sum(source.sourceLinks.slice(0, outflowIndex), l => l.width);
         const sourceCenterY = (source.y0 + source.y1) / 2;
         const outflowHeight = source.outflowHeight || 0;
         const sourceLinkHeight = link.width || 0;
-        // Position at the center of the segment
-        const sourceY = sourceCenterY - (outflowHeight / 2) + cumulativeOutflowHeight + (sourceLinkHeight / 2);
+        // Start from the top of the right edge (centerY - outflowHeight/2) and stack downward
+        const sourceTopY = sourceCenterY - (outflowHeight / 2);
+        const sourceY = sourceTopY + cumulativeOutflowHeight + (sourceLinkHeight / 2);
         const sourceX = source.x1;
 
         // Target position (left edge of target node)
         const target = link.target;
-        // Sort targetLinks by value (descending) to match SVG
-        target.targetLinks.sort((a, b) => b.value - a.value);
+        // Sort targetLinks: "Other" links go to the bottom, others by value (descending)
+        const originalTargetLinks = [...target.targetLinks];
+        sortLinks(target.targetLinks, link => link.target);
         const inflowIndex = target.targetLinks.indexOf(link);
         const cumulativeInflowHeight = d3.sum(target.targetLinks.slice(0, inflowIndex), l => l.width);
-        const targetCenterY = (target.y0 + target.y1) / 2;
-        const inflowHeight = target.inflowHeight || 0;
+        const targetBottomY = target.y1; // Start from the bottom
         const targetLinkHeight = link.width || 0;
-        // Position at the center of the segment
-        const targetY = targetCenterY - (inflowHeight / 2) + cumulativeInflowHeight + (targetLinkHeight / 2);
+        const targetY = targetBottomY - cumulativeInflowHeight - (targetLinkHeight / 2);
         const targetX = target.x0;
+
+        // Restore original order to avoid side effects
+        source.sourceLinks = originalSourceLinks;
+        target.targetLinks = originalTargetLinks;
 
         // Compute control points for cubic Bézier curve
         const dx = targetX - sourceX;
@@ -652,9 +667,6 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
 
     g.selectAll("*").remove();
 
-    graph.links.sort((a, b) => b.value - a.value);
-
-
     graph.links.forEach((link, i) => {
         link.gradientId = generateUniqueId("gradient");
     });
@@ -693,7 +705,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("d", sankeyLinkHorizontalTrapezoid())
         .style("stroke", d => d.target.isOther ? "#ccc" : `url(#${d.gradientId})`)
         .style("stroke-opacity", "0.3")
-        .attr("stroke-width", d => Math.max(1, d.width || 1))
+        .attr("stroke-width", d => d.width)
         .on('click', function(event, d) {
             event.stopPropagation();
             handlePathClick(event,d);
