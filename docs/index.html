@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1740861956">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1740861956">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1740864666">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1740864666">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -725,9 +725,9 @@ $(document).ready(function() {
       })();
     </script>
     <main class="@container p-4 xl:px-6 min-h-[calc(100vh-200px)]">
-      <h1 class="mt-0 text-2xl mb-6 text-navy">Discover how money flows through government grants, charities, and NGOs</h1>
+      <h1 class="mt-0 text-2xl mb-6 text-navy max-w-7xl @6xl:mx-auto">Discover how money flows through government grants, charities, and NGOs</h1>
 
-<div class="grid @4xl:grid-cols-5 gap-4 @4xl:gap-8 max-w-7xl">
+<div class="grid @4xl:grid-cols-5 gap-4 @4xl:gap-8 max-w-7xl @6xl:mx-auto">
   <div class="@4xl:col-span-3 max-w-2xl">
     <p>
       Billions of dollars are spent on government grants, charities, and other organizations every year. Have you ever wondered where the money is awarded or where it ends up?
@@ -739,8 +739,9 @@ $(document).ready(function() {
       We've found some interesting connections, and we've made the data available for you to explore.
     </p>
     <p>See what you can find, and if you find something interesting, please <a href="https://x.com/datarepublican" target="_blank">let me know on X</a>!</p>
+    <p><em>- DataRepublican</em></p>
 
-    <div class="my-4 border-2 border-green p-4 rounded text-sm bg-white text-center">
+    <div class="my-4 border-2 border-green p-4 rounded text-[15px] bg-white text-center">
       <strong class="block mb-1">Help us build more tools like this.</strong> If you like the work you're doing, <a href="/donate" class="text-green font-semibold inline-block">we'd love your support</a>.
     </div>
 
@@ -781,12 +782,110 @@ $(document).ready(function() {
   </div>
 </div>
 
-<div class="py-8 md:py-4 my-8 md:my-4 border-y border-gray-300 max-w-7xl">
-  <h3 class="text-xl mt-0">Explore the tools</h3>
-  tools
+<div class="py-8 max-w-7xl @6xl:mx-auto @6xl:grid @6xl:grid-cols-2 @6xl:gap-x-4">
+  <div class="text-xl font-bold m-0 @6xl:col-span-2">Explore the tools</div>
+  <h3 class="@6xl:col-span-2 font-medium text-[15px] opacity-70 border-b border-gray-300 pb-2 mb-4">Charity funding &amp; financials</h3>
+  
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/expose"><img src="/assets/images/products/charity-graph.png" alt="Charity graph" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/expose" class="text-navy hover:text-blue font-bold">Charity graph</a></h4>
+    <p class="opacity-80 text-[15px]">Visualize how the money flows</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>Explore financial connections among charitable organizations, focusing on taxpayer funds received.</p>
+    <p>This tool allows users to trace funding flows, offering insights into how taxpayer money is allocated within the charitable sector.</p>
+    </div>
+  </div>
 </div>
 
-<div class="max-w-7xl @container">
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/nonprofit"><img src="/assets/images/products/charity-funding.png" alt="Charity funding" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/nonprofit" class="text-navy hover:text-blue font-bold">Charity funding</a></h4>
+    <p class="opacity-80 text-[15px]">Discover the percentage of taxpayer funds used</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>Explore detailed financial information on 501(c)(3) charitable organizations, including the extent of taxpayer funding they receive.</p>
+    </div>
+  </div>
+</div>
+
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/nonprofit/assets"><img src="/assets/images/products/nonprofit-financials.png" alt="Nonprofit financials" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/nonprofit/assets" class="text-navy hover:text-blue font-bold">Nonprofit financials</a></h4>
+    <p class="opacity-80 text-[15px]">Analyze assets & expenses</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>Browse nonprofit financials and see how organizations allocate their funds.</p>
+    </div>
+  </div>
+</div>
+
+
+  <h3 class="@6xl:col-span-2 font-medium text-[15px] opacity-70 border-b border-gray-300 pb-2 mb-4">Officers &amp; salaries</h3>
+  
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/officers"><img src="/assets/images/products/officer-search.png" alt="Principal officer search" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/officers" class="text-navy hover:text-blue font-bold">Principal officer search</a></h4>
+    <p class="opacity-80 text-[15px]">Search NGOs for officers and salaries</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>Identify relationships between nonprofits and their officers.</p>
+    </div>
+  </div>
+</div>
+  
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/officers/bulk"><img src="/assets/images/products/bulk-officer-search.png" alt="Bulk NGO officer search" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/officers/bulk" class="text-navy hover:text-blue font-bold">Bulk NGO officer search</a></h4>
+    <p class="opacity-80 text-[15px]">Search and cross-reference names</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>This tool is useful for cross-referencing names across multiple nonprofits, helping identify affiliations between organizations and their members.</p>
+    </div>
+  </div>
+</div>
+
+
+  <h3 class="@6xl:col-span-2 font-medium text-[15px] opacity-70 border-b border-gray-300 pb-2 mb-4">Political campaign &amp; grant funding</h3>
+  
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/donations2024"><img src="/assets/images/products/donations.png" alt="Small dollar donations" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/donations2024" class="text-navy hover:text-blue font-bold">Small dollar donations</a></h4>
+    <p class="opacity-80 text-[15px]">ActBlue & WinRed donations</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>By highlighting donors with a high volume of small contributions, this tool aims to identify patterns that may indicate potential donation fraud, thereby promoting accountability in campaign financing.</p>
+    </div>
+  </div>
+</div>
+  
+  <div class="grid @lg:grid-cols-2 @4xl:grid-cols-3 gap-4 mb-12 md:mb-8">
+  <div class="bg-white rounded border border-gray-300 flex items-center justify-center">
+    <a href="/award_search"><img src="/assets/images/products/award-search.png" alt="Federal grant search" class="w-full "></a>
+  </div>
+  <div class="@4xl:col-span-2">
+    <h4 class="text-lg m-0"><a href="/award_search" class="text-navy hover:text-blue font-bold">Federal grant search</a></h4>
+    <p class="opacity-80 text-[15px]">Map funds to connected orgs</p>
+    <div class="[&_p]:text-[15px] [&_p]:mt-2 [&_p]:mb-0">
+    <p>Identify patterns, potential inefficiencies, or misuse of funds in grants funded by the federal government and cross-reference with taxpayer funding.</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="max-w-7xl @6xl:mx-auto @container">
   <h3 class="text-xl mb-1">Nice things people have said</h3>
   <p class="mb-4">Follow <a href="https://x.com/DataRepublican" target="_blank">@DataRepublican</a> on X to get the latest updates.</p>
   

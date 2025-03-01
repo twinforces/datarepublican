@@ -3,9 +3,9 @@ layout: default
 title: Exposing where the money flows
 ---
 
-<h1 class="mt-0 text-2xl mb-6 text-navy">Discover how money flows through government grants, charities, and NGOs</h1>
+<h1 class="mt-0 text-2xl mb-6 text-navy max-w-7xl @6xl:mx-auto">Discover how money flows through government grants, charities, and NGOs</h1>
 
-<div class="grid @4xl:grid-cols-5 gap-4 @4xl:gap-8 max-w-7xl">
+<div class="grid @4xl:grid-cols-5 gap-4 @4xl:gap-8 max-w-7xl @6xl:mx-auto">
   <div class="@4xl:col-span-3 max-w-2xl">
     <p>
       Billions of dollars are spent on government grants, charities, and other organizations every year. Have you ever wondered where the money is awarded or where it ends up?
@@ -17,8 +17,9 @@ title: Exposing where the money flows
       We've found some interesting connections, and we've made the data available for you to explore.
     </p>
     <p>See what you can find, and if you find something interesting, please <a href="https://x.com/datarepublican" target="_blank">let me know on X</a>!</p>
+    <p><em>- DataRepublican</em></p>
 
-    <div class="my-4 border-2 border-green p-4 rounded text-sm bg-white text-center">
+    <div class="my-4 border-2 border-green p-4 rounded text-[15px] bg-white text-center">
       <strong class="block mb-1">Help us build more tools like this.</strong> If you like the work you're doing, <a href="/donate" class="text-green font-semibold inline-block">we'd love your support</a>.
     </div>
 
@@ -37,12 +38,81 @@ title: Exposing where the money flows
   </div>
 </div>
 
-<div class="py-8 md:py-4 my-8 md:my-4 border-y border-gray-300 max-w-7xl">
-  <h3 class="text-xl mt-0">Explore the tools</h3>
-  tools
+<div class="py-8 max-w-7xl @6xl:mx-auto @6xl:grid @6xl:grid-cols-2 @6xl:gap-x-4">
+  <div class="text-xl font-bold m-0 @6xl:col-span-2">Explore the tools</div>
+  {% include product-category.html
+    title="Charity funding &amp; financials"
+  %}
+  
+  {% include product.html
+    image="/assets/images/products/charity-graph.png"
+    title="Charity graph"
+    description="Visualize how the money flows"
+    content="<p>Explore financial connections among charitable organizations, focusing on taxpayer funds received.</p>
+    <p>This tool allows users to trace funding flows, offering insights into how taxpayer money is allocated within the charitable sector.</p>"
+    url="/expose"
+  %}
+
+  {% include product.html
+    image="/assets/images/products/charity-funding.png"
+    title="Charity funding"
+    description="Discover the percentage of taxpayer funds used"
+    content="<p>Explore detailed financial information on 501(c)(3) charitable organizations, including the extent of taxpayer funding they receive.</p>"
+    url="/nonprofit"
+  %}
+
+  {% include product.html
+    image="/assets/images/products/nonprofit-financials.png"
+    title="Nonprofit financials"
+    description="Analyze assets & expenses"
+    content="<p>Browse nonprofit financials and see how organizations allocate their funds.</p>"
+    url="/nonprofit/assets"
+  %}
+
+
+  {% include product-category.html
+    title="Officers &amp; salaries"
+  %}
+  
+  {% include product.html
+    image="/assets/images/products/officer-search.png"
+    title="Principal officer search"
+    description="Search NGOs for officers and salaries"
+    content="<p>Identify relationships between nonprofits and their officers.</p>"
+    url="/officers"
+  %}
+  
+  {% include product.html
+    image="/assets/images/products/bulk-officer-search.png"
+    title="Bulk NGO officer search"
+    description="Search and cross-reference names"
+    content="<p>This tool is useful for cross-referencing names across multiple nonprofits, helping identify affiliations between organizations and their members.</p>"
+    url="/officers/bulk"
+  %}
+
+
+  {% include product-category.html
+    title="Political campaign &amp; grant funding"
+  %}
+  
+  {% include product.html
+    image="/assets/images/products/donations.png"
+    title="Small dollar donations"
+    description="ActBlue & WinRed donations"
+    content="<p>By highlighting donors with a high volume of small contributions, this tool aims to identify patterns that may indicate potential donation fraud, thereby promoting accountability in campaign financing.</p>"
+    url="/donations2024"
+  %}
+  
+  {% include product.html
+    image="/assets/images/products/award-search.png"
+    title="Federal grant search"
+    description="Map funds to connected orgs"
+    content="<p>Identify patterns, potential inefficiencies, or misuse of funds in grants funded by the federal government and cross-reference with taxpayer funding.</p>"
+    url="/award_search"
+  %}
 </div>
 
-<div class="max-w-7xl @container">
+<div class="max-w-7xl @6xl:mx-auto @container">
   <h3 class="text-xl mb-1">Nice things people have said</h3>
   <p class="mb-4">Follow <a href="https://x.com/DataRepublican" target="_blank">@DataRepublican</a> on X to get the latest updates.</p>
   
