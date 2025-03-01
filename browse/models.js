@@ -122,7 +122,7 @@
     }
 
     get grantsTotal() {
-        const cacheKey = `grantsTotal-${POWER_LAW}`;
+        const cacheKey = `grantsTotal`;
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
         return this._valueCache[cacheKey]=this.grants.reduce((total, g) => total + g.amt, 0);
@@ -414,6 +414,11 @@
     
     handleClick(e) {
     
+        if (e.altKey)
+        {
+                return this.tunnelNode();
+        }
+    
         if (!this.grants.length) // terminal node, click means hide
         {
                 this.isVisible=false;
@@ -439,17 +444,42 @@
                 g.isVisible=false;
                 g.grantee.recurseHide();
         }
+        
+        get origOut()
+        {
+                if (this.otherDown) return this._origOut;
+                return this.grantsTotal;
+        }
+        get origIn()
+        {
+                if (this.otherUp) return this._origIn;
+                return this.grantsInTotal;
+        }
+        
+        buildDownstream()
+        {
+                this._origOut = this.grantsTotal; // remememer for later
+                this.otherDown = new DownstreamOther({parent: this});
+
+        }
 
     expandDown(e) {
         if (!this.otherDown)
-                this.otherDown = new DownstreamOther({parent: this});
+                this.buildDownstream();
         else
                 this.otherDown.handleClick(e); 
     }
     
+    buildUpstream()
+    {
+        this._origIn = this.grantsInTotal;
+        this.otherUp = new UpstreamOther({parent: this});
+
+    }
+    
     expandUp(e) {
         if (!this.otherUp)
-                this.otherUp = new UpstreamOther({parent: this});
+                this.buildUpstream();
         else
                 this.otherUp.handleClick(e); 
     
@@ -533,6 +563,14 @@
     
     }
     
+    tunnelNode() {
+        //mark every other node and grant invisible
+        Object.values(Charity.charityLookup).forEach( c => c.isVisible=false);
+        Object.values(Grant.grantLookup).forEach( g => g.isVisible=false );
+        // add just us to chart
+        Charity.placeNode(this.id);
+    }
+    
     /* show node and appropriate number of grants*/
     static placeNode( startEin) {
     
@@ -540,8 +578,10 @@
         if (c) {
         
                 c.isVisible=true;
+                c.organize();
                 c.expandDown({}); //
                 c.expandUp({});
+                c.organize();
                 c.expanded=true;
                 c.grants.forEach(g => g.isVisible=true);
                 c.grantsIn.forEach(g => g.isVisible=true);
@@ -549,7 +589,7 @@
         else
         {
         
-                        system.log(`Couldn't place ${startEin}'`);
+                console.log(`Couldn't place ${startEin}'`);
 
         }
         return c;
@@ -594,7 +634,7 @@ class DownstreamOther extends Charity
         {
                 super({       
                         ein: `${parent.ein}-Down`, 
-                        name: `${parent.name}-Downstream`, 
+                        name: `More...`, 
                         xml_name: `${parent.xml_name}-Down`, 
                         isVisible : true,
                         isOther:true,
@@ -670,7 +710,7 @@ class UpstreamOther extends Charity
         {
                 super({       
                         ein: `${parent.ein}-Up`, 
-                        name: `${parent.name}-Up`, 
+                        name: `More...`, 
                         xml_name: `${parent.xml_name}-Down`, 
                         isVisible : true,
                         isOther:true,
@@ -842,7 +882,7 @@ class UpstreamOther extends Charity
     }
 
     toString() {
-        return `${this.id} ${formatNumber(this.amt)} (${this.scaledAmt})`;
+        return `${this.id} ${formatNumber(this.amt)} (${this.value})`;
     }
 
     disorganize() {

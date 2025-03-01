@@ -589,7 +589,6 @@ function calculateNodePositions(nodes, kyHeight, scale, height) {
             d.inflowHeight = 50;
         }
 
-        console.log(`Node ${d.filer_ein}: sankeyHeight=${sankeyHeight}, outflowHeight=${d.outflowHeight}, inflowHeight=${d.inflowHeight}, totalOutflow=${formatNumber(totalOutflow)}`);
         d.x0Original = d.x0;
         d.x1Original = d.x1;
         d.y0Original = d.y0;
@@ -611,13 +610,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
 
     const graph = sankey(currentData);
     const scale = calculateScale(graph, width, height);
-console.log(graph.nodes.map(n => ({
-  id: n.id,
-  depth: n.depth,
-  sourceLinks: n.sourceLinks.length,
-  targetLinks: n.targetLinks.length,
-  x0: n.x0
-})));   calculateNodePositions(graph.nodes, 1.0, scale, height);
+    calculateNodePositions(graph.nodes, 1.0, scale, height);
 
     graph.nodes.forEach(n => {
         if (!isFinite(n.x0) || !isFinite(n.y0) || !isFinite(n.x1) || !isFinite(n.y1)) {
@@ -627,7 +620,6 @@ console.log(graph.nodes.map(n => ({
 
     g.selectAll("*").remove();
 
-    console.log(`Rendering ${selectedNodeId}: nodes=${graph.nodes.length}, links=${graph.links.length}`);
 
     graph.links.forEach((link, i) => {
         link.gradientId = generateUniqueId("gradient");
@@ -682,8 +674,8 @@ console.log(graph.nodes.map(n => ({
 
     link.append("title")
         .text(d => d.target.isOther 
-            ? `${d.source.name} → ...\n$${formatNumber(d.rawValue)}` 
-            : `${d.source.name} → ${d.target.name}\n$${formatNumber(d.rawValue)}`);
+            ? `${d.source.name} → ...\n$${formatNumber(d.amt)}` 
+            : `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`);
 
     const nodeGroup = masterGroup.append('g').attr('class', 'nodes');
     nodeElements = nodeGroup.selectAll('g')
@@ -700,7 +692,6 @@ console.log(graph.nodes.map(n => ({
     nodeElements.each(function(d) {
         const sel = d3.select(this);
         if (d.isOther === true) {
-            console.log(`Rendering "OTHER" for ${d.id}, parent_ein=${d.parent_ein}`);
             sel.append("path")
                 .attr("d", generatePlusPath(d))
                 .attr("fill", "#ccc")
@@ -721,11 +712,10 @@ console.log(graph.nodes.map(n => ({
 
     function nodeClick(event, d) {
         event.stopPropagation();
-        if (event.altKey) {
+        if (event.controlKey) {
             generateGraph();
         } else if (d.isOther === true) {
             const sourceId = d.id;
-            console.log(`Expanding "OTHER" for ${sourceId}`);
             d.handleClick(event)
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         } else {
@@ -754,8 +744,8 @@ console.log(graph.nodes.map(n => ({
 
     nodeElements.append("title")
         .text(d => {
-            const inflow = d.grantsIn.filter(g => g.isVisible).reduce((sum, g) => sum + g.amt, 0);
-            const outflow = d.grants.filter(g => g.isVisible).reduce((sum, g) => sum + g.amt, 0);
+            const inflow = d.origIn;
+            const outflow = d.origOut;
             const top = `${d.name || d.id}\nInflow: $${formatNumber(inflow)}\nOutflow: $${formatNumber(outflow)}`;
             const loopback = d.loopbackgrants.reduce((sum, g) => sum + g.amt, 0);
             if (loopback) return `${top}\nLoop: $${formatNumber(loopback)}`;
