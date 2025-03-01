@@ -411,7 +411,7 @@ function generateGraph() {
         .nodeId(d => d.id )
         .nodeWidth(NODE_WIDTH)
         .nodePadding(NODE_PADDING)
-        .linkSort(linkCompare)
+        .linkSort(sortLinks)
         .nodeId(d => d.id)
         .nodeAlign(d3.sankeyCenter)
         .nodeSort(compareCharities)
@@ -557,7 +557,7 @@ function generatePlusPath(d) {
     const fullPath = `${circlePath} ${plusPath}`;
     return fullPath;
 }
-function linkCompare(a,b) {
+function sortLinks(a,b) {
 
        const aIsOther = a.isOther || false;
         const bIsOther = b.isOther || false;
@@ -568,7 +568,7 @@ function linkCompare(a,b) {
 
 function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
     // Sort links: "Other" links go to the bottom, others by value (descending)
-    const sortedLinks = [...links].sort(linkCompare);
+    const sortedLinks = [...links].sort(sortLinks);
     
     // Compute the cumulative height up to this link
     const cumulativeHeight = d3.sum(sortedLinks.slice(0, linkIndex), l => l.width);
@@ -591,8 +591,9 @@ function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
     // - Target side: Stack upward from startY (bottom)
     const segmentTop = isSourceSide ? (startY + cumulativeHeight) : (startY - height + cumulativeHeight);
     
-    // Compute the centered y position for rendering
-    const y = segmentTop + (linkHeight / 2);
+    // For the source side (outflows), return the top of the segment (stroke-width extends downward)
+    // For the target side (inflows), center the path for visual alignment (stroke-width extends symmetrically)
+    const y = (segmentTop + (linkHeight / 2));
     
     return y;
 }
@@ -633,16 +634,20 @@ function calculateNodePositions(nodes, scale, height) {
     nodes.forEach(d => {
 
         let scaleFactor = 100; // placeholder for 0,0
-        const sankeyHeight = Math.max(MIN_LINK_HEIGHT, d.y1 - d.y0);
-        if (d.logGrantsInTotal > d.logGrantsTotal)
-                scaleFactor = sankeyHeight/d.logGrantsInTotal; // we know its greater so must be not zero
+        const sankeyHeight = d.y1 - d.y0;
+        if (d.grantsInLogTotal > d.grantsLogTotal)
+                scaleFactor = sankeyHeight/d.grantsInLogTotal; // we know its greater so must be not zero
         else
-                scaleFactor = sankeyHeight/d.logGrantsTotal;
-        d.outflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.logGrantsTotal * scaleFactor));
-        d.inflowHeight = Math.max(MIN_LINK_HEIGHT, Math.min(sankeyHeight, d.logGrantsInTotal * scaleFactor));
-        if (d.grantsTotal === 0) {
+                scaleFactor = sankeyHeight/d.grantsLogTotal;
+        d.outflowHeight =  Math.min(sankeyHeight, d.grantsLogTotal * scaleFactor);
+        d.inflowHeight = Math.min(sankeyHeight, d.grantsInLogTotal * scaleFactor);
+        if (d.grantsLogTotal === 0) {
             d.inflowHeight = sankeyHeight;
-            d.outflowHeight = 0;
+            d.outflowHeight = 5;
+        }
+        if (d.grantsLogInTotal === 0){
+            d.inflowHeight = 5;
+            d.outflowHeight = sankeyHeight;
         }
 
         if (!isFinite(d.outflowHeight) || !isFinite(d.inflowHeight)) {
@@ -655,6 +660,30 @@ function calculateNodePositions(nodes, scale, height) {
         d.x1Original = d.x1;
         d.y0Original = d.y0;
         d.y1Original = d.y1;
+    });
+}
+
+function normalizeStrokeWidths(sankey) {
+    const nodes = sankey.nodes;
+    nodes.forEach(node => {
+        // Normalize outflow stroke-widths
+        const totalOutflowWidth = d3.sum(node.sourceLinks, l => l.width);
+        const outflowHeight = node.outflowHeight || 0;
+        if (totalOutflowWidth > 0 && outflowHeight > 0) {
+            const scaleFactor = outflowHeight / totalOutflowWidth;
+            node.sourceLinks.forEach(link => {
+                link.normalizedWidth = link.width * scaleFactor; // Store in a custom property
+            });
+        }
+        // Normalize inflow stroke-widths
+        const totalInflowWidth = d3.sum(node.targetLinks, l => l.width);
+        const inflowHeight = node.inflowHeight || 0;
+        if (totalInflowWidth > 0 && inflowHeight > 0) {
+            const scaleFactor = inflowHeight / totalInflowWidth;
+            node.targetLinks.forEach(link => {
+                link.normalizedWidth = link.width * scaleFactor; // Store in a custom property
+            });
+        }
     });
 }
 
@@ -673,6 +702,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     const graph = sankey(currentData);
     const scale = calculateScale(graph, width, height);
     calculateNodePositions(graph.nodes, scale, height);
+    normalizeStrokeWidths(graph);
 
     graph.nodes.forEach(n => {
         if (!isFinite(n.x0) || !isFinite(n.y0) || !isFinite(n.x1) || !isFinite(n.y1)) {

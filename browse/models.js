@@ -113,7 +113,8 @@
                         this.otherUp.otherGrant.isVisible=value;
         }
     }
-
+    
+    // useful for overall scale
     get logGrantsTotal() {
         const cacheKey = `logGrantTotal-${POWER_LAW}`;
         if (this._valueCache[cacheKey])
@@ -126,6 +127,21 @@
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
         return this._valueCache[cacheKey]=scaleValue(this.grantsInTotal);
+    }
+
+    //useful for the sankey which doesn't know its values are scaled
+    get grantsLogTotal() {
+        const cacheKey = `grantsLogTotal-${POWER_LAW}`;
+        if (this._valueCache[cacheKey])
+                return this._valueCache[cacheKey];
+        return this._valueCache[cacheKey]=this.grants.reduce((total, g) => total + g.value, 0);
+    }
+
+    get grantsInLogTotal() {
+        const cacheKey = `grantsInLogTotal-${POWER_LAW}`;
+        if (this._valueCache[cacheKey])
+                return this._valueCache[cacheKey];
+        return this._valueCache[cacheKey]=this.grantsIn.reduce((total, g) => total + g.value, 0);
     }
 
     get grantsTotal() {
@@ -945,8 +961,8 @@ class UpstreamOther extends Charity
         if (v != this._isVisible)
         {
                 this._isVisible = v;
-                // if we're visible, we have to have somewhere to draw from/to.
                 if (v) {
+                // if we're visible, we have to have somewhere to draw from/to.
                   this.filer.isVisible = v;
                   this.grantee.isVisible = v;
                 }
