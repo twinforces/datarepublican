@@ -429,6 +429,12 @@
      
     }
     
+       // grants that get clicked hide their path and their destination node
+        handleGrantClick(g, event) {
+                g.isVisible=false;
+                g.grantee.recurseHide();
+        }
+
     expandDown(e) {
         if (!this.otherDown)
                 this.otherDown = new DownstreamOther({parent: this});
@@ -529,9 +535,11 @@
         if (c) {
         
                 c.isVisible=true;
-                c.expandDown({});
+                c.expandDown({}); //
+                c.expandUp({});
                 c.expanded=true;
-                
+                c.grants.forEach(g => g.isVisible=true);
+                c.grantsIn.forEach(g => g.isVisible=true);
         }
         else
         {
@@ -590,6 +598,16 @@ class DownstreamOther extends Charity
                         parent.removeGrant(g);
                         g.filer=this;
                 });
+                this.parent.grants.push(
+                        this.otherGrant=new Grant({
+                            filer_ein: this.parent.ein,
+                            grantee_ein: this.ein,
+                            amt: this.totalGrantAmt,
+                            isOther: true,
+                            isOtherDest: this
+                        })               
+                );
+                this.otherGrant.isVisible=true;
                 this.parent.grants.forEach(g => g.isVisible=true);
         
         }
@@ -615,6 +633,9 @@ class DownstreamOther extends Charity
         
                 return (this.grants.length) && (super.isVisible);
         }
+    set isVisible(v) { // javascript gotcha
+        super.isVisible=v;
+    }
 
 }
 
@@ -638,11 +659,25 @@ class UpstreamOther extends Charity
                 } );
                 this.parent = parent;
                 this.parent.otherUp = this;
+                if (this.grantsIn.length ==0)
+                {
+                        this.isVisible=false; // we're unnecessary
+                }
                 this.grants.slice(count).forEach( g => {
                         g.isVisiblbe=false;
                         parent.removeGrantIn(g);
                         g.grantee=this;
                 });
+                this.parent.grantsIn.push(
+                        this.otherGrant = new Grant({
+                            filer_ein: this.ein,
+                            grantee_ein: this.parent.ein,
+                            amt: this.totalGrantInAmt,
+                            isOther: true,
+                            isOtherDest: this
+                        })               
+                );
+                this.otherGrant.isVisible=true;
                 this.parent.grantsIn.forEach(g => g.isVisible=true);
         
         }
@@ -653,6 +688,8 @@ class UpstreamOther extends Charity
                         this.parent.addGrantIn(g);
                         this.removeGrantIn(g);
                         g.grantee=this.parent;
+                        if (!this.grantsIn.length)
+                                this.otherGrant.isVisible=false;
                 
                 })       
         }
@@ -668,6 +705,9 @@ class UpstreamOther extends Charity
         
                 return (this.grantsIn.length) && (super.isVisible);
         }
+           set isVisible(v) { // javascript gotcha
+                super.isVisible= v;
+            }
        
 
 }
@@ -751,7 +791,11 @@ class UpstreamOther extends Charity
         return scaleValue(this.amt);
     }
 
-    constructor({ filer_ein, grantee_ein, amt = 0, isCircular = false, isVisible = false }) {
+    constructor({ filer_ein, grantee_ein, amt = 0, isCircular = false,
+             isVisible = false, 
+             isOther = false,
+             isOtherDest
+     }) {
         this.registered=false;
         this.id = `${filer_ein}~${grantee_ein}`;
         this.amt = amt;
@@ -764,6 +808,8 @@ class UpstreamOther extends Charity
         this.registered=true;
         this.isVisible = isVisible;
         this._isCircular = isCircular;
+        this.isOther = isOther;
+        this.isOtherDest = isOtherDest;
    }
 
     get relativeInAmount() {
@@ -784,6 +830,8 @@ class UpstreamOther extends Charity
     }
     
     get isVisible() {
+        if (this.isOther)
+                return this.isOtherDest.isVisible;
         return this._isVisible;
     }
 
