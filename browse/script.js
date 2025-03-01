@@ -1,5 +1,5 @@
 // main.js
-import {graphScaleUp, graphScaleDown, graphScaleReset, Charity, Grant, loadData, scaleValue, formatNumber } from './models.js';
+import {graphScaleUp, graphScaleDown, graphScaleReset, GOV_EIN, Charity, Grant, loadData, scaleValue, formatNumber } from './models.js';
 
 // Filter state
 let activeEINs = [];
@@ -425,12 +425,12 @@ function generateGraph() {
         .size([width - 100, height - 100]);
 
     if (!customGraphEdges && activeEINs.length === 0) {
-        const usGov = Charity.getCharity("001");
-        expandNode("001", false, false);
+        const usGov = Charity.getCharity(GOV_EIN);
+        expandNode(GOV_EIN, false, false);
         Charity.getRootCharities().slice(0,TOP_N_INITIAL).forEach(m=> expandNode(m.id));
     }
 
-    renderFocusedSankey(g, sankey, svg, width, height, activeEINs[0] || "001");
+    renderFocusedSankey(g, sankey, svg, width, height, activeEINs[0] || GOV_EIN);
 
     document.getElementById('zoomIn').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 1.3);
     document.getElementById('zoomOut').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 0.7);
@@ -662,7 +662,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("stroke-width", d => Math.max(1, d.width || 1))
         .on('click', function(event, d) {
             event.stopPropagation();
-            handlePathClick(d);
+            handlePathClick(event,d);
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         });
 
@@ -727,15 +727,20 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     
     function handlePathClick(e,d) {
     
-        if (e.filer.isOther) 
+        if (e.altKey)
         {
-                e.filer.handleGrantClick(e, d.grant)
-        } else if (e.grantee.isOther) {
-                e.grantee.handleGrantClick(e, d.grant);
+                return d.tunnelGrant();
+        
+        }
+        if (d.filer.isOther) 
+        {
+                d.filer.handleGrantClick(e, d)
+        } else if (d.grantee.isOther) {
+                d.grantee.handleGrantClick(e, d);
         }
         else {
-                e.filer.handleGrantClick(e, d.grant);
-                e.grantee.handleGrantClick(e, d.grant);
+                d.filer.handleGrantClick(e, d);
+                d.grantee.handleGrantClick(e, d);
         }
     
     }

@@ -3,6 +3,8 @@
  const START_REVEAL = 5;
  const MIN_REVEAL = 2;
  const NEXT_REVEAL = 3;
+ const NEXT_REVEAL_MAX = 15;
+ const GOV_EIN = '001';
  
  function graphScaleDown()
  {
@@ -294,7 +296,7 @@
       the Government is implied by the data  
     */
     static buildGovCharity() {
-        const gov_ein = "001";
+        const gov_ein = GOV_EIN;
         const gov_proto = {
             ein: gov_ein,
             filer_ein: gov_ein,
@@ -440,7 +442,7 @@
     }
     
        // grants that get clicked hide their path and their destination node
-        handleGrantClick(g, event) {
+        handleGrantClick(event,g) {
                 g.isVisible=false;
                 g.grantee.recurseHide();
         }
@@ -489,29 +491,36 @@
         let end = start+NEXT_REVEAL;
         if (start < 0) start = 0;
         this.grants.slice(start, end).forEach( g =>{
-                this.handleGrantClick(g,e);
+                this.handleGrantClick(e,g);
         });
     
     }
     
     /*when we get turned off, we have to flow down to other nodes*/
     recurseHide() {
-        this.isVisible=false;
-        this.grants.forEach(g => {
-                g.isVisible=false;
-                g.grantee.recurseHide();
-        });
+        if (this.isVisible)
+        {
+                this.isVisible=false;
+                this.grants.forEach(g => {
+                        g.isVisible=false;
+                        g.grantee.recurseHide();
+                });
+        
+        }
     
     }
     
     /* recurse upwards through nodes we're hiding to hide flows*/
     recurseUpHide() {
-        this.isVisible=false;
-        this.grantsIn.forEach(g => {
-                g.isVisible=false;
-                g.filer.recurseUpHide();
-        });
-    
+        if (this.isVisible)
+        {
+                this.isVisible=false;
+                this.grantsIn.forEach(g => {
+                        g.isVisible=false;
+                        g.filer.recurseUpHide();
+                });
+       }
+     
     }
     
     /**
@@ -665,8 +674,17 @@ class DownstreamOther extends Charity
                 this.parent.grants.forEach(g => g.isVisible=true);
         
         }
-        handleClick() { // every time we get clicked on, 3 more get shown
-                this.grantsIn.slice(0,NEXT_REVEAL).forEach( g=> {
+        handleClick(e) { // every time we get clicked on, 3 more get shown
+                let revealGrants = [];
+                if (e.shiftKey)
+                        if(this.grantsIn.length > NEXT_REVEAL_MAX)
+                                revealGrants=this.grantsIn.slice(0,NEXT_REVEAL_MAX); // 10x for gov
+                        else
+                                revealGrants=this.grantsIn; // do all
+                else
+                        revealGrants = this.grantsIn.slice(0,NEXT_REVEAL);
+                        
+                revealGrants.forEach( g=> {
                         g.isVisible=true;
                         g.grantee.isVisible=true;
                         this.parent.addGrant(g);
@@ -716,15 +734,15 @@ class UpstreamOther extends Charity
                         isOther:true,
                         grants : parent.grantsIn.slice(count)
                 } );
-                this.parent = parent;
-                this.parent.otherUp = this;
                 if (this.grants.length ==0)
                 {
                         this.isVisible=false; // we're unnecessary
                 }
+                this.parent = parent;
+                this.parent.otherUp = this;
                 this.grants.forEach( g => {
                         g.isVisiblbe=false;
-                        parent.removeGrant(g);
+                        parent.removeGrantIn(g);
                         //g.swapCharities(this, this.parent);
                 });
                 this.parent.addGrantIn(
@@ -742,8 +760,14 @@ class UpstreamOther extends Charity
                 this.parent.grantsIn.forEach(g => g.isVisible=true);
         
         }
-        handleClick() { // every time we get clicked on, 3 more get shown
-                this.grants.slice(0,NEXT_REVEAL).forEach( g=> {
+        handleClick(e) { // every time we get clicked on, 3 more get shown
+                let revealGrants = [];
+                if (e.shiftKey) 
+                        revealGrants=this.grants; // do all
+                else
+                        revealGrants = this.grants.slice(0,NEXT_REVEAL);
+                        
+                 revealGrants.forEach( g=> {
                         g.isVisible=true;
                         g.filer.isVisible=true;
                         this.parent.addGrantIn(g);
@@ -927,6 +951,16 @@ class UpstreamOther extends Charity
         
         }
     }
+    tunnelGrant() {
+       //mark every other node and grant invisible
+        Object.values(Charity.charityLookup).forEach( c => c.isVisible=false);
+        Object.values(Grant.grantLookup).forEach( g => g.isVisible=false );
+        // add ourselves back, plus the nodes we point to
+        this.isVisible=true;
+        Charity.placeNode(this.filer_ein);
+        Charity.placeNode(this.grantee_ein);
+    
+    }
         
 }
 
@@ -993,4 +1027,4 @@ class UpstreamOther extends Charity
     };
 }
 
-export {graphScaleUp, graphScaleDown, graphScaleReset, POWER_LAW, Charity, Grant, loadData, scaleValue, formatNumber };
+export {graphScaleUp, graphScaleDown, graphScaleReset, POWER_LAW, GOV_EIN, Charity, Grant, loadData, scaleValue, formatNumber };
