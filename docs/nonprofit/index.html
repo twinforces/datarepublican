@@ -4,8 +4,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1740855962">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1740855962">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1740857250">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1740857250">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -929,9 +929,12 @@ $(document).ready(function() {
   // Filter data by EIN or name (case-insensitive)
   function filterData(dataArray, query) {
     const q = query.toLowerCase().trim();
+    // Remove hyphens from the query for EIN matching
+    const cleanQuery = q.replace(/-/g, '');
+    
     if (!q) return dataArray; // No filter
     return dataArray.filter(item =>
-      item.ein.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
+      item.ein.toLowerCase().includes(cleanQuery) || item.name.toLowerCase().includes(q)
     );
   }
 
@@ -1069,7 +1072,7 @@ $(document).ready(function() {
 
     // 4) Filter actions. Instead of reloading data, we just re-filter in-memory & update URL
     $('#filterButton').on('click', function (e) {
-      e.preventDefault(); // Don’t submit form
+      e.preventDefault(); // Don't submit form
       const newFilter = $('#filterInput').val().trim();
       updateQueryStringParam('filter', newFilter);
       applyFilterAndSort();
