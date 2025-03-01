@@ -565,37 +565,52 @@ function linkCompare(a,b) {
         if (!aIsOther && bIsOther) return -1;
         return b.value - a.value; // Sort by value (descending)
 }
-function sortLinks(links, getNode) {
-    return links.sort(linkCompare);
+
+function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
+    // Sort links: "Other" links go to the bottom, others by value (descending)
+    const sortedLinks = [...links].sort(linkCompare);
+    
+    // Compute the cumulative height up to this link
+    const cumulativeHeight = d3.sum(sortedLinks.slice(0, linkIndex), l => l.width);
+    
+    // Compute the center Y of the node
+    const centerY = (node.y0 + node.y1) / 2;
+    
+    // Get the inflow/outflow height
+    const height = node[heightKey] || 0;
+    
+    // Get the link's stroke-width
+    const linkHeight = sortedLinks[linkIndex].width || 0;
+    
+    // For the source side (right edge), start from the top of the right edge (centerY - height/2)
+    // For the target side (left edge), start from the bottom of the left edge (y1)
+    const startY = isSourceSide ? (centerY - height / 2) : node.y1;
+    
+    // Compute the top of the segment:
+    // - Source side: Stack downward from startY
+    // - Target side: Stack upward from startY (bottom)
+    const segmentTop = isSourceSide ? (startY + cumulativeHeight) : (startY - height + cumulativeHeight);
+    
+    // Compute the centered y position for rendering
+    const y = segmentTop + (linkHeight / 2);
+    
+    return y;
 }
 
 function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
     return function(link) {
         // Source position (right edge of source node)
         const source = link.source;
-        // Sort sourceLinks: "Other" links go to the bottom, others by value (descending)
         const originalSourceLinks = [...source.sourceLinks];
-        sortLinks(source.sourceLinks, link => link.source);
-        const outflowIndex = source.sourceLinks.indexOf(link);
-        const cumulativeOutflowHeight = d3.sum(source.sourceLinks.slice(0, outflowIndex), l => l.width);
-        const sourceCenterY = (source.y0 + source.y1) / 2;
-        const outflowHeight = source.outflowHeight || 0;
-        const sourceLinkHeight = link.width || 0;
-        // Start from the top of the right edge (centerY - outflowHeight/2) and stack downward
-        const sourceTopY = sourceCenterY - (outflowHeight / 2);
-        const sourceY = sourceTopY + cumulativeOutflowHeight + (sourceLinkHeight / 2);
+        const outflowIndex = source.sourceLinks.sort(compareLinks).indexOf(link);
+        const sourceY = computeLinkY(source, outflowIndex, source.sourceLinks, 'outflowHeight', true);
         const sourceX = source.x1;
 
         // Target position (left edge of target node)
         const target = link.target;
-        // Sort targetLinks: "Other" links go to the bottom, others by value (descending)
         const originalTargetLinks = [...target.targetLinks];
-        sortLinks(target.targetLinks, link => link.target);
-        const inflowIndex = target.targetLinks.indexOf(link);
-        const cumulativeInflowHeight = d3.sum(target.targetLinks.slice(0, inflowIndex), l => l.width);
-        const targetBottomY = target.y1; // Start from the bottom
-        const targetLinkHeight = link.width || 0;
-        const targetY = targetBottomY - cumulativeInflowHeight - (targetLinkHeight / 2);
+        const inflowIndex = target.targetLinks.sort(compareLinks).indexOf(link);
+        const targetY = computeLinkY(target, inflowIndex, target.targetLinks, 'inflowHeight', false);
         const targetX = target.x0;
 
         // Restore original order to avoid side effects
