@@ -599,12 +599,12 @@ class DownstreamOther extends Charity
                 {
                         this.isVisible=false; // we're unnecessary
                 }
-               this.parent = parent;
+                this.parent = parent;
                 this.parent.otherDown = this;
                 this.grantsIn.forEach( g => {
                         g.isVisible=false;
                         parent.removeGrant(g);
-                        g.swapCharities(this, parent);
+                        //g.swapCharities(this, parent);
                         
                 });
                 this.parent.addGrant(
@@ -624,11 +624,12 @@ class DownstreamOther extends Charity
                 this.grantsIn.slice(0,NEXT_REVEAL).forEach( g=> {
                         g.isVisible=true;
                         g.grantee.isVisible=true;
-                        g.swapCharities(this, this.parent);
                         this.parent.addGrant(g);
                         this.removeGrantIn(g);
                 
-                })       
+                });       
+                if (!this.grantsIn.length)
+                        this.otherGrant.isVisible=false;
         }
         // grants that get clicked hide their path and their node
         handleGrantClick(g, event) {
@@ -679,7 +680,7 @@ class UpstreamOther extends Charity
                 this.grants.forEach( g => {
                         g.isVisiblbe=false;
                         parent.removeGrant(g);
-                        g.swapCharities(this, this.parent);
+                        //g.swapCharities(this, this.parent);
                 });
                 this.parent.addGrantIn(
                         this.otherGrant = new Grant({
@@ -702,11 +703,11 @@ class UpstreamOther extends Charity
                         g.filer.isVisible=true;
                         this.parent.addGrantIn(g);
                         this.removeGrantIn(g);
-                        g.swapCharities(this, this.parent);
-                        if (!this.grantsIn.length)
-                                this.otherGrant.isVisible=false;
+                        //g.swapCharities(this, this.parent);
                 
-                })       
+                });       
+                if (!this.grantsIn.length)
+                        this.otherGrant.isVisible=false;
         }
         // grants that get clicked hide their path and their node
         handleGrantClick(g) {
