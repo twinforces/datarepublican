@@ -509,36 +509,31 @@ function generateOctagonPath(d) {
 }
 
 function generatePlusPath(d) {
-    const nodeHeight = d.y1 - d.y0;
-    const size = Math.max(nodeHeight * 0.5, 20);
-    const armWidth = size * 0.3;
-    const cx = d.x0;
-    const cy = (d.y0 + d.y1) / 2;
-    const radius = size / 2;
+    const radius = d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
+    const armWidth = radius * 0.2; // Skinny arms (20% of radius)
+    const cx = d.x0; // Absolute center at d.x0
+    const cy = (d.y0 + d.y1) / 2; // Absolute vertical center
 
-    const plusPath = `
-        M${cx - radius},${cy - armWidth / 2}
-        H${cx - armWidth / 2}
-        V${cy - radius}
-        H${cx + armWidth / 2}
-        V${cy - armWidth / 2}
-        H${cx + radius}
-        V${cy + armWidth / 2}
-        H${cx + armWidth / 2}
-        V${cx + radius}
-        H${cx - armWidth / 2}
-        V${cy + armWidth / 2}
-        H${cx - radius}
-        Z`;
-
+    // Circle path (filled)
     const circlePath = `
         M${cx},${cy - radius}
         A${radius},${radius} 0 1 1 ${cx},${cy + radius}
         A${radius},${radius} 0 1 1 ${cx},${cy - radius}
         Z`;
 
-    return `${plusPath} ${circlePath}`; // Separate paths for different fills
+    // Skinny plus sign path (lines)
+    const plusPath = `
+        M${cx - armWidth},${cy}
+        H${cx + armWidth}
+        M${cx},${cy - armWidth}
+        V${cy + armWidth}
+    `;
+
+    const fullPath = `${circlePath} ${plusPath}`;
+    console.log(`Node ${d.id}: cx=${cx}, cy=${cy}, radius=${radius}, inflowHeight=${d.inflowHeight}, x0=${d.x0}, y0=${d.y0}, y1=${d.y1}, path="${fullPath}"`);
+    return fullPath;
 }
+
 function calculateNodePositions(nodes, kyHeight, scale, height) {
     nodes.forEach(d => {
         const sourceData = d.sourceLinks.length > 0 ? d.sourceLinks : d.grantsIn.filter(g => g.isVisible);
@@ -682,6 +677,7 @@ console.log(graph.nodes.map(n => ({
             sel.append("path")
                 .attr("d", generatePlusPath(d))
                 .attr("fill", "#ccc")
+                .attr("fill-rule", "evenodd") // Circle filled, plus as hole
                 .attr("stroke", "#000");
         } else if (!d.grants || !d.grants.length) { // terminal nodes
             sel.append("path")
@@ -714,15 +710,15 @@ console.log(graph.nodes.map(n => ({
     
     function handlePathClick(e,d) {
     
-        if (d.filer.isOther) 
+        if (e.filer.isOther) 
         {
-                d.filer.handleGrantClick(e, d.grant)
-        } else if (d.grantee.isOther) {
-                d.grantee.handleGrantClick(e, d.grant);
+                e.filer.handleGrantClick(e, d.grant)
+        } else if (e.grantee.isOther) {
+                e.grantee.handleGrantClick(e, d.grant);
         }
         else {
-                d.filer.handleGrantClick(e, d.grant);
-                d.grantee.handleGrantClick(e, d.grant);
+                e.filer.handleGrantClick(e, d.grant);
+                e.grantee.handleGrantClick(e, d.grant);
         }
     
     }
