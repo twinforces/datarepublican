@@ -409,9 +409,14 @@
     
     handleClick(e) {
     
+        if (!this.grants.length) // terminal node, click means hide
+        {
+                this.isVisible=false;
+                this.grantsIn.forEach(g=> g.isVisible=false);
+        }
         if (this.expanded)
         {
-                this.shrink(d);
+                this.shrink(e);
         
         }
         else
@@ -606,7 +611,10 @@ class DownstreamOther extends Charity
                 this.parent.removeGrant(g);        
         }
         
+        get isVisible() {
         
+                return (this.grants.length) && (super.isVisible);
+        }
 
 }
 
@@ -656,7 +664,11 @@ class UpstreamOther extends Charity
                 this.parent.removeGrantIn(g);        
         }
         
+         get isVisible() {
         
+                return (this.grantsIn.length) && (super.isVisible);
+        }
+       
 
 }
 

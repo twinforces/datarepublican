@@ -500,7 +500,7 @@ function generateTrapezoidPath(d) {
 
 function generateOctagonPath(d) {
     const radius = d.inflowHeight / 2 || 10;
-    const cx = d.x1;
+    const cx = d.x0;
     const cy = (d.y0 + d.y1) / 2;
     const r = radius;
     const s = radius * Math.SQRT2 / 2;
@@ -509,13 +509,36 @@ function generateOctagonPath(d) {
 }
 
 function generatePlusPath(d) {
-    const size = d.inflowHeight;
-    const cx = d.x1;
+    const nodeHeight = d.y1 - d.y0;
+    const size = Math.max(nodeHeight * 0.5, 20);
+    const armWidth = size * 0.3;
+    const cx = d.x0;
     const cy = (d.y0 + d.y1) / 2;
-    return `M${cx - size / 2},${cy - size / 6} L${cx + size / 2},${cy - size / 6} L${cx + size / 2},${cy + size / 6} L${cx - size / 2},${cy + size / 6} Z
-            M${cx - size / 6},${cy - size / 2} L${cx + size / 6},${cy - size / 2} L${cx + size / 6},${cy + size / 2} L${cx - size / 6},${cy + size / 2} Z`;
-}
+    const radius = size / 2;
 
+    const plusPath = `
+        M${cx - radius},${cy - armWidth / 2}
+        H${cx - armWidth / 2}
+        V${cy - radius}
+        H${cx + armWidth / 2}
+        V${cy - armWidth / 2}
+        H${cx + radius}
+        V${cy + armWidth / 2}
+        H${cx + armWidth / 2}
+        V${cx + radius}
+        H${cx - armWidth / 2}
+        V${cy + armWidth / 2}
+        H${cx - radius}
+        Z`;
+
+    const circlePath = `
+        M${cx},${cy - radius}
+        A${radius},${radius} 0 1 1 ${cx},${cy + radius}
+        A${radius},${radius} 0 1 1 ${cx},${cy - radius}
+        Z`;
+
+    return `${plusPath} ${circlePath}`; // Separate paths for different fills
+}
 function calculateNodePositions(nodes, kyHeight, scale, height) {
     nodes.forEach(d => {
         const sourceData = d.sourceLinks.length > 0 ? d.sourceLinks : d.grantsIn.filter(g => g.isVisible);
@@ -680,26 +703,26 @@ console.log(graph.nodes.map(n => ({
         } else if (d.isOther === true) {
             const sourceId = d.id;
             console.log(`Expanding "OTHER" for ${sourceId}`);
-            d.charity.handleClick(event)
+            d.handleClick(event)
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         } else {
             console.log(`Expanding node: ${d.filer_ein}`);
-            d.charity.handleClick(event)
+            d.handleClick(event)
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         }
     }
     
     function handlePathClick(e,d) {
     
-        if (d.source.isOther) 
+        if (d.filer.isOther) 
         {
-                d.source.handleGrantClick(e, d.grant)
-        } else if (d.target.isOther) {
-                d.target.handleGrantClick(e, d.grant);
+                d.filer.handleGrantClick(e, d.grant)
+        } else if (d.grantee.isOther) {
+                d.grantee.handleGrantClick(e, d.grant);
         }
         else {
-                d.source.handleGrantClick(e, d.grant);
-                d.target.handleGrantClick(e, d.grant);
+                d.filer.handleGrantClick(e, d.grant);
+                d.grantee.handleGrantClick(e, d.grant);
         }
     
     }
@@ -829,7 +852,7 @@ function handleSearchKeydown(e) {
             if (selectedSearchIndex >= 0) {
                 const selectedResult = results[selectedSearchIndex];
                 if (selectedResult) {
-                    handleSearchClick({ target: selectedResult });
+                    Charity.handleSearchClick({ target: selectedResult });
                 }
             }
             break;
