@@ -236,10 +236,14 @@ title: Nonprofit assets
   // Filter by EIN/Name plus the slider ranges
   function filterData(dataArray, query) {
     const q = query.toLowerCase().trim();
+    // Remove hyphens from the query for EIN matching
+    const cleanQuery = q.replace(/-/g, '');
 
     return dataArray.filter(item => {
-      // Text filter
-      const textMatch = !q || item.ein.toLowerCase().includes(q) || item.name.toLowerCase().includes(q);
+      // Text filter - check both original query (for name) and cleaned query (for EIN)
+      const textMatch = !q || 
+                        item.ein.toLowerCase().includes(cleanQuery) || 
+                        item.name.toLowerCase().includes(q);
 
       // Slider-based numeric filters
       const withinReceipts = (item.receiptAmt >= receiptsMinVal && item.receiptAmt <= receiptsMaxVal);
