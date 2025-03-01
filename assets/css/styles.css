@@ -975,6 +975,10 @@ body > div#main-content {
   margin-top: 2rem;
   margin-bottom: 2rem;
 }
+.mx-px {
+  margin-left: 1px;
+  margin-right: 1px;
+}
 .\!mt-4 {
   margin-top: 1rem !important;
 }
@@ -1698,6 +1702,10 @@ body > div#main-content {
   padding-top: 2rem;
   padding-bottom: 2rem;
 }
+.px-px {
+  padding-left: 1px;
+  padding-right: 1px;
+}
 .\!pr-4 {
   padding-right: 1rem !important;
 }
@@ -1863,6 +1871,9 @@ body > div#main-content {
 .text-white\/80 {
   color: rgb(255 255 255 / 0.8);
 }
+.text-white\/75 {
+  color: rgb(255 255 255 / 0.75);
+}
 .\!text-opacity-75 {
   --tw-text-opacity: 0.75 !important;
 }
@@ -1912,6 +1923,11 @@ body > div#main-content {
 .shadow-sm {
   --tw-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --tw-shadow-colored: 0 1px 2px 0 var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+.shadow-xl {
+  --tw-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --tw-shadow-colored: 0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
 .outline {
@@ -2290,10 +2306,6 @@ body > div#main-content {
 
   .md\:ml-\[275px\] {
     margin-left: 275px;
-  }
-
-  .md\:ml-\[300px\] {
-    margin-left: 300px;
   }
 
   .md\:mr-2 {
