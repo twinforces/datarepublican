@@ -558,6 +558,47 @@ function generatePlusPath(d) {
     return fullPath;
 }
 
+
+function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
+    return function(link) {
+        // Source position (right edge of source node)
+        const source = link.source;
+        // Sort sourceLinks by value (descending) to match SVG
+        source.sourceLinks.sort((a, b) => b.value - a.value);
+        const outflowIndex = source.sourceLinks.indexOf(link);
+        const cumulativeOutflowHeight = d3.sum(source.sourceLinks.slice(0, outflowIndex), l => l.width);
+        const sourceCenterY = (source.y0 + source.y1) / 2;
+        const outflowHeight = source.outflowHeight || 0;
+        const sourceLinkHeight = link.width || 0;
+        // Position at the center of the segment
+        const sourceY = sourceCenterY - (outflowHeight / 2) + cumulativeOutflowHeight + (sourceLinkHeight / 2);
+        const sourceX = source.x1;
+
+        // Target position (left edge of target node)
+        const target = link.target;
+        // Sort targetLinks by value (descending) to match SVG
+        target.targetLinks.sort((a, b) => b.value - a.value);
+        const inflowIndex = target.targetLinks.indexOf(link);
+        const cumulativeInflowHeight = d3.sum(target.targetLinks.slice(0, inflowIndex), l => l.width);
+        const targetCenterY = (target.y0 + target.y1) / 2;
+        const inflowHeight = target.inflowHeight || 0;
+        const targetLinkHeight = link.width || 0;
+        // Position at the center of the segment
+        const targetY = targetCenterY - (inflowHeight / 2) + cumulativeInflowHeight + (targetLinkHeight / 2);
+        const targetX = target.x0;
+
+        // Compute control points for cubic Bézier curve
+        const dx = targetX - sourceX;
+        const cp1X = sourceX + dx * curvature;
+        const cp1Y = sourceY;
+        const cp2X = targetX - dx * curvature;
+        const cp2Y = targetY;
+
+        // Generate the path
+        return `M${sourceX},${sourceY} C${cp1X},${cp1Y} ${cp2X},${cp2Y} ${targetX},${targetY}`;
+    };
+}
+
 function calculateNodePositions(nodes, scale, height) {
     nodes.forEach(d => {
 
@@ -611,6 +652,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
 
     g.selectAll("*").remove();
 
+    graph.links.sort((a, b) => b.value - a.value);
+
 
     graph.links.forEach((link, i) => {
         link.gradientId = generateUniqueId("gradient");
@@ -647,7 +690,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .selectAll(".link")
         .data(graph.links)
         .join("path")
-        .attr("d", d3.sankeyLinkHorizontal())
+        .attr("d", sankeyLinkHorizontalTrapezoid())
         .style("stroke", d => d.target.isOther ? "#ccc" : `url(#${d.gradientId})`)
         .style("stroke-opacity", "0.3")
         .attr("stroke-width", d => Math.max(1, d.width || 1))
