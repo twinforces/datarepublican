@@ -1,5 +1,5 @@
 // main.js
-import { Charity, Grant, loadData, scaleValue, formatNumber } from './models.js';
+import {graphScaleUp, graphScaleDown, graphScaleReset, Charity, Grant, loadData, scaleValue, formatNumber } from './models.js';
 
 // Filter state
 let activeEINs = [];
@@ -420,7 +420,7 @@ function generateGraph() {
         .nodePadding(NODE_PADDING)
         .linkSort(compareLinks)
         .nodeId(d => d.id)
-        .nodeAlign(d3.sankeyJustify)
+        .nodeAlign(d3.sankeyCenter)
         .nodeSort(compareCharities)
         .size([width - 100, height - 100]);
 
@@ -447,6 +447,9 @@ function generateGraph() {
                 .scale(scale)
                 .translate(-dx - bounds.width/2, -dy - bounds.height/2));
     };
+    document.getElementById('scaleUp').onclick = () => doScaleUp();
+    document.getElementById('scaleDown').onclick = () => doScaleDown();
+    document.getElementById('scaleReset').onclick = () => doScaleReset();
 
     setTimeout(() => {
         const bounds = g.node().getBBox();
@@ -466,6 +469,22 @@ function generateGraph() {
     }, 1000);
 
     $('#loading').hide();
+}
+
+function doScaleUp()
+{
+        graphScaleUp();
+        generateGraph();
+}
+function doScaleDown()
+{
+        graphScaleDown();
+        generateGraph();
+}
+function doScaleReset()
+{
+        graphScaleReset();
+        generateGraph()
 }
 
 

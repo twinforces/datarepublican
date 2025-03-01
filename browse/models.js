@@ -4,17 +4,22 @@
  const MIN_REVEAL = 2;
  const NEXT_REVEAL = 3;
  
- function scaleDown()
+ function graphScaleDown()
  {
         POWER_LAW++;
                 
  }
  
- function scaleUp()
+ function graphScaleUp()
  {
         POWER_LAW--;
         if (POWER_LAW < 1) POWER_LAW=1;
                 
+ }
+ 
+ function graphScaleReset()
+ {
+        POWER_LAW=3;
  }
 
 
@@ -948,4 +953,4 @@ class UpstreamOther extends Charity
     };
 }
 
-export {scaleUp, scaleDown, POWER_LAW, Charity, Grant, loadData, scaleValue, formatNumber };
+export {graphScaleUp, graphScaleDown, graphScaleReset, POWER_LAW, Charity, Grant, loadData, scaleValue, formatNumber };
