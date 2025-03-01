@@ -369,6 +369,15 @@ function compareCharities( a, b)
                         (a.name.localeCompare(b.name));
 }
 
+function compareLinks(a,b)
+{
+        //sort other links to bottom
+        if (a.isOther) return 1;
+        if (b.isOther) return -1;
+        return (b.value-a.value);
+
+}
+
 function generateGraph() {
     console.log('1. Starting graph generation');
     if (!dataReady) {
@@ -409,7 +418,7 @@ function generateGraph() {
         .nodeId(d => d.id )
         .nodeWidth(NODE_WIDTH)
         .nodePadding(NODE_PADDING)
-        .linkSort((a,b) => b.value-a.value)
+        .linkSort(compareLinks)
         .nodeId(d => d.id)
         .nodeAlign(d3.sankeyJustify)
         .nodeSort(compareCharities)
@@ -530,7 +539,6 @@ function generatePlusPath(d) {
     `;
 
     const fullPath = `${circlePath} ${plusPath}`;
-    console.log(`Node ${d.id}: cx=${cx}, cy=${cy}, radius=${radius}, inflowHeight=${d.inflowHeight}, x0=${d.x0}, y0=${d.y0}, y1=${d.y1}, path="${fullPath}"`);
     return fullPath;
 }
 
@@ -848,7 +856,7 @@ function handleSearchKeydown(e) {
             if (selectedSearchIndex >= 0) {
                 const selectedResult = results[selectedSearchIndex];
                 if (selectedResult) {
-                    Charity.handleSearchClick({ target: selectedResult });
+                    handleSearchClick({ target: selectedResult });
                 }
             }
             break;
