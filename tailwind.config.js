@@ -16,7 +16,7 @@ module.exports = {
     'list-disc',
     'list-inside',
     'space-y-4',
-    'md:w-[280px]',
+    'md:w-[300px]',
     'md:w-[60px]',
     'bottom-4',
     'md:ml-12',
