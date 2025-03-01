@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1740857745">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1740857745">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1740861956">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1740861956">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -83,9 +83,16 @@ $(document).ready(function() {
   </script>
 
   
-  <button id="expand-button" class="flex justify-center px-1 py-1.5 m-0 min-w-0 items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white hidden" aria-label="Expand menu" aria-expanded="false">
-    <span class="size-5"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M2 5.75A.75.75 0 0 1 2.75 5h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 5.75ZM2 12a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 12Zm0 6.25a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg></span>
-  </button>
+  <div id="expand-button-container" class="hidden md:flex flex-col">
+
+    <div class="collapsed-logomark flex justify-center border-b border-white/25 w-full text-center">
+      <a href="/" class="text-white/75 inline-block px-1 pt-2 pb-1.5"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 21 19" width="21"><path fill="#FDFEF7" d="M5.32 1.459A9.35 9.35 0 0 1 8.646.168c2.076-.278 4.14.345 6.04 1.13.528.226.98.6 1.358 1.029-.162.129-.354.23-.472.405-.381.688-.394 1.531-.829 2.193-.628.405-1.42.384-2.118.608-.642.212-1.325.328-1.923.657-.212.095-.26.36-.167.558.175.185.443.224.684.252.688.055 1.347-.192 2.02-.285.75-.132 1.514-.136 2.272-.124.395.022.854.009 1.137.34-.897.042-1.807-.05-2.694.126-1.297.298-2.513.853-3.71 1.416-1.032.499-2.083.98-3.01 1.662-.06.061-.114.128-.163.198 1.131-.309 2.184-.848 3.264-1.299.823-.317 1.64-.707 2.52-.828-.533.278-1.11.473-1.61.81-1.72 1.172-3.132 2.72-4.555 4.223-.278.255-.512.6-.896.701.59-.898 1.183-1.804 1.94-2.574.22-.245.511-.432.661-.734-1.302.648-2.455 1.558-3.527 2.534-.473.504-.98.999-1.3 1.62-.19.364-.201.78-.238 1.179-.428-1.56-.096-3.2.439-4.69.546-1.441 1.331-2.819 2.442-3.902.292-.297.647-.518.952-.799-.945.336-1.844.857-2.53 1.598-.528.569-1.066 1.134-1.514 1.77-.39.543-.589 1.188-.87 1.787-.257.546-.318 1.17-.63 1.692 0-.455.13-.895.223-1.336.15-.676.604-1.239.762-1.91-.243.368-.521.712-.755 1.086-.403.752-.717 1.559-.835 2.408-.182.844-.235 1.707-.342 2.561-.252-1.03-.047-2.103.162-3.122.21-.83.449-1.668.914-2.394.249-.558.833-.844 1.15-1.35-.283.261-.517.572-.814.82-.619.478-.98 1.19-1.378 1.845-.236.366-.338.8-.583 1.162-.01-.18-.025-.363.023-.539.158-.601.349-1.197.643-1.747.451-.989.98-1.955 1.705-2.772.653-.705 1.353-1.38 2.176-1.886a.57.57 0 0 1-.005-.036c-1.329.342-2.444 1.207-3.375 2.183-.179.196-.301.442-.517.602.4-1.043.854-2.086 1.521-2.99.772-1.173 1.87-2.1 3.054-2.835-1.466.38-2.705 1.317-3.764 2.365.168-.399.453-.73.7-1.08.883-1.118 1.855-2.19 3.038-2.997ZM9.3 2.856c-.748.327-1.522.615-2.208 1.068-.403.274-.848.495-1.192.848.584-.3 1.192-.567 1.837-.708.494-.095.923-.403 1.432-.433.227-.004.528-.102.686.115-.392.043-.793.03-1.177.134.252.16.566.135.838.246.564.233 1.028.64 1.55.948-.701.129-1.223-.506-1.906-.501.57.46 1.3.85 2.057.72.55-.1 1.132-.127 1.626-.411.422-.213.766-.549 1.191-.755.209-.098.362-.273.54-.413-.012.17-.166.308-.333.323-.347.377-.636.81-1.04 1.132.849-.197 1.324-.995 1.738-1.689.105-.142.09-.32.083-.487-.159.107-.314.247-.518.247-1.214.04-2.268-.764-3.479-.755-.59.016-1.212.044-1.725.371Z"/><path fill="#E2D134" d="M15.329 4.875c.226-.629.382-1.322.833-1.835.293-.142.633.029.932.089.445.178.892.357 1.33.55 1.202.635 1.762 2.078 1.678 3.384-.04.389-.035.831-.315 1.139a2.23 2.23 0 0 0-.903-1.565c-.494-.285-1.083-.283-1.628-.394-1.57-.303-3.213-.327-4.765.094-.363.052-.694.329-1.071.23l-.016-.135a6.038 6.038 0 0 1 1.639-.675c.617-.125 1.255-.153 1.862-.33.25-.068.342-.335.424-.552Zm.536-.084c.482-.106.85-.45 1.297-.634a.81.81 0 0 0 .196-.559c-.626.157-1.444.43-1.493 1.193Zm.249.323-.013.183c.474-.212.893-.573 1.063-1.081-.302.355-.67.635-1.05.898Z"/><path fill="#FDFEF7" d="M10.865 3.41c.131-.191.392-.215.6-.263.117.26-.03.482-.291.546-.025.394.403.672.764.58.323-.063.5-.367.687-.606.189.503-.37 1.05-.87 1.005-.633.06-1.088-.706-.89-1.263ZM11.237 9.557c.392-.2.788-.394 1.185-.585-.924.782-1.646 1.76-2.371 2.719.543-.304.979-.757 1.496-1.1.564-.382 1.029-.884 1.569-1.297-.179.436-.454.83-.567 1.292-.213.918-.216 1.864-.261 2.801.084-.177.158-.36.201-.552.112-.468.348-.89.531-1.33.227-.479.377-.991.629-1.458.086.807.036 1.75.641 2.379-.104-.626-.281-1.252-.186-1.891a5.467 5.467 0 0 0 1.53 2.66c.031-.211-.095-.39-.196-.563a4.366 4.366 0 0 1-.704-2.374c.638 1.327 1.574 2.477 2.432 3.664.419.563.8 1.154 1.26 1.685-.571-.185-1.128-.411-1.696-.604-.87-.364-1.599-.984-2.277-1.624.197.691.44 1.38.49 2.103.08.615-.03 1.232-.016 1.848a5.356 5.356 0 0 0-.432-.836 13.682 13.682 0 0 1-1.289-2.555.791.791 0 0 0-.158-.223c-.054.963-.102 1.95-.441 2.864-.175.546-.491 1.03-.725 1.55.009-.273.131-.546.068-.818-.18-.431-.511-.78-.698-1.208-.446-1.055-.51-2.225-.454-3.356-.065.086-.14.166-.184.267-.322.887-.398 1.835-.556 2.759a.854.854 0 0 1-.101-.382c-.044-.701-.09-1.404-.052-2.105.007-.35.165-.673.192-1.019-.602.907-.967 1.947-1.344 2.963-.23.703-.58 1.362-.75 2.084-.135-1.152-.244-2.332.006-3.478.233-.781.543-1.545.976-2.237a6.442 6.442 0 0 1 2.252-2.043ZM2.288 14.506c-.009-1.325.288-2.698 1.041-3.803-.374 1.015-.73 2.046-.848 3.127-.045.227-.009.504-.193.676Z"/></svg></a>
+    </div>
+    
+    <button id="expand-button" class="flex justify-center px-1 py-1.5 m-0 min-w-0 items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white" aria-label="Expand menu" aria-expanded="false">
+      <span class="size-5"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M2 5.75A.75.75 0 0 1 2.75 5h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 5.75ZM2 12a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 12Zm0 6.25a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg></span>
+    </button>
+  </div>
 
   <div id="menu-contents" class="flex flex-col gap-4 flex-1 p-2">
     <div class="flex-[0_0_auto] flex md:flex-col gap-2 items-center">
@@ -116,7 +123,7 @@ $(document).ready(function() {
             class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 is-active border-transparent relative group justify-start items-start transition-opacity"
           >
             <strong class="text-base md:text-sm w-full md:w-auto text-left">Charity funding &amp; financials</strong>
-            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Track money flows and financials</span>
+            <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">Track money flow and spending</span>
             <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 4 7.293 7.293a1 1 0 0 1 0 1.414L9 20"/></svg>
             </span>
@@ -138,7 +145,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Track where the money flows</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Visualize how the money flows</span>
   
   
 </a> 
@@ -154,7 +161,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Discover % of taxpayer funds used</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Discover % of taxpayer funds used</span>
   
   
 </a> 
@@ -172,7 +179,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Analyze expenses & assets</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Analyze expenses & assets</span>
   
   
 </a> 
@@ -185,7 +192,7 @@ $(document).ready(function() {
             class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 border-transparent hover:border-white/75 hover:bg-white/10 relative group justify-start items-start"
           >
             <strong class="text-base md:text-sm w-full md:w-auto text-left">Officers &amp; salaries</strong>
-            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Search NGO officers and salaries</span>
+            <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">Search NGO officers and salaries</span>
             <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 4 7.293 7.293a1 1 0 0 1 0 1.414L9 20"/></svg>
             </span>
@@ -207,7 +214,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Search for NGO officers and salaries</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Explore for NGO officers and salaries</span>
   
   
 </a> 
@@ -225,7 +232,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Search and cross-reference names</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Search and cross-reference names</span>
   
   
 </a> 
@@ -237,8 +244,8 @@ $(document).ready(function() {
             id="political-funding-dropdown-button"
             class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 border-transparent hover:border-white/75 hover:bg-white/10 relative group justify-start items-start"
           >
-            <strong class="text-base md:text-sm w-full md:w-auto text-left">Political &amp; government funding</strong>
-            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Donations and federal grants</span>
+            <strong class="text-base md:text-sm w-full md:w-auto text-left">Political campaign &amp; grant funding</strong>
+            <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">Donations and taxpayer-funded grants</span>
             <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 4 7.293 7.293a1 1 0 0 1 0 1.414L9 20"/></svg>
             </span>
@@ -262,7 +269,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">ActBlue & WinRed donations</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">ActBlue & WinRed donations</span>
   
   
 </a> 
@@ -278,7 +285,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Map funds to connected orgs</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Map funds to connected orgs</span>
   
   
 </a> 
@@ -291,7 +298,7 @@ $(document).ready(function() {
         
       >
         <strong class="text-base md:text-sm w-full md:w-auto text-left">Voter turnout analysis</strong>
-        <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">2024 vs. previous elections</span>
+        <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">2024 vs. previous elections</span>
         <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 4 7.293 7.293a1 1 0 0 1 0 1.414L9 20"/></svg>
         </span>
@@ -377,7 +384,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">Help support our work</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Help support our work</span>
   
   
     <span class="right-icon inline-block absolute right-2 top-[calc(50%-0.75rem)] size-6 group-hover:text-navy"><svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M8.667 3.5a.917.917 0 0 0-.917.917A2.583 2.583 0 0 0 10.333 7h.917v-.917A2.583 2.583 0 0 0 8.667 3.5ZM12 3.724A4.078 4.078 0 0 0 8.667 2 2.417 2.417 0 0 0 6.25 4.417c0 .98.345 1.88.92 2.583H4.75A1.75 1.75 0 0 0 3 8.75V11c0 .698.409 1.3 1 1.582v6.668c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 20 19.25v-6.668c.591-.281 1-.884 1-1.582V8.75A1.75 1.75 0 0 0 19.25 7h-2.42c.575-.704.92-1.603.92-2.583A2.417 2.417 0 0 0 15.333 2C13.957 2 12.74 2.68 12 3.724Zm.75 4.776v2.75h6.5a.25.25 0 0 0 .25-.25V8.75a.25.25 0 0 0-.25-.25h-6.5Zm-1.5 2.75V8.5h-6.5a.25.25 0 0 0-.25.25V11c0 .138.112.25.25.25h6.5Zm0 1.5v6.75h-5.5a.25.25 0 0 1-.25-.25v-6.5h5.75Zm1.5 6.75v-6.75h5.75v6.5a.25.25 0 0 1-.25.25h-5.5Zm0-12.5h.917a2.583 2.583 0 0 0 2.583-2.583.917.917 0 0 0-.917-.917 2.583 2.583 0 0 0-2.583 2.583V7Z" clip-rule="evenodd"/></svg></span>
@@ -395,7 +402,7 @@ $(document).ready(function() {
     
   </strong>
   
-    <span class="opacity-70 text-sm md:text-[13px]">@datarepublican</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">@datarepublican</span>
   
   
     <span class="right-icon inline-block absolute right-2 top-[calc(50%-0.75rem)] size-6 "><svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24"><path d="M17.169 4h2.747l-6 6.904L21 20.265h-5.566l-4.338-5.675-4.988 5.675H3.361l6.434-7.373L3 4h5.71l3.94 5.205L17.17 4Zm-.976 14.602h1.518L7.88 5.554H6.217l9.976 13.048Z"/></svg></span>
@@ -443,6 +450,7 @@ $(document).ready(function() {
     // New elements for collapse/expand functionality
     const $collapseButton = $('#collapse-button');
     const $expandButton = $('#expand-button');
+    const $expandButtonContainer = $('#expand-button-container');
     const $menuContents = $('#menu-contents');
     const $mainContent = $('body > div');
     
@@ -453,10 +461,10 @@ $(document).ready(function() {
     if (isInitiallyCollapsed && window.innerWidth >= 768) {
       $menuContents.addClass('hidden');
       $collapseButton.addClass('hidden');
-      $expandButton.removeClass('hidden');
+      $expandButtonContainer.removeClass('!hidden');
       $mainContent.addClass('menu-collapsed');
     } else {
-      $expandButton.addClass('hidden');
+      $expandButtonContainer.addClass('!hidden');
       // If on mobile, ensure menu is expanded regardless of localStorage
       if (window.innerWidth < 768) {
         $header.removeClass('collapsed');
@@ -598,7 +606,7 @@ $(document).ready(function() {
         $header.addClass('collapsed');
         $menuContents.addClass('hidden');
         $collapseButton.addClass('hidden');
-        $expandButton.removeClass('hidden');
+        $expandButtonContainer.removeClass('!hidden');
         $mainContent.removeClass('menu-expanded');
         $mainContent.addClass('menu-collapsed');
         localStorage.setItem('menuCollapsed', 'true');
@@ -611,7 +619,7 @@ $(document).ready(function() {
       $header.removeClass('collapsed');
       $menuContents.removeClass('hidden');
       $collapseButton.removeClass('hidden');
-      $expandButton.addClass('hidden');
+      $expandButtonContainer.addClass('!hidden');
       $mainContent.removeClass('menu-collapsed');
       $mainContent.addClass('menu-expanded');
       localStorage.setItem('menuCollapsed', 'false');
@@ -716,7 +724,7 @@ $(document).ready(function() {
         }
       })();
     </script>
-    <main class="@container p-4 xl:p-6 min-h-[calc(100vh-200px)]">
+    <main class="@container p-4 xl:px-6 min-h-[calc(100vh-200px)]">
       <style>
   #filterContainer {
     margin-bottom: 10px;

@@ -23,9 +23,16 @@
   </script>
 
   
-  <button id="expand-button" class="flex justify-center px-1 py-1.5 m-0 min-w-0 items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white hidden" aria-label="Expand menu" aria-expanded="false">
-    <span class="size-5">{% include icon-menu.html %}</span>
-  </button>
+  <div id="expand-button-container" class="hidden md:flex flex-col">
+
+    <div class="collapsed-logomark flex justify-center border-b border-white/25 w-full text-center">
+      <a href="/" class="text-white/75 inline-block px-1 pt-2 pb-1.5">{% include icon-eagle.html %}</a>
+    </div>
+    
+    <button id="expand-button" class="flex justify-center px-1 py-1.5 m-0 min-w-0 items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white" aria-label="Expand menu" aria-expanded="false">
+      <span class="size-5">{% include icon-menu.html %}</span>
+    </button>
+  </div>
 
   <div id="menu-contents" class="flex flex-col gap-4 flex-1 p-2">
     <div class="flex-[0_0_auto] flex md:flex-col gap-2 items-center">
@@ -56,7 +63,7 @@
             class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 {% if page.url contains '/expose' or page.url contains '/nonprofit' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10 opacity-75 hover:opacity-100{% endif %} relative group justify-start items-start transition-opacity"
           >
             <strong class="text-base md:text-sm w-full md:w-auto text-left">Charity funding &amp; financials</strong>
-            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Track money flows and financials</span>
+            <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">Track money flow and spending</span>
             <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
               {% include icon-chevron.html %}
             </span>
@@ -68,7 +75,7 @@
           >
             {% include nav-link.html 
               title="Charity graph"
-              subtitle="Track where the money flows"
+              subtitle="Visualize how the money flows"
               url="/expose"
               classes=""
             %}
@@ -94,7 +101,7 @@
             class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 {% if page.url contains '/officers' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
           >
             <strong class="text-base md:text-sm w-full md:w-auto text-left">Officers &amp; salaries</strong>
-            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Search NGO officers and salaries</span>
+            <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">Search NGO officers and salaries</span>
             <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
               {% include icon-chevron.html %}
             </span>
@@ -106,7 +113,7 @@
           >
             {% include nav-link.html 
               title="Principal officer search"
-              subtitle="Search for NGO officers and salaries"
+              subtitle="Explore for NGO officers and salaries"
               url="/officers"
               classes=""
             %}
@@ -125,8 +132,8 @@
             id="political-funding-dropdown-button"
             class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 {% if page.url contains '/donations2024' or page.url contains '/award_search' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
           >
-            <strong class="text-base md:text-sm w-full md:w-auto text-left">Political &amp; government funding</strong>
-            <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">Donations and federal grants</span>
+            <strong class="text-base md:text-sm w-full md:w-auto text-left">Political campaign &amp; grant funding</strong>
+            <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">Donations and taxpayer-funded grants</span>
             <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
               {% include icon-chevron.html %}
             </span>
@@ -158,7 +165,7 @@
         {% if include.target %}target="{{ include.target }}"{% endif %}
       >
         <strong class="text-base md:text-sm w-full md:w-auto text-left">Voter turnout analysis</strong>
-        <span class="opacity-70 text-sm md:text-[13px] w-full md:w-auto text-left">2024 vs. previous elections</span>
+        <span class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left">2024 vs. previous elections</span>
         <span class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90">
           {% include icon-chevron.html %}
         </span>
@@ -236,6 +243,7 @@
     // New elements for collapse/expand functionality
     const $collapseButton = $('#collapse-button');
     const $expandButton = $('#expand-button');
+    const $expandButtonContainer = $('#expand-button-container');
     const $menuContents = $('#menu-contents');
     const $mainContent = $('body > div');
     
@@ -246,10 +254,10 @@
     if (isInitiallyCollapsed && window.innerWidth >= 768) {
       $menuContents.addClass('hidden');
       $collapseButton.addClass('hidden');
-      $expandButton.removeClass('hidden');
+      $expandButtonContainer.removeClass('!hidden');
       $mainContent.addClass('menu-collapsed');
     } else {
-      $expandButton.addClass('hidden');
+      $expandButtonContainer.addClass('!hidden');
       // If on mobile, ensure menu is expanded regardless of localStorage
       if (window.innerWidth < 768) {
         $header.removeClass('collapsed');
@@ -391,7 +399,7 @@
         $header.addClass('collapsed');
         $menuContents.addClass('hidden');
         $collapseButton.addClass('hidden');
-        $expandButton.removeClass('hidden');
+        $expandButtonContainer.removeClass('!hidden');
         $mainContent.removeClass('menu-expanded');
         $mainContent.addClass('menu-collapsed');
         localStorage.setItem('menuCollapsed', 'true');
@@ -404,7 +412,7 @@
       $header.removeClass('collapsed');
       $menuContents.removeClass('hidden');
       $collapseButton.removeClass('hidden');
-      $expandButton.addClass('hidden');
+      $expandButtonContainer.addClass('!hidden');
       $mainContent.removeClass('menu-collapsed');
       $mainContent.addClass('menu-expanded');
       localStorage.setItem('menuCollapsed', 'false');
