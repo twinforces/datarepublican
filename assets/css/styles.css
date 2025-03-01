@@ -914,6 +914,9 @@ body > div#main-content {
 .z-50 {
   z-index: 50;
 }
+.z-40 {
+  z-index: 40;
+}
 .order-2 {
   order: 2;
 }
@@ -946,6 +949,9 @@ body > div#main-content {
 }
 .m-4 {
   margin: 1rem;
+}
+.-m-2 {
+  margin: -0.5rem;
 }
 .-mx-4 {
   margin-left: -1rem;
@@ -2283,6 +2289,10 @@ body > div#main-content {
     float: right;
   }
 
+  .md\:m-0 {
+    margin: 0px;
+  }
+
   .md\:mx-0 {
     margin-left: 0px;
     margin-right: 0px;
@@ -2504,6 +2514,10 @@ body > div#main-content {
 
   .md\:p-0 {
     padding: 0px;
+  }
+
+  .md\:p-2 {
+    padding: 0.5rem;
   }
 
   .md\:px-0 {
