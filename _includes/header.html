@@ -23,7 +23,7 @@
   </script>
 
   
-  <div id="expand-button-container" class="hidden md:flex flex-col">
+  <div id="expand-button-container" class="md:flex flex-col" style="display: none;">
 
     <div class="collapsed-logomark flex justify-center border-b border-white/25 w-full text-center">
       <a href="/" class="text-white/75 inline-block px-1 pt-2 pb-1.5">{% include icon-eagle.html %}</a>
@@ -254,10 +254,12 @@
     if (isInitiallyCollapsed && window.innerWidth >= 768) {
       $menuContents.addClass('hidden');
       $collapseButton.addClass('hidden');
-      $expandButtonContainer.removeClass('!hidden');
+      $expandButtonContainer.addClass('md:flex');
+      $expandButtonContainer.removeAttr('style');
       $mainContent.addClass('menu-collapsed');
     } else {
-      $expandButtonContainer.addClass('!hidden');
+      $expandButtonContainer.addClass('hidden');
+      
       // If on mobile, ensure menu is expanded regardless of localStorage
       if (window.innerWidth < 768) {
         $header.removeClass('collapsed');
@@ -405,6 +407,8 @@
         localStorage.setItem('menuCollapsed', 'true');
         $collapseButton.attr('aria-expanded', 'false');
         $expandButton.attr('aria-expanded', 'true');
+        $expandButtonContainer.removeAttr('style');
+
       }
     }
     

@@ -2377,6 +2377,10 @@ body > div#main-content {
     margin-bottom: 0px;
   }
 
+  .md\:mb-8 {
+    margin-bottom: 2rem;
+  }
+
   .md\:ml-12 {
     margin-left: 3rem;
   }
@@ -2399,10 +2403,6 @@ body > div#main-content {
 
   .md\:mt-6 {
     margin-top: 1.5rem;
-  }
-
-  .md\:mb-8 {
-    margin-bottom: 2rem;
   }
 
   .md\:block {
