@@ -41,16 +41,16 @@ $(document).ready(function() {
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
 <meta property="og:description" content="Tracking where the money goes" />
-<link rel="canonical" href="http://localhost:4000/donations2024/" />
-<meta property="og:url" content="http://localhost:4000/donations2024/" />
+<link rel="canonical" href="https://datarepublican.com/donations2024/" />
+<meta property="og:url" content="https://datarepublican.com/donations2024/" />
 <meta property="og:site_name" content="DataRepublican" />
-<meta property="og:image" content="http://localhost:4000/assets/images/og.png" />
+<meta property="og:image" content="https://datarepublican.com/assets/images/og.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta property="twitter:image" content="http://localhost:4000/assets/images/og.png" />
+<meta property="twitter:image" content="https://datarepublican.com/assets/images/og.png" />
 <meta property="twitter:title" content="ActBlue / WinRed 2024 donor lookup" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"ActBlue / WinRed 2024 donor lookup","image":"http://localhost:4000/assets/images/og.png","url":"http://localhost:4000/donations2024/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"ActBlue / WinRed 2024 donor lookup","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/donations2024/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
@@ -67,7 +67,8 @@ $(document).ready(function() {
       var mainContent = document.getElementById('main-content');
       var isCollapsed = localStorage.getItem('menuCollapsed') === 'true';
       
-      if (isCollapsed) {
+      // Only apply collapsed state if not on mobile
+      if (isCollapsed && window.innerWidth >= 768) {
         header.classList.add('collapsed');
         if (menuContents) {
           menuContents.classList.add('hidden');
@@ -121,7 +122,7 @@ $(document).ready(function() {
           
           <div 
             id="charity-funding-dropdown"
-            class="nav-dropdown-content relative pl-2 h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+            class="nav-dropdown-content relative pl-2 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
           >
             <a 
   href="/expose" 
@@ -190,7 +191,7 @@ $(document).ready(function() {
           
           <div 
             id="officers-dropdown"
-            class="nav-dropdown-content relative pl-2 h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+            class="nav-dropdown-content relative pl-2 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
           >
             <a 
   href="/officers" 
@@ -243,7 +244,7 @@ $(document).ready(function() {
           
           <div 
             id="political-funding-dropdown"
-            class="nav-dropdown-content relative pl-2 h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+            class="nav-dropdown-content relative pl-2 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
           >
             <a 
   href="/donations2024" 
@@ -296,7 +297,7 @@ $(document).ready(function() {
 
       <div 
         id="election-results-dropdown"
-        class="nav-dropdown-content relative pl-2 h-0 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
+        class="nav-dropdown-content relative pl-2 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
       >
         <a 
   href="/florida" 
@@ -417,7 +418,7 @@ $(document).ready(function() {
 
     </div>
   </div>
-    <div class="border-t border-white/25 hover:border-white/50">
+    <div class="border-t border-white/25 hover:border-white/50 hidden md:block">
     <button id="collapse-button" class="frameless flex items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white !p-2 !pr-4 justify-center w-full" aria-label="Collapse menu" aria-expanded="true">
       <span class="size-4"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m10 16-3.47-3.47a.75.75 0 0 1 0-1.06L10 8m7 8-3.47-3.47a.75.75 0 0 1 0-1.06L17 8"/></svg></span>
       Collapse menu
@@ -447,13 +448,19 @@ $(document).ready(function() {
     const isInitiallyCollapsed = $header.hasClass('collapsed');
     
     // Set initial state of buttons and menu contents based on header state
-    if (isInitiallyCollapsed) {
+    if (isInitiallyCollapsed && window.innerWidth >= 768) {
       $menuContents.addClass('hidden');
       $collapseButton.addClass('hidden');
       $expandButton.removeClass('hidden');
       $mainContent.addClass('menu-collapsed');
     } else {
       $expandButton.addClass('hidden');
+      // If on mobile, ensure menu is expanded regardless of localStorage
+      if (window.innerWidth < 768) {
+        $header.removeClass('collapsed');
+        $menuContents.removeClass('hidden');
+        $mainContent.removeClass('menu-collapsed');
+      }
     }
     
     // Function to handle dropdown menus
@@ -474,28 +481,35 @@ $(document).ready(function() {
         const $content = $('#' + $button.attr('id').replace('-button', ''));
         const $chevron = $button.find('span:last-child');
         
-        // Get the full height of the hidden content
-        $content.css('height', 'auto');
-        const expandedHeight = $content.outerHeight();
+        // Make sure content exists before trying to manipulate it
+        if ($content.length === 0) {
+          console.warn('Dropdown content not found for button:', $button.attr('id'));
+          return;
+        }
         
         // Check if we're on a page that should have this dropdown expanded
         const isActive = $button.hasClass('is-active');
         
         // Set initial state
         if (isActive) {
-          $content.removeClass('h-0').css('height', expandedHeight);
+          $content.addClass('expanded');
           $chevron.toggleClass('rotate-90 -rotate-90');
           $button.removeClass('opacity-75').addClass('opacity-100');
         } else {
-          $content.css('height', 0);
+          $content.removeClass('expanded');
         }
         
         // Add click event
-        $button.on('click', function() {
-          const isExpanded = $content.height() !== 0;
+        $button.on('click', function(e) {
+          e.preventDefault();
+          const isExpanded = $content.hasClass('expanded');
           
           // Toggle the dropdown
-          $content.css('height', isExpanded ? 0 : expandedHeight);
+          if (isExpanded) {
+            $content.removeClass('expanded');
+          } else {
+            $content.addClass('expanded');
+          }
           
           // Toggle the chevron rotation classes
           $chevron.toggleClass('rotate-90 -rotate-90');
@@ -519,16 +533,14 @@ $(document).ready(function() {
     // Function to update menu position and height
     function updateMenuPosition() {
       const headerHeight = $header.outerHeight();
-      const windowHeight = window.innerHeight;
+      document.documentElement.style.setProperty('--header-height', headerHeight + 'px');
       
       if (window.innerWidth < 768) { // Only set these on mobile
         $menuItems
-          .css('top', headerHeight + 'px')
-          .css('height', (windowHeight - headerHeight) + 'px');
+          .css('height', `calc(100vh - ${headerHeight}px)`);
       } else {
         // Reset styles on desktop
         $menuItems
-          .css('top', '')
           .css('height', '');
       }
     }
@@ -540,7 +552,12 @@ $(document).ready(function() {
     function showMenu() {
       $menuItems
         .css('display', 'flex')
-        .removeClass('hidden translate-x-full');
+        .removeClass('hidden');
+      
+      // Use a small timeout to ensure the display:flex is applied before adding the class
+      setTimeout(function() {
+        $menuItems.addClass('menu-visible').removeClass('translate-x-full');
+      }, 10);
       
       // Update button to show close state
       $menuIcon.addClass('hidden');
@@ -550,7 +567,7 @@ $(document).ready(function() {
 
     function hideMenu() {
       $menuItems
-        .addClass('translate-x-full')
+        .removeClass('menu-visible')
         .one('transitionend', function(e) {
           if (window.innerWidth < 768) {
             $(this).addClass('hidden').css('display', '');
@@ -574,15 +591,18 @@ $(document).ready(function() {
     
     // Functions for collapse/expand functionality
     function collapseMenu() {
-      $header.addClass('collapsed');
-      $menuContents.addClass('hidden');
-      $collapseButton.addClass('hidden');
-      $expandButton.removeClass('hidden');
-      $mainContent.removeClass('menu-expanded');
-      $mainContent.addClass('menu-collapsed');
-      localStorage.setItem('menuCollapsed', 'true');
-      $collapseButton.attr('aria-expanded', 'false');
-      $expandButton.attr('aria-expanded', 'true');
+      // Only apply on desktop
+      if (window.innerWidth >= 768) {
+        $header.addClass('collapsed');
+        $menuContents.addClass('hidden');
+        $collapseButton.addClass('hidden');
+        $expandButton.removeClass('hidden');
+        $mainContent.removeClass('menu-expanded');
+        $mainContent.addClass('menu-collapsed');
+        localStorage.setItem('menuCollapsed', 'true');
+        $collapseButton.attr('aria-expanded', 'false');
+        $expandButton.attr('aria-expanded', 'true');
+      }
     }
     
     function expandMenu() {
@@ -605,8 +625,76 @@ $(document).ready(function() {
     // Event listeners for collapse/expand
     $collapseButton.on('click', collapseMenu);
     $expandButton.on('click', expandMenu);
+    
+    // Handle window resize to ensure proper state on breakpoint changes
+    $(window).on('resize', function() {
+      if (window.innerWidth < 768) {
+        // On mobile, always show expanded menu
+        $header.removeClass('collapsed');
+        $menuContents.removeClass('hidden');
+        $mainContent.removeClass('menu-collapsed');
+      } else {
+        // On desktop, respect the localStorage setting
+        const shouldBeCollapsed = localStorage.getItem('menuCollapsed') === 'true';
+        if (shouldBeCollapsed) {
+          $header.addClass('collapsed');
+          $menuContents.addClass('hidden');
+          $collapseButton.addClass('hidden');
+          $expandButton.removeClass('hidden');
+          $mainContent.addClass('menu-collapsed');
+        } else {
+          $header.removeClass('collapsed');
+          $menuContents.removeClass('hidden');
+          $collapseButton.removeClass('hidden');
+          $expandButton.addClass('hidden');
+          $mainContent.removeClass('menu-collapsed');
+        }
+      }
+    });
   });
 </script>
+
+<style>
+  /* Add this style to your header.html or in your CSS file */
+  .nav-dropdown-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  
+  .nav-dropdown-content.expanded {
+    max-height: 500px; /* Set this to a value larger than your tallest dropdown */
+  }
+  
+  /* Mobile menu animation styles */
+  @media (max-width: 767px) {
+    #menu-items {
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+      right: 0;
+      left: 0;
+      bottom: 0;
+      top: auto;
+      height: calc(100vh - var(--header-height, 60px));
+      overflow-y: auto;
+    }
+    
+    #menu-items.menu-visible {
+      transform: translateY(0);
+    }
+  }
+  
+  /* Keep the existing horizontal slide for desktop */
+  @media (min-width: 768px) {
+    #menu-items {
+      transform: none !important;
+      top: auto;
+      bottom: auto;
+      height: auto;
+      overflow-y: visible;
+    }
+  }
+</style>
 
 
 
