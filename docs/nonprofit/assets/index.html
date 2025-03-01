@@ -80,8 +80,8 @@ $(document).ready(function() {
   </script>
 
   
-  <button id="expand-button" class="frameless flex items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white hidden" aria-label="Expand menu" aria-expanded="false">
-    <span class="size-4"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M2 5.75A.75.75 0 0 1 2.75 5h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 5.75ZM2 12a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 12Zm0 6.25a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg></span>
+  <button id="expand-button" class="flex justify-center px-1 py-1.5 m-0 min-w-0 items-center gap-1 text-sm !text-opacity-75 hover:!text-opacity-100 !text-white hidden" aria-label="Expand menu" aria-expanded="false">
+    <span class="size-5"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M2 5.75A.75.75 0 0 1 2.75 5h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 5.75ZM2 12a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 12Zm0 6.25a.75.75 0 0 1 .75-.75h18.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg></span>
   </button>
 
   <div id="menu-contents" class="flex flex-col gap-4 flex-1 p-2">
@@ -458,10 +458,18 @@ $(document).ready(function() {
     
     // Function to handle dropdown menus
     function setupDropdowns() {
-      // First, set all non-active buttons to reduced opacity
-      $('.nav-dropdown-button:not(.is-active)').addClass('opacity-75 hover:opacity-100');
+      const $dropdownButtons = $('.nav-dropdown-button');
+      const hasActiveButton = $dropdownButtons.hasClass('is-active');
       
-      $('.nav-dropdown-button').each(function() {
+      // If no active buttons, show all at full opacity
+      if (!hasActiveButton) {
+        $dropdownButtons.removeClass('opacity-75').addClass('opacity-100');
+      } else {
+        // Otherwise, set non-active buttons to reduced opacity
+        $('.nav-dropdown-button:not(.is-active)').addClass('opacity-75 hover:opacity-100');
+      }
+      
+      $dropdownButtons.each(function() {
         const $button = $(this);
         const $content = $('#' + $button.attr('id').replace('-button', ''));
         const $chevron = $button.find('span:last-child');
@@ -494,7 +502,10 @@ $(document).ready(function() {
           
           // Toggle opacity class based on expanded state
           if (isExpanded) {
-            $button.addClass('opacity-75 hover:opacity-100');
+            // Only add opacity if there's an active button somewhere
+            if (hasActiveButton) {
+              $button.addClass('opacity-75 hover:opacity-100');
+            }
           } else {
             $button.removeClass('opacity-75').addClass('opacity-100');
           }
