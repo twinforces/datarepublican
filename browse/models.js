@@ -578,6 +578,10 @@
         This object holds the downstream grants taht we don't want to show. 
         Clicking on it shows NEXT_REVEAL more grants and moves them back to the parent
         for display
+        
+        Mindfuck: To the other node, the grants we're archiving are
+        incoming grants, so we have to store them in grantsIn, and reverse all the
+        flows!
 */
 class DownstreamOther extends Charity
 {
@@ -589,35 +593,40 @@ class DownstreamOther extends Charity
                         xml_name: `${parent.xml_name}-Down`, 
                         isVisible : true,
                         isOther:true,
-                        grants : parent.grants.slice(count)
+                        grantsIn : parent.grants.slice(count)
                 } );
-                this.parent = parent;
+                if (this.grantsIn.length ==0)
+                {
+                        this.isVisible=false; // we're unnecessary
+                }
+               this.parent = parent;
                 this.parent.otherDown = this;
-                this.grants.slice(count).forEach( g => {
-                        g.isVisiblbe=false;
+                this.grantsIn.forEach( g => {
+                        g.isVisible=false;
                         parent.removeGrant(g);
-                        g.filer=this;
+                        g.swapCharities(this, parent);
+                        
                 });
-                this.parent.grants.push(
+                this.parent.addGrant(
                         this.otherGrant=new Grant({
                             filer_ein: this.parent.ein,
                             grantee_ein: this.ein,
-                            amt: this.totalGrantAmt,
+                            amt: this.grantsInTotal,
                             isOther: true,
                             isOtherDest: this
                         })               
                 );
-                this.otherGrant.isVisible=true;
+                this.otherGrant.isVisible= this.isVisible;
                 this.parent.grants.forEach(g => g.isVisible=true);
         
         }
         handleClick() { // every time we get clicked on, 3 more get shown
-                this.grants.slice(0,NEXT_REVEAL).forEach( g=> {
+                this.grantsIn.slice(0,NEXT_REVEAL).forEach( g=> {
                         g.isVisible=true;
                         g.grantee.isVisible=true;
+                        g.swapCharities(this, this.parent);
                         this.parent.addGrant(g);
-                        this.removeGrant(g);
-                        g.filer=this.parent;
+                        this.removeGrantIn(g);
                 
                 })       
         }
@@ -631,7 +640,7 @@ class DownstreamOther extends Charity
         
         get isVisible() {
         
-                return (this.grants.length) && (super.isVisible);
+                return (this.grantsIn.length) && (super.isVisible);
         }
     set isVisible(v) { // javascript gotcha
         super.isVisible=v;
@@ -643,6 +652,10 @@ class DownstreamOther extends Charity
         This object holds the upstream grants taht we don't want to show. 
         Clicking on it shows NEXT_REVEAL more grants and moves them back to the parent
         for display
+        
+        Mindfuck: the grants that are coming from grantsIn become grants
+        to us that aren't displayed, and we have a grant that goes from us 
+        to our parent
 */
 
 class UpstreamOther extends Charity
@@ -655,24 +668,26 @@ class UpstreamOther extends Charity
                         xml_name: `${parent.xml_name}-Down`, 
                         isVisible : true,
                         isOther:true,
-                        grantsIn : parent.grantsIn.slice(count)
+                        grants : parent.grantsIn.slice(count)
                 } );
                 this.parent = parent;
                 this.parent.otherUp = this;
-                if (this.grantsIn.length ==0)
+                if (this.grants.length ==0)
                 {
                         this.isVisible=false; // we're unnecessary
                 }
-                this.grants.slice(count).forEach( g => {
+                this.grants.forEach( g => {
                         g.isVisiblbe=false;
-                        parent.removeGrantIn(g);
-                        g.grantee=this;
+                        parent.removeGrant(g);
+                        g.swapCharities(this, this.parent);
                 });
-                this.parent.grantsIn.push(
+                this.parent.addGrantIn(
                         this.otherGrant = new Grant({
                             filer_ein: this.ein,
                             grantee_ein: this.parent.ein,
-                            amt: this.totalGrantInAmt,
+                            filer: this,
+                            grantee: this.parent,
+                            amt: this.grantsTotal,
                             isOther: true,
                             isOtherDest: this
                         })               
@@ -687,7 +702,7 @@ class UpstreamOther extends Charity
                         g.filer.isVisible=true;
                         this.parent.addGrantIn(g);
                         this.removeGrantIn(g);
-                        g.grantee=this.parent;
+                        g.swapCharities(this, this.parent);
                         if (!this.grantsIn.length)
                                 this.otherGrant.isVisible=false;
                 
@@ -845,6 +860,26 @@ class UpstreamOther extends Charity
             Charity.circularGrant(this);
         }
         this._isCircular = value;
+    }
+    
+    // special method for dealing with "other" nodes that have 
+    swapCharities(from, to) {
+        if (this.filer = from){
+                this.grantee_ein=to.ein;
+                this.grantee=to;
+                this.filer=from;
+                this.filer_ein=from.ein;
+        }
+        else if (this.grantee = from){
+                this.filer=to;
+                this.filer_ein=to.ein;
+                 this.grantee_ein=from.ein;
+                this.grantee=from;        
+        } else 
+        {
+                throw ("swap error with other?");
+        
+        }
     }
         
 }
