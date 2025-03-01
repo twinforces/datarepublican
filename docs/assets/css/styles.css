@@ -783,6 +783,62 @@ select {
   border-color: rgb(209 213 219 / var(--tw-border-opacity));
   padding: 0.25rem;
 }
+/* Menu collapse/expand styles */
+header#site-header {
+  left: 1rem;
+  top: 1rem;
+  bottom: 1rem;
+  display: flex;
+  max-height: calc(100vh - 2rem);
+  flex-direction: column;
+  --tw-bg-opacity: 1;
+  background-color: rgb(37 39 57 / var(--tw-bg-opacity));
+  padding: 0.5rem;
+  --tw-text-opacity: 1;
+  color: rgb(255 255 255 / var(--tw-text-opacity));
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+@media (min-width: 768px) {
+
+  header#site-header {
+    position: fixed;
+    margin-left: auto;
+    margin-right: auto;
+    width: 280px;
+    overflow: auto;
+    border-radius: 0.5rem;
+    padding: 0px;
+  }
+}
+header#site-header.collapsed {
+  bottom: auto !important;
+  max-height: 4rem;
+}
+@media (min-width: 768px) {
+
+  header#site-header.collapsed {
+    width: 2rem;
+    border-radius: 0.25rem;
+  }
+}
+/* Main content margin adjustment */
+body > div#main-content {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+@media (min-width: 768px) {
+
+  body > div#main-content.menu-collapsed {
+    margin-left: 3rem;
+  }
+
+  body > div#main-content.menu-expanded {
+    margin-left: 300px;
+  }
+}
 .pointer-events-none {
   pointer-events: none;
 }
@@ -791,9 +847,6 @@ select {
 }
 .visible {
   visibility: visible;
-}
-.invisible {
-  visibility: hidden;
 }
 .collapse {
   visibility: collapse;
@@ -1084,11 +1137,17 @@ select {
 .h-full {
   height: 100%;
 }
+.max-h-16 {
+  max-height: 4rem;
+}
 .max-h-\[208px\] {
   max-height: 208px;
 }
 .max-h-\[50vh\] {
   max-height: 50vh;
+}
+.max-h-\[calc\(100vh-2rem\)\] {
+  max-height: calc(100vh - 2rem);
 }
 .min-h-40 {
   min-height: 10rem;
@@ -1472,6 +1531,9 @@ select {
 .border-transparent {
   border-color: transparent;
 }
+.border-white\/25 {
+  border-color: rgb(255 255 255 / 0.25);
+}
 .border-white\/50 {
   border-color: rgb(255 255 255 / 0.5);
 }
@@ -1571,6 +1633,9 @@ select {
 .fill-current {
   fill: currentColor;
 }
+.\!p-2 {
+  padding: 0.5rem !important;
+}
 .p-0 {
   padding: 0px;
 }
@@ -1632,6 +1697,9 @@ select {
 .py-8 {
   padding-top: 2rem;
   padding-bottom: 2rem;
+}
+.\!pr-4 {
+  padding-right: 1rem !important;
 }
 .pb-1 {
   padding-bottom: 0.25rem;
@@ -1795,6 +1863,9 @@ select {
 .text-white\/80 {
   color: rgb(255 255 255 / 0.8);
 }
+.\!text-opacity-75 {
+  --tw-text-opacity: 0.75 !important;
+}
 .text-opacity-75 {
   --tw-text-opacity: 0.75;
 }
@@ -1936,6 +2007,10 @@ select {
   border-color: rgb(52 156 226 / var(--tw-border-opacity));
 }
 
+.hover\:border-white\/50:hover {
+  border-color: rgb(255 255 255 / 0.5);
+}
+
 .hover\:border-white\/75:hover {
   border-color: rgb(255 255 255 / 0.75);
 }
@@ -1985,6 +2060,10 @@ select {
 .hover\:text-white:hover {
   --tw-text-opacity: 1;
   color: rgb(255 255 255 / var(--tw-text-opacity));
+}
+
+.hover\:\!text-opacity-100:hover {
+  --tw-text-opacity: 1 !important;
 }
 
 .hover\:underline:hover {
@@ -2150,10 +2229,6 @@ select {
     position: static;
   }
 
-  .md\:fixed {
-    position: fixed;
-  }
-
   .md\:left-\[initial\] {
     left: initial;
   }
@@ -2205,12 +2280,20 @@ select {
     margin-bottom: 0px;
   }
 
+  .md\:ml-12 {
+    margin-left: 3rem;
+  }
+
   .md\:ml-4 {
     margin-left: 1rem;
   }
 
   .md\:ml-\[275px\] {
     margin-left: 275px;
+  }
+
+  .md\:ml-\[300px\] {
+    margin-left: 300px;
   }
 
   .md\:mr-2 {
@@ -2249,16 +2332,20 @@ select {
     height: auto;
   }
 
-  .md\:h-screen {
-    height: 100vh;
-  }
-
   .md\:min-h-\[50vh\] {
     min-height: 50vh;
   }
 
   .md\:w-64 {
     width: 16rem;
+  }
+
+  .md\:w-\[280px\] {
+    width: 280px;
+  }
+
+  .md\:w-\[60px\] {
+    width: 60px;
   }
 
   .md\:w-auto {
@@ -2271,10 +2358,6 @@ select {
 
   .md\:max-w-xs {
     max-width: 20rem;
-  }
-
-  .md\:flex-\[0_0_300px\] {
-    flex: 0 0 300px;
   }
 
   .md\:flex-none {
@@ -2358,12 +2441,12 @@ select {
     align-self: flex-end;
   }
 
-  .md\:overflow-auto {
-    overflow: auto;
-  }
-
   .md\:rounded {
     border-radius: 0.25rem;
+  }
+
+  .md\:rounded-lg {
+    border-radius: 0.5rem;
   }
 
   .md\:border-x {
@@ -2448,10 +2531,6 @@ select {
 
   .md\:pt-0 {
     padding-top: 0px;
-  }
-
-  .md\:pt-4 {
-    padding-top: 1rem;
   }
 
   .md\:text-left {
