@@ -1661,6 +1661,9 @@ body > div#main-content {
 .p-8 {
   padding: 2rem;
 }
+.\!p-4 {
+  padding: 1rem !important;
+}
 .px-1 {
   padding-left: 0.25rem;
   padding-right: 0.25rem;
