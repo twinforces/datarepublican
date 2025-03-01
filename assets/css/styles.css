@@ -914,9 +914,6 @@ body > div#main-content {
 .z-50 {
   z-index: 50;
 }
-.z-40 {
-  z-index: 40;
-}
 .order-2 {
   order: 2;
 }
@@ -950,9 +947,6 @@ body > div#main-content {
 .m-4 {
   margin: 1rem;
 }
-.-m-2 {
-  margin: -0.5rem;
-}
 .-mx-4 {
   margin-left: -1rem;
   margin-right: -1rem;
@@ -969,6 +963,10 @@ body > div#main-content {
   margin-left: auto;
   margin-right: auto;
 }
+.mx-px {
+  margin-left: 1px;
+  margin-right: 1px;
+}
 .my-2 {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
@@ -980,10 +978,6 @@ body > div#main-content {
 .my-8 {
   margin-top: 2rem;
   margin-bottom: 2rem;
-}
-.mx-px {
-  margin-left: 1px;
-  margin-right: 1px;
 }
 .\!mt-4 {
   margin-top: 1rem !important;
@@ -1667,9 +1661,6 @@ body > div#main-content {
 .p-8 {
   padding: 2rem;
 }
-.\!p-4 {
-  padding: 1rem !important;
-}
 .px-1 {
   padding-left: 0.25rem;
   padding-right: 0.25rem;
@@ -1713,10 +1704,6 @@ body > div#main-content {
 .py-8 {
   padding-top: 2rem;
   padding-bottom: 2rem;
-}
-.px-px {
-  padding-left: 1px;
-  padding-right: 1px;
 }
 .\!pr-4 {
   padding-right: 1rem !important;
@@ -1880,11 +1867,11 @@ body > div#main-content {
   --tw-text-opacity: 1;
   color: rgb(255 255 255 / var(--tw-text-opacity));
 }
-.text-white\/80 {
-  color: rgb(255 255 255 / 0.8);
-}
 .text-white\/75 {
   color: rgb(255 255 255 / 0.75);
+}
+.text-white\/80 {
+  color: rgb(255 255 255 / 0.8);
 }
 .\!text-opacity-75 {
   --tw-text-opacity: 0.75 !important;
@@ -1935,11 +1922,6 @@ body > div#main-content {
 .shadow-sm {
   --tw-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --tw-shadow-colored: 0 1px 2px 0 var(--tw-shadow-color);
-  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-}
-.shadow-xl {
-  --tw-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-  --tw-shadow-colored: 0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
 .outline {
@@ -2289,10 +2271,6 @@ body > div#main-content {
     float: right;
   }
 
-  .md\:m-0 {
-    margin: 0px;
-  }
-
   .md\:mx-0 {
     margin-left: 0px;
     margin-right: 0px;
@@ -2514,10 +2492,6 @@ body > div#main-content {
 
   .md\:p-0 {
     padding: 0px;
-  }
-
-  .md\:p-2 {
-    padding: 0.5rem;
   }
 
   .md\:px-0 {
