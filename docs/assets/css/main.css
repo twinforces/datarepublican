@@ -142,7 +142,7 @@
   }
 
   body > div#main-content.menu-expanded {
-    @apply md:ml-[310px];
+    @apply md:ml-[316px] xl:ml-[326px];
   }
 }
 
