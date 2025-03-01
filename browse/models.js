@@ -5,6 +5,7 @@
  const NEXT_REVEAL = 3;
  const NEXT_REVEAL_MAX = 15;
  const GOV_EIN = '001';
+ let GOV_NODE = null; // for easier debugging
  
  function graphScaleDown()
  {
@@ -106,6 +107,10 @@
         {
                 this._isVisible = value;
                 this.isOrganized = false; // force some recalck
+                if (this.otherDown)
+                        this.otherDown.otherGrant.isVisible=value;
+                if (this.otherUp)
+                        this.otherUp.otherGrant.isVisible=value;
         }
     }
 
@@ -331,6 +336,7 @@
                 target: g.grantee_ein, 
                 amt: formatNumber(g.amt) 
             })));
+        GOV_NODE = govChar;
         return govChar;
     }
 
@@ -462,6 +468,10 @@
         
         buildDownstream()
         {
+                if (this.otherDown)
+                {
+                        throw('duplicate Other');
+                }
                 this._origOut = this.grantsTotal; // remememer for later
                 this.otherDown = new DownstreamOther({parent: this});
 
@@ -594,8 +604,17 @@
                 c.expandUp({});
                 c.organize();
                 c.expanded=true;
-                c.grants.forEach(g => g.isVisible=true);
-                c.grantsIn.forEach(g => g.isVisible=true);
+                c.grants.forEach(g => {
+                        g.isVisible=true;
+                        g.filer.isVisible=true;
+                        g.grantee.isVisible=true;
+                });
+                c.grantsIn.forEach(g => {
+                        g.isVisible=true;
+                        g.filer.isVisible=true;
+                        g.grantee.isVisible=true;
+                });
+                
         }
         else
         {
@@ -663,15 +682,15 @@ class DownstreamOther extends Charity
                         //g.swapCharities(this, parent);
                         
                 });
-                this.parent.addGrant(
+                //this.parent.addGrant( // grant constructor does this already
                         this.otherGrant=new Grant({
                             filer_ein: this.parent.ein,
                             grantee_ein: this.ein,
                             amt: this.grantsInTotal,
                             isOther: true,
                             isOtherDest: this
-                        })               
-                );
+                        });               
+                //);
                 this.otherGrant.isVisible= this.isVisible;
                 this.parent.grants.forEach(g => g.isVisible=true);
         
@@ -747,7 +766,7 @@ class UpstreamOther extends Charity
                         parent.removeGrantIn(g);
                         //g.swapCharities(this, this.parent);
                 });
-                this.parent.addGrantIn(
+               // this.parent.addGrantIn( // grant constructor does this already
                         this.otherGrant = new Grant({
                             filer_ein: this.ein,
                             grantee_ein: this.parent.ein,
@@ -756,8 +775,8 @@ class UpstreamOther extends Charity
                             amt: this.grantsTotal,
                             isOther: true,
                             isOtherDest: this
-                        })               
-                );
+                        })      ;         
+                //);
                 this.otherGrant.isVisible=true;
                 this.parent.grantsIn.forEach(g => g.isVisible=true);
         
@@ -893,10 +912,10 @@ class UpstreamOther extends Charity
         Grant.registerGrant(this);
         Charity.addGrant(this);
         this.registered=true;
-        this.isVisible = isVisible;
         this._isCircular = isCircular;
         this.isOther = isOther;
         this.isOtherDest = isOtherDest;
+        this.isVisible = isVisible;
    }
 
     get relativeInAmount() {
@@ -923,8 +942,17 @@ class UpstreamOther extends Charity
     }
 
     set isVisible(v) {
-        this._isVisible = v;
-        this.disorganize();
+        if (v != this._isVisible)
+        {
+                this._isVisible = v;
+                // if we're visible, we have to have somewhere to draw from/to.
+                if (v) {
+                  this.filer.isVisible = v;
+                  this.grantee.isVisible = v;
+                }
+                this.disorganize();
+        
+        }
     }
 
     set isCircular(value) {
@@ -981,7 +1009,7 @@ class UpstreamOther extends Charity
                 results.data.forEach(row => {
                     Charity.buildCharityFromRow(row);
                 });
-                $('#status').html('<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading..."> Building Gov Master...</span>');
+                $('#status').html(`<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading..."> Building Gov Master...${Charity.getCharityCount()}</span>`);
                 Charity.buildGovCharity();
                 resolve();
             },
