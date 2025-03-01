@@ -125,8 +125,8 @@ function addEINFromInput() {
     let val = $('#einInput').val().trim();
     val = val.replace(/[-\s]/g, '');
     
-    if (!/^\d{9}$/.test(val)) {
-        alert("EIN must be 9 digits after removing dashes/spaces.");
+    if (!/^\d{9}$/.test(val) && !(val=='001')) {
+        alert("EIN must be 9 digits after removing dashes/spaces or 001.");
         return;
     }
     if (!Charity.getCharity(val)) {
@@ -336,7 +336,7 @@ function parseQueryParams() {
         activeEINs.forEach(ein => {
             const charity = Charity.getCharity(ein);
             if (charity) {
-                expandNode(ein, true, false);
+                Charity.placeNode(ein);
             }
         });
     }
@@ -347,25 +347,17 @@ function updateQueryParams() {
         return;
     }
     const params = new URLSearchParams();
-    if (activeEINs.length > 0) {
-        params.set('eins', activeEINs.join(','));
-    }
-    if (activeKeywords.length > 0) {
-        params.set('keywords', activeKeywords.join(','));
-    }
+    params.set('ein', activeEINs);
+    params.set('search', activeKeywords);
     const newUrl = window.location.pathname + '?' + params.toString();
     window.history.replaceState({}, '', newUrl);
 }
 
-function expandNode(ein, param1, param2) {
-        Charity.placeNode(ein);
-
-}
 
 function compareCharities( a, b)
 {
         return (b.govt_amt - a.govt_amt) || 
-                (b.grantsInTotal - a.grantsInTotal) || 
+                (b.grantsInTotal+b.grantsTotal - a.grantsInTotal-b.grantsTotal) || 
                         (a.name.localeCompare(b.name));
 }
 
@@ -374,7 +366,8 @@ function compareLinks(a,b)
         //sort other links to bottom
         if (a.isOther) return 1;
         if (b.isOther) return -1;
-        return (b.value-a.value);
+        return (a.index-b.index);
+        //return (b.value-a.value);
 
 }
 
@@ -426,8 +419,12 @@ function generateGraph() {
 
     if (!customGraphEdges && activeEINs.length === 0) {
         const usGov = Charity.getCharity(GOV_EIN);
-        expandNode(GOV_EIN, false, false);
-        Charity.getRootCharities().slice(0,TOP_N_INITIAL).forEach(m=> expandNode(m.id));
+        Charity.placeNode(GOV_EIN);
+        Charity.getRootCharities().slice(0,TOP_N_INITIAL).forEach(c=> {
+                Charity.placeNode(c.id);
+        });
+        customGraphEdges = Charity.visibleCharities();
+        
     }
 
     renderFocusedSankey(g, sankey, svg, width, height, activeEINs[0] || GOV_EIN);
@@ -538,7 +535,7 @@ function generateOctagonPath(d) {
 
 function generatePlusPath(d) {
     const radius = d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
-    const armWidth = radius * 0.2; // Skinny arms (20% of radius)
+    const armWidth = radius * 0.8; // Skinny arms (20% of radius)
     const cx = d.x0; // Absolute center at d.x0
     const cy = (d.y0 + d.y1) / 2; // Absolute vertical center
 
@@ -710,11 +707,11 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
             generateGraph();
         } else if (d.isOther === true) {
             const sourceId = d.id;
-            d.handleClick(event)
+            d.handleClick(event);
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         } else {
             console.log(`Expanding node: ${d.filer_ein}`);
-            d.handleClick(event)
+            d.handleClick(event);
             renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
         }
     }
