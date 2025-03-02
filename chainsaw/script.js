@@ -1,11 +1,15 @@
 let selectedYear = '2025';
 let selectedType = 'ba';
+let dataReady=false;
 
-document.getElementById('selectYearBtn').addEventListener('click', showYearPopup);
-document.getElementById('confirmYearBtn').addEventListener('click', confirmYear);
-document.getElementById('cancelYearBtn').addEventListener('click', hideYearPopup);
+import {BudgetNode} from "./models.js";
+
+gel('selectYearBtn').addEventListener('click', showYearPopup);
+gel('confirmYearBtn').addEventListener('click', confirmYear);
+gel('cancelYearBtn').addEventListener('click', hideYearPopup);
 
 async function loadData(budgetCsvFile, functionSubfunctionCsvFile) {
+    statusUpdate("Loading data...");
     const [budgetResponse, functionSubfunctionResponse] = await Promise.all([
         fetch(budgetCsvFile),
         fetch(functionSubfunctionCsvFile)
@@ -55,9 +59,6 @@ function processFunctionSubfunctionCSV(csvString) {
         }
     });
 
-    console.log('Function mappings:', Array.from(functionCodeToName.entries()));
-    console.log('Subfunction mappings:', Array.from(subfunctionCodeToName.entries()));
-
     return { functionCodeToName, subfunctionCodeToName };
 }
 
@@ -80,7 +81,7 @@ function storePath(path, keyStore,value){
 
 }
 
-async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, year, type) {
+ function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, year, type) {
     const { functionCodeToName, subfunctionCodeToName } = processFunctionSubfunctionCSV(functionSubfunctionCsvString);
 
 
@@ -88,7 +89,6 @@ async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, y
     let resultsArr=[];
     let levelKeys={};
      let totalValue = 0;
-   await new Promise((resolve, reject) => {
         Papa.parse(budgetCsvString, {
             header: true,
             skipEmptyLines: true,
@@ -119,6 +119,7 @@ async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, y
                     const subPath = functionCodeToName.get(func) || [func,func];
                     const subSubPath = subfunctionCodeToName.get(subfunc);
                     const path=[
+                                'Budget',
                             mandDisc,
                             offBudget,
                             agency,
@@ -126,7 +127,8 @@ async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, y
                             majorCat,
                             subPath[0],
                             subPath[1],
-                            title
+                            title,
+                            tid
                     ];
                     const value = parseFloat(row[`${selectedYear}-${selectedType}`]) || 0;
 
@@ -154,17 +156,12 @@ async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, y
                             path,
                             value
                     });
-                    storePath(path,levelKeys, value);
+                    BudgetNode.addPathToRoot(path, tid, value);
                 });
 
         }});
 
-    return {path: ['Budget'],
-            value: totalValue,
-            children: levelKeys,
-            name: 'Budget'};
-  });
-
+    return BudgetNode.getRoot();
 }
 
 function formatNumber(value) {
@@ -179,162 +176,167 @@ function formatNumber(value) {
     }
 }
 
-function renderSunburst(jsonData) {
-    const width = 800;
-    const radius = width / 6;
 
+// Generate a color palette for your agencies
+function generateColors(n) {
+    const colors = [];
+    for (let i = 0; i < n; i++) {
+        const hue = (i * 360 / n) % 360;
+        colors.push(`hsl(${hue}, 70%, 50%)`);
+    }
+    return colors;
+}
+
+
+function renderSunburst(rootNode) {
+    // Constants for layout
+    const width = 800;           // SVG width and height
+    const radius = width / 2;    // Radius of the sunburst
+    const agencyDepth = 4;       // Depth where agencies are (adjust if needed)
+
+    // Helper to generate distinct colors for agencies
+    function generateColors(n) {
+        const colors = [];
+        for (let i = 0; i < n; i++) {
+            const hue = (i * 360 / n) % 360;
+            colors.push(`hsl(${hue}, 70%, 50%)`);
+        }
+        return colors;
+    }
+
+    // Set up the SVG
     const svg = d3.select('#sunburst')
-        .html('')
+        .html('')                             // Clear any existing content
         .attr('width', width)
-        .attr('height', width);
-
-    const g = svg.append('g')
+        .attr('height', width)
+        .append('g')
         .attr('transform', `translate(${width / 2},${width / 2})`);
 
+    // Build the hierarchy from BudgetNode
+    const root = d3.hierarchy(rootNode, d => d.children)  // Use children getter
+        .sum(d => Math.abs(d.value || 0))                 // Absolute values for full circle
+        .sort((a, b) => b.value - a.value);               // Sort for better layout
+
+console.log('Root name:', root.data.name);
+if (root.children) {
+    console.log('First child name:', root.children[0].data.name);
+}
+
+  // Collect unique agency names at agencyDepth for coloring
+    const agencies = new Set();
+    root.each(d => {
+        if (d.depth === agencyDepth) agencies.add(d.data.name);
+    });
+    const colorPalette = generateColors(agencies.size);
+    const color = d3.scaleOrdinal()
+        .domain(Array.from(agencies))
+        .range(colorPalette);
+
+    // Set up the partition layout
     const partition = d3.partition()
         .size([2 * Math.PI, radius * radius]);
-
-    const root = d3.hierarchy(jsonData)
-        .eachBefore(d => {
-            if (d.depth === 0) d.value = jsonData.value;
-            else if (d.data.value !== undefined) d.value = d.data.value;
-        })
-        .sort((a, b) => b.value - a.value);
-
-    console.log(`Root value: ${root.value}`);
     partition(root);
-    console.log(`Root angles: x0: ${root.x0}, x1: ${root.x1}`);
 
+    // Define the arc generator
     const arc = d3.arc()
         .startAngle(d => d.x0)
         .endAngle(d => d.x1)
         .innerRadius(d => Math.sqrt(d.y0))
         .outerRadius(d => Math.sqrt(d.y1));
 
-    const color = d3.scaleOrdinal()
-        .domain(['Mandatory', 'Discretionary'])
-        .range(['#1f77b4', '#ff7f0e']);
+function averageColors(colors) {
+    let r = 0, g = 0, b = 0;
+    colors.forEach(color => {
+        const rgb = d3.color(color).rgb();
+        r += rgb.r;
+        g += rgb.g;
+        b += rgb.b;
+    });
+    const count = colors.length;
+    r = Math.round(r / count);
+    g = Math.round(g / count);
+    b = Math.round(b / count);
+    return `rgb(${r},${g},${b})`;
+}
+function getName(d) {
+    if (d.name) return d.name;                    // Direct name (unlikely in D3 hierarchy)
+    if (d.data && d.data.name) return d.data.name; // Standard D3 hierarchy
+    if (d.data && d.data.data && d.data.data.name) return d.data.data.name; // Nested data
+    return 'unknown';                            // Fallback
+}
 
-    function update(focusNode, abbreviated = false) {
-        const descendants = focusNode.descendants().slice(1);
-
-        const pathThreshold = abbreviated ? 0.3 : 0.05; // Relaxed for full display
-        const labelThreshold = abbreviated ? 0.3 : 0.05; // Relaxed for full display
-        const labelDepthLimit = abbreviated ? 1 : 3; // Increased for full display
-
-        const pathData = descendants.filter(d => (d.x1 - d.x0) > pathThreshold && d.value > 0);
-
-        const path = g.selectAll('path')
-            .data(pathData, d => d.ancestors().map(a => a.data.name).reverse().join('-'))
-            .join('path')
-            .attr('d', arc)
-            .attr('fill', d => {
-                if (d.depth === 1 && focusNode === root) return color(d.data.name);
-                const parentColor = color(d.ancestors().find(a => a.depth === 1 && focusNode === root)?.data.name || 'Mandatory');
-                return d3.interpolate(parentColor, '#fff')(0.2 * (d.depth - (focusNode === root ? 1 : 0)));
-            })
-            .attr('stroke', '#fff')
-            .attr('stroke-width', 1)
-            .attr('opacity', 1)
-            .on('click', clicked);
-
-        path.selectAll('title').remove();
-        path.append('title')
-            .text(d => `${d.ancestors().map(d => d.data.displayName || d.data.name).reverse().join(' > ')}\n${formatNumber(d.value)}`);
-
-        const labelData = descendants.filter(d => {
-            const relativeDepth = d.depth - focusNode.depth;
-            const passesFilter = (d.x1 - d.x0) > labelThreshold && d.value > 0 && relativeDepth <= labelDepthLimit;
-            if (!passesFilter && relativeDepth <= labelDepthLimit) {
-                console.log(`Label filtered out: ${d.data.displayName || d.data.name}, angle: ${(d.x1 - d.x0).toFixed(3)}, depth: ${relativeDepth}`);
-            }
-            return passesFilter;
-        });
-
-        g.selectAll('text')
-            .data(labelData, d => d.ancestors().map(a => a.data.name).reverse().join('-'))
-            .join('text')
-            .attr('transform', d => {
-                const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
-                const y = (Math.sqrt(d.y0) + Math.sqrt(d.y1)) / 2;
-                return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
-            })
-            .attr('dy', '0.35em')
-            .attr('text-anchor', 'middle')
-            .text(d => {
-                const displayName = d.data.displayName || d.data.name;
-                return displayName.length < 20 ? displayName : displayName.slice(0, 17) + '...';
-            })
-            .style('font-size', d => `${Math.min(12, Math.max(8, (d.x1 - d.x0) * 30))}px`)
-            .style('pointer-events', 'none')
-            .style('opacity', 0)
-            .transition()
-            .duration(500)
-            .style('opacity', 1);
+function calcColor(d) {
+    if (d.depth >= agencyDepth) {
+        const agencyAncestor = d.ancestors().find(a => a.depth === agencyDepth);
+        const agencyName = agencyAncestor ? getName(agencyAncestor) : 'default';
+        const agencyColor = color(agencyName);
+        return d3.interpolate(agencyColor, '#fff')(0.2 * (d.depth - agencyDepth));
+    } else {
+        const descendantAgencies = d.descendants().filter(desc => desc.depth === agencyDepth);
+        if (descendantAgencies.length === 0) return '#ccc';
+        const agencyColors = descendantAgencies.map(agency => color(getName(agency)));
+        return averageColors(agencyColors);
     }
+}
 
+function update() {
+    const descendants = root.descendants().filter(d => (d.x1 - d.x0) > 0.05 && d.value > 0);
+    const labelData = descendants; // Adjust filtering if needed
+
+    // Paths (with color fix)
+    svg.selectAll('path')
+        .data(descendants, d => (d.name || 'unknown') + d.depth)
+        .join('path')
+        .attr('d', arc)
+        .attr('fill', calcColor)
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 1)
+        .on('click', clicked);
+
+        // Labels (with error fix)
+    svg.selectAll('text')
+        .data(labelData, d => (d.name || d.data.name || d.data.data.name || 'unknown') + d.depth)
+        .join('text')
+        .attr('transform', d => {
+            const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+            const y = (Math.sqrt(d.y0) + Math.sqrt(d.y1)) / 2;
+            return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+        })
+        .attr('dy', '0.35em')
+        .attr('text-anchor', 'middle')
+        .text(d => {
+            const name = d.name || d.data.name || d.data.name || 'Unknown';
+            return name.length < 20 ? name : name.slice(0, 17) + '...';
+        })
+        .style('font-size', '12px')
+        .style('pointer-events', 'none');
+}
+    // Click handler for zooming
     function clicked(event, p) {
-        focus = (p === focus) ? (focus.parent || root) : p;
-        const focusedRoot = d3.hierarchy(focus.data, d => d.children)
-            .eachBefore(d => {
-                if (d.data.value !== undefined) d.value = d.data.value;
-            })
+        const focusedRoot = p === root ? root : d3.hierarchy(p, d => d.children)
+            .sum(d => Math.abs(d.value || 0))
             .sort((a, b) => b.value - a.value);
-        partition.size([2 * Math.PI, radius * radius])(focusedRoot);
+        partition(focusedRoot);
 
-        const focusMap = new Map(focusedRoot.descendants().map(d => {
-            const path = d.ancestors().map(a => a.data.name).reverse().join('-');
-            return [path, d];
-        }));
-        const k = radius / Math.sqrt(focusedRoot.y1 || 1);
-        const angleRange = focusedRoot.x1 - focusedRoot.x0 || 2 * Math.PI;
-        const angleScale = 2 * Math.PI / angleRange;
-
-        const activeDescendants = focusedRoot.descendants().filter(d => d.value > 0);
-
-        const arcTween = d => {
-            if (!d.value) return () => arc(d);
-            const path = d.ancestors().map(a => a.data.name).reverse().join('-');
-            const match = focusMap.get(path) || d;
-            const xd = d3.interpolate(d.x0, match.x0 * angleScale);
-            const x1d = d3.interpolate(d.x1, match.x1 * angleScale);
-            const yd = d3.interpolate(d.y0, match.y0 * k * k);
-            const y1d = d3.interpolate(d.y1, match.y1 * k * k);
-            return t => arc({ x0: xd(t), x1: x1d(t), y0: yd(t), y1: y1d(t) });
-        };
-
-        console.log('Focus:', focus.data.displayName || focus.data.name, 'y1:', focusedRoot.y1, 'descendants:', focusedRoot.descendants().length, 'active:', activeDescendants.length);
-        console.log('Focused angles:', focusedRoot.x0, focusedRoot.x1, 'angleRange:', angleRange, 'angleScale:', angleScale);
-
-        const largeSegments = g.selectAll('path')
-            .filter(d => d.value > 0 && (d.x1 - d.x0) > 0.3);
-
-        g.selectAll('path')
-            .filter(d => d.value > 0 && (d.x1 - d.x0) <= 0.3)
+        // Animate the arcs
+        svg.selectAll('path')
             .transition()
-            .duration(200)
-            .style('opacity', 0);
+            .duration(750)
+            .attrTween('d', d => {
+                const match = focusedRoot.descendants().find(f => f.name === d.data.name && f.depth === d.depth);
+                if (!match) return () => arc(d);
+                const interpolate = d3.interpolate({ x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 }, match);
+                return t => arc(interpolate(t));
+            });
 
-        g.selectAll('text')
-            .transition()
-            .duration(200)
-            .style('opacity', 0);
-
-        update(focusedRoot, true);
-
-        const transition = largeSegments.transition()
-            .duration(500)
-            .delay((d, i) => i * 5)
-            .attrTween('d', arcTween);
-
-        Promise.all(transition.end()).then(() => update(focusedRoot, false)).catch(() => {
-            setTimeout(() => update(focusedRoot, false), 1000);
-        });
+        // Update the view after animation
+        setTimeout(() => update(focusedRoot), 750);
     }
 
-    let focus = root;
+    // Render the initial view
     update(root);
 }
+
 
 function showYearPopup() {
     const popup = document.getElementById('yearPopup');
@@ -358,15 +360,36 @@ function hideYearPopup() {
     document.getElementById('yearPopup').style.display = 'none';
 }
 
-function loadAndRender() {
+function statusUpdate(message) {
+    //gel('status').html(`<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading...">${message}</span>`);
+
+
+}
+
+function gel(id) {
+        return document.getElementById(id)
+}
+
+async function render(budgetText, functionSubfunctionText, selectedYear, selectedType) {
+    dataReady=true;    
+    statusUpdate("Processing data...");
+    const budget = processBudgetCSV(budgetText, functionSubfunctionText, selectedYear, selectedType);
+    statusUpdate("Generating Graph...");
+    if (!budget || !budget.children || budget.children.length === 0) {
+        throw new Error('Invalid hierarchy: No children found');
+        }
+    renderSunburst(budget);
+    statusUpdate("Done...");       
+   
+}
+
+async function loadAndRender() {
     loadData("CBOs_January_2025_Baseline_Projections.csv", "Budget_Functions_and_Subfunctions.csv")
         .then(({ budgetText, functionSubfunctionText }) => {
-            const jsonData = processBudgetCSV(budgetText, functionSubfunctionText, selectedYear, selectedType);
-            if (!jsonData || !jsonData.children || jsonData.children.length === 0) {
-                throw new Error('Invalid hierarchy: No children found');
-            }
-            renderSunburst(jsonData);
-        })
+        
+                render(budgetText, functionSubfunctionText, selectedYear, selectedType);
+ 
+    })
         .catch(error => console.error('Error:', error.message));
 }
 
