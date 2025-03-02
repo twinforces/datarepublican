@@ -95,74 +95,75 @@ async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, y
             complete: results => {
                 results.data.forEach(row => {
 
-    const mandatory = { name: 'Mandatory', children: [] };
-    const discretionary = { name: 'Discretionary', children: [] };
-    const functionMap = { Mandatory: new Map(), Discretionary: new Map() };
-    const titleCounts = new Map();
-    let mandatoryCount = 0;
-    let discretionaryCount = 0;
-    let mandatoryValue = 0;
-    let discretionaryValue = 0;
-    const mandatoryContributors = [];
-    const discretionaryContributors = [];
+                    const mandatory = { name: 'Mandatory', children: [] };
+                    const discretionary = { name: 'Discretionary', children: [] };
+                    const functionMap = { Mandatory: new Map(), Discretionary: new Map() };
+                    const titleCounts = new Map();
+                    let mandatoryCount = 0;
+                    let discretionaryCount = 0;
+                    let mandatoryValue = 0;
+                    let discretionaryValue = 0;
+                    const mandatoryContributors = [];
+                    const discretionaryContributors = [];
 
-        const tid = row['Treasury Identification Number']?.trim();
-        const tidParse=tid.split('-');
-        const title = row['Title']?.trim();
-        const mandDisc = row['Discretionary or mandatory']?.trim();
-        const majorCat = row['Major spending category']?.trim();
-        const agency = row['Agency']?.trim();
-        const bureau = row['Bureau']?.trim();
-        const func = row['Function']?.trim();
-        const subfunc = row['Subfunction']?.trim();
-        const offBudget = row['Off-budget?'];
-        const subPath = functionCodeToName.get(func) || [func,func];
-        const subSubPath = subfunctionCodeToName.get(subfunc);
-        const path=[
-                mandDisc,
-                agency,
-                bureau,
-                majorCat,
-                subPath[0],
-                subPath[1],
-                title
-        ];
-        const value = parseFloat(row[`${selectedYear}-${selectedType}`]) || 0;
+                    const tid = row['Treasury Identification Number']?.trim();
+                    const tidParse=tid.split('-');
+                    const title = row['Title']?.trim();
+                    const mandDisc = row['Discretionary or mandatory']?.trim();
+                    const majorCat = row['Major spending category']?.trim();
+                    const agency = row['Agency']?.trim();
+                    const bureau = row['Bureau']?.trim();
+                    const func = row['Function']?.trim();
+                    const subfunc = row['Subfunction']?.trim();
+                    const offBudget = row['Off-budget?'] || "on";
+                    const subPath = functionCodeToName.get(func) || [func,func];
+                    const subSubPath = subfunctionCodeToName.get(subfunc);
+                    const path=[
+                            mandDisc,
+                            offBudget,
+                            agency,
+                            bureau,
+                            majorCat,
+                            subPath[0],
+                            subPath[1],
+                            title
+                    ];
+                    const value = parseFloat(row[`${selectedYear}-${selectedType}`]) || 0;
 
-        if (!tid || !title || !agency || !func || !subfunc || isNaN(value) || !mandDisc) return;
+                    if (!tid || !title || !agency || !func || !subfunc || isNaN(value) || !mandDisc) return;
 
-        totalValue += value;
-        const isMandatory = mandDisc.toLowerCase() === 'mandatory';
-        if (isMandatory) {
-            mandatoryCount++;
-            mandatoryValue += Math.abs(value);
-            mandatoryContributors.push({ tid, title, agency, func, subfunc, value: Math.abs(value) });
-        } else {
-            discretionaryCount++;
-            discretionaryValue += Math.abs(value);
-            discretionaryContributors.push({ tid, title, agency, func, subfunc, value: Math.abs(value) });
-        }
+                    totalValue += value;
+                    const isMandatory = mandDisc.toLowerCase() === 'mandatory';
+                    if (isMandatory) {
+                        mandatoryCount++;
+                        mandatoryValue += Math.abs(value);
+                        mandatoryContributors.push({ tid, title, agency, func, subfunc, value: Math.abs(value) });
+                    } else {
+                        discretionaryCount++;
+                        discretionaryValue += Math.abs(value);
+                        discretionaryContributors.push({ tid, title, agency, func, subfunc, value: Math.abs(value) });
+                    }
 
-        const key = path.join('/');
-        if (results[key]) 
-                results[key] += value;
-        else
-                results[key] = value;
-        resultsArr.push({
-                key,
-                path,
-                value
-        });
-        storePath(path,levelKeys, value);
-    });
+                    const key = path.join('/');
+                    if (results[key]) 
+                            results[key] += value;
+                    else
+                            results[key] = value;
+                    resultsArr.push({
+                            key,
+                            path,
+                            value
+                    });
+                    storePath(path,levelKeys, value);
+                });
 
-}});
+        }});
 
     return {path: ['Budget'],
             value: totalValue,
             children: levelKeys,
             name: 'Budget'};
-});
+  });
 
 }
 
