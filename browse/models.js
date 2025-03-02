@@ -458,9 +458,9 @@
         else
         {
                 if (!this.otherUp)
-                        this.expandDown();
+                        this.expandDown(e);
                 if (!this.otherDown)
-                        this.expandUp();
+                        this.expandUp(e);
         }
      
     }
@@ -1073,4 +1073,4 @@ class UpstreamOther extends Charity
     };
 }
 
-export {graphScaleUp, graphScaleDown, graphScaleReset, POWER_LAW, GOV_EIN, Charity, Grant, loadData, scaleValue, formatNumber };
+export {graphScaleUp, graphScaleDown, graphScaleReset, POWER_LAW, GOV_EIN, GOV_NODE, Charity, Grant, loadData, scaleValue, formatNumber };
