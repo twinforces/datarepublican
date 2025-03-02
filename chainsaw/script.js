@@ -80,26 +80,25 @@ function storePath(path, keyStore,value){
 
 }
 
-function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, year, type) {
+async function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, year, type) {
     const { functionCodeToName, subfunctionCodeToName } = processFunctionSubfunctionCSV(functionSubfunctionCsvString);
 
-    const rows = budgetCsvString.split('\n').map(row => row.split(','));
-    let headerRowIndex = rows.findIndex(row => row[0] === 'Treasury Identification Number');
-    if (headerRowIndex === -1) throw new Error('Header row not found in CSV');
 
-    const headers = rows[headerRowIndex].map(h => h.trim()).filter(h => h);
-    const yearOffset = parseInt(year) - 2024;
-    const yearIndex = type === 'ba' ? 10 + yearOffset : 22 + yearOffset;
-    const mandDiscIndex = headers.indexOf('Discretionary or mandatory');
-    if (mandDiscIndex === -1) throw new Error('Discretionary or mandatory column not found in CSV');
-
-    if (yearIndex >= headers.length) throw new Error(`Year index ${yearIndex} out of bounds`);
+    let results={};
+    let resultsArr=[];
+    let levelKeys={};
+     let totalValue = 0;
+   await new Promise((resolve, reject) => {
+        Papa.parse(budgetCsvString, {
+            header: true,
+            skipEmptyLines: true,
+            complete: results => {
+                results.data.forEach(row => {
 
     const mandatory = { name: 'Mandatory', children: [] };
     const discretionary = { name: 'Discretionary', children: [] };
     const functionMap = { Mandatory: new Map(), Discretionary: new Map() };
     const titleCounts = new Map();
-    let totalValue = 0;
     let mandatoryCount = 0;
     let discretionaryCount = 0;
     let mandatoryValue = 0;
@@ -107,31 +106,28 @@ function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, year, t
     const mandatoryContributors = [];
     const discretionaryContributors = [];
 
-    const data = rows.slice(headerRowIndex + 1).filter(row => row[0]);
-    let results={};
-    let resultsArr=[];
-    let levelKeys={};
-    data.forEach(row => {
-        const tid = row[0]?.trim();
+        const tid = row['Treasury Identification Number']?.trim();
         const tidParse=tid.split('-');
-        const title = row[1]?.trim();
-        const mandDisc = row[2]?.trim();
-        const majorCat = row[3]?.trim();
-        const agency = row[4]?.trim();
-        const bureau = row[5]?.trim();
-        const func = row[6]?.trim();
-        const subfunc = row[7]?.trim();
+        const title = row['Title']?.trim();
+        const mandDisc = row['Discretionary or mandatory']?.trim();
+        const majorCat = row['Major spending category']?.trim();
+        const agency = row['Agency']?.trim();
+        const bureau = row['Bureau']?.trim();
+        const func = row['Function']?.trim();
+        const subfunc = row['Subfunction']?.trim();
+        const offBudget = row['Off-budget?'];
         const subPath = functionCodeToName.get(func) || [func,func];
         const subSubPath = subfunctionCodeToName.get(subfunc);
         const path=[
                 mandDisc,
                 agency,
+                bureau,
                 majorCat,
                 subPath[0],
                 subPath[1],
                 title
         ];
-        const value = parseFloat(row[yearIndex]) || 0;
+        const value = parseFloat(row[`${selectedYear}-${selectedType}`]) || 0;
 
         if (!tid || !title || !agency || !func || !subfunc || isNaN(value) || !mandDisc) return;
 
@@ -160,10 +156,14 @@ function processBudgetCSV(budgetCsvString, functionSubfunctionCsvString, year, t
         storePath(path,levelKeys, value);
     });
 
+}});
+
     return {path: ['Budget'],
             value: totalValue,
             children: levelKeys,
             name: 'Budget'};
+});
+
 }
 
 function formatNumber(value) {
