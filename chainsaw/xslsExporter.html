@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Budget Browser XLSX to CSV Exporter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        input, button { margin: 10px 0; }
+        #sheets { margin-top: 20px; }
+        .sheet-preview { margin: 10px 0; }
+        pre { white-space: pre-wrap; font-family: monospace; max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>XLSX to CSV Exporter for Budget Browser</h1>
+    <input type="file" id="fileInput" accept=".xlsx" />
+    <button onclick="convertToCSV()">Convert All Sheets to CSV</button>
+    <button onclick="downloadAllCSVs()" id="downloadAllBtn" disabled>Download All CSVs (ZIP)</button>
+    <div id="sheets"></div>
+
+    <script>
+        let csvContents = {};
+
+        function convertToCSV() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please upload an XLSX file first!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                const sheetsDiv = document.getElementById('sheets');
+                sheetsDiv.innerHTML = '';
+
+                workbook.SheetNames.forEach(sheetName => {
+                    const worksheet = workbook.Sheets[sheetName];
+                    const csv = XLSX.utils.sheet_to_csv(worksheet);
+                    csvContents[sheetName] = csv;
+
+                    // Display preview and download button for each sheet
+                    const sheetDiv = document.createElement('div');
+                    sheetDiv.className = 'sheet-preview';
+                    sheetDiv.innerHTML = `
+                        <h3>${sheetName}</h3>
+                        <pre>${csv.slice(0, 500)}...</pre>
+                        <button onclick="downloadSingleCSV('${sheetName}')">Download ${sheetName}.csv</button>
+                    `;
+                    sheetsDiv.appendChild(sheetDiv);
+                });
+
+                document.getElementById('downloadAllBtn').disabled = false;
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function downloadSingleCSV(sheetName) {
+            const csv = csvContents[sheetName];
+            if (!csv) return;
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            saveAs(blob, `${sheetName}.csv`);
+        }
+
+        function downloadAllCSVs() {
+            const zip = new JSZip();
+            for (const [sheetName, csv] of Object.entries(csvContents)) {
+                zip.file(`${sheetName}.csv`, csv);
+            }
+            zip.generateAsync({ type: 'blob' }).then(blob => {
+                saveAs(blob, 'budget_data.zip');
+            });
+        }
+    </script>
+</body>
+</html>

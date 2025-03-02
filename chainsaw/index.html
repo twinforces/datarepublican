@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Budget Browser</title>
+    <script src="../expose/d3.v7.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        button { margin: 10px 0; }
+        svg { background: #f0f0f0; margin-top: 20px; }
+        #yearPopup { 
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: white; padding: 20px; border: 1px solid #ccc; box-shadow: 0 0 10px rgba(0,0,0,0.5); 
+            display: none; z-index: 1000; 
+        }
+        #yearPopup select { width: 100%; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Budget Browser</h1>
+    <button id="selectYearBtn">Select Budget Year</button>
+    <svg id="sunburst" width="800" height="800"></svg>
+    <div id="yearPopup">
+        <h3>Select Year and Type</h3>
+        <select id="yearSelect">
+            <option value="2025">2025</option>
+            <option value="2026">2026</option>
+            <option value="2027">2027</option>
+            <option value="2028">2028</option>
+            <option value="2029">2029</option>
+            <option value="2030">2030</option>
+            <option value="2031">2031</option>
+            <option value="2032">2032</option>
+            <option value="2033">2033</option>
+            <option value="2034">2034</option>
+            <option value="2035">2035</option>
+        </select>
+        <select id="typeSelect">
+            <option value="ba">Budget Authority</option>
+            <option value="outlays">Outlays</option>
+        </select>
+        <button id="confirmYearBtn">Confirm</button>
+        <button id="cancelYearBtn">Cancel</button>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
