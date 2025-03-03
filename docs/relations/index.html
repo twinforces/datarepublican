@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741029178">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741029178">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741031089">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741031089">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1454,7 +1454,7 @@ async function renderGraphForSubject(subjectName) {
       bulletInfo: subject
     };
     nodes.push(rootNode);
-    
+
     // 1) Forward edges
     for (let row of parsedRelations) {
       let s = row.subject?.trim() || "";
@@ -1472,20 +1472,20 @@ async function renderGraphForSubject(subjectName) {
         });
         if (hasMirror && s > o) continue;
       }
-      
+
       addNodeIfNeeded(globalNodesMap, o);
       let c = row.category?.trim() || "UNKNOWN";
       let color = categoryColors[c] || categoryColors["UNKNOWN"];
       addEdge(edgesSet, globalAllEdges, s, o, (row.label||""), c, color);
     }
-    
+
     // 2) Reverse edges
     for (let revRow of parsedRelations) {
       let s = revRow.subject?.trim() || "";
       let o = revRow.object?.trim() || "";
       if (o !== subjectName) continue;
       if (!s) continue;
-      
+
       // Skip self-loops
       if (s === o) continue;
       
@@ -1501,17 +1501,17 @@ async function renderGraphForSubject(subjectName) {
       let color = categoryColors[c] || categoryColors["UNKNOWN"];
       addEdge(edgesSet, globalAllEdges, s, subjectName, (revRow.label||""), c, color);
     }
-    
+
     // 3) Intergraph edges
     const potentialEdges = [];
     for (let iRow of parsedIntergraph) {
       let rp = iRow.root_person?.trim() || "";
       if (rp !== subjectName) continue;
-      
+
       let s = iRow.subject?.trim() || "";
       let o = iRow.object?.trim() || "";
       if (!s || !o) continue;
-      
+
       if (globalNodesMap.has(s) && globalNodesMap.has(o)) {
         potentialEdges.push({
           from: s,
@@ -1866,7 +1866,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Reset zoom and pan
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(width/2, height/2)
+    d3.zoomIdentity.translate(width/2, height/2).scale(0.7) // Start with a zoomed-out view
   );
   
   // Create the graph content group
@@ -1879,10 +1879,10 @@ function renderD3Graph(rootSubject, nodes, edges) {
   defs.append('marker')
     .attr('id', 'arrow')
     .attr('viewBox', '0 -5 10 10')
-    .attr('refX', 10)
+    .attr('refX', 20) // Increased to move arrow away from node
     .attr('refY', 0)
-    .attr('markerWidth', 6)
-    .attr('markerHeight', 6)
+    .attr('markerWidth', 8) // Increased size
+    .attr('markerHeight', 8) // Increased size
     .attr('orient', 'auto')
     .append('path')
     .attr('class', 'arrow-path')
@@ -1892,10 +1892,10 @@ function renderD3Graph(rootSubject, nodes, edges) {
   defs.append('marker')
     .attr('id', 'arrow-highlighted')
     .attr('viewBox', '0 -5 10 10')
-    .attr('refX', 10)
+    .attr('refX', 20) // Increased to move arrow away from node
     .attr('refY', 0)
-    .attr('markerWidth', 6)
-    .attr('markerHeight', 6)
+    .attr('markerWidth', 8) // Increased size
+    .attr('markerHeight', 8) // Increased size
     .attr('orient', 'auto')
     .append('path')
     .attr('fill', '#2563EB')
@@ -2218,11 +2218,11 @@ function renderD3Graph(rootSubject, nodes, edges) {
           const sourceSize = Math.sqrt(getNodeWidth(sourceNode) * getNodeHeight(sourceNode));
           const targetSize = Math.sqrt(getNodeWidth(targetNode) * getNodeHeight(targetNode));
           
-          // Base distance on node sizes plus padding
-          return (sourceSize + targetSize) / 2 + forceParams.linkDistance;
+          // Base distance on node sizes plus padding - increased for better spacing
+          return (sourceSize + targetSize) / 2 + forceParams.linkDistance * 1.5; // Increased distance multiplier
         } catch (error) {
           console.error("Error in link distance calculation:", error, d);
-          return forceParams.linkDistance;
+          return forceParams.linkDistance * 1.5; // Increased default distance
         }
       })
     )
@@ -2230,28 +2230,28 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .strength(d => {
         // Stronger repulsion for structured layout
         const nodeSize = Math.sqrt(getNodeWidth(d) * getNodeHeight(d));
-        return forceParams.charge * (nodeSize / 200) * 1.5;
+        return forceParams.charge * (nodeSize / 200) * 2.0; // Increased repulsion
       })
-      .distanceMin(200)
-      .distanceMax(2000))
+      .distanceMin(250) // Increased minimum distance
+      .distanceMax(2500)) // Increased maximum distance
     .force('x', d3.forceX(d => {
       // Keep root node centered, let others spread horizontally
       if (d.id === rootSubject) return width / 2;
       return d.x; // Use pre-positioned x value
-    }).strength(d => d.id === rootSubject ? 1 : 0.2))
+    }).strength(d => d.id === rootSubject ? 1 : 0.15)) // Reduced strength to allow more movement
     .force('y', d3.forceY(d => {
       // Keep root node at top, others in row below
       if (d.id === rootSubject) return height * 0.2;
       return height * 0.7;
-    }).strength(0.3))
+    }).strength(0.2)) // Reduced strength to allow more movement
     .force('collision', d3.forceCollide().radius(d => {
       // Make collision radius based on node size plus padding
       const nodeWidth = getNodeWidth(d);
       const nodeHeight = getNodeHeight(d);
-      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 70; // Increased padding
+      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 100; // Increased padding significantly
     }).strength(1))
     .alpha(0.8) // Higher alpha for more movement
-    .alphaDecay(0.008) // Slower decay for more time to find optimal positions
+    .alphaDecay(0.006) // Slower decay for more time to find optimal positions
     .velocityDecay(0.4)
     .on('tick', ticked);
 }
@@ -2321,20 +2321,47 @@ function ticked() {
         }
         
         // Create orthogonal (right-angled) paths with better routing
-        // Calculate midpoint Y position - place it closer to the higher node
-        const sourceIsHigher = sourcePoint.y < targetPoint.y;
-        const higherY = Math.min(sourcePoint.y, targetPoint.y);
-        const lowerY = Math.max(sourcePoint.y, targetPoint.y);
-        const yDiff = lowerY - higherY;
+        // Calculate if nodes are more horizontal or vertical to each other
+        const dx = Math.abs(targetPoint.x - sourcePoint.x);
+        const dy = Math.abs(targetPoint.y - sourcePoint.y);
+        const isHorizontal = dx > dy;
         
-        // Place the horizontal segment at 1/3 of the distance from the higher node
-        const midY = higherY + yDiff * (sourceIsHigher ? 0.33 : 0.67);
+        // Create path with more segments to avoid running behind nodes
+        let path = '';
         
-        // Create the path
-        return `M${sourcePoint.x},${sourcePoint.y} 
-                L${sourcePoint.x},${midY} 
-                L${targetPoint.x},${midY} 
-                L${targetPoint.x},${targetPoint.y}`;
+        // Add a small offset to ensure arrows don't touch nodes
+        const arrowOffset = 10;
+        
+        // Adjust target point to account for arrow
+        const targetPointWithOffset = {
+          x: targetPoint.x + (sourcePoint.x > targetPoint.x ? arrowOffset : -arrowOffset),
+          y: targetPoint.y + (sourcePoint.y > targetPoint.y ? arrowOffset : -arrowOffset)
+        };
+        
+        if (isHorizontal) {
+          // For horizontal arrangement, use 3 segments with vertical middle segment
+          const midX = (sourcePoint.x + targetPointWithOffset.x) / 2;
+          path = `M${sourcePoint.x},${sourcePoint.y} 
+                  L${midX},${sourcePoint.y} 
+                  L${midX},${targetPointWithOffset.y} 
+                  L${targetPointWithOffset.x},${targetPointWithOffset.y}`;
+        } else {
+          // For vertical arrangement, use 3 segments with horizontal middle segment
+          const midY = (sourcePoint.y + targetPointWithOffset.y) / 2;
+          path = `M${sourcePoint.x},${sourcePoint.y} 
+                  L${sourcePoint.x},${midY} 
+                  L${targetPointWithOffset.x},${midY} 
+                  L${targetPointWithOffset.x},${targetPointWithOffset.y}`;
+        }
+        
+        // Store the path points for label positioning
+        d.pathPoints = {
+          source: sourcePoint,
+          target: targetPointWithOffset,
+          isHorizontal: isHorizontal
+        };
+        
+        return path;
       } catch (error) {
         console.error("Error in link path calculation:", error, d);
         return '';
@@ -2371,6 +2398,27 @@ function ticked() {
             const midPoint = path.getPointAtLength(pathLength / 2);
             midX = midPoint.x;
             midY = midPoint.y;
+            
+            // If we have stored path points, use them for better label positioning
+            if (d.pathPoints) {
+              const { source, target, isHorizontal } = d.pathPoints;
+              
+              if (isHorizontal) {
+                // For horizontal paths, position label above or below the middle segment
+                const midX = (source.x + target.x) / 2;
+                midY = source.y + (target.y - source.y) / 2;
+                
+                // Offset the label to avoid overlapping with the path
+                midY += (source.y > target.y) ? -20 : 20;
+              } else {
+                // For vertical paths, position label to the left or right of the middle segment
+                midX = source.x + (target.x - source.x) / 2;
+                const midY = (source.y + target.y) / 2;
+                
+                // Offset the label to avoid overlapping with the path
+                midX += (source.x > target.x) ? -20 : 20;
+              }
+            }
           } else {
             // Fallback if path length is 0
             const sourceNode = nodeMap.get(sourceId);
@@ -2448,7 +2496,8 @@ function preventLabelOverlaps() {
         y: d.y - getNodeHeight(d) / 2,
         width: getNodeWidth(d),
         height: getNodeHeight(d),
-        id: d.id
+        id: d.id,
+        type: 'node'
       });
     });
     
@@ -2477,7 +2526,8 @@ function preventLabelOverlaps() {
         edge: d,
         group: labelGroup,
         originalX: labelX,
-        originalY: labelY
+        originalY: labelY,
+        type: 'label'
       });
     });
     
@@ -2486,7 +2536,7 @@ function preventLabelOverlaps() {
       const labelRect = labelRects[i];
       let hasOverlap = true;
       let attempts = 0;
-      const maxAttempts = 10;
+      const maxAttempts = 10; // Limit repositioning attempts
       
       // Try to find a position without overlaps
       while (hasOverlap && attempts < maxAttempts) {
@@ -2519,11 +2569,14 @@ function preventLabelOverlaps() {
       }
       
       // Update the label position
-      labelRect.group.attr('transform', `translate(${labelRect.x + labelRect.width/2}, ${labelRect.y + labelRect.height/2})`);
+      const newX = labelRect.x + labelRect.width/2;
+      const newY = labelRect.y + labelRect.height/2;
+      
+      labelRect.group.attr('transform', `translate(${newX}, ${newY})`);
       
       // Update stored position for future reference
-      labelRect.edge.labelX = labelRect.x + labelRect.width/2;
-      labelRect.edge.labelY = labelRect.y + labelRect.height/2;
+      labelRect.edge.labelX = newX;
+      labelRect.edge.labelY = newY;
     }
   } catch (error) {
     console.error("Error in preventLabelOverlaps:", error);
@@ -2532,11 +2585,14 @@ function preventLabelOverlaps() {
 
 // Helper function to check if two rectangles overlap
 function rectsOverlap(rect1, rect2) {
+  // Add a buffer zone to ensure labels don't touch
+  const buffer = 15;
+  
   return !(
-    rect1.x + rect1.width < rect2.x ||
-    rect2.x + rect2.width < rect1.x ||
-    rect1.y + rect1.height < rect2.y ||
-    rect2.y + rect2.height < rect1.y
+    rect1.x + rect1.width + buffer < rect2.x ||
+    rect2.x + rect2.width + buffer < rect1.x ||
+    rect1.y + rect1.height + buffer < rect2.y ||
+    rect2.y + rect2.height + buffer < rect1.y
   );
 }
 
@@ -2561,19 +2617,22 @@ function repositionLabelAwayFromRect(labelRect, overlapRect) {
   const minDistX = (labelRect.width + overlapRect.width) / 2;
   const minDistY = (labelRect.height + overlapRect.height) / 2;
   
-  // Move primarily in the direction with the least overlap
+  // Calculate the overlap amount
   const overlapX = minDistX - Math.abs(labelCenterX - rectCenterX);
   const overlapY = minDistY - Math.abs(labelCenterY - rectCenterY);
   
-  // Add a small buffer to ensure no overlap
-  const buffer = 10;
+  // Add a larger buffer to ensure no overlap
+  const buffer = 20;
+  
+  // Move in the direction with the least overlap, but with a minimum movement
+  const moveDistance = Math.max(Math.min(overlapX, overlapY) + buffer, 30);
   
   if (overlapX < overlapY) {
     // Move horizontally
-    labelRect.x += (overlapX + buffer) * Math.sign(normDirX);
+    labelRect.x += moveDistance * Math.sign(normDirX);
   } else {
     // Move vertically
-    labelRect.y += (overlapY + buffer) * Math.sign(normDirY);
+    labelRect.y += moveDistance * Math.sign(normDirY);
   }
 }
 
