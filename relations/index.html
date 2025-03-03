@@ -64,12 +64,8 @@ title: People Relations (BETA)
   }
   .link {
     fill: none;
-    stroke: #CBD5E1;
     stroke-width: 2px;
     filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.05));
-  }
-  .arrow-path {
-    fill: #CBD5E1;
   }
   .label-bg {
     fill: #F3F4F6;
@@ -129,8 +125,8 @@ title: People Relations (BETA)
     fill: #94A3B8;
   }
   
-  #arrow-highlighted .arrow-path {
-    fill: #2563EB !important;
+  #arrow .arrow-path {
+    fill: #94A3B8;
   }
   
   /* Label styling */
@@ -252,12 +248,9 @@ It shows the generated graph and a legend, plus a button to go back to the searc
     <defs>
       <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5"
         markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path" fill="#94A3B8" />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94A3B8" />
       </marker>
-      <marker id="arrow-highlighted" viewBox="0 0 10 10" refX="5" refY="5"
-        markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path" fill="#2563EB" />
-      </marker>
+      <!-- Category-specific markers will be added dynamically by D3 -->
     </defs>
     <g id="graph-content"></g>
   </svg>
@@ -1214,28 +1207,15 @@ function renderD3Graph(rootSubject, nodes, edges) {
   defs.append('marker')
     .attr('id', 'arrow')
     .attr('viewBox', '0 -5 10 10')
-    .attr('refX', 20) // Increased to move arrow away from node
+    .attr('refX', 20)
     .attr('refY', 0)
-    .attr('markerWidth', 8) // Increased size
-    .attr('markerHeight', 8) // Increased size
+    .attr('markerWidth', 8)
+    .attr('markerHeight', 8)
     .attr('orient', 'auto')
     .append('path')
-    .attr('class', 'arrow-path')
+    .attr('fill', '#94A3B8')  // Default gray color
     .attr('d', 'M0,-5L10,0L0,5');
     
-  // Highlighted arrow marker (blue)
-  defs.append('marker')
-    .attr('id', 'arrow-highlighted')
-    .attr('viewBox', '0 -5 10 10')
-    .attr('refX', 20) // Increased to move arrow away from node
-    .attr('refY', 0)
-    .attr('markerWidth', 8) // Increased size
-    .attr('markerHeight', 8) // Increased size
-    .attr('orient', 'auto')
-    .append('path')
-    .attr('fill', '#2563EB')
-    .attr('d', 'M0,-5L10,0L0,5');
-  
   // Create a map of node IDs for quick lookup - make it global for other functions to use
   window.nodeMap = new Map();
   nodes.forEach(node => {
@@ -1473,30 +1453,42 @@ function renderD3Graph(rootSubject, nodes, edges) {
   
   // Helper function to highlight a connection between two nodes
   function highlightConnection(sourceId, targetId) {
-    // Highlight the link
-    linkElements.filter(l => {
-      return (l.from === sourceId && l.to === targetId);
-    })
-    .style('stroke', '#2563EB')
-    .style('stroke-width', '4px')
-    .attr('marker-end', 'url(#arrow-highlighted)');
+    // Find the link data to get its category color
+    const linkData = linkElements.filter(l => l.from === sourceId && l.to === targetId).data()[0];
     
-    // Highlight source and target nodes
-    nodeElements.filter(n => n.id === sourceId || n.id === targetId)
+    if (!linkData) {
+      console.warn(`No link found between ${sourceId} and ${targetId}`);
+      return;
+    }
+    
+    // Get the category color
+    const categoryColor = categoryColors[linkData.category] || categoryColors["UNKNOWN"];
+    
+    // Highlight the link with its category color
+    linkElements.filter(l => l.from === sourceId && l.to === targetId)
+      .style('stroke', categoryColor)
+      .style('stroke-width', '4px')
+      .attr('marker-end', `url(#arrow-${linkData.category || 'UNKNOWN'})`);
+    
+    // Highlight source and target nodes with the same category color
+    nodeElements.filter(n => n.id === sourceId)
       .select('rect')
-      .style('stroke', '#2563EB')
+      .style('stroke', '#2563EB')  // Source node still uses blue
+      .style('stroke-width', '3px');
+      
+    nodeElements.filter(n => n.id === targetId)
+      .select('rect')
+      .style('stroke', categoryColor)  // Target node uses category color
       .style('stroke-width', '3px');
     
-    // Highlight the label
-    labelElements.filter(l => {
-      return (l.from === sourceId && l.to === targetId);
-    })
-    .each(function() {
-      d3.select(this).select('.label-bg')
-        .style('fill', '#2563EB');
-      d3.select(this).selectAll('.link-label')
-        .style('fill', 'white');
-    });
+    // Highlight the label with the category color
+    labelElements.filter(l => l.from === sourceId && l.to === targetId)
+      .each(function() {
+        d3.select(this).select('.label-bg')
+          .style('fill', categoryColor);
+        d3.select(this).selectAll('.link-label')
+          .style('fill', 'white');
+      });
   }
   
   // Helper function to highlight all connections to/from a node
@@ -1522,12 +1514,13 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .attr('stroke', d => d.id === rootSubject ? '#2563EB' : '#94A3B8')
       .attr('stroke-width', d => d.id === rootSubject ? 3 : 1);
     
-    // Reset edge styles
+    // Reset edge styles - maintain category colors
     linkElements
       .style('stroke', null)
       .style('stroke-width', null)
       .attr('stroke', d => categoryColors[d.category] || categoryColors["UNKNOWN"])
-      .attr('stroke-width', 2);
+      .attr('stroke-width', 2)
+      .attr('marker-end', d => `url(#arrow-${d.category || 'UNKNOWN'})`);
     
     // Reset label styles
     labelElements.select('.label-bg')
