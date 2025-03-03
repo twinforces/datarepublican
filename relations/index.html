@@ -6,9 +6,8 @@ title: People Relations (BETA)
 <!-- jQuery for convenience -->
 <script src="jquery.min.js"></script>
 
-<!-- Viz.js (core + full render) -->
-<script src="viz.js"></script>
-<script src="full.render.js"></script>
+<!-- D3.js -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
 
 <!-- svg-pan-zoom for panning/zooming the resulting SVG -->
 <script src="svg-pan-zoom.min.js"></script>
@@ -47,6 +46,56 @@ title: People Relations (BETA)
     gap: 8px;
     margin-bottom: 0.5rem;
   }
+  
+  /* D3 Graph Styles */
+  .node rect {
+    fill: #F3F4F6;
+    stroke: #94A3B8;
+    stroke-width: 1px;
+    filter: drop-shadow(0px 2px 3px rgba(0, 0, 0, 0.1));
+  }
+  .node.root rect {
+    stroke: #2563EB;
+    stroke-width: 3px;
+    fill: #EFF6FF;
+  }
+  .node text {
+    pointer-events: none;
+  }
+  .link {
+    fill: none;
+    stroke: #CBD5E1;
+    stroke-width: 2px;
+    filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.05));
+  }
+  .arrow-path {
+    fill: #CBD5E1;
+  }
+  .label-bg {
+    fill: #F3F4F6;
+    stroke: white;
+    stroke-width: 2px;
+    filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.1));
+  }
+  .link-label {
+    fill: #475569;
+    font-size: 12px;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .legend-item {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    color: white;
+    margin-right: 4px;
+    margin-bottom: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+  .legend-item.disabled {
+    opacity: 0.5;
+  }
 </style>
 
 <!-- 
@@ -69,7 +118,7 @@ letting the user enter a name, see results, and click to load GraphViz mode.
   <form id="searchForm" class="flex flex-wrap gap-2 items-end">
     <div>
       <label for="searchBox" class="text-sm font-bold mb-1">Name/Keyword(s)</label><br/>
-      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. ‘aaron’ or ‘14th Dalai Lama’"/>
+      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. 'aaron' or '14th Dalai Lama'"/>
     </div>
 
     <button type="submit" id="searchButton" class="p-2 border border-gray-200 rounded font-bold text-sm">
@@ -105,9 +154,9 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <div id="graphExplanation" class="mb-3">
   <h1 id="graphTitle" class="mb-1">Relationship Graph</h1>
   <p class="text-sm mb-2" id="graphInstructions">
-    Below is a visualization of our selected subject’s relationships, color-coded by category.  
+    Below is a visualization of our selected subject's relationships, color-coded by category.  
     <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
-    Click “Download SVG” to get an offline copy of the image.
+    Click "Download SVG" to get an offline copy of the image.
   </p>
 </div>
 
@@ -119,7 +168,17 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 
 <!-- Where the graph renders -->
 <div id="graph-container" class="border rounded flex items-center justify-center bg-white">
-  <div>
+  <svg id="graph" width="100%" height="100%">
+    <!-- Arrow marker definition for edges -->
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5"
+        markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path" />
+      </marker>
+    </defs>
+    <g id="graph-content"></g>
+  </svg>
+  <div id="loading-indicator" class="absolute">
     <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
   </div>
 </div>
@@ -157,13 +216,31 @@ let categoryColors = {
   "UNKNOWN": "#6B7280"
 };
 
-let panZoomInstance = null;
+// D3 Graph variables
+let width, height;
+let simulation = null;
+let zoom = null;
+let nodeElements = null;
+let linkElements = null;
+let labelElements = null;
 
 // We store all graph edges in memory so toggling categories is easy:
 let globalNodesMap = new Map();  // subject -> bullet info
 let globalAllEdges = [];         // all edges (including duplicates filtered out)
 let globalActiveCategories = new Set(); // which categories are currently on display
 
+// Force simulation parameters
+const forceParams = {
+  linkDistance: 400,
+  charge: -3000,
+  collisionRadius: 200,
+  bounds: {
+    left: 100,
+    right: 100,
+    top: 100,
+    bottom: 100
+  }
+};
 
 /***************************************
 * ON LOAD
@@ -470,10 +547,9 @@ $('#backToSearch').on('click', function() {
 * GRAPH MODE
 ***************************************/
 async function renderGraphForSubject(subjectName) {
-  // Show spinner in #graph-container
-  $('#graph-container').html(`
-    <div><img src="../assets/images/loading.svg" style="width:32px;height:32px" alt="Loading..."></div>
-  `);
+  // Show loading indicator
+  $('#loading-indicator').show();
+  $('#graph-content').empty();
 
   // Set the search param in the URL
   const newUrl = new URL(window.location);
@@ -500,6 +576,9 @@ async function renderGraphForSubject(subjectName) {
   globalAllEdges = [];
   globalActiveCategories.clear();
 
+  // Initialize D3 graph
+  initializeD3Graph();
+
   // Add the root node
   addNodeIfNeeded(globalNodesMap, subjectName);
 
@@ -509,12 +588,28 @@ async function renderGraphForSubject(subjectName) {
   const relationsZip = `relations_${pStr}.zip`;
 
   try {
+    // Show loading status
+    $('#graphInstructions').html(`
+      <div class="flex items-center gap-2">
+        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
+        <span>Loading relationship data for ${escapeHtml(subjectName)}...</span>
+      </div>
+    `);
+
     const resp = await fetch(relationsZip);
     if (!resp.ok) {
       throw new Error(`Unable to fetch ${relationsZip}`);
     }
     const buffer = await resp.arrayBuffer();
     const z = await JSZip.loadAsync(buffer);
+
+    // Update loading status
+    $('#graphInstructions').html(`
+      <div class="flex items-center gap-2">
+        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
+        <span>Parsing relationship data...</span>
+      </div>
+    `);
 
     // parse relations.csv, relations_reverse.csv, intergraph_edges.csv
     const relationsCsv     = await getZipText(z, 'relations.csv');
@@ -524,6 +619,14 @@ async function renderGraphForSubject(subjectName) {
     const parsedRelations  = Papa.parse(relationsCsv,     { header:true, skipEmptyLines:true }).data;
     const parsedReverse    = Papa.parse(revCsv,           { header:true, skipEmptyLines:true }).data;
     const parsedIntergraph = Papa.parse(interCsv,         { header:true, skipEmptyLines:true }).data;
+
+    // Update loading status
+    $('#graphInstructions').html(`
+      <div class="flex items-center gap-2">
+        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
+        <span>Building relationship graph...</span>
+      </div>
+    `);
 
     let edgesSet = new Set(); // to ensure no duplicates
 
@@ -610,23 +713,63 @@ async function renderGraphForSubject(subjectName) {
     // Render the legend
     renderLegend([...uniqueCats]);
 
-    // Build and render final
-    reRenderGraph(subjectName);
+    // Update loading status
+    $('#graphInstructions').html(`
+      <div class="flex items-center gap-2">
+        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
+        <span>Rendering graph with ${globalNodesMap.size} nodes and ${globalAllEdges.length} connections...</span>
+      </div>
+    `);
+
+    // Prepare data for D3
+    const nodes = [];
+    const edges = [];
+    
+    // Add nodes
+    for (let [subject, bulletInfo] of globalNodesMap.entries()) {
+      nodes.push({
+        id: subject,
+        bulletInfo: bulletInfo
+      });
+    }
+    
+    // Add edges
+    for (let edge of globalAllEdges) {
+      edges.push({
+        source: edge.from,
+        target: edge.to,
+        from: edge.from,
+        to: edge.to,
+        label: edge.label,
+        category: edge.category,
+        color: edge.color
+      });
+    }
+    
+    // Render the D3 graph
+    renderD3Graph(subjectName, nodes, edges);
+
+    // Restore instructions
+    setTimeout(() => {
+      $('#graphInstructions').html(`
+        Below is a visualization of our selected subject's relationships, color-coded by category.  
+        <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
+        Click "Download SVG" to get an offline copy of the image.
+      `);
+    }, 1000);
 
   } catch (err) {
     console.error(err);
     $('#graph-container').html(
       `<div class="p-2 text-center text-sm text-red-500">Error loading relationships: ${err}</div>`
     );
+    $('#graphInstructions').html(`
+      <div class="text-red-500">Error: ${escapeHtml(err.message)}</div>
+    `);
   }
 }
 
 // Build & render the DOT from globalNodesMap + filtered edges
-function reRenderGraph(rootSubject) {
-  let activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
-  let dotSrc = buildDotSource(rootSubject, globalNodesMap, activeEdges);
-  renderDot(dotSrc);
-}
 
 // A function to ensure node exists
 function addNodeIfNeeded(map, subject) {
@@ -659,28 +802,6 @@ async function getZipText(zipObj, filename) {
 
 
 /***************************************
-* DOT BUILDING / RENDERING
-***************************************/
-// We insert <br> every ~50 chars on word boundaries
-function insertLineBreaks(str, maxLen=50) {
-  if (!str) return '';
-  const words = str.split(/\s+/);
-  let lines = [];
-  let current = '';
-
-  for (let w of words) {
-    if (!current) {
-      current = w;
-    } else if ((current + ' ' + w).length > maxLen) {
-      lines.push(escapeHtml(current));
-      current = w;
-    } else {
-      current += ' ' + w;
-    }
-  }
-  if (current) lines.push(escapeHtml(current));
-  return lines.join("<BR/>");
-}
 
 function buildDotSource(rootSubject, nodesMap, edges) {
   let dot = `digraph G {
@@ -761,8 +882,8 @@ function renderLegend(categories) {
   let html = '';
   categories.sort(); // optional: sort them alphabetically
   for (let c of categories) {
-    let colorClass = 'legend-' + c;
-    html += `<div class="legend-item ${colorClass}" data-cat="${c}">${c}</div>`;
+    let color = categoryColors[c] || categoryColors["UNKNOWN"];
+    html += `<div class="legend-item" data-cat="${c}" style="background-color: ${color};">${c}</div>`;
   }
   $('#legend').html(html);
 
@@ -781,9 +902,19 @@ function toggleCategory(cat) {
   } else {
     globalActiveCategories.add(cat);
   }
-  // re-render
-  let rootName = $('#graphTitle').text().trim();
-  reRenderGraph(rootName);
+  
+  // Filter edges based on active categories
+  const activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
+  
+  // Update edge visibility
+  linkElements.attr('visibility', d => 
+    globalActiveCategories.has(d.category) ? 'visible' : 'hidden'
+  );
+  
+  // Update label visibility
+  labelElements.attr('visibility', d => 
+    globalActiveCategories.has(d.category) ? 'visible' : 'hidden'
+  );
 }
 
 
@@ -791,14 +922,29 @@ function toggleCategory(cat) {
 * DOWNLOAD SVG
 ***************************************/
 $('#downloadBtn').on('click', function() {
-  let svgEl = document.querySelector('#graph-container svg');
+  const svgEl = document.querySelector('#graph');
   if (!svgEl) {
     alert('No SVG to download');
     return;
   }
-  let svgData = new XMLSerializer().serializeToString(svgEl);
-  let blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-  let url = URL.createObjectURL(blob);
+  
+  // Create a clone of the SVG to modify for download
+  const clonedSvg = svgEl.cloneNode(true);
+  
+  // Set explicit width and height
+  clonedSvg.setAttribute('width', width);
+  clonedSvg.setAttribute('height', height);
+  
+  // Reset the transform to ensure the graph is centered
+  const content = clonedSvg.querySelector('#graph-content');
+  if (content) {
+    content.setAttribute('transform', `translate(${width/2}, ${height/2})`);
+  }
+  
+  // Convert to string
+  const svgData = new XMLSerializer().serializeToString(clonedSvg);
+  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
 
   let link = document.createElement('a');
   link.href = url;
@@ -820,5 +966,533 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/***************************************
+* D3 GRAPH RENDERING
+***************************************/
+function initializeD3Graph() {
+  // Get container dimensions
+  const container = document.getElementById('graph-container');
+  width = container.clientWidth;
+  height = container.clientHeight;
+  
+  // Initialize zoom behavior
+  zoom = d3.zoom()
+    .scaleExtent([0.1, 2])
+    .on('zoom', (event) => {
+      d3.select('#graph-content').attr('transform', event.transform);
+    });
+  
+  // Apply zoom behavior to SVG
+  d3.select('#graph')
+    .call(zoom)
+    .on('dblclick.zoom', null); // Disable double-click zoom
+    
+  // Reset zoom and pan
+  resetZoom();
+  
+  // Show loading indicator
+  $('#loading-indicator').show();
+}
+
+function resetZoom() {
+  d3.select('#graph').call(
+    zoom.transform,
+    d3.zoomIdentity.translate(width/2, height/2)
+  );
+}
+
+function renderD3Graph(rootSubject, nodes, edges) {
+  // Clear previous graph
+  d3.select('#graph-content').selectAll('*').remove();
+  
+  // Hide loading indicator when rendering starts
+  $('#loading-indicator').hide();
+  
+  // Create the graph content group
+  const g = d3.select('#graph-content');
+  
+  // Create links
+  linkElements = g.append('g')
+    .attr('class', 'links')
+    .selectAll('path')
+    .data(edges)
+    .join('path')
+    .attr('class', 'link')
+    .attr('stroke', d => d.color)
+    .attr('stroke-width', 2)
+    .attr('marker-end', 'url(#arrow)');
+  
+  // Create nodes
+  nodeElements = g.append('g')
+    .attr('class', 'nodes')
+    .selectAll('g')
+    .data(nodes)
+    .join('g')
+    .attr('class', d => d.id === rootSubject ? 'node root' : 'node')
+    .attr('data-id', d => d.id)
+    .call(d3.drag()
+      .on('start', dragStarted)
+      .on('drag', dragged)
+      .on('end', dragEnded)
+    );
+  
+  // Add rectangles to nodes
+  nodeElements.append('rect')
+    .attr('rx', 4)
+    .attr('ry', 4)
+    .attr('width', d => getNodeWidth(d))
+    .attr('height', d => getNodeHeight(d))
+    .style('cursor', 'grab');
+  
+  // Add text to nodes
+  nodeElements.each(function(d) {
+    const node = d3.select(this);
+    const bulletInfo = d.bulletInfo;
+    const padding = 10;
+    let y = padding;
+    
+    // Add subject name
+    node.append('text')
+      .attr('x', padding)
+      .attr('y', y + 15)
+      .attr('font-weight', 'bold')
+      .attr('font-size', '14px')
+      .text(d.id);
+    y += 25;
+    
+    // Add bullet point 1 if available
+    if (bulletInfo.bullet_point1) {
+      const wrappedText = wrapText(bulletInfo.bullet_point1, 30);
+      wrappedText.forEach(line => {
+        node.append('text')
+          .attr('x', padding)
+          .attr('y', y + 12)
+          .attr('font-size', '12px')
+          .text(line);
+        y += 18;
+      });
+    }
+    
+    // Add bullet point 2 if available
+    if (bulletInfo.bullet_point2) {
+      y += 5; // Add a little extra space
+      const wrappedText = wrapText(bulletInfo.bullet_point2, 30);
+      wrappedText.forEach(line => {
+        node.append('text')
+          .attr('x', padding)
+          .attr('y', y + 12)
+          .attr('font-size', '12px')
+          .text(line);
+        y += 18;
+      });
+    }
+  });
+  
+  // Create edge labels
+  const labelGroup = g.append('g').attr('class', 'label-group');
+  labelElements = labelGroup.selectAll('g')
+    .data(edges)
+    .join('g')
+    .attr('class', 'link-label-group');
+  
+  // Add background pill for labels
+  labelElements.append('rect')
+    .attr('rx', 12)
+    .attr('ry', 12)
+    .attr('class', 'label-bg')
+    .style('cursor', 'pointer')
+    .on('mouseover', function(event, d) {
+      d3.select(this).attr('fill', d.color);
+      d3.select(this.parentNode).select('.link-label').attr('fill', 'white');
+      linkElements.filter(l => l === d).attr('stroke-width', 4);
+    })
+    .on('mouseout', function() {
+      d3.select(this).attr('fill', '#F3F4F6');
+      d3.select(this.parentNode).select('.link-label').attr('fill', '#475569');
+      linkElements.attr('stroke-width', 2);
+    });
+  
+  // Add text labels with wrapping
+  labelElements.each(function(d) {
+    const labelGroup = d3.select(this);
+    const label = d.label || "";
+    
+    // Skip empty labels
+    if (!label.trim()) {
+      labelGroup.append('text')
+        .attr('class', 'link-label')
+        .text("");
+      return;
+    }
+    
+    // Wrap text to max 20 characters per line
+    const wrappedText = wrapText(label, 20);
+    
+    // Add each line of text
+    wrappedText.forEach((line, i) => {
+      labelGroup.append('text')
+        .attr('class', 'link-label')
+        .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
+        .text(line);
+    });
+  });
+  
+  // Add hover effects to nodes
+  nodeElements.on('mouseover', function(event, d) {
+    // Highlight this node
+    d3.select(this).select('rect')
+      .attr('stroke-width', 3)
+      .attr('stroke', '#2563EB');
+    
+    // Highlight connected edges and nodes
+    linkElements.each(function(link) {
+      if (link.from === d.id || link.to === d.id) {
+        d3.select(this)
+          .attr('stroke-width', 4)
+          .attr('stroke', link.color);
+        
+        // Highlight connected node
+        const connectedId = link.from === d.id ? link.to : link.from;
+        nodeElements.filter(n => n.id === connectedId)
+          .select('rect')
+          .attr('stroke-width', 2)
+          .attr('stroke', link.color);
+      }
+    });
+    
+    // Highlight related labels
+    labelElements.each(function(label) {
+      if (label.from === d.id || label.to === d.id) {
+        d3.select(this).select('.label-bg')
+          .attr('fill', label.color);
+        d3.select(this).select('.link-label')
+          .attr('fill', 'white');
+      }
+    });
+  })
+  .on('mouseout', function() {
+    // Reset node styles
+    nodeElements.select('rect')
+      .attr('stroke-width', d => d.id === rootSubject ? 3 : 1)
+      .attr('stroke', d => d.id === rootSubject ? '#2563EB' : '#94A3B8');
+    
+    // Reset edge styles
+    linkElements
+      .attr('stroke-width', 2)
+      .attr('stroke', d => d.color);
+    
+    // Reset label styles
+    labelElements.select('.label-bg')
+      .attr('fill', '#F3F4F6');
+    labelElements.select('.link-label')
+      .attr('fill', '#475569');
+  });
+  
+  // Start the simulation
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges)
+      .id(d => d.id)
+      .distance(d => {
+        // Adjust link distance based on node sizes
+        const sourceNode = nodes.find(n => n.id === d.from);
+        const targetNode = nodes.find(n => n.id === d.to);
+        if (!sourceNode || !targetNode) return forceParams.linkDistance;
+        
+        const sourceSize = Math.sqrt(getNodeWidth(sourceNode) * getNodeHeight(sourceNode));
+        const targetSize = Math.sqrt(getNodeWidth(targetNode) * getNodeHeight(targetNode));
+        
+        // Base distance on node sizes plus padding
+        return (sourceSize + targetSize) / 2 + forceParams.linkDistance;
+      }))
+    .force('charge', d3.forceManyBody()
+      .strength(d => {
+        // Adjust repulsion based on node size
+        const nodeSize = Math.sqrt(getNodeWidth(d) * getNodeHeight(d));
+        return forceParams.charge * (nodeSize / 200);
+      })
+      .distanceMin(150)
+      .distanceMax(2000))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('x', d3.forceX(width / 2).strength(0.05))
+    .force('y', d3.forceY(height / 2).strength(0.05))
+    .force('collision', d3.forceCollide().radius(d => {
+      // Make collision radius based on node size plus padding
+      const nodeWidth = getNodeWidth(d);
+      const nodeHeight = getNodeHeight(d);
+      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 50;
+    }).strength(1))
+    .alpha(0.6)
+    .alphaDecay(0.01) // Slower decay for more time to find optimal positions
+    .velocityDecay(0.4) // Lower value to allow nodes to move more freely
+    .on('tick', ticked);
+  
+  // Enable download button
+  $('#downloadBtn').show();
+  
+  // Auto-zoom to fit all nodes after simulation stabilizes
+  setTimeout(() => {
+    zoomToFitAll();
+  }, 2000);
+}
+
+// Function to zoom to fit all nodes
+function zoomToFitAll() {
+  if (!nodeElements || !nodeElements.size()) return;
+  
+  // Get bounding box of all nodes
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  
+  nodeElements.each(function(d) {
+    const nodeWidth = getNodeWidth(d);
+    const nodeHeight = getNodeHeight(d);
+    
+    minX = Math.min(minX, d.x - nodeWidth/2);
+    minY = Math.min(minY, d.y - nodeHeight/2);
+    maxX = Math.max(maxX, d.x + nodeWidth/2);
+    maxY = Math.max(maxY, d.y + nodeHeight/2);
+  });
+  
+  // Add padding
+  const padding = 50;
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
+  
+  const graphWidth = maxX - minX;
+  const graphHeight = maxY - minY;
+  
+  // Calculate scale to fit
+  const scale = Math.min(
+    width / graphWidth,
+    height / graphHeight,
+    1.5 // Max scale
+  );
+  
+  // Calculate center point
+  const centerX = minX + graphWidth/2;
+  const centerY = minY + graphHeight/2;
+  
+  // Apply zoom transform
+  d3.select('#graph').transition()
+    .duration(750)
+    .call(
+      zoom.transform,
+      d3.zoomIdentity
+        .translate(width/2, height/2)
+        .scale(scale)
+        .translate(-centerX, -centerY)
+    );
+}
+
+function ticked() {
+  // Update node positions
+  nodeElements.attr('transform', d => {
+    // Constrain to bounds
+    d.x = Math.max(forceParams.bounds.left, Math.min(width - forceParams.bounds.right, d.x));
+    d.y = Math.max(forceParams.bounds.top, Math.min(height - forceParams.bounds.bottom, d.y));
+    return `translate(${d.x - getNodeWidth(d) / 2}, ${d.y - getNodeHeight(d) / 2})`;
+  });
+  
+  // Update link paths
+  linkElements.attr('d', d => {
+    const sourceNode = nodeElements.filter(n => n.id === d.from).datum();
+    const targetNode = nodeElements.filter(n => n.id === d.to).datum();
+    
+    if (!sourceNode || !targetNode) return '';
+    
+    const sourceWidth = getNodeWidth(sourceNode);
+    const sourceHeight = getNodeHeight(sourceNode);
+    const targetWidth = getNodeWidth(targetNode);
+    const targetHeight = getNodeHeight(targetNode);
+    
+    // Calculate source and target points on the edges of the rectangles
+    const sourceX = sourceNode.x;
+    const sourceY = sourceNode.y;
+    const targetX = targetNode.x;
+    const targetY = targetNode.y;
+    
+    // Find intersection points with rectangles
+    const sourcePoint = findIntersectionPoint(
+      sourceX, sourceY, targetX, targetY,
+      sourceX - sourceWidth/2, sourceY - sourceHeight/2,
+      sourceWidth, sourceHeight
+    );
+    
+    const targetPoint = findIntersectionPoint(
+      targetX, targetY, sourceX, sourceY,
+      targetX - targetWidth/2, targetY - targetHeight/2,
+      targetWidth, targetHeight
+    );
+    
+    if (!sourcePoint || !targetPoint) return '';
+    
+    // Add a slight curve to the path to make overlapping paths more visible
+    const dx = targetPoint.x - sourcePoint.x;
+    const dy = targetPoint.y - sourcePoint.y;
+    const dr = Math.sqrt(dx * dx + dy * dy) * 1.2;
+    
+    // Use curved paths for better visibility when there are multiple edges
+    return `M${sourcePoint.x},${sourcePoint.y} A${dr},${dr} 0 0,1 ${targetPoint.x},${targetPoint.y}`;
+  });
+  
+  // Update label positions
+  labelElements.attr('transform', d => {
+    const path = linkElements.filter(l => l === d).node();
+    if (!path) return '';
+    
+    const pathLength = path.getTotalLength();
+    if (isNaN(pathLength) || pathLength === 0) return '';
+    
+    // Position label at the midpoint of the path
+    const midPoint = path.getPointAtLength(pathLength / 2);
+    return `translate(${midPoint.x}, ${midPoint.y})`;
+  });
+  
+  // Update label background sizes
+  labelElements.each(function(d) {
+    const labelTexts = d3.select(this).selectAll('.link-label');
+    if (!labelTexts.size()) return;
+    
+    // Calculate bounding box that encompasses all text elements
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    
+    labelTexts.each(function() {
+      const bbox = this.getBBox();
+      minX = Math.min(minX, bbox.x);
+      minY = Math.min(minY, bbox.y);
+      maxX = Math.max(maxX, bbox.x + bbox.width);
+      maxY = Math.max(maxY, bbox.y + bbox.height);
+    });
+    
+    // Add padding
+    const padding = { x: 10, y: 6 };
+    
+    d3.select(this).select('.label-bg')
+      .attr('x', minX - padding.x)
+      .attr('y', minY - padding.y)
+      .attr('width', maxX - minX + padding.x * 2)
+      .attr('height', maxY - minY + padding.y * 2);
+  });
+}
+
+function dragStarted(event, d) {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x;
+  d.fy = d.y;
+  d3.select(this).style('cursor', 'grabbing');
+}
+
+function dragged(event, d) {
+  d.fx = event.x;
+  d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+  if (!event.active) simulation.alphaTarget(0);
+  d.fx = null;
+  d.fy = null;
+  d3.select(this).style('cursor', 'grab');
+}
+
+function getNodeWidth(d) {
+  // Calculate width based on text content
+  const minWidth = 200;
+  const textLength = d.id.length;
+  const bulletLength1 = d.bulletInfo?.bullet_point1?.length || 0;
+  const bulletLength2 = d.bulletInfo?.bullet_point2?.length || 0;
+  const maxTextLength = Math.max(textLength, bulletLength1 / 5, bulletLength2 / 5);
+  return Math.max(minWidth, maxTextLength * 7);
+}
+
+function getNodeHeight(d) {
+  // Calculate height based on text content
+  const baseHeight = 50; // Minimum height
+  const bulletInfo = d.bulletInfo;
+  let additionalHeight = 0;
+  
+  if (bulletInfo.bullet_point1) {
+    const lines1 = Math.ceil(bulletInfo.bullet_point1.length / 30);
+    additionalHeight += lines1 * 18;
+  }
+  
+  if (bulletInfo.bullet_point2) {
+    const lines2 = Math.ceil(bulletInfo.bullet_point2.length / 30);
+    additionalHeight += lines2 * 18 + 5; // +5 for spacing
+  }
+  
+  return baseHeight + additionalHeight;
+}
+
+function wrapText(text, maxCharsPerLine) {
+  if (!text) return [];
+  
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = '';
+  
+  words.forEach(word => {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (testLine.length <= maxCharsPerLine) {
+      currentLine = testLine;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  });
+  
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  
+  return lines;
+}
+
+function findIntersectionPoint(x1, y1, x2, y2, rectX, rectY, rectWidth, rectHeight) {
+  // Calculate rectangle corners
+  const corners = [
+    { x: rectX, y: rectY }, // top-left
+    { x: rectX + rectWidth, y: rectY }, // top-right
+    { x: rectX + rectWidth, y: rectY + rectHeight }, // bottom-right
+    { x: rectX, y: rectY + rectHeight } // bottom-left
+  ];
+  
+  // Check intersection with each edge of the rectangle
+  const edges = [
+    [corners[0], corners[1]], // top
+    [corners[1], corners[2]], // right
+    [corners[2], corners[3]], // bottom
+    [corners[3], corners[0]]  // left
+  ];
+  
+  for (const [p1, p2] of edges) {
+    const intersection = lineIntersection(x1, y1, x2, y2, p1.x, p1.y, p2.x, p2.y);
+    if (intersection) {
+      return intersection;
+    }
+  }
+  
+  // If no intersection found, return center of rectangle
+  return { x: rectX + rectWidth / 2, y: rectY + rectHeight / 2 };
+}
+
+function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
+  // Calculate determinants
+  const den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+  if (den === 0) return null; // Lines are parallel
+  
+  const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / den;
+  const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / den;
+  
+  // Check if intersection is on both line segments
+  if (ua < 0 || ua > 1 || ub < 0 || ub > 1) return null;
+  
+  // Calculate intersection point
+  const x = x1 + ua * (x2 - x1);
+  const y = y1 + ua * (y2 - y1);
+  
+  return { x, y };
 }
 </script>
