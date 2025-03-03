@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741036375">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741036375">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741038837">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741038837">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -780,6 +780,17 @@ $(document).ready(function() {
     justify-content: center; /* Center horizontally */
     align-items: center;     /* Center vertically */
   }
+  #loading {
+    position: absolute;
+    inset: 0;
+    background-color: white;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transition: opacity 0.3s ease-out;
+  }
   #legend {
     display: flex;
     align-items: flex-start;
@@ -989,12 +1000,22 @@ It shows the generated graph and a legend, plus a button to go back to the searc
     <defs>
       <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5"
         markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94A3B8" />
+        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path"></path>
       </marker>
       <!-- Category-specific markers will be added dynamically by D3 -->
     </defs>
     <g id="graph-content"></g>
   </svg>
+  <!-- Add loading overlay with the same styling as in expose/index.html -->
+  <div id="loading" class="absolute inset-0 flex flex-col items-center justify-center pt-5 bg-white z-30">
+    <div class="text-center">
+      <svg class="animate-spin h-8 w-8 text-navy mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      <div id="loading-text" class="text-lg font-semibold text-navy mb-4">Loading graph...</div>
+    </div>
+  </div>
   <div id="loading-indicator" class="absolute">
     <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
   </div>
@@ -1902,6 +1923,11 @@ function renderD3Graph(rootSubject, nodes, edges) {
   
   // Hide loading indicator when rendering starts
   $('#loading-indicator').hide();
+  // Note: We keep the main 'loading' overlay visible until the graph is fully centered
+  // That will be hidden in the centerGraph function when "Graph centered based on actual bounds" is logged
+  
+  // Update loading text to show that the graph is being processed
+  $('#loading-text').text('Rendering graph visualization...');
   
   // Initialize container dimensions
   const container = document.getElementById('graph-container');
@@ -2336,6 +2362,16 @@ function centerGraph() {
       graphCenter: { x: graphCenterX, y: graphCenterY },
       translation: { x: translateX, y: translateY }
     });
+    
+    // Hide the loading overlay when the graph is fully loaded and centered
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) {
+      loadingEl.style.opacity = '0';
+      loadingEl.style.transition = 'opacity 0.3s ease-out';
+      setTimeout(() => {
+        loadingEl.style.display = 'none';
+      }, 300);
+    }
   } catch (error) {
     console.error('Error centering graph:', error);
   }
@@ -3036,6 +3072,29 @@ function zoomToFitAll() {
     zoom.transform,
     d3.zoomIdentity.translate(translateX, translateY).scale(scale)
   );
+}
+
+function buildGraph(subject, filterKeywords = []) {
+  // Update page title with subject name
+  try {
+    const subjectName = nameFromEntityId(subject);
+    document.title = `${subjectName} - People Relations`;
+    $('#graphTitle').text(`${subjectName} - Relationship Graph`);
+  } catch (e) {
+    document.title = "People Relations";
+    $('#graphTitle').text("Relationship Graph");
+  }
+  
+  // Update loading overlay text
+  $('#loading-text').text('Preparing graph data...');
+  $('#loading').show(); // Ensure loading overlay is visible
+  
+  // Show loading indicator
+  $('#loading-indicator').show();
+  
+  // Start fetch process
+  const relationsZip = `../data/${subject}.zip`;
+  // ... existing code ...
 }
 </script>
 </body>
