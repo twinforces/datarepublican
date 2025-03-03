@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741019912">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741019912">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741027815">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741027815">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -834,6 +834,70 @@ $(document).ready(function() {
   .legend-item.disabled {
     opacity: 0.5;
   }
+  
+  /* Hover effects - using !important to override any inline styles */
+  .node rect:hover {
+    stroke: #2563EB !important;
+    stroke-width: 3px !important;
+  }
+  
+  .link:hover {
+    stroke: #2563EB !important;
+    stroke-width: 4px !important;
+  }
+  
+  /* Arrow styling */
+  .arrow-path {
+    fill: #94A3B8;
+  }
+  
+  #arrow-highlighted .arrow-path {
+    fill: #2563EB !important;
+  }
+  
+  /* Label styling */
+  .label-bg:hover {
+    fill: #2563EB !important;
+  }
+  
+  /* Make all text in a label group white when the background is hovered */
+  .link-label-group:hover .link-label {
+    fill: white !important;
+  }
+  
+  /* Custom data attribute selectors for connected elements */
+  .link[data-highlighted="true"] {
+    stroke: #2563EB !important;
+    stroke-width: 4px !important;
+  }
+  
+  .node rect[data-highlighted="true"] {
+    stroke: #2563EB !important;
+    stroke-width: 3px !important;
+  }
+  
+  .label-bg[data-highlighted="true"] {
+    fill: #2563EB !important;
+  }
+  
+  .link-label[data-highlighted="true"] {
+    fill: white !important;
+  }
+  
+  /* When hovering a node, highlight connected links */
+  .node:hover ~ .links .link {
+    stroke: #2563EB !important;
+    stroke-width: 4px !important;
+  }
+  
+  /* When hovering a node, highlight connected labels */
+  .node:hover ~ .label-group .link-label-group .label-bg {
+    fill: #2563EB !important;
+  }
+  
+  .node:hover ~ .label-group .link-label-group .link-label {
+    fill: white !important;
+  }
 </style>
 
 <!-- 
@@ -907,11 +971,14 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <!-- Where the graph renders -->
 <div id="graph-container" class="border rounded flex items-center justify-center bg-white">
   <svg id="graph" width="100%" height="100%">
-    <!-- Arrow marker definition for edges -->
     <defs>
       <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5"
         markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path" />
+        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path" fill="#94A3B8" />
+      </marker>
+      <marker id="arrow-highlighted" viewBox="0 0 10 10" refX="5" refY="5"
+        markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-path" fill="#2563EB" />
       </marker>
     </defs>
     <g id="graph-content"></g>
@@ -935,6 +1002,9 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 let allReverseIndex = new Map();      // token -> array of lineIDs (with ranges)
 let allSubjects = [];                 // lines from subjects.csv (index = line-1)
 let allBullets = new Map();           // subject -> { bullet_point1, bullet_point2 }
+let globalSubjectsMap = new Map();    // subject name -> bullet info
+let parsedRelations = [];             // parsed relations data
+let parsedIntergraph = [];            // parsed intergraph edges data
 let searchInProgress = false;
 let searchCanceled = false;
 let hasInitialDataLoaded = false;
@@ -964,7 +1034,7 @@ let labelElements = null;
 
 // We store all graph edges in memory so toggling categories is easy:
 let globalNodesMap = new Map();  // subject -> bullet info
-let globalAllEdges = [];         // all edges (including duplicates filtered out)
+let globalAllEdges = new Map();  // key -> edge object
 let globalActiveCategories = new Set(); // which categories are currently on display
 
 // Force simulation parameters
@@ -1000,7 +1070,12 @@ $(document).ready(async function() {
 
   // If we have ?subject=, go straight to GraphViz mode after data loads
   if (subj) {
-    renderGraphForSubject(subj);
+    try {
+      await renderGraphForSubject(subj);
+    } catch (error) {
+      console.error("Error rendering graph:", error);
+      $('#statusMessage').text(`Error: ${error.message}`);
+    }
   }
 
   // Otherwise, remain in search mode, but if the user typed any text in ?search= param, do that:
@@ -1118,11 +1193,73 @@ async function loadBulletsCSV(zipUrl, csvFile) {
   for (let row of parsed.data) {
     const s = row['subject']?.trim() ?? '';
     if (!s) continue;
-    allBullets.set(s, {
+    const bulletInfo = {
       bullet_point1: row['bullet_point1'] || '',
       bullet_point2: row['bullet_point2'] || ''
-    });
+    };
+    allBullets.set(s, bulletInfo);
+    globalSubjectsMap.set(s, bulletInfo);
   }
+}
+
+// Function to load relations data for a specific subject
+async function loadRelationsData(subjectName) {
+  try {
+    // figure out which partition
+    const partitionIdx = partitionIndex(subjectName);
+    let pStr = partitionIdx.toString().padStart(2,'0');
+    const relationsZip = `relations_${pStr}.zip`;
+    
+    console.log(`Loading relations data for ${subjectName} from ${relationsZip}`);
+    
+    const resp = await fetch(relationsZip);
+    if (!resp.ok) {
+      throw new Error(`Unable to fetch ${relationsZip}: ${resp.status} ${resp.statusText}`);
+    }
+    
+    const buffer = await resp.arrayBuffer();
+    const z = await JSZip.loadAsync(buffer);
+    
+    // Check if files exist in the zip
+    if (!z.file('relations.csv')) {
+      throw new Error(`Missing relations.csv in ${relationsZip}`);
+    }
+    
+    // Parse relations.csv
+    const relationsCsv = await z.file('relations.csv').async('string');
+    parsedRelations = Papa.parse(relationsCsv, { 
+      header: true, 
+      skipEmptyLines: true 
+    }).data;
+    
+    console.log(`Loaded ${parsedRelations.length} relations`);
+    
+    // Optionally load intergraph_edges.csv if it exists
+    if (z.file('intergraph_edges.csv')) {
+      const interCsv = await z.file('intergraph_edges.csv').async('string');
+      parsedIntergraph = Papa.parse(interCsv, { 
+        header: true, 
+        skipEmptyLines: true 
+      }).data;
+      console.log(`Loaded ${parsedIntergraph.length} intergraph edges`);
+    } else {
+      console.log('No intergraph_edges.csv found in zip');
+      parsedIntergraph = [];
+    }
+    
+    return true;
+  } catch (error) {
+    console.error("Error loading relations data:", error);
+    $('#statusMessage').text(`Error loading relations: ${error.message}`);
+    throw error;
+  }
+}
+
+// Helper function to determine which partition a subject belongs to
+function partitionIndex(subject) {
+  // Use murmur hash to determine partition
+  const hash = murmurHash3.x86.hash32(subject);
+  return Math.abs(hash) % NUM_PARTITIONS;
 }
 
 
@@ -1285,113 +1422,75 @@ $('#backToSearch').on('click', function() {
 * GRAPH MODE
 ***************************************/
 async function renderGraphForSubject(subjectName) {
-  // Show loading indicator
-  $('#loading-indicator').show();
-  $('#graph-content').empty();
-
-  // Set the search param in the URL
-  const newUrl = new URL(window.location);
-  newUrl.searchParams.set('subject', subjectName);
-  window.history.pushState({}, '', newUrl);
-
-  // Put subject name in title
-  $('#graphTitle').text(subjectName);
-
-  // Summarize from bullets.csv if found
-  let bulletInfo = allBullets.get(subjectName) || {};
-  let b1 = bulletInfo.bullet_point1 || "";
-  let b2 = bulletInfo.bullet_point2 || "";
-  let summaryHtml = `<p class="mb-2"><strong>${escapeHtml(subjectName)}</strong></p>`;
-  if (b1) summaryHtml += `<p class="mb-2">${escapeHtml(b1)}</p>`;
-  if (b2) summaryHtml += `<p>${escapeHtml(b2)}</p>`;
-  if (!b1 && !b2) {
-    summaryHtml += `<p class="text-sm text-gray-600">(No extended info available.)</p>`;
-  }
-  $('#rootSummary').html(summaryHtml);
-
-  // Clear globals for new subject
-  globalNodesMap.clear();
-  globalAllEdges = [];
-  globalActiveCategories.clear();
-
-  // Initialize D3 graph
-  initializeD3Graph();
-
-  // Add the root node
-  addNodeIfNeeded(globalNodesMap, subjectName);
-
-  // figure out which partition
-  const partitionIdx = partitionIndex(subjectName);
-  let pStr = partitionIdx.toString().padStart(2,'0');
-  const relationsZip = `relations_${pStr}.zip`;
-
   try {
-    // Show loading status
-    $('#graphInstructions').html(`
-      <div class="flex items-center gap-2">
-        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
-        <span>Loading relationship data for ${escapeHtml(subjectName)}...</span>
-      </div>
-    `);
-
-    const resp = await fetch(relationsZip);
-    if (!resp.ok) {
-      throw new Error(`Unable to fetch ${relationsZip}`);
+    // Show loading indicator
+    $('#loading-indicator').show();
+    $('#graphInstructions').hide();
+    
+    // Clear any previous error messages
+    $('#graph-container').removeClass('error');
+    
+    // Get the subject data
+    const subject = globalSubjectsMap.get(subjectName);
+    if (!subject) {
+      throw new Error(`Subject "${subjectName}" not found`);
     }
-    const buffer = await resp.arrayBuffer();
-    const z = await JSZip.loadAsync(buffer);
-
-    // Update loading status
-    $('#graphInstructions').html(`
-      <div class="flex items-center gap-2">
-        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
-        <span>Parsing relationship data...</span>
-      </div>
-    `);
-
-    // parse relations.csv, relations_reverse.csv, intergraph_edges.csv
-    const relationsCsv     = await getZipText(z, 'relations.csv');
-    const revCsv           = await getZipText(z, 'relations_reverse.csv');
-    const interCsv         = await getZipText(z, 'intergraph_edges.csv');
-
-    const parsedRelations  = Papa.parse(relationsCsv,     { header:true, skipEmptyLines:true }).data;
-    const parsedReverse    = Papa.parse(revCsv,           { header:true, skipEmptyLines:true }).data;
-    const parsedIntergraph = Papa.parse(interCsv,         { header:true, skipEmptyLines:true }).data;
-
-    // Update loading status
-    $('#graphInstructions').html(`
-      <div class="flex items-center gap-2">
-        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
-        <span>Building relationship graph...</span>
-      </div>
-    `);
-
-    let edgesSet = new Set(); // to ensure no duplicates
-
+    
+    // Load relations data for this subject
+    await loadRelationsData(subjectName);
+    
+    // Reset global variables
+    globalNodesMap = new Map();
+    globalAllEdges = new Map();
+    
+    // Create nodes and edges for the graph
+    const nodes = [];
+    const edges = [];
+    const edgesSet = new Set();
+    
+    // Add the root subject node
+    const rootNode = {
+      id: subjectName,
+      bulletInfo: subject
+    };
+    nodes.push(rootNode);
+    
     // 1) Forward edges
     for (let row of parsedRelations) {
       let s = row.subject?.trim() || "";
+      let o = row.object?.trim() || "";
       if (s !== subjectName) continue;
-      let o = (row.object || "").trim();
       if (!o) continue;
-
+      
+      // Skip self-loops
+      if (s === o) continue;
+      
+      // Check if we should skip symmetrical duplicates
+      if (parseInt(row.is_symmetrical,10)===1) {
+        let hasMirror = parsedRelations.some(rel => {
+          return (rel.subject?.trim() === o && rel.object?.trim() === s);
+        });
+        if (hasMirror && s > o) continue;
+      }
+      
       addNodeIfNeeded(globalNodesMap, o);
       let c = row.category?.trim() || "UNKNOWN";
       let color = categoryColors[c] || categoryColors["UNKNOWN"];
       addEdge(edgesSet, globalAllEdges, s, o, (row.label||""), c, color);
     }
-
+    
     // 2) Reverse edges
-    for (let revRow of parsedReverse) {
-      let obj = revRow.object?.trim() || "";
-      if (obj !== subjectName) continue;
-
+    for (let revRow of parsedRelations) {
       let s = revRow.subject?.trim() || "";
+      let o = revRow.object?.trim() || "";
+      if (o !== subjectName) continue;
       if (!s) continue;
-
-      let symmetrical = parseInt(revRow.is_symmetrical,10) === 1;
-      if (symmetrical) {
-        // skip if forward set had the mirror
+      
+      // Skip self-loops
+      if (s === o) continue;
+      
+      // Check if we should skip symmetrical duplicates
+      if (parseInt(revRow.is_symmetrical,10)===1) {
         let hasMirror = parsedRelations.some(rel => {
           return (rel.subject?.trim() === subjectName && rel.object?.trim() === s);
         });
@@ -1402,17 +1501,17 @@ async function renderGraphForSubject(subjectName) {
       let color = categoryColors[c] || categoryColors["UNKNOWN"];
       addEdge(edgesSet, globalAllEdges, s, subjectName, (revRow.label||""), c, color);
     }
-
+    
     // 3) Intergraph edges
     const potentialEdges = [];
     for (let iRow of parsedIntergraph) {
       let rp = iRow.root_person?.trim() || "";
       if (rp !== subjectName) continue;
-
+      
       let s = iRow.subject?.trim() || "";
       let o = iRow.object?.trim() || "";
       if (!s || !o) continue;
-
+      
       if (globalNodesMap.has(s) && globalNodesMap.has(o)) {
         potentialEdges.push({
           from: s,
@@ -1435,75 +1534,63 @@ async function renderGraphForSubject(subjectName) {
       }
       finalInterEdges.push(pe);
     }
-    // Add them
-    for (let pe of finalInterEdges) {
-      let c = pe.category;
-      let color = categoryColors[c] || categoryColors["UNKNOWN"];
-      addEdge(edgesSet, globalAllEdges, pe.from, pe.to, pe.label, c, color);
-    }
-
-    // Initialize active categories
-    let uniqueCats = new Set(globalAllEdges.map(e => e.category));
-    for (let c of uniqueCats) {
-      globalActiveCategories.add(c);
-    }
-
-    // Render the legend
-    renderLegend([...uniqueCats]);
-
-    // Update loading status
-    $('#graphInstructions').html(`
-      <div class="flex items-center gap-2">
-        <img src="../assets/images/loading.svg" class="loading-spinner" style="width:16px;height:16px" alt="Loading...">
-        <span>Rendering graph with ${globalNodesMap.size} nodes and ${globalAllEdges.length} connections...</span>
-      </div>
-    `);
-
-    // Prepare data for D3
-    const nodes = [];
-    const edges = [];
     
-    // Add nodes
-    for (let [subject, bulletInfo] of globalNodesMap.entries()) {
+    // Add intergraph edges
+    for (let ie of finalInterEdges) {
+      let c = ie.category;
+      let color = categoryColors[c] || categoryColors["UNKNOWN"];
+      addEdge(edgesSet, globalAllEdges, ie.from, ie.to, ie.label, c, color);
+    }
+    
+    // Convert nodes map to array
+    for (let [id, bulletInfo] of globalNodesMap) {
+      if (id === subjectName) continue; // Skip root node, already added
       nodes.push({
-        id: subject,
+        id: id,
         bulletInfo: bulletInfo
       });
     }
     
-    // Add edges
-    for (let edge of globalAllEdges) {
-      edges.push({
-        source: edge.from,
-        target: edge.to,
-        from: edge.from,
-        to: edge.to,
-        label: edge.label,
-        category: edge.category,
-        color: edge.color
-      });
+    // Convert edges set to array
+    for (let edgeKey of edgesSet) {
+      const edge = globalAllEdges.get(edgeKey);
+      if (edge) {
+        edges.push(edge);
+      }
     }
     
-    // Render the D3 graph
+    // Render the graph
     renderD3Graph(subjectName, nodes, edges);
-
-    // Restore instructions
-    setTimeout(() => {
-      $('#graphInstructions').html(`
-        Below is a visualization of our selected subject's relationships, color-coded by category.  
-        <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
-        Click "Download SVG" to get an offline copy of the image.
-      `);
-    }, 1000);
-
-  } catch (err) {
-    console.error(err);
-    $('#graph-container').html(
-      `<div class="p-2 text-center text-sm text-red-500">Error loading relationships: ${err}</div>`
-    );
-    $('#graphInstructions').html(`
-      <div class="text-red-500">Error: ${escapeHtml(err.message)}</div>
+    
+    // Update URL with subject
+    const url = new URL(window.location);
+    url.searchParams.set('subject', subjectName);
+    window.history.pushState({}, '', url);
+    
+    // Update page title
+    document.title = `${subjectName} - People Relations`;
+    
+    // Show instructions
+    $('#graphInstructions').show();
+  } catch (error) {
+    console.error("Error loading relationships:", error);
+    
+    // Hide loading indicator
+    $('#loading-indicator').hide();
+    
+    // Display error message to user
+    $('#graph-container').html(`
+      <div class="p-4 bg-red-50 border border-red-200 rounded-md text-red-800">
+        <h3 class="font-bold mb-2">Error loading relationships:</h3>
+        <p>${error.message || error}</p>
+        <p class="mt-2">Please try refreshing the page or selecting a different subject.</p>
+      </div>
     `);
+    
+    // Update instructions
+    $('#graphInstructions').html(`
+      <p class="text-red-600">An error occurred while loading the graph. Please try again.</p>
+    `).show();
   }
 }
 
@@ -1518,13 +1605,21 @@ function addNodeIfNeeded(map, subject) {
 }
 
 // Deduplicate edges
-function addEdge(edgesSet, edgesArray, from, to, label, category, color) {
+function addEdge(edgesSet, edgesMap, from, to, label, category, color) {
   let key = `${from}||${to}||${category}||${label}`;
   if (edgesSet.has(key)) {
     return; // skip duplicates
   }
   edgesSet.add(key);
-  edgesArray.push({ from, to, label, category, color });
+  
+  // Store in the map with the key
+  if (!(edgesMap instanceof Map)) {
+    console.error("edgesMap is not a Map:", edgesMap);
+    // Initialize as a Map if it's not already
+    edgesMap = new Map();
+  }
+  
+  edgesMap.set(key, { from, to, label, category, color });
 }
 
 // Partition
@@ -1748,8 +1843,100 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Hide loading indicator when rendering starts
   $('#loading-indicator').hide();
   
+  // Initialize container dimensions
+  const container = document.getElementById('graph-container');
+  width = container.clientWidth;
+  height = container.clientHeight;
+  
+  // Initialize zoom behavior if not already done
+  if (!zoom) {
+    zoom = d3.zoom()
+      .scaleExtent([0.1, 2])
+      .on('zoom', (event) => {
+        d3.select('#graph-content').attr('transform', event.transform);
+      });
+    
+    // Apply zoom behavior to SVG
+    d3.select('#graph')
+      .call(zoom)
+      .on('dblclick.zoom', null); // Disable double-click zoom
+  }
+  
+  // Reset zoom and pan
+  d3.select('#graph').call(
+    zoom.transform,
+    d3.zoomIdentity.translate(width/2, height/2)
+  );
+  
   // Create the graph content group
   const g = d3.select('#graph-content');
+  
+  // Add arrow markers for links
+  const defs = g.append('defs');
+  
+  // Regular arrow marker
+  defs.append('marker')
+    .attr('id', 'arrow')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 10)
+    .attr('refY', 0)
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('class', 'arrow-path')
+    .attr('d', 'M0,-5L10,0L0,5');
+    
+  // Highlighted arrow marker (blue)
+  defs.append('marker')
+    .attr('id', 'arrow-highlighted')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 10)
+    .attr('refY', 0)
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('fill', '#2563EB')
+    .attr('d', 'M0,-5L10,0L0,5');
+  
+  // Create a map of node IDs for quick lookup - make it global for other functions to use
+  window.nodeMap = new Map();
+  nodes.forEach(node => {
+    nodeMap.set(node.id, node);
+  });
+  
+  // Preprocess edges to ensure all source and target nodes exist
+  console.log(`Processing ${edges.length} edges...`);
+  const validEdges = edges.filter(edge => {
+    const sourceId = edge.from;
+    const targetId = edge.to;
+    
+    // Check if source and target nodes exist
+    const sourceExists = nodeMap.has(sourceId);
+    const targetExists = nodeMap.has(targetId);
+    
+    if (!sourceExists) {
+      console.warn(`Edge source node not found: ${sourceId}`);
+    }
+    if (!targetExists) {
+      console.warn(`Edge target node not found: ${targetId}`);
+    }
+    
+    // Only keep edges where both nodes exist
+    if (sourceExists && targetExists) {
+      // Set source and target properties for D3
+      edge.source = sourceId;
+      edge.target = targetId;
+      return true;
+    }
+    return false;
+  });
+  
+  console.log(`Filtered to ${validEdges.length} valid edges`);
+  
+  // Store the root subject for reference in other functions
+  window.rootSubject = rootSubject;
   
   // Separate root node from other nodes
   const rootNode = nodes.find(n => n.id === rootSubject);
@@ -1778,12 +1965,29 @@ function renderD3Graph(rootSubject, nodes, edges) {
   linkElements = g.append('g')
     .attr('class', 'links')
     .selectAll('path')
-    .data(edges)
+    .data(validEdges)
     .join('path')
     .attr('class', 'link')
     .attr('stroke', d => d.color)
     .attr('stroke-width', 2)
-    .attr('marker-end', 'url(#arrow)');
+    .attr('marker-end', 'url(#arrow)')
+    .attr('data-source', d => d.from)
+    .attr('data-target', d => d.to)
+    .style('cursor', 'pointer')
+    .on('mouseover', function(event, d) {
+      console.log('Link path hover:', d);
+      
+      // Get source and target IDs
+      const sourceId = d.from;
+      const targetId = d.to;
+      
+      // Highlight this connection
+      highlightConnection(sourceId, targetId);
+    })
+    .on('mouseout', function() {
+      console.log('Link path mouseout');
+      resetHighlights();
+    });
   
   // Create nodes
   nodeElements = g.append('g')
@@ -1798,15 +2002,28 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .on('drag', dragged)
       .on('end', dragEnded)
     );
-  
+    
   // Add rectangles to nodes
   nodeElements.append('rect')
     .attr('rx', 4)
     .attr('ry', 4)
     .attr('width', d => getNodeWidth(d))
     .attr('height', d => getNodeHeight(d))
-    .style('cursor', 'grab');
-  
+    .attr('fill', 'white')
+    .attr('stroke', d => d.id === rootSubject ? '#2563EB' : '#94A3B8')
+    .attr('stroke-width', d => d.id === rootSubject ? 3 : 1)
+    .style('cursor', 'grab')
+    .on('mouseover', function(event, d) {
+      console.log('Node rect hover:', d);
+      
+      // Highlight all connections to/from this node
+      highlightNodeConnections(d.id);
+    })
+    .on('mouseout', function() {
+      console.log('Node rect mouseout');
+      resetHighlights();
+    });
+    
   // Add text to nodes
   nodeElements.each(function(d) {
     const node = d3.select(this);
@@ -1824,7 +2041,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     y += 25;
     
     // Add bullet point 1 if available
-    if (bulletInfo.bullet_point1) {
+    if (bulletInfo && bulletInfo.bullet_point1) {
       const wrappedText = wrapText(bulletInfo.bullet_point1, 30);
       wrappedText.forEach(line => {
         node.append('text')
@@ -1837,7 +2054,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     }
     
     // Add bullet point 2 if available
-    if (bulletInfo.bullet_point2) {
+    if (bulletInfo && bulletInfo.bullet_point2) {
       y += 5; // Add a little extra space
       const wrappedText = wrapText(bulletInfo.bullet_point2, 30);
       wrappedText.forEach(line => {
@@ -1850,31 +2067,38 @@ function renderD3Graph(rootSubject, nodes, edges) {
       });
     }
   });
-  
+    
   // Create edge labels
   const labelGroup = g.append('g').attr('class', 'label-group');
   labelElements = labelGroup.selectAll('g')
-    .data(edges)
+    .data(validEdges)
     .join('g')
-    .attr('class', 'link-label-group');
+    .attr('class', 'link-label-group')
+    .attr('data-source', d => d.from)
+    .attr('data-target', d => d.to);
   
   // Add background pill for labels
   labelElements.append('rect')
     .attr('rx', 12)
     .attr('ry', 12)
     .attr('class', 'label-bg')
+    .attr('fill', '#F3F4F6')
+    .attr('width', 10) // Initial size, will be updated in ticked
+    .attr('height', 10)
+    .attr('x', -5)
+    .attr('y', -5)
     .style('cursor', 'pointer')
     .on('mouseover', function(event, d) {
-      d3.select(this).attr('fill', d.color);
-      d3.select(this.parentNode).selectAll('.link-label').attr('fill', 'white');
-      linkElements.filter(l => l === d).attr('stroke-width', 4);
+      console.log('Label bg hover:', d);
+      
+      // Highlight this connection
+      highlightConnection(d.from, d.to);
     })
     .on('mouseout', function() {
-      d3.select(this).attr('fill', '#F3F4F6');
-      d3.select(this.parentNode).selectAll('.link-label').attr('fill', '#475569');
-      linkElements.attr('stroke-width', 2);
+      console.log('Label bg mouseout');
+      resetHighlights();
     });
-  
+    
   // Add text labels with wrapping
   labelElements.each(function(d) {
     const labelGroup = d3.select(this);
@@ -1884,6 +2108,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     if (!label.trim()) {
       labelGroup.append('text')
         .attr('class', 'link-label')
+        .attr('fill', '#475569')
         .text("");
       return;
     }
@@ -1895,78 +2120,107 @@ function renderD3Graph(rootSubject, nodes, edges) {
     wrappedText.forEach((line, i) => {
       labelGroup.append('text')
         .attr('class', 'link-label')
+        .attr('fill', '#475569')
+        .attr('text-anchor', 'middle') // Center text
         .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
         .text(line);
     });
   });
   
-  // Add hover effects to nodes
-  nodeElements.on('mouseover', function(event, d) {
-    // Highlight this node
-    d3.select(this).select('rect')
-      .attr('stroke-width', 3)
-      .attr('stroke', '#2563EB');
+  // Helper function to highlight a connection between two nodes
+  function highlightConnection(sourceId, targetId) {
+    // Highlight the link
+    linkElements.filter(l => {
+      return (l.from === sourceId && l.to === targetId);
+    })
+    .style('stroke', '#2563EB')
+    .style('stroke-width', '4px')
+    .attr('marker-end', 'url(#arrow-highlighted)');
     
-    // Highlight connected edges and nodes
+    // Highlight source and target nodes
+    nodeElements.filter(n => n.id === sourceId || n.id === targetId)
+      .select('rect')
+      .style('stroke', '#2563EB')
+      .style('stroke-width', '3px');
+    
+    // Highlight the label
+    labelElements.filter(l => {
+      return (l.from === sourceId && l.to === targetId);
+    })
+    .each(function() {
+      d3.select(this).select('.label-bg')
+        .style('fill', '#2563EB');
+      d3.select(this).selectAll('.link-label')
+        .style('fill', 'white');
+    });
+  }
+  
+  // Helper function to highlight all connections to/from a node
+  function highlightNodeConnections(nodeId) {
+    // Highlight all links connected to this node
     linkElements.each(function(link) {
-      if (link.from === d.id || link.to === d.id) {
-        d3.select(this)
-          .attr('stroke-width', 4)
-          .attr('stroke', link.color);
-        
-        // Highlight connected node
-        const connectedId = link.from === d.id ? link.to : link.from;
-        nodeElements.filter(n => n.id === connectedId)
-          .select('rect')
-          .attr('stroke-width', 2)
-          .attr('stroke', link.color);
+      const sourceId = link.from;
+      const targetId = link.to;
+      
+      if (sourceId === nodeId || targetId === nodeId) {
+        // Highlight this connection
+        highlightConnection(sourceId, targetId);
       }
     });
-    
-    // Highlight related labels
-    labelElements.each(function(label) {
-      if (label.from === d.id || label.to === d.id) {
-        d3.select(this).select('.label-bg')
-          .attr('fill', label.color);
-        d3.select(this).selectAll('.link-label')
-          .attr('fill', 'white');
-      }
-    });
-  })
-  .on('mouseout', function() {
+  }
+  
+  // Helper function to reset all highlights
+  function resetHighlights() {
     // Reset node styles
     nodeElements.select('rect')
-      .attr('stroke-width', d => d.id === rootSubject ? 3 : 1)
-      .attr('stroke', d => d.id === rootSubject ? '#2563EB' : '#94A3B8');
+      .style('stroke', null)
+      .style('stroke-width', null)
+      .attr('stroke', d => d.id === rootSubject ? '#2563EB' : '#94A3B8')
+      .attr('stroke-width', d => d.id === rootSubject ? 3 : 1);
     
     // Reset edge styles
     linkElements
-      .attr('stroke-width', 2)
-      .attr('stroke', d => d.color);
+      .style('stroke', null)
+      .style('stroke-width', null)
+      .attr('stroke', d => d.color)
+      .attr('stroke-width', 2);
     
     // Reset label styles
     labelElements.select('.label-bg')
+      .style('fill', null)
       .attr('fill', '#F3F4F6');
     labelElements.selectAll('.link-label')
+      .style('fill', null)
       .attr('fill', '#475569');
-  });
+  }
   
   // Start the simulation with modified forces for structured layout
   simulation = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(edges)
+    .force('link', d3.forceLink()
+      .links(validEdges)
       .id(d => d.id)
       .distance(d => {
-        // Adjust link distance based on node sizes
-        const sourceNode = nodes.find(n => n.id === d.from);
-        const targetNode = nodes.find(n => n.id === d.to);
-        if (!sourceNode || !targetNode) return forceParams.linkDistance;
-        
-        const sourceSize = Math.sqrt(getNodeWidth(sourceNode) * getNodeHeight(sourceNode));
-        const targetSize = Math.sqrt(getNodeWidth(targetNode) * getNodeHeight(targetNode));
-        
-        // Base distance on node sizes plus padding
-        return (sourceSize + targetSize) / 2 + forceParams.linkDistance;
-      }))
+        try {
+          // Get source and target nodes
+          const sourceNode = d.source;
+          const targetNode = d.target;
+          
+          if (!sourceNode || !targetNode) {
+            console.warn("Missing node in link distance calculation");
+            return forceParams.linkDistance;
+          }
+          
+          const sourceSize = Math.sqrt(getNodeWidth(sourceNode) * getNodeHeight(sourceNode));
+          const targetSize = Math.sqrt(getNodeWidth(targetNode) * getNodeHeight(targetNode));
+          
+          // Base distance on node sizes plus padding
+          return (sourceSize + targetSize) / 2 + forceParams.linkDistance;
+        } catch (error) {
+          console.error("Error in link distance calculation:", error, d);
+          return forceParams.linkDistance;
+        }
+      })
+    )
     .force('charge', d3.forceManyBody()
       .strength(d => {
         // Stronger repulsion for structured layout
@@ -1995,280 +2249,484 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .alphaDecay(0.008) // Slower decay for more time to find optimal positions
     .velocityDecay(0.4)
     .on('tick', ticked);
-  
-  // Force an initial tick to position elements correctly
-  ticked();
-  
-  // Enable download button
-  $('#downloadBtn').show();
-  
-  // Auto-zoom to fit all nodes after simulation stabilizes
-  setTimeout(() => {
-    zoomToFitAll();
-    
-    // Run label overlap prevention multiple times during and after stabilization
-    preventLabelOverlaps();
-    
-    // Set up interval to repeatedly check for and fix label overlaps during simulation
-    const labelInterval = setInterval(() => {
-      preventLabelOverlaps();
-      
-      // Stop checking once simulation has cooled down
-      if (simulation.alpha() < 0.05) {
-        clearInterval(labelInterval);
-        // Final adjustment after simulation ends
-        setTimeout(() => {
-          preventLabelOverlaps();
-          ticked(); // Force one more update
-        }, 500);
-      }
-    }, 200);
-  }, 1000);
 }
 
-// Function to zoom to fit all nodes
-function zoomToFitAll() {
-  if (!nodeElements || !nodeElements.size()) return;
-  
-  // Get bounding box of all nodes
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  
-  nodeElements.each(function(d) {
-    const nodeWidth = getNodeWidth(d);
-    const nodeHeight = getNodeHeight(d);
-    
-    minX = Math.min(minX, d.x - nodeWidth/2);
-    minY = Math.min(minY, d.y - nodeHeight/2);
-    maxX = Math.max(maxX, d.x + nodeWidth/2);
-    maxY = Math.max(maxY, d.y + nodeHeight/2);
-  });
-  
-  // Add padding
-  const padding = 50;
-  minX -= padding;
-  minY -= padding;
-  maxX += padding;
-  maxY += padding;
-  
-  const graphWidth = maxX - minX;
-  const graphHeight = maxY - minY;
-  
-  // Calculate scale to fit
-  const scale = Math.min(
-    width / graphWidth,
-    height / graphHeight,
-    1.5 // Max scale
-  );
-  
-  // Calculate center point
-  const centerX = minX + graphWidth/2;
-  const centerY = minY + graphHeight/2;
-  
-  // Apply zoom transform
-  d3.select('#graph').transition()
-    .duration(750)
-    .call(
-      zoom.transform,
-      d3.zoomIdentity
-        .translate(width/2, height/2)
-        .scale(scale)
-        .translate(-centerX, -centerY)
-    );
-}
-
-// Update the ticked function to properly position labels along their paths
+// Update the ticked function to properly position nodes, links, and labels
 function ticked() {
-  // Update node positions
-  nodeElements.attr('transform', d => {
-    // Constrain to bounds
-    d.x = Math.max(forceParams.bounds.left, Math.min(width - forceParams.bounds.right, d.x));
-    d.y = Math.max(forceParams.bounds.top, Math.min(height - forceParams.bounds.bottom, d.y));
-    return `translate(${d.x - getNodeWidth(d) / 2}, ${d.y - getNodeHeight(d) / 2})`;
-  });
-  
-  // Update link paths with improved orthogonal routing
-  linkElements.attr('d', d => {
-    const sourceNode = nodeElements.filter(n => n.id === d.from).datum();
-    const targetNode = nodeElements.filter(n => n.id === d.to).datum();
-    
-    if (!sourceNode || !targetNode) return '';
-    
-    const sourceWidth = getNodeWidth(sourceNode);
-    const sourceHeight = getNodeHeight(sourceNode);
-    const targetWidth = getNodeWidth(targetNode);
-    const targetHeight = getNodeHeight(targetNode);
-    
-    // Calculate source and target points on the edges of the rectangles
-    const sourceX = sourceNode.x;
-    const sourceY = sourceNode.y;
-    const targetX = targetNode.x;
-    const targetY = targetNode.y;
-    
-    // Find intersection points with rectangles
-    const sourcePoint = findIntersectionPoint(
-      sourceX, sourceY, targetX, targetY,
-      sourceX - sourceWidth/2, sourceY - sourceHeight/2,
-      sourceWidth, sourceHeight
-    );
-    
-    const targetPoint = findIntersectionPoint(
-      targetX, targetY, sourceX, sourceY,
-      targetX - targetWidth/2, targetY - targetHeight/2,
-      targetWidth, targetHeight
-    );
-    
-    if (!sourcePoint || !targetPoint) return '';
-    
-    // Create orthogonal (right-angled) paths with better routing
-    // For structured layout, we want to route from top to bottom
-    // with horizontal segments as needed
-    
-    // Calculate midpoint Y position - place it closer to the higher node
-    const sourceIsHigher = sourcePoint.y < targetPoint.y;
-    const higherY = Math.min(sourcePoint.y, targetPoint.y);
-    const lowerY = Math.max(sourcePoint.y, targetPoint.y);
-    const yDiff = lowerY - higherY;
-    
-    // Place the horizontal segment at 1/3 of the distance from the higher node
-    const midY = higherY + yDiff * (sourceIsHigher ? 0.33 : 0.67);
-    
-    // Create the path
-    return `M${sourcePoint.x},${sourcePoint.y} 
-            L${sourcePoint.x},${midY} 
-            L${targetPoint.x},${midY} 
-            L${targetPoint.x},${targetPoint.y}`;
-  });
-  
-  // Update label positions with improved placement
-  labelElements.attr('transform', function(d) {
-    const path = linkElements.filter(l => l.source === d.source && l.target === d.target).node();
-    if (!path) return '';
-    
-    const pathLength = path.getTotalLength();
-    if (isNaN(pathLength) || pathLength === 0) return '';
-    
-    // For structured layout, we want to position labels further from the source node
-    // to prevent overlapping - use positions between 60% and 80% along the path
-    // This places labels closer to the target node and away from the crowded center
-    
-    // Calculate position based on source node's position in the layout
-    const sourceNode = nodeElements.filter(n => n.id === d.from).datum();
-    const targetNode = nodeElements.filter(n => n.id === d.to).datum();
-    
-    if (!sourceNode || !targetNode) {
-      // Fallback to midpoint if nodes not found
-      const midPoint = path.getPointAtLength(pathLength / 2);
-      d.labelX = midPoint.x;
-      d.labelY = midPoint.y;
-      return `translate(${midPoint.x}, ${midPoint.y})`;
-    }
-    
-    // Determine if this is a connection from root to child or between other nodes
-    const rootNode = d3.select('.node.root').datum();
-    const isRootToChild = sourceNode.id === rootNode.id;
-    
-    // Position labels at different points along the path based on connection type
-    let positionRatio;
-    
-    if (isRootToChild) {
-      // For root-to-child connections, position labels at 70% along the path
-      // This places them closer to the child nodes and away from the crowded center
-      positionRatio = 0.7;
-    } else {
-      // For other connections, use a position that's 60% along the path
-      positionRatio = 0.6;
-    }
-    
-    // Get the point at the calculated position
-    const labelPoint = path.getPointAtLength(pathLength * positionRatio);
-    
-    // Store the position for collision detection
-    d.labelX = labelPoint.x;
-    d.labelY = labelPoint.y;
-    d.pathLength = pathLength;
-    d.path = path;
-    d.positionRatio = positionRatio;
-    
-    return `translate(${labelPoint.x}, ${labelPoint.y})`;
-  });
-  
-  // Update label background sizes
-  labelElements.each(function(d) {
-    const labelTexts = d3.select(this).selectAll('.link-label');
-    if (!labelTexts.size()) return;
-    
-    // Calculate bounding box that encompasses all text elements
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    
-    labelTexts.each(function() {
-      const bbox = this.getBBox();
-      minX = Math.min(minX, bbox.x);
-      minY = Math.min(minY, bbox.y);
-      maxX = Math.max(maxX, bbox.x + bbox.width);
-      maxY = Math.max(maxY, bbox.y + bbox.height);
+  try {
+    // Update node positions
+    nodeElements.attr('transform', d => {
+      // Constrain to bounds
+      d.x = Math.max(50, Math.min(width - 50, d.x));
+      d.y = Math.max(50, Math.min(height - 50, d.y));
+      return `translate(${d.x - getNodeWidth(d) / 2}, ${d.y - getNodeHeight(d) / 2})`;
     });
     
-    // Add padding
-    const padding = { x: 10, y: 6 };
+    // Update link paths with improved orthogonal routing
+    linkElements.attr('d', d => {
+      try {
+        // Get source and target IDs
+        const sourceId = d.from;
+        const targetId = d.to;
+        
+        if (!sourceId || !targetId) {
+          console.warn("Missing source or target ID in link path calculation:", d);
+          return '';
+        }
+        
+        // Get the actual node objects using the nodeMap
+        const sourceNode = nodeMap.get(sourceId);
+        const targetNode = nodeMap.get(targetId);
+        
+        if (!sourceNode || !targetNode) {
+          console.warn("Missing node for link in ticked:", 
+                      !sourceNode ? `source: ${sourceId}` : `target: ${targetId}`);
+          return '';
+        }
+        
+        // Calculate dimensions
+        const sourceWidth = getNodeWidth(sourceNode);
+        const sourceHeight = getNodeHeight(sourceNode);
+        const targetWidth = getNodeWidth(targetNode);
+        const targetHeight = getNodeHeight(targetNode);
+        
+        // Calculate source and target centers
+        const sourceX = sourceNode.x;
+        const sourceY = sourceNode.y;
+        const targetX = targetNode.x;
+        const targetY = targetNode.y;
+        
+        // Find intersection points with rectangles
+        const sourcePoint = findIntersectionPoint(
+          sourceX, sourceY, targetX, targetY,
+          sourceX - sourceWidth/2, sourceY - sourceHeight/2,
+          sourceWidth, sourceHeight
+        );
+        
+        const targetPoint = findIntersectionPoint(
+          targetX, targetY, sourceX, sourceY,
+          targetX - targetWidth/2, targetY - targetHeight/2,
+          targetWidth, targetHeight
+        );
+        
+        if (!sourcePoint || !targetPoint) {
+          console.warn("Could not find intersection points for link:", sourceId, targetId);
+          // Fallback to direct line between centers
+          return `M${sourceX},${sourceY} L${targetX},${targetY}`;
+        }
+        
+        // Create orthogonal (right-angled) paths with better routing
+        // Calculate midpoint Y position - place it closer to the higher node
+        const sourceIsHigher = sourcePoint.y < targetPoint.y;
+        const higherY = Math.min(sourcePoint.y, targetPoint.y);
+        const lowerY = Math.max(sourcePoint.y, targetPoint.y);
+        const yDiff = lowerY - higherY;
+        
+        // Place the horizontal segment at 1/3 of the distance from the higher node
+        const midY = higherY + yDiff * (sourceIsHigher ? 0.33 : 0.67);
+        
+        // Create the path
+        return `M${sourcePoint.x},${sourcePoint.y} 
+                L${sourcePoint.x},${midY} 
+                L${targetPoint.x},${midY} 
+                L${targetPoint.x},${targetPoint.y}`;
+      } catch (error) {
+        console.error("Error in link path calculation:", error, d);
+        return '';
+      }
+    });
     
-    d3.select(this).select('.label-bg')
-      .attr('x', minX - padding.x)
-      .attr('y', minY - padding.y)
-      .attr('width', maxX - minX + padding.x * 2)
-      .attr('height', maxY - minY + padding.y * 2);
-  });
+    // Update label positions
+    labelElements.each(function(d) {
+      try {
+        const labelGroup = d3.select(this);
+        
+        // Get source and target IDs
+        const sourceId = d.from;
+        const targetId = d.to;
+        
+        if (!sourceId || !targetId) {
+          console.warn("Missing source or target ID in label positioning");
+          return;
+        }
+        
+        // Find the path element for this edge
+        const path = d3.select(`path.link[data-source="${sourceId}"][data-target="${targetId}"]`).node();
+        
+        let midX, midY;
+        
+        // If we have a path, position the label at its midpoint
+        if (path) {
+          const pathLength = path.getTotalLength();
+          if (pathLength) {
+            // Store the path for later use in overlap prevention
+            d.path = path;
+            
+            // Get the midpoint of the path
+            const midPoint = path.getPointAtLength(pathLength / 2);
+            midX = midPoint.x;
+            midY = midPoint.y;
+          } else {
+            // Fallback if path length is 0
+            const sourceNode = nodeMap.get(sourceId);
+            const targetNode = nodeMap.get(targetId);
+            
+            if (!sourceNode || !targetNode) {
+              console.warn("Missing node in label positioning fallback");
+              return;
+            }
+            
+            midX = (sourceNode.x + targetNode.x) / 2;
+            midY = (sourceNode.y + targetNode.y) / 2;
+          }
+        } else {
+          // Fallback: position between nodes if no path is found
+          const sourceNode = nodeMap.get(sourceId);
+          const targetNode = nodeMap.get(targetId);
+          
+          if (!sourceNode || !targetNode) {
+            console.warn("Missing node in label positioning fallback");
+            return;
+          }
+          
+          midX = (sourceNode.x + targetNode.x) / 2;
+          midY = (sourceNode.y + targetNode.y) / 2;
+        }
+        
+        // Store label position for overlap prevention
+        d.labelX = midX;
+        d.labelY = midY;
+        
+        // Update transform
+        labelGroup.attr('transform', `translate(${midX}, ${midY})`);
+        
+        // Size the background rectangle based on the text content
+        const textElements = labelGroup.selectAll('.link-label');
+        let maxWidth = 0;
+        let totalHeight = 0;
+        
+        textElements.each(function() {
+          const bbox = this.getBBox();
+          maxWidth = Math.max(maxWidth, bbox.width);
+          totalHeight += bbox.height;
+        });
+        
+        // Add padding to the background rectangle
+        const padding = 8;
+        
+        // Update background rectangle size with padding
+        labelGroup.select('.label-bg')
+          .attr('width', maxWidth + padding * 2)
+          .attr('height', totalHeight + padding * 2)
+          .attr('x', -maxWidth / 2 - padding)
+          .attr('y', -totalHeight / 2 - padding);
+      } catch (error) {
+        console.error("Error in label positioning:", error, d);
+      }
+    });
+    
+    // Run label overlap prevention
+    preventLabelOverlaps();
+  } catch (error) {
+    console.error("Error in ticked function:", error);
+  }
 }
 
-function dragStarted(event, d) {
-  if (!event.active) simulation.alphaTarget(0.3).restart();
-  d.fx = d.x;
-  d.fy = d.y;
-  d3.select(this).style('cursor', 'grabbing');
+// Function to prevent label overlaps with nodes
+function preventLabelOverlaps() {
+  try {
+    // For each label, check if it overlaps with any node
+    labelElements.each(function(d) {
+      try {
+        const labelGroup = d3.select(this);
+        const labelBg = labelGroup.select('.label-bg');
+        
+        // Skip if no background element
+        if (labelBg.empty()) return;
+        
+        // Get the label's bounding box
+        const labelBBox = labelBg.node().getBBox();
+        if (!labelBBox) return;
+        
+        // Current label position
+        const labelX = d.labelX || 0;
+        const labelY = d.labelY || 0;
+        
+        // Create a rectangle representing the label's current position
+        const labelRect = {
+          x: labelX - labelBBox.width / 2,
+          y: labelY - labelBBox.height / 2,
+          width: labelBBox.width,
+          height: labelBBox.height
+        };
+        
+        // Check for overlaps with nodes
+        let maxOverlap = 0;
+        nodeElements.each(function(nodeData) {
+          const nodeRect = {
+            x: nodeData.x - getNodeWidth(nodeData) / 2,
+            y: nodeData.y - getNodeHeight(nodeData) / 2,
+            width: getNodeWidth(nodeData),
+            height: getNodeHeight(nodeData)
+          };
+          
+          // Calculate overlap area
+          const overlapArea = calculateOverlapArea(labelRect, nodeRect);
+          maxOverlap = Math.max(maxOverlap, overlapArea);
+        });
+        
+        // If there's significant overlap, try to reposition the label
+        if (maxOverlap > 0) {
+          // Get source and target IDs
+          const sourceId = d.from;
+          const targetId = d.to;
+          
+          if (!sourceId || !targetId) return;
+          
+          // Find the path for this label
+          let path = d.path;
+          
+          // If path is not stored, try to find it
+          if (!path) {
+            path = d3.select(`path[data-source="${sourceId}"][data-target="${targetId}"]`).node();
+            if (!path) {
+              console.log('No path found for label:', sourceId, targetId);
+              return;
+            }
+            d.path = path;
+          }
+          
+          const pathLength = path.getTotalLength();
+          if (!pathLength || pathLength <= 0) {
+            console.log('Invalid path length:', pathLength);
+            return;
+          }
+          
+          // Try different positions along the path
+          let bestPosition = 0.5; // Default to midpoint
+          let minOverlap = maxOverlap;
+          
+          // Test positions at 5% increments
+          for (let pos = 0.05; pos <= 0.95; pos += 0.05) {
+            if (pos === 0.5) continue; // Skip the current position
+            
+            const testPoint = path.getPointAtLength(pathLength * pos);
+            
+            // Create a rectangle for this test position
+            const testRect = {
+              x: testPoint.x - labelBBox.width / 2,
+              y: testPoint.y - labelBBox.height / 2,
+              width: labelBBox.width,
+              height: labelBBox.height
+            };
+            
+            // Check overlap with all nodes
+            let testMaxOverlap = 0;
+            nodeElements.each(function(nodeData) {
+              const nodeRect = {
+                x: nodeData.x - getNodeWidth(nodeData) / 2,
+                y: nodeData.y - getNodeHeight(nodeData) / 2,
+                width: getNodeWidth(nodeData),
+                height: getNodeHeight(nodeData)
+              };
+              
+              const overlapArea = calculateOverlapArea(testRect, nodeRect);
+              testMaxOverlap = Math.max(testMaxOverlap, overlapArea);
+            });
+            
+            // If this position has less overlap, use it
+            if (testMaxOverlap < minOverlap) {
+              minOverlap = testMaxOverlap;
+              bestPosition = pos;
+            }
+          }
+          
+          // If we found a better position, update the label
+          if (bestPosition !== 0.5) {
+            const newPoint = path.getPointAtLength(pathLength * bestPosition);
+            
+            // Update stored position
+            d.labelX = newPoint.x;
+            d.labelY = newPoint.y;
+            
+            // Update transform
+            labelGroup.attr('transform', `translate(${newPoint.x}, ${newPoint.y})`);
+            
+            console.log('Repositioned label to reduce overlap:', sourceId, targetId, bestPosition);
+          }
+        }
+      } catch (error) {
+        console.error("Error in label overlap prevention for label:", error, d);
+      }
+    });
+  } catch (error) {
+    console.error("Error in preventLabelOverlaps:", error);
+  }
 }
 
-function dragged(event, d) {
-  d.fx = event.x;
-  d.fy = event.y;
-}
-
-function dragEnded(event, d) {
-  if (!event.active) simulation.alphaTarget(0);
-  d.fx = null;
-  d.fy = null;
-  d3.select(this).style('cursor', 'grab');
-}
-
-function getNodeWidth(d) {
-  // Calculate width based on text content
-  const minWidth = 200;
-  const textLength = d.id.length;
-  const bulletLength1 = d.bulletInfo?.bullet_point1?.length || 0;
-  const bulletLength2 = d.bulletInfo?.bullet_point2?.length || 0;
-  const maxTextLength = Math.max(textLength, bulletLength1 / 5, bulletLength2 / 5);
-  return Math.max(minWidth, maxTextLength * 7);
-}
-
-function getNodeHeight(d) {
-  // Calculate height based on text content
-  const baseHeight = 50; // Minimum height
-  const bulletInfo = d.bulletInfo;
-  let additionalHeight = 0;
+// Helper function to calculate the overlap area between two rectangles
+function calculateOverlapArea(rect1, rect2) {
+  // Calculate the overlap along the x-axis
+  const overlapX = Math.max(0, 
+    Math.min(rect1.x + rect1.width, rect2.x + rect2.width) - 
+    Math.max(rect1.x, rect2.x)
+  );
   
-  if (bulletInfo.bullet_point1) {
-    const lines1 = Math.ceil(bulletInfo.bullet_point1.length / 30);
-    additionalHeight += lines1 * 18;
+  // Calculate the overlap along the y-axis
+  const overlapY = Math.max(0, 
+    Math.min(rect1.y + rect1.height, rect2.y + rect2.height) - 
+    Math.max(rect1.y, rect2.y)
+  );
+  
+  // The overlap area is the product of the x and y overlaps
+  return overlapX * overlapY;
+}
+
+// Helper function to find intersection point of a line with a rectangle
+function findIntersectionPoint(x1, y1, x2, y2, rectX, rectY, rectWidth, rectHeight) {
+  // Line equation: y = mx + b
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  
+  // Handle vertical line
+  if (Math.abs(dx) < 0.001) {
+    // Check if the line intersects the top or bottom of the rectangle
+    if (x1 >= rectX && x1 <= rectX + rectWidth) {
+      if (y1 < y2) { // Line going down
+        return { x: x1, y: rectY };
+      } else { // Line going up
+        return { x: x1, y: rectY + rectHeight };
+      }
+    }
+    return null;
   }
   
-  if (bulletInfo.bullet_point2) {
-    const lines2 = Math.ceil(bulletInfo.bullet_point2.length / 30);
-    additionalHeight += lines2 * 18 + 5; // +5 for spacing
+  // Handle horizontal line
+  if (Math.abs(dy) < 0.001) {
+    // Check if the line intersects the left or right of the rectangle
+    if (y1 >= rectY && y1 <= rectY + rectHeight) {
+      if (x1 < x2) { // Line going right
+        return { x: rectX + rectWidth, y: y1 };
+      } else { // Line going left
+        return { x: rectX, y: y1 };
+      }
+    }
+    return null;
   }
   
-  return baseHeight + additionalHeight;
+  // Calculate slope and y-intercept
+  const m = dy / dx;
+  const b = y1 - m * x1;
+  
+  // Check intersection with each edge of the rectangle
+  const intersections = [];
+  
+  // Top edge: y = rectY
+  const topX = (rectY - b) / m;
+  if (topX >= rectX && topX <= rectX + rectWidth) {
+    intersections.push({ x: topX, y: rectY, dist: Math.hypot(topX - x1, rectY - y1) });
+  }
+  
+  // Bottom edge: y = rectY + rectHeight
+  const bottomX = (rectY + rectHeight - b) / m;
+  if (bottomX >= rectX && bottomX <= rectX + rectWidth) {
+    intersections.push({ x: bottomX, y: rectY + rectHeight, dist: Math.hypot(bottomX - x1, rectY + rectHeight - y1) });
+  }
+  
+  // Left edge: x = rectX
+  const leftY = m * rectX + b;
+  if (leftY >= rectY && leftY <= rectY + rectHeight) {
+    intersections.push({ x: rectX, y: leftY, dist: Math.hypot(rectX - x1, leftY - y1) });
+  }
+  
+  // Right edge: x = rectX + rectWidth
+  const rightY = m * (rectX + rectWidth) + b;
+  if (rightY >= rectY && rightY <= rectY + rectHeight) {
+    intersections.push({ x: rectX + rectWidth, y: rightY, dist: Math.hypot(rectX + rectWidth - x1, rightY - y1) });
+  }
+  
+  // Find the closest intersection point in the direction of the line
+  let closestPoint = null;
+  let minDist = Infinity;
+  
+  for (const point of intersections) {
+    // Check if the point is in the direction of the line
+    const dotProduct = (point.x - x1) * (x2 - x1) + (point.y - y1) * (y2 - y1);
+    if (dotProduct > 0) {
+      if (point.dist < minDist) {
+        minDist = point.dist;
+        closestPoint = point;
+      }
+    }
+  }
+  
+  return closestPoint;
 }
 
-function wrapText(text, maxCharsPerLine) {
-  if (!text) return [];
+// Helper function to get node width
+function getNodeWidth(node) {
+  // Default width if not calculated yet
+  if (!node._width) {
+    // Base width on text length
+    const textLength = node.id ? node.id.length : 10;
+    const bulletInfo = node.bulletInfo || {};
+    const bullet1 = bulletInfo.bullet_point1 || '';
+    const bullet2 = bulletInfo.bullet_point2 || '';
+    
+    // Find the longest line after wrapping
+    const wrappedBullet1 = wrapText(bullet1, 30);
+    const wrappedBullet2 = wrapText(bullet2, 30);
+    
+    let maxLineLength = textLength;
+    wrappedBullet1.forEach(line => {
+      maxLineLength = Math.max(maxLineLength, line.length);
+    });
+    wrappedBullet2.forEach(line => {
+      maxLineLength = Math.max(maxLineLength, line.length);
+    });
+    
+    // Calculate width based on the longest text
+    node._width = Math.max(
+      Math.min(maxLineLength * 8, 350),
+      150
+    );
+  }
+  return node._width;
+}
+
+// Helper function to get node height
+function getNodeHeight(node) {
+  // Default height if not calculated yet
+  if (!node._height) {
+    // Base height on number of text lines
+    const bulletInfo = node.bulletInfo || {};
+    const bullet1 = bulletInfo.bullet_point1 || '';
+    const bullet2 = bulletInfo.bullet_point2 || '';
+    
+    // Count lines after wrapping
+    const wrappedBullet1 = wrapText(bullet1, 30);
+    const wrappedBullet2 = wrapText(bullet2, 30);
+    
+    const bulletLines1 = wrappedBullet1.length;
+    const bulletLines2 = wrappedBullet2.length;
+    
+    // Calculate height based on number of lines
+    node._height = 30 + (bulletLines1 + bulletLines2) * 18;
+    
+    // Add extra padding if there are two bullet points
+    if (bulletLines1 > 0 && bulletLines2 > 0) {
+      node._height += 10;
+    }
+    
+    // Ensure minimum height
+    node._height = Math.max(node._height, 60);
+  }
+  return node._height;
+}
+
+// Helper function to wrap text to a specified width
+function wrapText(text, maxChars) {
+  if (!text) return [''];
   
   const words = text.split(' ');
   const lines = [];
@@ -2276,7 +2734,7 @@ function wrapText(text, maxCharsPerLine) {
   
   words.forEach(word => {
     const testLine = currentLine ? `${currentLine} ${word}` : word;
-    if (testLine.length <= maxCharsPerLine) {
+    if (testLine.length <= maxChars) {
       currentLine = testLine;
     } else {
       lines.push(currentLine);
@@ -2291,178 +2749,68 @@ function wrapText(text, maxCharsPerLine) {
   return lines;
 }
 
-function findIntersectionPoint(x1, y1, x2, y2, rectX, rectY, rectWidth, rectHeight) {
-  // Calculate rectangle corners
-  const corners = [
-    { x: rectX, y: rectY }, // top-left
-    { x: rectX + rectWidth, y: rectY }, // top-right
-    { x: rectX + rectWidth, y: rectY + rectHeight }, // bottom-right
-    { x: rectX, y: rectY + rectHeight } // bottom-left
-  ];
-  
-  // Check intersection with each edge of the rectangle
-  const edges = [
-    [corners[0], corners[1]], // top
-    [corners[1], corners[2]], // right
-    [corners[2], corners[3]], // bottom
-    [corners[3], corners[0]]  // left
-  ];
-  
-  for (const [p1, p2] of edges) {
-    const intersection = lineIntersection(x1, y1, x2, y2, p1.x, p1.y, p2.x, p2.y);
-    if (intersection) {
-      return intersection;
-    }
+// Drag functions for nodes
+function dragStarted(event, d) {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x;
+  d.fy = d.y;
+  d3.select(this).select('rect').style('cursor', 'grabbing');
+}
+
+function dragged(event, d) {
+  d.fx = event.x;
+  d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+  if (!event.active) simulation.alphaTarget(0);
+  // Keep root node fixed, release others
+  if (d.id !== rootSubject) {
+    d.fx = null;
+    d.fy = null;
   }
-  
-  // If no intersection found, return center of rectangle
-  return { x: rectX + rectWidth / 2, y: rectY + rectHeight / 2 };
+  d3.select(this).select('rect').style('cursor', 'grab');
 }
 
-function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
-  // Calculate determinants
-  const den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
-  if (den === 0) return null; // Lines are parallel
+// Function to zoom to fit all nodes
+function zoomToFitAll() {
+  // Get the bounds of all nodes
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   
-  const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / den;
-  const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / den;
-  
-  // Check if intersection is on both line segments
-  if (ua < 0 || ua > 1 || ub < 0 || ub > 1) return null;
-  
-  // Calculate intersection point
-  const x = x1 + ua * (x2 - x1);
-  const y = y1 + ua * (y2 - y1);
-  
-  return { x, y };
-}
-
-// Improved label overlap prevention
-function preventLabelOverlaps() {
-  const labelData = labelElements.data();
-  if (!labelData.length) return;
-  
-  // First pass: group labels by their vertical position into rows
-  const verticalThreshold = 30;
-  const rows = [];
-  let currentRow = [];
-  
-  // Sort labels by y-position first
-  const sortedLabels = [...labelData].sort((a, b) => a.labelY - b.labelY);
-  
-  sortedLabels.forEach(label => {
-    if (!currentRow.length) {
-      currentRow.push(label);
-    } else {
-      const lastLabel = currentRow[currentRow.length - 1];
-      if (Math.abs(label.labelY - lastLabel.labelY) < verticalThreshold) {
-        currentRow.push(label);
-      } else {
-        rows.push([...currentRow]);
-        currentRow = [label];
-      }
-    }
+  nodeElements.each(function(d) {
+    const width = getNodeWidth(d);
+    const height = getNodeHeight(d);
+    
+    minX = Math.min(minX, d.x - width/2);
+    minY = Math.min(minY, d.y - height/2);
+    maxX = Math.max(maxX, d.x + width/2);
+    maxY = Math.max(maxY, d.y + height/2);
   });
   
-  // Add the last row
-  if (currentRow.length) rows.push(currentRow);
+  // Add padding
+  const padding = 50;
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
   
-  // Second pass: for each row, resolve horizontal overlaps
-  rows.forEach(row => {
-    if (row.length <= 1) return; // No overlaps with single label
-    
-    // Sort by x-position
-    row.sort((a, b) => a.labelX - b.labelX);
-    
-    // Get label widths and calculate minimum required space
-    const labelWidths = row.map(label => {
-      const labelIndex = labelData.indexOf(label);
-      const labelElement = d3.select(labelElements.nodes()[labelIndex]);
-      const labelBg = labelElement.select('.label-bg').node();
-      return labelBg ? labelBg.getBBox().width : 0;
-    });
-    
-    // Calculate total width and required spacing
-    const minSpacing = 30; // Increased minimum spacing between labels
-    
-    // Check for overlaps and adjust positions
-    for (let i = 0; i < row.length - 1; i++) {
-      const currentLabel = row[i];
-      const nextLabel = row[i + 1];
-      
-      const currentWidth = labelWidths[i];
-      const nextWidth = labelWidths[i + 1];
-      
-      const currentRight = currentLabel.labelX + (currentWidth / 2);
-      const nextLeft = nextLabel.labelX - (nextWidth / 2);
-      
-      // If labels overlap or are too close
-      if (nextLeft - currentRight < minSpacing) {
-        // Calculate how much we need to move
-        const moveDistance = (minSpacing - (nextLeft - currentRight)) / 2;
-        
-        // Move current label left and next label right
-        if (currentLabel.path && nextLabel.path) {
-          // Adjust position ratios to move labels apart
-          currentLabel.positionRatio = Math.max(0.4, currentLabel.positionRatio - 0.1);
-          nextLabel.positionRatio = Math.min(0.9, nextLabel.positionRatio + 0.1);
-          
-          // Update positions based on new ratios
-          const currentPoint = currentLabel.path.getPointAtLength(currentLabel.pathLength * currentLabel.positionRatio);
-          const nextPoint = nextLabel.path.getPointAtLength(nextLabel.pathLength * nextLabel.positionRatio);
-          
-          currentLabel.labelX = currentPoint.x;
-          currentLabel.labelY = currentPoint.y;
-          nextLabel.labelX = nextPoint.x;
-          nextLabel.labelY = nextPoint.y;
-          
-          // Update the DOM
-          const currentIndex = labelData.indexOf(currentLabel);
-          const nextIndex = labelData.indexOf(nextLabel);
-          
-          d3.select(labelElements.nodes()[currentIndex])
-            .attr('transform', `translate(${currentLabel.labelX}, ${currentLabel.labelY})`);
-          
-          d3.select(labelElements.nodes()[nextIndex])
-            .attr('transform', `translate(${nextLabel.labelX}, ${nextLabel.labelY})`);
-        } else {
-          // Fallback if path information is not available
-          currentLabel.labelX -= moveDistance;
-          nextLabel.labelX += moveDistance;
-          
-          const currentIndex = labelData.indexOf(currentLabel);
-          const nextIndex = labelData.indexOf(nextLabel);
-          
-          d3.select(labelElements.nodes()[currentIndex])
-            .attr('transform', `translate(${currentLabel.labelX}, ${currentLabel.labelY})`);
-          
-          d3.select(labelElements.nodes()[nextIndex])
-            .attr('transform', `translate(${nextLabel.labelX}, ${nextLabel.labelY})`);
-        }
-      }
-    }
-  });
+  // Calculate the scale and translate to fit all nodes
+  const graphWidth = maxX - minX;
+  const graphHeight = maxY - minY;
+  const scale = Math.min(width / graphWidth, height / graphHeight, 1);
   
-  // Third pass: stagger labels vertically within rows to further reduce overlaps
-  rows.forEach(row => {
-    if (row.length <= 2) return; // No need to stagger if only 1-2 labels
-    
-    row.forEach((label, i) => {
-      // Apply a slight vertical offset based on position in row
-      // Odd indices go up, even indices go down
-      const verticalOffset = (i % 2 === 0) ? -15 : 15;
-      
-      label.labelY += verticalOffset;
-      
-      // Update the DOM
-      const labelIndex = labelData.indexOf(label);
-      d3.select(labelElements.nodes()[labelIndex])
-        .attr('transform', `translate(${label.labelX}, ${label.labelY})`);
-    });
-  });
+  const translateX = width/2 - (minX + maxX)/2 * scale;
+  const translateY = height/2 - (minY + maxY)/2 * scale;
+  
+  // Apply the zoom transform
+  d3.select('#graph').transition().duration(750).call(
+    zoom.transform,
+    d3.zoomIdentity.translate(translateX, translateY).scale(scale)
+  );
 }
 </script>
-
+</body>
+</html>
     </main>
     
 <div class="flex justify-center">
