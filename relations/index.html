@@ -1289,9 +1289,13 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Add text to nodes
   nodeElements.each(function(d) {
     const node = d3.select(this);
-    const bulletInfo = d.bulletInfo;
-    const padding = 10;
+    const bulletInfo = d.bulletInfo || {};
+    const padding = 12;
     let y = padding;
+    
+    // Calculate node width for text wrapping
+    const nodeWidth = getNodeWidth(d);
+    const maxCharsPerLine = Math.floor((nodeWidth - padding * 2) / 6.5); // Adjusted chars per line
     
     // Add subject name
     node.append('text')
@@ -1304,7 +1308,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     
     // Add bullet point 1 if available
     if (bulletInfo && bulletInfo.bullet_point1) {
-      const wrappedText = wrapText(bulletInfo.bullet_point1, 30);
+      const wrappedText = wrapText(bulletInfo.bullet_point1, maxCharsPerLine);
       wrappedText.forEach(line => {
         node.append('text')
           .attr('x', padding)
@@ -1318,7 +1322,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     // Add bullet point 2 if available
     if (bulletInfo && bulletInfo.bullet_point2) {
       y += 5; // Add a little extra space
-      const wrappedText = wrapText(bulletInfo.bullet_point2, 30);
+      const wrappedText = wrapText(bulletInfo.bullet_point2, maxCharsPerLine);
       wrappedText.forEach(line => {
         node.append('text')
           .attr('x', padding)
@@ -1935,23 +1939,29 @@ function getNodeWidth(node) {
     const bullet1 = bulletInfo.bullet_point1 || '';
     const bullet2 = bulletInfo.bullet_point2 || '';
     
-    // Find the longest line after wrapping
-    const wrappedBullet1 = wrapText(bullet1, 30);
-    const wrappedBullet2 = wrapText(bullet2, 30);
+    // If there are no bullet points, use a smaller width
+    if (bullet1.length === 0 && bullet2.length === 0) {
+      node._width = Math.max(textLength * 8 + 40, 120);
+      return node._width;
+    }
     
-    let maxLineLength = textLength;
-    wrappedBullet1.forEach(line => {
-      maxLineLength = Math.max(maxLineLength, line.length);
-    });
-    wrappedBullet2.forEach(line => {
-      maxLineLength = Math.max(maxLineLength, line.length);
-    });
+    // For nodes with descriptions, calculate width based on content
+    // Find the longest line in the bullets
+    const longestBullet = bullet1.length > bullet2.length ? bullet1 : bullet2;
     
-    // Calculate width based on the longest text
-    node._width = Math.max(
-      Math.min(maxLineLength * 8, 350),
-      150
+    // Estimate how many characters we can fit per line
+    // Use a smaller character width to fit more text per line
+    const charWidth = 6.5; // Pixels per character (reduced to fit more text)
+    
+    // Calculate a width that will fit approximately 40-50 chars per line
+    // This ensures text fills the box better
+    const targetCharsPerLine = 45;
+    const contentBasedWidth = Math.min(
+      Math.max(longestBullet.length, textLength * 1.5) * charWidth + 40,
+      targetCharsPerLine * charWidth + 40
     );
+    
+    node._width = Math.max(contentBasedWidth, 220);
   }
   return node._width;
 }
@@ -1965,19 +1975,33 @@ function getNodeHeight(node) {
     const bullet1 = bulletInfo.bullet_point1 || '';
     const bullet2 = bulletInfo.bullet_point2 || '';
     
+    // Use consistent padding (12px) for top, sides, and bottom
+    const padding = 12;
+    
+    // If there are no bullet points, use a smaller height but maintain padding
+    if (bullet1.length === 0 && bullet2.length === 0) {
+      node._height = padding + 18 + padding; // Top padding + title height + bottom padding
+      return node._height;
+    }
+    
+    // Get node width to calculate how many lines we'll need
+    const nodeWidth = getNodeWidth(node);
+    const charsPerLine = Math.floor((nodeWidth - padding * 2) / 6.5); // Characters per line
+    
     // Count lines after wrapping
-    const wrappedBullet1 = wrapText(bullet1, 30);
-    const wrappedBullet2 = wrapText(bullet2, 30);
+    const wrappedBullet1 = wrapText(bullet1, charsPerLine);
+    const wrappedBullet2 = wrapText(bullet2, charsPerLine);
     
     const bulletLines1 = wrappedBullet1.length;
     const bulletLines2 = wrappedBullet2.length;
     
     // Calculate height based on number of lines
-    node._height = 30 + (bulletLines1 + bulletLines2) * 18;
+    // Top padding + title height + bullet points + bottom padding
+    node._height = padding + 18 + (bulletLines1 + bulletLines2) * 18 + padding;
     
-    // Add extra padding if there are two bullet points
+    // Add small padding between bullet points if both exist
     if (bulletLines1 > 0 && bulletLines2 > 0) {
-      node._height += 10;
+      node._height += 5;
     }
     
     // Ensure minimum height
@@ -1988,13 +2012,30 @@ function getNodeHeight(node) {
 
 // Helper function to wrap text to a specified width
 function wrapText(text, maxChars) {
-  if (!text) return [''];
+  if (!text) return [];
   
   const words = text.split(' ');
   const lines = [];
   let currentLine = '';
   
   words.forEach(word => {
+    // If the word itself is longer than maxChars, we need to break it
+    if (word.length > maxChars) {
+      // First add any current line content
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = '';
+      }
+      
+      // Then break the long word
+      let i = 0;
+      while (i < word.length) {
+        lines.push(word.substr(i, maxChars));
+        i += maxChars;
+      }
+      return;
+    }
+    
     const testLine = currentLine ? `${currentLine} ${word}` : word;
     if (testLine.length <= maxChars) {
       currentLine = testLine;
