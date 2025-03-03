@@ -9,8 +9,8 @@
   {% endif %}
   <strong class="md:text-sm{% if include.icon %} font-semibold{% endif %}">
     {{ include.title }}
-    {% if include.new %}
-      <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">New</span>
+    {% if include.label %}
+      <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">{{ include.label }}</span>
     {% endif %}
   </strong>
   {% if include.subtitle %}
