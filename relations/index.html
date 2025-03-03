@@ -326,9 +326,9 @@ let globalActiveCategories = new Set(); // which categories are currently on dis
 
 // Force simulation parameters
 const forceParams = {
-  linkDistance: 1200,     // Doubled from 600
-  charge: -10000,         // Doubled from -5000
-  collisionRadius: 500,   // Increased from 300
+  linkDistance: 800,     // Reduced from 1200
+  charge: -8000,         // Reduced from -10000
+  collisionRadius: 400,   // Reduced from 500
   bounds: {
     left: 300,
     right: 300,
@@ -1743,7 +1743,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .stop();
   
   // Run the pre-positioning simulation for more iterations
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < 50; i++) {  // Reduced from 150 to 50 iterations
     tempSimulation.tick();
   }
   
@@ -1755,59 +1755,59 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .distance(d => {
         // Use different distances for different types of connections
         if (d.from === rootSubject || d.to === rootSubject) {
-          return forceParams.linkDistance * 10; // More space for root connections
+          return forceParams.linkDistance * 8; // Reduced from 10
         }
-        return forceParams.linkDistance * 7; // More space for non-root connections
+        return forceParams.linkDistance * 5; // Reduced from 7
       }))
     .force('charge', d3.forceManyBody()
       .strength(d => {
         // Use stronger repulsion for the root
         if (d.id === rootSubject) {
-          return forceParams.charge * -20;
+          return forceParams.charge * -15; // Reduced from -20
         }
         // Use node size to scale repulsion
         const nodeSize = Math.sqrt(getNodeWidth(d) * getNodeHeight(d));
-        return forceParams.charge * (nodeSize / 150) * -15;
+        return forceParams.charge * (nodeSize / 150) * -10; // Reduced from -15
       })
-      .distanceMin(900)
-      .distanceMax(12000))
+      .distanceMin(600) // Reduced from 900
+      .distanceMax(8000)) // Reduced from 12000
     .force('x', d3.forceX(d => {
       // Root node stays at center
       if (d.id === rootSubject) return 0;
       
       // First level nodes maintain their existing x position but with scaling
       if (firstLevelNodeIds.has(d.id)) {
-        return d.x * 1.3; // Expand the first level more
+        return d.x * 1.2; // Reduced from 1.3
       }
       
       // Second level nodes spread wider
-      return d.x * 1.4;
-    }).strength(d => d.id === rootSubject ? 1 : 0.2))
+      return d.x * 1.3; // Reduced from 1.4
+    }).strength(d => d.id === rootSubject ? 1 : 0.3)) // Increased from 0.2 for faster positioning
     .force('y', d3.forceY(d => {
       // Keep root at top
-      if (d.id === rootSubject) return -height * 0.4;
+      if (d.id === rootSubject) return -height * 0.3; // Reduced from 0.4
       
       // First level nodes position
       if (firstLevelNodeIds.has(d.id)) {
-        return d.y * 0.95; // Keep in their semi-circle but slightly tighter
+        return d.y * 0.9; // Adjust as needed
       }
       
       // Second level nodes position
-      return d.y * 1.3; // Push further down
-    }).strength(d => d.id === rootSubject ? 1 : 0.35))
+      return d.y * 1.2; // Reduced from 1.3
+    }).strength(d => d.id === rootSubject ? 1 : 0.4)) // Increased from 0.35
     .force('collision', d3.forceCollide().radius(d => {
       // Use much larger collision radius
       const nodeWidth = getNodeWidth(d);
       const nodeHeight = getNodeHeight(d);
       // Different collision radii based on node type
       if (d.id === rootSubject) {
-        return Math.sqrt(nodeWidth * nodeHeight) + 180;
+        return Math.sqrt(nodeWidth * nodeHeight) + 150; // Reduced from 180
       }
-      return Math.sqrt(nodeWidth * nodeHeight) + 130;
-    }).strength(0.95).iterations(4)) // More iterations for better collision resolution
-    .alpha(0.4) // Start with lower alpha since we've pre-positioned
-    .alphaDecay(0.003) // Slower decay for more gradual layout
-    .velocityDecay(0.25) // Adjust velocity decay for smoother movement
+      return Math.sqrt(nodeWidth * nodeHeight) + 100; // Reduced from 130
+    }).strength(0.8).iterations(2)) // Reduced iterations from 4 to 2
+    .alpha(0.5) // Slightly higher alpha for faster convergence
+    .alphaDecay(0.015) // Increased from 0.003 for faster convergence
+    .velocityDecay(0.3) // Increased from 0.25 for slightly more damping
     .on('tick', ticked)
     .on('end', () => {
       // When the simulation ends, center the graph based on actual content bounds
