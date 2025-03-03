@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741045436">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741045436">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741045845">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741045845">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -2213,10 +2213,20 @@ function renderD3Graph(rootSubject, nodes, edges) {
       
       // Highlight this connection
       highlightConnection(d.from, d.to);
+      
+      // Highlight the specific path
+      linkElements.filter(l => l.from === d.from && l.to === d.to)
+        .attr('stroke-width', 4)
+        .attr('stroke-opacity', 1);
     })
-    .on('mouseout', function() {
+    .on('mouseout', function(event, d) {
       console.log('Label bg mouseout');
       resetHighlights();
+      
+      // Restore original path styling
+      linkElements.filter(l => l.from === d.from && l.to === d.to)
+        .attr('stroke-width', 2)
+        .attr('stroke-opacity', 0.8);
     });
     
   // Add text labels with wrapping
@@ -2234,18 +2244,34 @@ function renderD3Graph(rootSubject, nodes, edges) {
         return;
       }
       
-      // Wrap text to max 20 characters per line
-      const wrappedText = wrapText(label, 20);
+      // For "Son of" relationship, use special styling and don't wrap
+      const isSonOfRelation = label.includes("Son of") || label.includes("Child of") || 
+                             label.includes("Parent of") || label.includes("Father of") || 
+                             label.includes("Mother of");
       
-      // Add each line of text
-      wrappedText.forEach((line, i) => {
+      if (isSonOfRelation) {
+        // Use a single text element with special styling for these important relationships
         labelGroup.append('text')
-          .attr('class', 'link-label')
-          .attr('fill', '#475569')
-          .attr('text-anchor', 'middle') // Center text
-          .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
-          .text(line);
-      });
+          .attr('class', 'link-label relationship-label')
+          .attr('fill', '#3B82F6') // Blue color for relationship labels
+          .attr('text-anchor', 'middle')
+          .attr('font-weight', 'bold')
+          .attr('dy', '0.3em')
+          .text(label);
+      } else {
+        // Wrap text to max 20 characters per line for other relationships
+        const wrappedText = wrapText(label, 20);
+        
+        // Add each line of text
+        wrappedText.forEach((line, i) => {
+          labelGroup.append('text')
+            .attr('class', 'link-label')
+            .attr('fill', '#475569')
+            .attr('text-anchor', 'middle') // Center text
+            .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
+            .text(line);
+        });
+      }
       
       if (!d.pathPoints) {
         return;
@@ -2343,15 +2369,14 @@ function renderD3Graph(rootSubject, nodes, edges) {
           .attr('height', labelHeight)
           .attr('x', -labelWidth / 2)
           .attr('y', -labelHeight / 2);
+        
+        // Update the text position to match the background
+        labelEl.attr('transform', `translate(${labelX},${labelY})`);
+        
+        // Store the position for use in interactions
+        d.labelX = labelX;
+        d.labelY = labelY;
       }
-      
-      // Apply the transform to position the label
-      labelEl.attr('transform', `translate(${labelX}, ${labelY})`);
-      
-      // Store position for collision detection
-      d.labelX = labelX;
-      d.labelY = labelY;
-      
     } catch (error) {
       console.error("Error positioning label:", error);
     }
@@ -2833,6 +2858,9 @@ function ticked() {
           y: targetNode.y
         };
         
+        // Store the source and target points for label positioning
+        d.pathPoints = { source: sourcePoint, target: targetPoint };
+        
         // Direct line for debugging
         if (window.debugMode) {
           const sourceX = sourceNode.x;
@@ -2844,23 +2872,50 @@ function ticked() {
         
         // Adjust path drawing based on whether this is a connection from/to root
         const isRootConnection = (sourceId === rootSubject || targetId === rootSubject);
-        const isSourceHigher = sourcePoint.y < targetPoint.y;
+        
+        // Check if this is a "Son of" relationship
+        const isSonOfRelation = d.label && (d.label.includes("Son of") || d.label.includes("Child of") || d.label.includes("Parent of") || d.label.includes("Father of") || d.label.includes("Mother of"));
         
         // Create path with more segments for hierarchical flow
         let path = '';
         
-        // Adjust target point to account for arrow
-        const targetPointWithOffset = {
-          x: targetPoint.x,
-          y: targetPoint.y
-        };
-
+        // For "Son of" relations, use a more prominent curve
+        if (isSonOfRelation) {
+          // Calculate midpoint with offset for a nice curve
+          const midX = (sourcePoint.x + targetPoint.x) / 2;
+          const midY = (sourcePoint.y + targetPoint.y) / 2;
+          
+          // Calculate a perpendicular vector to the line
+          const dx = targetPoint.x - sourcePoint.x;
+          const dy = targetPoint.y - sourcePoint.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          // Normalize and get perpendicular vector
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const px = -ny;
+          const py = nx;
+          
+          // Create a large curve for "Son of" relationships
+          // The curve should extend away from the direct line to make space for the label
+          const curveOffset = dist * 0.3; // 30% of distance as curve height
+          
+          // Apply the curve offset
+          const ctrlX = midX + px * curveOffset;
+          const ctrlY = midY + py * curveOffset;
+          
+          // Use a quadratic curve for "Son of" relationships
+          path = `M${sourcePoint.x},${sourcePoint.y} Q${ctrlX},${ctrlY} ${targetPoint.x},${targetPoint.y}`;
+          
+          // Store control points for label positioning
+          d.curveControlPoints = { ctrlX, ctrlY };
+        }
         // For hierarchical layout, use different path strategies
-        if (isRootConnection) {
+        else if (isRootConnection) {
           // For connections involving the root, use more direct paths
           if (sourceId === rootSubject) {
             // Root to other nodes - create more spread out curves
-            const controlDistance = Math.abs(targetPoint.x - sourcePoint.x) * 0.5;
+            const controlDistance = Math.abs(targetPoint.x - sourcePoint.x) * 0.3;
             const midY = sourcePoint.y + (targetPoint.y - sourcePoint.y) * 0.4;
             
             // Use bezier curves with control points that spread out more
@@ -2868,15 +2923,31 @@ function ticked() {
                     C${sourcePoint.x},${sourcePoint.y + controlDistance} 
                     ${targetPoint.x},${targetPoint.y - controlDistance} 
                     ${targetPoint.x},${targetPoint.y}`;
+            
+            // Store control points for label positioning
+            d.curveControlPoints = { 
+              ctrl1X: sourcePoint.x, 
+              ctrl1Y: sourcePoint.y + controlDistance,
+              ctrl2X: targetPoint.x, 
+              ctrl2Y: targetPoint.y - controlDistance 
+            };
           } else {
             // Other nodes to root - create more spread out curves going upward
-            const controlDistance = Math.abs(sourcePoint.x - targetPoint.x) * 0.5;
+            const controlDistance = Math.abs(sourcePoint.x - targetPoint.x) * 0.3;
             
             // Use bezier curves with control points that spread out more
             path = `M${sourcePoint.x},${sourcePoint.y} 
                     C${sourcePoint.x},${sourcePoint.y - controlDistance} 
                     ${targetPoint.x},${targetPoint.y + controlDistance} 
                     ${targetPoint.x},${targetPoint.y}`;
+            
+            // Store control points for label positioning
+            d.curveControlPoints = { 
+              ctrl1X: sourcePoint.x, 
+              ctrl1Y: sourcePoint.y - controlDistance,
+              ctrl2X: targetPoint.x, 
+              ctrl2Y: targetPoint.y + controlDistance 
+            };
           }
         } else {
           // For connections between non-root nodes
@@ -2929,7 +3000,7 @@ function ticked() {
         // Store the path points for label positioning
         d.pathPoints = {
           source: sourcePoint,
-          target: targetPointWithOffset,
+          target: targetPoint,
           isHorizontal: Math.abs(sourcePoint.x - targetPoint.x) > Math.abs(sourcePoint.y - targetPoint.y)
         };
         
@@ -2949,17 +3020,6 @@ function ticked() {
         
         const { source, target } = d.pathPoints;
         const labelEl = d3.select(this);
-        
-        // Calculate basic position for labels
-        let labelX, labelY;
-        
-        // Create a unique identifier for this edge to ensure consistent offsets
-        const edgeId = `${d.from}-${d.to}`;
-        // Create a hash from the edge ID to get a deterministic but varied offset
-        const hash = Math.abs(edgeId.split('').reduce((a, b) => {
-          a = ((a << 5) - a) + b.charCodeAt(0);
-          return a & a;
-        }, 0));
         
         // Get nodes from source and target IDs
         const sourceNode = nodeMap.get(d.from);
@@ -2985,30 +3045,77 @@ function ticked() {
         const px = -ny;
         const py = nx;
         
-        if (isRootConnection) {
-          // For connections with root
-          const t = isFromRoot ? 0.35 : 0.65; // Position along the path
-          
-          // Calculate base position along the path
-          labelX = source.x + dx * t;
-          labelY = source.y + dy * t;
-          
-          // Apply a perpendicular offset based on hash
-          const perpOffset = 60 + (hash % 40); // 60-100px perpendicular offset
-          labelX += px * perpOffset;
-          labelY += py * perpOffset;
+        // Get actual path element for this edge to find points along the path
+        const pathElement = linkElements.filter(e => e.from === d.from && e.to === d.to).node();
+        let labelX, labelY;
+        
+        if (pathElement) {
+          try {
+            // Get the total length of the path
+            const pathLength = pathElement.getTotalLength();
+            
+            // Position the label at a specific point along the path
+            // Root connections might need different positioning
+            let pathPosition;
+            
+            if (isRootConnection) {
+              pathPosition = isFromRoot ? 0.4 : 0.6; // Position along the path
+            } else {
+              pathPosition = 0.5; // Middle of the path for non-root connections
+            }
+            
+            // Get the point at the desired position along the path
+            const point = pathElement.getPointAtLength(pathLength * pathPosition);
+            labelX = point.x;
+            labelY = point.y;
+            
+            // Create a unique identifier for this edge to ensure consistent offsets
+            const edgeId = `${d.from}-${d.to}`;
+            // Create a hash from the edge ID to get a deterministic but varied offset
+            const hash = Math.abs(edgeId.split('').reduce((a, b) => {
+              a = ((a << 5) - a) + b.charCodeAt(0);
+              return a & a;
+            }, 0));
+            
+            // For curves, we might need to adjust the perpendicular offset
+            // Get points slightly before and after the current point to determine the tangent
+            const pointBefore = pathElement.getPointAtLength(Math.max(0, pathLength * pathPosition - 10));
+            const pointAfter = pathElement.getPointAtLength(Math.min(pathLength, pathLength * pathPosition + 10));
+            
+            // Calculate the tangent vector at this point
+            const tangentX = pointAfter.x - pointBefore.x;
+            const tangentY = pointAfter.y - pointBefore.y;
+            const tangentLength = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
+            
+            // Normalize the tangent vector
+            const tnx = tangentX / tangentLength;
+            const tny = tangentY / tangentLength;
+            
+            // Calculate the perpendicular vector to the tangent
+            const tpx = -tny;
+            const tpy = tnx;
+            
+            // Apply a small perpendicular offset to ensure text is on the line but visible
+            const perpOffset = 15 + (hash % 10); // Smaller offset - just enough to not overlap the line
+            
+            // Use a deterministic but varied sign for the offset
+            const sign = ((hash % 2) * 2 - 1); // Either 1 or -1
+            labelX += tpx * perpOffset * sign;
+            labelY += tpy * perpOffset * sign;
+          } catch (e) {
+            console.warn("Error positioning label on path:", e);
+            
+            // Fallback to simple midpoint positioning
+            labelX = source.x + dx * 0.5;
+            labelY = source.y + dy * 0.5;
+          }
         } else {
-          // For non-root connections, position at midpoint with perpendicular offset
+          // Fallback if path element not found
+          console.warn("Path element not found for label positioning");
+          
+          // Position at midpoint with offset
           labelX = source.x + dx * 0.5;
           labelY = source.y + dy * 0.5;
-          
-          // Apply larger perpendicular offset based on hash
-          const perpOffset = 80 + (hash % 60); // 80-140px perpendicular offset
-          
-          // Use a deterministic but varied sign for the offset
-          const sign = ((hash % 2) * 2 - 1); // Either 1 or -1
-          labelX += px * perpOffset * sign;
-          labelY += py * perpOffset * sign;
         }
         
         // Get text elements to calculate size
@@ -3039,15 +3146,14 @@ function ticked() {
             .attr('height', labelHeight)
             .attr('x', -labelWidth / 2)
             .attr('y', -labelHeight / 2);
+          
+          // Update the text position to match the background
+          labelEl.attr('transform', `translate(${labelX},${labelY})`);
+          
+          // Store the position for use in interactions
+          d.labelX = labelX;
+          d.labelY = labelY;
         }
-        
-        // Apply the transform to position the label
-        labelEl.attr('transform', `translate(${labelX}, ${labelY})`);
-        
-        // Store position for collision detection
-        d.labelX = labelX;
-        d.labelY = labelY;
-        
       } catch (error) {
         console.error("Error positioning label:", error);
       }
@@ -3582,6 +3688,25 @@ function getNodeLayer(nodeId, edgesParam) {
   
   return 3; // Everything else is layer 3 or beyond
 }
+
+// Add text to labels
+labelElements.append('text')
+  .attr('class', 'link-label')
+  .attr('text-anchor', 'middle')
+  .attr('dominant-baseline', 'middle')
+  .attr('fill', '#374151')
+  .style('pointer-events', 'none')
+  .style('font-size', '12px')
+  .style('font-weight', 'bold')
+  .text(function(d) {
+    // For "Son of" relationships, highlight them with a special format
+    if (d.label && (d.label.includes("Son of") || d.label.includes("Child of") || 
+                    d.label.includes("Parent of") || d.label.includes("Father of") || 
+                    d.label.includes("Mother of"))) {
+      return d.label;
+    }
+    return d.label || '';
+  });
 </script>
 </body>
 </html>
