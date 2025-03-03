@@ -301,14 +301,14 @@ let globalActiveCategories = new Set(); // which categories are currently on dis
 
 // Force simulation parameters
 const forceParams = {
-  linkDistance: 400,
-  charge: -3000,
-  collisionRadius: 200,
+  linkDistance: 600,     // Increased from 400
+  charge: -5000,         // Increased from -3000
+  collisionRadius: 300,  // Increased from 200
   bounds: {
-    left: 100,
-    right: 100,
-    top: 100,
-    bottom: 100
+    left: 150,
+    right: 150,
+    top: 150,
+    bottom: 150
   }
 };
 
@@ -1084,7 +1084,7 @@ function initializeD3Graph() {
     .call(zoom)
     .on('dblclick.zoom', null); // Disable double-click zoom
     
-  // Reset zoom and pan
+  // Reset zoom and pan with initial scale of 0.7 to show more of the graph
   resetZoom();
   
   // Show loading indicator
@@ -1092,9 +1092,10 @@ function initializeD3Graph() {
 }
 
 function resetZoom() {
+  // Start with a zoomed-out view (scale 0.7) to show more of the graph
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(width/2, height/2)
+    d3.zoomIdentity.translate(width/2, height/2).scale(0.7)
   );
 }
 
@@ -1698,135 +1699,143 @@ function ticked() {
   }
 }
 
-// Function to prevent label overlaps with nodes
+// Function to prevent label overlaps with nodes and other labels
 function preventLabelOverlaps() {
   try {
-    // For each label, check if it overlaps with any node
+    // First collect all node rectangles for overlap checking
+    const nodeRects = [];
+    nodeElements.each(function(d) {
+      nodeRects.push({
+        x: d.x - getNodeWidth(d) / 2,
+        y: d.y - getNodeHeight(d) / 2,
+        width: getNodeWidth(d),
+        height: getNodeHeight(d),
+        id: d.id
+      });
+    });
+    
+    // Collect all label rectangles
+    const labelRects = [];
     labelElements.each(function(d) {
-      try {
-        const labelGroup = d3.select(this);
-        const labelBg = labelGroup.select('.label-bg');
-        
-        // Skip if no background element
-        if (labelBg.empty()) return;
-        
-        // Get the label's bounding box
-        const labelBBox = labelBg.node().getBBox();
-        if (!labelBBox) return;
-        
-        // Current label position
-        const labelX = d.labelX || 0;
-        const labelY = d.labelY || 0;
-        
-        // Create a rectangle representing the label's current position
-        const labelRect = {
-          x: labelX - labelBBox.width / 2,
-          y: labelY - labelBBox.height / 2,
-          width: labelBBox.width,
-          height: labelBBox.height
-        };
+      const labelGroup = d3.select(this);
+      const labelBg = labelGroup.select('.label-bg');
+      
+      // Skip if no background element
+      if (labelBg.empty()) return;
+      
+      // Get the label's bounding box
+      const labelBBox = labelBg.node().getBBox();
+      if (!labelBBox) return;
+      
+      // Current label position
+      const labelX = d.labelX || 0;
+      const labelY = d.labelY || 0;
+      
+      labelRects.push({
+        x: labelX - labelBBox.width / 2,
+        y: labelY - labelBBox.height / 2,
+        width: labelBBox.width,
+        height: labelBBox.height,
+        edge: d,
+        group: labelGroup,
+        originalX: labelX,
+        originalY: labelY
+      });
+    });
+    
+    // Process each label to avoid overlaps
+    for (let i = 0; i < labelRects.length; i++) {
+      const labelRect = labelRects[i];
+      let hasOverlap = true;
+      let attempts = 0;
+      const maxAttempts = 10;
+      
+      // Try to find a position without overlaps
+      while (hasOverlap && attempts < maxAttempts) {
+        hasOverlap = false;
+        attempts++;
         
         // Check for overlaps with nodes
-        let maxOverlap = 0;
-        nodeElements.each(function(nodeData) {
-          const nodeRect = {
-            x: nodeData.x - getNodeWidth(nodeData) / 2,
-            y: nodeData.y - getNodeHeight(nodeData) / 2,
-            width: getNodeWidth(nodeData),
-            height: getNodeHeight(nodeData)
-          };
-          
-          // Calculate overlap area
-          const overlapArea = calculateOverlapArea(labelRect, nodeRect);
-          maxOverlap = Math.max(maxOverlap, overlapArea);
-        });
-        
-        // If there's significant overlap, try to reposition the label
-        if (maxOverlap > 0) {
-          // Get source and target IDs
-          const sourceId = d.from;
-          const targetId = d.to;
-          
-          if (!sourceId || !targetId) return;
-          
-          // Find the path for this label
-          let path = d.path;
-          
-          // If path is not stored, try to find it
-          if (!path) {
-            path = d3.select(`path[data-source="${sourceId}"][data-target="${targetId}"]`).node();
-            if (!path) {
-              console.log('No path found for label:', sourceId, targetId);
-              return;
-            }
-            d.path = path;
-          }
-          
-          const pathLength = path.getTotalLength();
-          if (!pathLength || pathLength <= 0) {
-            console.log('Invalid path length:', pathLength);
-            return;
-          }
-          
-          // Try different positions along the path
-          let bestPosition = 0.5; // Default to midpoint
-          let minOverlap = maxOverlap;
-          
-          // Test positions at 5% increments
-          for (let pos = 0.05; pos <= 0.95; pos += 0.05) {
-            if (pos === 0.5) continue; // Skip the current position
+        for (const nodeRect of nodeRects) {
+          if (rectsOverlap(labelRect, nodeRect)) {
+            hasOverlap = true;
             
-            const testPoint = path.getPointAtLength(pathLength * pos);
-            
-            // Create a rectangle for this test position
-            const testRect = {
-              x: testPoint.x - labelBBox.width / 2,
-              y: testPoint.y - labelBBox.height / 2,
-              width: labelBBox.width,
-              height: labelBBox.height
-            };
-            
-            // Check overlap with all nodes
-            let testMaxOverlap = 0;
-            nodeElements.each(function(nodeData) {
-              const nodeRect = {
-                x: nodeData.x - getNodeWidth(nodeData) / 2,
-                y: nodeData.y - getNodeHeight(nodeData) / 2,
-                width: getNodeWidth(nodeData),
-                height: getNodeHeight(nodeData)
-              };
-              
-              const overlapArea = calculateOverlapArea(testRect, nodeRect);
-              testMaxOverlap = Math.max(testMaxOverlap, overlapArea);
-            });
-            
-            // If this position has less overlap, use it
-            if (testMaxOverlap < minOverlap) {
-              minOverlap = testMaxOverlap;
-              bestPosition = pos;
-            }
-          }
-          
-          // If we found a better position, update the label
-          if (bestPosition !== 0.5) {
-            const newPoint = path.getPointAtLength(pathLength * bestPosition);
-            
-            // Update stored position
-            d.labelX = newPoint.x;
-            d.labelY = newPoint.y;
-            
-            // Update transform
-            labelGroup.attr('transform', `translate(${newPoint.x}, ${newPoint.y})`);
-            
-            console.log('Repositioned label to reduce overlap:', sourceId, targetId, bestPosition);
+            // Try to move the label away from the node
+            repositionLabelAwayFromRect(labelRect, nodeRect);
+            break;
           }
         }
-      } catch (error) {
-        console.error("Error in label overlap prevention for label:", error, d);
+        
+        // If no node overlaps, check for overlaps with other labels
+        if (!hasOverlap) {
+          for (let j = 0; j < i; j++) {
+            if (rectsOverlap(labelRect, labelRects[j])) {
+              hasOverlap = true;
+              
+              // Try to move the label away from the other label
+              repositionLabelAwayFromRect(labelRect, labelRects[j]);
+              break;
+            }
+          }
+        }
       }
-    });
+      
+      // Update the label position
+      labelRect.group.attr('transform', `translate(${labelRect.x + labelRect.width/2}, ${labelRect.y + labelRect.height/2})`);
+      
+      // Update stored position for future reference
+      labelRect.edge.labelX = labelRect.x + labelRect.width/2;
+      labelRect.edge.labelY = labelRect.y + labelRect.height/2;
+    }
   } catch (error) {
     console.error("Error in preventLabelOverlaps:", error);
+  }
+}
+
+// Helper function to check if two rectangles overlap
+function rectsOverlap(rect1, rect2) {
+  return !(
+    rect1.x + rect1.width < rect2.x ||
+    rect2.x + rect2.width < rect1.x ||
+    rect1.y + rect1.height < rect2.y ||
+    rect2.y + rect2.height < rect1.y
+  );
+}
+
+// Helper function to reposition a label away from an overlapping rectangle
+function repositionLabelAwayFromRect(labelRect, overlapRect) {
+  // Calculate centers
+  const labelCenterX = labelRect.x + labelRect.width / 2;
+  const labelCenterY = labelRect.y + labelRect.height / 2;
+  const rectCenterX = overlapRect.x + overlapRect.width / 2;
+  const rectCenterY = overlapRect.y + overlapRect.height / 2;
+  
+  // Calculate direction vector from overlapping rect to label
+  const dirX = labelCenterX - rectCenterX;
+  const dirY = labelCenterY - rectCenterY;
+  
+  // Normalize direction vector
+  const length = Math.sqrt(dirX * dirX + dirY * dirY);
+  const normDirX = length > 0 ? dirX / length : 0;
+  const normDirY = length > 0 ? dirY / length : 1; // Default to moving down if centers are the same
+  
+  // Calculate minimum distance needed to avoid overlap
+  const minDistX = (labelRect.width + overlapRect.width) / 2;
+  const minDistY = (labelRect.height + overlapRect.height) / 2;
+  
+  // Move primarily in the direction with the least overlap
+  const overlapX = minDistX - Math.abs(labelCenterX - rectCenterX);
+  const overlapY = minDistY - Math.abs(labelCenterY - rectCenterY);
+  
+  // Add a small buffer to ensure no overlap
+  const buffer = 10;
+  
+  if (overlapX < overlapY) {
+    // Move horizontally
+    labelRect.x += (overlapX + buffer) * Math.sign(normDirX);
+  } else {
+    // Move vertically
+    labelRect.y += (overlapY + buffer) * Math.sign(normDirY);
   }
 }
 
