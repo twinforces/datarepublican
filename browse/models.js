@@ -42,7 +42,8 @@
     static charityLookup = {};
 
     static getCharity(ein) {
-        return Charity.charityLookup[ein];
+        const parts = ein.split(':');
+        return Charity.charityLookup[parts[0]];
     }
 
     static registerCharity(ein, c) {
@@ -461,30 +462,33 @@
     }    
     
     
-    handleClick(e) {
+    handleClick(e, count=1) {
     
         if (e.altKey)
         {
-                return this.tunnelNode();
+                return this.tunnelNode(e);
         }
     
         if (!this.grants.length) // terminal node, click means hide
         {
                 this.isVisible=false;
                 this.grantsIn.forEach(g=> g.isVisible=false);
+                return false;
         }
         if (this.expanded)
         {
                 this.shrink(e);
-        
+                 return false;
+       
         }
         else
         {
                 if (!this.otherUp)
-                        this.expandDown(e);
+                        this.expandDown(e,1);
                 if (!this.otherDown)
-                        this.expandUp(e);
-        }
+                        this.expandUp(e,1);
+                 return true;
+       }
      
     }
     
@@ -520,7 +524,7 @@
         if (!this.otherDown)
                 this.buildDownstream();
         else
-                this.otherDown.handleClick(e); 
+                this.otherDown.handleClick(e,1); 
     }
     
     buildUpstream()
@@ -530,11 +534,11 @@
 
     }
     
-    expandUp(e) {
+    expandUp(e,count) {
         if (!this.otherUp)
                 this.buildUpstream();
         else
-                this.otherUp.handleClick(e); 
+                this.otherUp.handleClick(e,count,1); 
     
     }
     shrink(e) {
@@ -580,47 +584,63 @@
         to report our node state as a string with our EIN.
     */
     URLPiece() {
-        if (!this.isVisible()) return null;
-        return `{this.ein}:${this.grantsIn.length}:${this.grants.length}`;
+        if (!this.isVisible || this.isOther || (!this.otherUp && !this.otherDown)) return null;
+        return `${this.ein}:${this.grantsIn.length}:${this.grants.length}`;
     }
     
     /**
         we we match if any of the words in the search stricng match our EIN or our
         name
     */
-     searchMatch(s) {
-        const words = s.split(/\s+/);
-        return words.some(w => this.name.includes(w) || this.ein.includes(w));
+     searchMatch(keywords) {
+        return keywords.some(w => this.name.includes(w) || this.ein.includes(w));
     }
     
+    static matchKeys(keywords) {
+        return Object.values(Charity.charityLookup).filter(c=> c.searchMatch(keywords));
+    } 
+    
     /* Given a list of URLs and a search string we compute the net URL*/
-    static computeURL(URLList, search) {
+    static computeURLParams( URLHideList, keywords) {
+        const params = new URLSearchParams();
         let visibleMap = {};
-        pieces=Object.values(Charity.charityLookup).reduce((total,c) => {
+        Charity.visibleCharities().forEach( c => {
                 const p =c.URLPiece();
                         if (p) {
                                 visibleMap[c.ein]=p;
                         }
                 },[]);
         
-        URLList.forEach(ein => visibleMap.remove(ein));
-        Object.values(visibleMap).forEach(c => {
-                if (c.searchMatch(s))
-                        delete visibleMap[ein];
-        });
-        URL = [];
-        if (search) URL.push(`search=${search}`);
-        EINList = Object.values(visibleMap).forEach(e => URL.push(`ein={e.ein}`));
-        return URL.join('&');
+        Charity.matchKeys(keywords).forEach(c => {
+                if (c.isVisible) 
+                        delete visibleMap[c.ein];
+                });
+        
+        URLHideList.forEach(ein => delete visibleMap[ein]);
+        Object.values(visibleMap).forEach(e=> params.append('ein', e));
+        URLHideList.forEach(e=> params.append('nein', e));
+        keywords.forEach(k=> params.append('keywords',k));
+        return params;
     }
     
     /* given a URL and a search list, which nodes are visible */
-    static matchURL(URLList, search){
+    static matchURL(URLList, URLHideList, keywords){
         URLList.forEach(ein => {
-                const c = Charity.getCharity(ein);
+                Charity.placeNode(ein);
                 
         })
-    
+        URLHideList.forEach(ein=> {
+                const c = Charity.getCharity(ein)
+                if (c)
+                        c.isVisible=false;
+        }
+        
+        )
+         Object.values(visibleMap).forEach(c => {
+                if (c.searchMatch(s))
+                        delete visibleMap[ein];
+        });
+   
     }
     
     tunnelNode() {
@@ -629,18 +649,20 @@
         Object.values(Grant.grantLookup).forEach( g => g.isVisible=false );
         // add just us to chart
         Charity.placeNode(this.id);
+        return true;
     }
     
     /* show node and appropriate number of grants*/
-    static placeNode( startEin) {
+    static placeNode( startEIN) {
     
-        const c = Charity.getCharity(startEin);
+        const splits = startEIN.split(/:/);
+        const c = Charity.getCharity(splits[0]);
         if (c) {
         
                 c.isVisible=true;
                 c.organize();
-                c.expandDown({}); //
-                c.expandUp({});
+                c.expandDown({},splits[2]||1); //
+                c.expandUp({},splits[1]||1);
                 c.organize();
                 c.expanded=true;
                 c.grants.forEach(g => {
@@ -658,7 +680,7 @@
         else
         {
         
-                console.log(`Couldn't place ${startEin}'`);
+                console.log(`Couldn't place ${startEIN}'`);
 
         }
         return c;
@@ -734,7 +756,7 @@ class DownstreamOther extends Charity
                 this.parent.grants.forEach(g => g.isVisible=true);
         
         }
-        handleClick(e) { // every time we get clicked on, 3 more get shown
+        handleClick(e, count) { // every time we get clicked on, 3 more get shown
                 let revealGrants = [];
                 if (e.shiftKey)
                         if(this.grantsIn.length > NEXT_REVEAL_MAX)
@@ -820,7 +842,7 @@ class UpstreamOther extends Charity
                 this.parent.grantsIn.forEach(g => g.isVisible=true);
         
         }
-        handleClick(e) { // every time we get clicked on, 3 more get shown
+        handleClick(e, count) { // every time we get clicked on, 3 more get shown
                 let revealGrants = [];
                 if (e.shiftKey) 
                         revealGrants=this.grants; // do all

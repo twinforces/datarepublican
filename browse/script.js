@@ -3,6 +3,7 @@ import {graphScaleUp, graphScaleDown, graphScaleReset, GOV_EIN, Charity, Grant, 
 
 // Filter state
 let activeEINs = [];
+let hideEINs = [];
 let activeKeywords = [];
 
 // BFS / data-ready
@@ -142,6 +143,11 @@ function addEINFromInput() {
     generateGraph();
 }
 
+function removeEIN(ein) {
+        removeEINs.push(ein);
+
+}
+
 function renderActiveEINs() {
     const $c = $('#activeEINs');
     $c.empty();
@@ -162,7 +168,26 @@ function renderActiveEINs() {
         $c.append($tag);
     });
 }
+function renderHideEINs() {
+    const $c = $('#hideEINs');
+    $c.empty();
+    $('#clearHideEINsBtn').toggle(hideEINs.length > 0);
 
+    hideEINs.forEach(ein => {
+        const $tag = $('<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>');
+        const $text = $('<span></span>').text(ein.slice(0,2) + '-' + ein.slice(2));
+        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>').attr('data-ein', ein);
+        $rm.on('click', function() {
+            const rem = $(this).attr('data-nein');
+            hideEINs = hideEINs.filter(x => x !== rem);
+            renderHideEINs();
+            updateQueryParams();
+            generateGraph();
+        });
+        $tag.append($text).append($rm);
+        $c.append($tag);
+    });
+}
 function addKeywordFromInput() {
     const kw = $('#keywordInput').val().trim();
     if (kw.length > 0) {
@@ -219,111 +244,10 @@ function parseQueryParams() {
     customTitle = params.get('title') || null;
 
     const customParam = params.get('custom_graph');
-    if (customParam) {
-        const trimmed = customParam.replace(/;+$/, '');
-        const segments = trimmed.split('&');
-        let edgeList = [];
-        let search = "";
-        
-        segments.forEach(segment => {
-            if (segment.startsWith("search=")) {
-                search = segment.replace("search=", "");
-            }
-            if (segment.startsWith("ein=")) {
-                edgeList.push(segment.replace("ein=", ""));
-            }
-        });
-        customGraphEdges = edgeList;
-
-        $('.bfs-only').hide();
-        $('#excluded-info').hide();
-
-        const addendum = `
-            <br/><br/>
-            <p style="font-weight: bold; color: red; background: yellow; text-align: center; padding: 20px; border: 5px solid black;">
-                🚨🚨🚨 <strong>WARNING! <a href="https://www.dictionary.com/browse/disclaimer" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">DISCLAIMER</a>! PAY ATTENTION! HAVE SOME READING <a href="https://www.dictionary.com/browse/comprehension" title="Look it up if you must." style="color: inherit; text-decoration: underline;">COMPREHENSION</a>! 📢📢📢</strong> 🚨🚨🚨
-            </p>
-            <p style="color: white; background: black; padding: 15px; text-align: center; border: 3px dashed red;">
-                <strong>FUNDING IS <a href="https://www.dictionary.com/browse/fungible" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">FUNGIBLE</a>!!!</strong> That means <span style="color: yellow; text-transform: uppercase;">USAID DOLLARS DO NOT <a href="https://www.dictionary.com/browse/literally" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">LITERALLY</a> FLOW INTO THESE NGOS!!!</span> 
-            </p>
-            <p style="color: black; background: lime; padding: 10px; border: 5px dotted blue; text-align: center;">
-                💰💰 Instead, the money <strong>MOVES</strong> through MULTIPLE LAYERS! 💰💰 <br/>
-                Various entities handle it, shuffle it around, and redistribute it! 
-            </p>
-            <p style="color: purple; background: orange; font-weight: bold; text-align: center; padding: 20px; border: 5px solid pink;">
-                So instead of <a href="https://www.dictionary.com/browse/obsess" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">obsessing</a> over individual grants and NGOs, OPEN YOUR EYES 👀 to the 
-                <span style="text-decoration: underline;">BROADER PATTERN of FUNDING <a href="https://www.dictionary.com/browse/distribution" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">DISTRIBUTION</a> and <a href="https://www.dictionary.com/browse/influence" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">INFLUENCE</a>!</span> <br/>
-                🚨🚨 And YES—layers of <strong style="color: red;"><a href="https://www.dictionary.com/browse/accountability" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">UNACCOUNTABILITY</a></strong> exist! 🚨🚨
-            </p>
-            <p style="color: black; background: cyan; text-align: center; padding: 15px; border: 5px double red;">
-                🤔🤔 <strong>WHO'S TRULY <a href="https://www.dictionary.com/browse/dependent" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">DEPENDENT</a> ON USAID?!</strong> 🤔🤔 <br/>
-                <span style="color: red;">The ones who DON’T want it to be shut down! 🔥🔥🔥</span> <br/>
-                <strong style="color: blue; text-transform: uppercase;">THIS IS COMMON SENSE!!!</strong> 🚨🚨🚨
-            </p>
-            <p style="font-weight: bold; text-align: center; color: white; background: red; padding: 25px; border: 10px solid black; text-transform: uppercase;">
-                THIS IS A TOOL NOT A VERDICT! YOU HAVE BEEN WARNED! 🔥🔥🔥
-            </p>
-        `.trim();
-
-        try {
-            if (customTitle) {
-                $('#instructions').html(`Displaying <strong>${customTitle}</strong>${addendum}`);
-            } else {
-                $('#instructions').html(`Displaying exact graph.${addendum}`);
-            }
-        } catch (e) {
-            console.error('Error setting instructions:', e);
-            $('#instructions').text('Error displaying instructions.');
-        }
-
-        //Object.values(Charity.charityLookup).forEach(charity => charity.isVisible = false);
-        //Object.values(Grant.grantLookup).forEach(grant => grant.isVisible = false);
-        customGraphEdges.forEach(edge => {
-            let filer = Charity.getCharity(edge.filer);
-            let grantee = Charity.getCharity(edge.grantee);
-            if (!filer) {
-                filer = new Charity({ ein: edge.filer, name: `Unknown (${edge.filer})` });
-            }
-            if (!grantee) {
-                grantee = new Charity({ ein: edge.grantee, name: `Unknown (${edge.grantee})` });
-            }
-            filer.isVisible = true;
-            grantee.isVisible = true;
-            const grant = Grant.getGrant(`${edge.filer}~${edge.grantee}`);
-            if (!grant) {
-                new Grant({
-                    filer_ein: edge.filer,
-                    grantee_ein: edge.grantee,
-                    amt: edge.amt,
-                    isVisible: true
-                });
-            } else {
-                grant.isVisible = true;
-            }
-        });
-    } else {
-        const einParam = params.get('eins');
-        if (einParam) {
-            let list = einParam.split(',');
-            list.forEach(e => {
-                let v = e.replace(/[-\s]/g, '');
-                if (/^\d{9}$/.test(v)) {
-                    if (!activeEINs.includes(v)) {
-                        activeEINs.push(v);
-                    }
-                }
-            });
-        }
-        const kwParam = params.get('keywords');
-        if (kwParam) {
-            let kws = kwParam.split(',');
-            kws.forEach(k => {
-                k = k.trim().toLowerCase();
-                if (k && !activeKeywords.includes(k)) {
-                    activeKeywords.push(k);
-                }
-            });
-        }
+    activeEINs=params.getAll('ein');
+    hideEINs=params.getAll('nein');
+    activeKeywords=params.getAll('keywords');
+    
 
         $('.bfs-only').show();
         $('#instructions').text(
@@ -331,6 +255,7 @@ function parseQueryParams() {
         );
 
         renderActiveEINs();
+        renderHideEINs();
         renderActiveKeywords();
 
         activeEINs.forEach(ein => {
@@ -339,16 +264,17 @@ function parseQueryParams() {
                 Charity.placeNode(ein);
             }
         });
-    }
+        Charity.matchKeys(activeKeywords).forEach( c=> {
+        
+                Charity.placeNode(c.ein);
+        });
 }
 
 function updateQueryParams() {
-    if (customGraphEdges) {
+    if (!customGraphEdges) {
         return;
     }
-    const params = new URLSearchParams();
-    params.set('ein', activeEINs);
-    params.set('search', activeKeywords);
+    const params = Charity.computeURLParams( hideEINs, activeKeywords);
     const newUrl = window.location.pathname + '?' + params.toString();
     window.history.replaceState({}, '', newUrl);
 }
@@ -427,7 +353,7 @@ function generateGraph() {
         
     }
 
-    renderFocusedSankey(g, sankey, svg, width, height, activeEINs[0] || GOV_EIN);
+    renderFocusedSankey(g, sankey, svg, width, height, activeEINs.length ? activeEINs : [GOV_EIN]);
 
     document.getElementById('zoomIn').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 1.3);
     document.getElementById('zoomOut').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 0.7);
@@ -687,17 +613,12 @@ function normalizeStrokeWidths(sankey) {
     });
 }
 
-function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
-    const selectedNode = Charity.getCharity(selectedNodeId);
-    if (!selectedNode) {
-        console.error(`No node found for ${selectedNodeId}`);
-        return;
-    }
+function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
 
+    if (nodeIds) nodeIds.forEach(nid => Charity.placeNode(nid));
+ 
     // Brute-force build currentData from visible nodes and grants
     currentData = Charity.buildSankeyData();
-
-    console.log(`Pre-sankey for ${selectedNodeId}: nodes=${currentData.nodes.length}, links=${currentData.links.length}`);
 
     const graph = sankey(currentData);
     const scale = calculateScale(graph, width, height);
@@ -802,17 +723,27 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
     });
 
     function nodeClick(event, d) {
+            const selectedNodeId = d.id;
         event.stopPropagation();
         if (event.controlKey) {
             generateGraph();
         } else if (d.isOther === true) {
-            const sourceId = d.id;
-            d.handleClick(event);
-            renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
+            if (!d.handleClick(event))
+            {
+                hideEINs.push(d.id);
+                updateQueryParams();
+                renderHideEINs();
+            }
+            renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
         } else {
             console.log(`Expanding node: ${d.filer_ein}`);
-            d.handleClick(event);
-            renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
+            if (!d.handleClick(event))
+            {
+                hideEINs.push(d.id);
+                renderHideEINs()            
+                updateQueryParams();
+            }
+            renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
         }
     }
     
@@ -858,6 +789,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
         .attr("text-anchor", d => d.x0Original < sankey.nodeWidth() / 2 ? "start" : "end")
         .text(d => d.name)
         .on('click', function(event, d) {
+            const selectedNodeId=d.id;
             event.stopPropagation();
             if (event.altKey) {
                 generateGraph();
@@ -865,15 +797,14 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId) {
                 const sourceId = d.parent_ein;
                 console.log(`Text expanding "OTHER" for ${sourceId}`);
                 d.handleClick(event);
-                renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
+                renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
             } else {
                 console.log(`Text expanding node: ${d.filer_ein}`);
                 d.handleClick(event);
-                renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
+                renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
             }
         });
 
-    console.log(`Post-render for ${selectedNodeId}: nodes=${graph.nodes.length}, links=${graph.links.length}, renderedLinks=${link.size()}`);
 }
 
 function getTextWidth(text, font) {
