@@ -524,7 +524,7 @@
         }
     
         // command hides this node and all its grants
-        if (e.commandKey || this.isTerminal)
+        if (e.metaKey || this.isTerminal)
         {
                 console.log(`Hiding ${this.id} ${this.name}`);
                 this.hide();
@@ -866,7 +866,7 @@ class DownstreamOther extends Charity
         handleClick(e, count) { // every time we get clicked on, 3 more get shown
                 let revealGrants = [];
                 let targetCount = NEXT_REVEAL;
-                if (e.shiftKey) tagetCount = NEXT_REVEAL_MAX;
+                if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
                 let candidates = this.grantsIn.filter(g=> !g.shouldHide());
                 if (count > -1)  // loading from a URL piece, need to match number
                 {
@@ -956,7 +956,7 @@ class UpstreamOther extends Charity
         handleClick(e, count) { // every time we get clicked on, 3 more get shown
                 let revealGrants = [];
                 let targetCount = NEXT_REVEAL;
-                if (e.shiftKey) tagetCount = NEXT_REVEAL_MAX;
+                if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
                 let candidates = this.grants.filter(g=> !g.shouldHide());
                 if (count > -1)  // loading from a URL piece, need to match number
                 {
