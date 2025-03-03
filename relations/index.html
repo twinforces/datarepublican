@@ -92,9 +92,25 @@ title: People Relations (BETA)
     margin-right: 4px;
     margin-bottom: 4px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .legend-item:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
   .legend-item.disabled {
     opacity: 0.5;
+    position: relative;
+  }
+  .legend-item.disabled::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
   }
   
   /* Hover effects - using !important to override any inline styles */
@@ -839,6 +855,20 @@ async function renderGraphForSubject(subjectName) {
       }
     }
     
+    // Collect unique categories for the legend
+    const uniqueCategories = new Set();
+    for (const edge of edges) {
+      if (edge.category) {
+        uniqueCategories.add(edge.category);
+      }
+    }
+    
+    // Initialize active categories with all categories
+    globalActiveCategories = new Set(uniqueCategories);
+    
+    // Render the legend
+    renderLegend(Array.from(uniqueCategories));
+    
     // Render the graph
     renderD3Graph(subjectName, nodes, edges);
     
@@ -1016,9 +1046,6 @@ function toggleCategory(cat) {
     globalActiveCategories.add(cat);
   }
   
-  // Filter edges based on active categories
-  const activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
-  
   // Update edge visibility
   linkElements.attr('visibility', d => 
     globalActiveCategories.has(d.category) ? 'visible' : 'hidden'
@@ -1028,6 +1055,19 @@ function toggleCategory(cat) {
   labelElements.attr('visibility', d => 
     globalActiveCategories.has(d.category) ? 'visible' : 'hidden'
   );
+  
+  // Update edge marker visibility (arrows)
+  linkElements.attr('marker-end', d => 
+    globalActiveCategories.has(d.category) 
+      ? `url(#arrow-${d.category || 'UNKNOWN'})` 
+      : 'none'
+  );
+  
+  // Update legend items visual state
+  $('.legend-item').each(function() {
+    const category = $(this).data('cat');
+    $(this).toggleClass('disabled', !globalActiveCategories.has(category));
+  });
 }
 
 
@@ -1155,7 +1195,22 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Add arrow markers for links
   const defs = g.append('defs');
   
-  // Regular arrow marker
+  // Create marker definitions for each category
+  Object.entries(categoryColors).forEach(([category, color]) => {
+    defs.append('marker')
+      .attr('id', `arrow-${category}`)
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 20)
+      .attr('refY', 0)
+      .attr('markerWidth', 8)
+      .attr('markerHeight', 8)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('fill', color)
+      .attr('d', 'M0,-5L10,0L0,5');
+  });
+  
+  // Regular arrow marker (fallback)
   defs.append('marker')
     .attr('id', 'arrow')
     .attr('viewBox', '0 -5 10 10')
@@ -1249,11 +1304,15 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .data(validEdges)
     .join('path')
     .attr('class', 'link')
-    .attr('stroke', d => d.color)
+    .attr('stroke', d => {
+      // Get the color from the category using the global categoryColors
+      return categoryColors[d.category] || categoryColors["UNKNOWN"];
+    })
     .attr('stroke-width', 2)
-    .attr('marker-end', 'url(#arrow)')
+    .attr('marker-end', d => `url(#arrow-${d.category || 'UNKNOWN'})`)
     .attr('data-source', d => d.from)
     .attr('data-target', d => d.to)
+    .attr('data-category', d => d.category)
     .style('cursor', 'pointer')
     .on('mouseover', function(event, d) {
       console.log('Link path hover:', d);
@@ -1467,7 +1526,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     linkElements
       .style('stroke', null)
       .style('stroke-width', null)
-      .attr('stroke', d => d.color)
+      .attr('stroke', d => categoryColors[d.category] || categoryColors["UNKNOWN"])
       .attr('stroke-width', 2);
     
     // Reset label styles
