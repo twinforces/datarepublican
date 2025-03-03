@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741028865">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741028865">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741029015">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741029015">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -2677,9 +2677,12 @@ function getNodeWidth(node) {
     const bullet1 = bulletInfo.bullet_point1 || '';
     const bullet2 = bulletInfo.bullet_point2 || '';
     
+    // Use consistent padding for all nodes
+    const padding = 12;
+    
     // If there are no bullet points, use a smaller width
     if (bullet1.length === 0 && bullet2.length === 0) {
-      node._width = Math.max(textLength * 8 + 40, 120);
+      node._width = Math.max(textLength * 8 + padding * 2, 120);
       return node._width;
     }
     
@@ -2695,8 +2698,8 @@ function getNodeWidth(node) {
     // This ensures text fills the box better
     const targetCharsPerLine = 45;
     const contentBasedWidth = Math.min(
-      Math.max(longestBullet.length, textLength * 1.5) * charWidth + 40,
-      targetCharsPerLine * charWidth + 40
+      Math.max(longestBullet.length, textLength * 1.5) * charWidth + padding * 2,
+      targetCharsPerLine * charWidth + padding * 2
     );
     
     node._width = Math.max(contentBasedWidth, 220);
