@@ -1173,6 +1173,12 @@ body > div#main-content {
 .max-h-60 {
   max-height: 15rem;
 }
+.max-h-full {
+  max-height: 100%;
+}
+.max-h-\[80vh\] {
+  max-height: 80vh;
+}
 .min-h-36 {
   min-height: 9rem;
 }
@@ -1439,6 +1445,9 @@ body > div#main-content {
 }
 .self-end {
   align-self: flex-end;
+}
+.overflow-auto {
+  overflow: auto;
 }
 .overflow-hidden {
   overflow: hidden;
