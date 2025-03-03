@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741044464">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741044464">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741045012">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741045012">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -780,17 +780,6 @@ $(document).ready(function() {
     justify-content: center; /* Center horizontally */
     align-items: center;     /* Center vertically */
   }
-  #loading {
-    position: absolute;
-    inset: 0;
-    background-color: white;
-    z-index: 30;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 1;
-    transition: opacity 0.3s ease-out;
-  }
   #legend {
     display: flex;
     align-items: flex-start;
@@ -1007,7 +996,7 @@ It shows the generated graph and a legend, plus a button to go back to the searc
     <g id="graph-content"></g>
   </svg>
   <!-- Add loading overlay with the same styling as in expose/index.html -->
-  <div id="loading" class="absolute inset-0 flex flex-col items-center justify-start pt-16 bg-white z-30">
+  <div id="loading" class="absolute inset-0 flex flex-col items-center justify-start bg-white pt-4 h-full z-30">
     <div class="text-center">
       <svg class="animate-spin h-8 w-8 text-navy mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -1931,7 +1920,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // That will be hidden in the centerGraph function when "Graph centered based on actual bounds" is logged
   
   // Update loading text to show that the graph is being processed
-  $('#loading-text').text('Rendering graph visualization...');
+  $('#loading-text').text('Analyzing connections...');
   
   // Remove the premature timeout - we'll let the centerGraph function handle hiding the overlay
   // instead of this fixed 10-second timer
@@ -2596,14 +2585,42 @@ function displayNodesProgressively() {
     // Add root node first
     if (rootNode) {
       const rootDiv = document.createElement('div');
-      rootDiv.className = 'font-bold opacity-0 transition-opacity duration-300 py-1';
-      rootDiv.textContent = rootNode.id;
+      rootDiv.className = 'opacity-0 transition-opacity duration-300 py-1';
+      
+      // Add the root node ID as the main text
+      const nodeIdSpan = document.createElement('div');
+      nodeIdSpan.className = 'font-bold';
+      nodeIdSpan.textContent = rootNode.id;
+      rootDiv.appendChild(nodeIdSpan);
+      
+      // Add text indicating this is the root node
+      const relationSpan = document.createElement('div');
+      relationSpan.className = 'text-sm opacity-80 ml-2';
+      relationSpan.textContent = '(root node)';
+      rootDiv.appendChild(relationSpan);
+      
       loadingNodesDiv.appendChild(rootDiv);
       
       // Trigger fade in for root node
       setTimeout(() => {
         rootDiv.style.opacity = '1';
       }, 100);
+    }
+    
+    // Function to find relationship labels between root and a node
+    function getRelationshipLabels(nodeId) {
+      const relationships = [];
+      
+      // Check for edges from root to this node
+      window.edges.forEach(edge => {
+        if (edge.from === rootSubject && edge.to === nodeId) {
+          relationships.push(edge.label || "unlabeled relation");
+        } else if (edge.to === rootSubject && edge.from === nodeId) {
+          relationships.push(edge.label || "unlabeled relation");
+        }
+      });
+      
+      return relationships;
     }
     
     // Add first-level nodes progressively
@@ -2614,8 +2631,23 @@ function displayNodesProgressively() {
         
         // Create element for this node
         const div = document.createElement('div');
-        div.className = 'opacity-0 transition-opacity duration-300 py-1';
-        div.textContent = node.id;
+        div.className = 'opacity-0 transition-opacity duration-300 py-2';
+        
+        // Add the node ID as the main text
+        const nodeIdSpan = document.createElement('div');
+        nodeIdSpan.textContent = node.id;
+        div.appendChild(nodeIdSpan);
+        
+        // Add relationship labels
+        const relationships = getRelationshipLabels(node.id);
+        if (relationships.length > 0) {
+          relationships.forEach(label => {
+            const relationSpan = document.createElement('div');
+            relationSpan.className = 'text-sm opacity-80 ml-2';
+            relationSpan.textContent = label;
+            div.appendChild(relationSpan);
+          });
+        }
         
         // Add to container
         loadingNodesDiv.appendChild(div);
