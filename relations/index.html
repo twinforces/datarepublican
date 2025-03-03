@@ -1013,6 +1013,29 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Create the graph content group
   const g = d3.select('#graph-content');
   
+  // Separate root node from other nodes
+  const rootNode = nodes.find(n => n.id === rootSubject);
+  const nonRootNodes = nodes.filter(n => n.id !== rootSubject);
+  
+  // Pre-position nodes in a structured layout
+  // Root node at center-top, other nodes in a row below
+  if (rootNode) {
+    rootNode.x = width / 2;
+    rootNode.y = height * 0.2; // Position root node at top
+    rootNode.fx = rootNode.x; // Fix position
+    rootNode.fy = rootNode.y;
+  }
+  
+  // Arrange non-root nodes in a row
+  const rowWidth = width * 0.8; // Use 80% of available width
+  const nodeSpacing = rowWidth / (nonRootNodes.length + 1);
+  
+  nonRootNodes.forEach((node, i) => {
+    node.x = (width * 0.1) + nodeSpacing * (i + 1); // Distribute evenly with margins
+    node.y = height * 0.7; // Position in a row below root
+    // Don't fix these positions completely, but use them as starting points
+  });
+  
   // Create links
   linkElements = g.append('g')
     .attr('class', 'links')
@@ -1105,12 +1128,12 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .style('cursor', 'pointer')
     .on('mouseover', function(event, d) {
       d3.select(this).attr('fill', d.color);
-      d3.select(this.parentNode).select('.link-label').attr('fill', 'white');
+      d3.select(this.parentNode).selectAll('.link-label').attr('fill', 'white');
       linkElements.filter(l => l === d).attr('stroke-width', 4);
     })
     .on('mouseout', function() {
       d3.select(this).attr('fill', '#F3F4F6');
-      d3.select(this.parentNode).select('.link-label').attr('fill', '#475569');
+      d3.select(this.parentNode).selectAll('.link-label').attr('fill', '#475569');
       linkElements.attr('stroke-width', 2);
     });
   
@@ -1167,7 +1190,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
       if (label.from === d.id || label.to === d.id) {
         d3.select(this).select('.label-bg')
           .attr('fill', label.color);
-        d3.select(this).select('.link-label')
+        d3.select(this).selectAll('.link-label')
           .attr('fill', 'white');
       }
     });
@@ -1186,11 +1209,11 @@ function renderD3Graph(rootSubject, nodes, edges) {
     // Reset label styles
     labelElements.select('.label-bg')
       .attr('fill', '#F3F4F6');
-    labelElements.select('.link-label')
+    labelElements.selectAll('.link-label')
       .attr('fill', '#475569');
   });
   
-  // Start the simulation
+  // Start the simulation with modified forces for structured layout
   simulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(edges)
       .id(d => d.id)
@@ -1208,25 +1231,35 @@ function renderD3Graph(rootSubject, nodes, edges) {
       }))
     .force('charge', d3.forceManyBody()
       .strength(d => {
-        // Adjust repulsion based on node size
+        // Stronger repulsion for structured layout
         const nodeSize = Math.sqrt(getNodeWidth(d) * getNodeHeight(d));
-        return forceParams.charge * (nodeSize / 200);
+        return forceParams.charge * (nodeSize / 200) * 1.5;
       })
-      .distanceMin(150)
+      .distanceMin(200)
       .distanceMax(2000))
-    .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('x', d3.forceX(width / 2).strength(0.05))
-    .force('y', d3.forceY(height / 2).strength(0.05))
+    .force('x', d3.forceX(d => {
+      // Keep root node centered, let others spread horizontally
+      if (d.id === rootSubject) return width / 2;
+      return d.x; // Use pre-positioned x value
+    }).strength(d => d.id === rootSubject ? 1 : 0.2))
+    .force('y', d3.forceY(d => {
+      // Keep root node at top, others in row below
+      if (d.id === rootSubject) return height * 0.2;
+      return height * 0.7;
+    }).strength(0.3))
     .force('collision', d3.forceCollide().radius(d => {
       // Make collision radius based on node size plus padding
       const nodeWidth = getNodeWidth(d);
       const nodeHeight = getNodeHeight(d);
-      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 50;
+      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 70; // Increased padding
     }).strength(1))
-    .alpha(0.6)
-    .alphaDecay(0.01) // Slower decay for more time to find optimal positions
-    .velocityDecay(0.4) // Lower value to allow nodes to move more freely
+    .alpha(0.8) // Higher alpha for more movement
+    .alphaDecay(0.008) // Slower decay for more time to find optimal positions
+    .velocityDecay(0.4)
     .on('tick', ticked);
+  
+  // Force an initial tick to position elements correctly
+  ticked();
   
   // Enable download button
   $('#downloadBtn').show();
@@ -1234,7 +1267,25 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Auto-zoom to fit all nodes after simulation stabilizes
   setTimeout(() => {
     zoomToFitAll();
-  }, 2000);
+    
+    // Run label overlap prevention multiple times during and after stabilization
+    preventLabelOverlaps();
+    
+    // Set up interval to repeatedly check for and fix label overlaps during simulation
+    const labelInterval = setInterval(() => {
+      preventLabelOverlaps();
+      
+      // Stop checking once simulation has cooled down
+      if (simulation.alpha() < 0.05) {
+        clearInterval(labelInterval);
+        // Final adjustment after simulation ends
+        setTimeout(() => {
+          preventLabelOverlaps();
+          ticked(); // Force one more update
+        }, 500);
+      }
+    }, 200);
+  }, 1000);
 }
 
 // Function to zoom to fit all nodes
@@ -1287,10 +1338,7 @@ function zoomToFitAll() {
     );
 }
 
-// Call the overlap prevention after the simulation has stabilized
-simulation.on('end', preventLabelOverlaps);
-
-// Update the ticked function to occasionally prevent overlaps
+// Update the ticked function to properly position labels along their paths
 function ticked() {
   // Update node positions
   nodeElements.attr('transform', d => {
@@ -1300,7 +1348,7 @@ function ticked() {
     return `translate(${d.x - getNodeWidth(d) / 2}, ${d.y - getNodeHeight(d) / 2})`;
   });
   
-  // Update link paths
+  // Update link paths with improved orthogonal routing
   linkElements.attr('d', d => {
     const sourceNode = nodeElements.filter(n => n.id === d.from).datum();
     const targetNode = nodeElements.filter(n => n.id === d.to).datum();
@@ -1333,44 +1381,77 @@ function ticked() {
     
     if (!sourcePoint || !targetPoint) return '';
     
-    // Create orthogonal (right-angled) paths
-    // Determine if the path should go horizontally first or vertically first
-    const dx = Math.abs(targetPoint.x - sourcePoint.x);
-    const dy = Math.abs(targetPoint.y - sourcePoint.y);
+    // Create orthogonal (right-angled) paths with better routing
+    // For structured layout, we want to route from top to bottom
+    // with horizontal segments as needed
     
-    // If nodes are more separated horizontally than vertically, go horizontal first
-    if (dx > dy) {
-      const midX = sourcePoint.x + (targetPoint.x - sourcePoint.x) / 2;
-      return `M${sourcePoint.x},${sourcePoint.y} 
-              L${midX},${sourcePoint.y} 
-              L${midX},${targetPoint.y} 
-              L${targetPoint.x},${targetPoint.y}`;
-    } else {
-      // Otherwise go vertical first
-      const midY = sourcePoint.y + (targetPoint.y - sourcePoint.y) / 2;
-      return `M${sourcePoint.x},${sourcePoint.y} 
-              L${sourcePoint.x},${midY} 
-              L${targetPoint.x},${midY} 
-              L${targetPoint.x},${targetPoint.y}`;
-    }
+    // Calculate midpoint Y position - place it closer to the higher node
+    const sourceIsHigher = sourcePoint.y < targetPoint.y;
+    const higherY = Math.min(sourcePoint.y, targetPoint.y);
+    const lowerY = Math.max(sourcePoint.y, targetPoint.y);
+    const yDiff = lowerY - higherY;
+    
+    // Place the horizontal segment at 1/3 of the distance from the higher node
+    const midY = higherY + yDiff * (sourceIsHigher ? 0.33 : 0.67);
+    
+    // Create the path
+    return `M${sourcePoint.x},${sourcePoint.y} 
+            L${sourcePoint.x},${midY} 
+            L${targetPoint.x},${midY} 
+            L${targetPoint.x},${targetPoint.y}`;
   });
   
-  // Update label positions with collision detection
+  // Update label positions with improved placement
   labelElements.attr('transform', function(d) {
-    const path = linkElements.filter(l => l === d).node();
+    const path = linkElements.filter(l => l.source === d.source && l.target === d.target).node();
     if (!path) return '';
     
     const pathLength = path.getTotalLength();
     if (isNaN(pathLength) || pathLength === 0) return '';
     
-    // Position label at the midpoint of the path
-    const midPoint = path.getPointAtLength(pathLength / 2);
+    // For structured layout, we want to position labels further from the source node
+    // to prevent overlapping - use positions between 60% and 80% along the path
+    // This places labels closer to the target node and away from the crowded center
     
-    // Store the midpoint for collision detection
-    d.labelX = midPoint.x;
-    d.labelY = midPoint.y;
+    // Calculate position based on source node's position in the layout
+    const sourceNode = nodeElements.filter(n => n.id === d.from).datum();
+    const targetNode = nodeElements.filter(n => n.id === d.to).datum();
     
-    return `translate(${midPoint.x}, ${midPoint.y})`;
+    if (!sourceNode || !targetNode) {
+      // Fallback to midpoint if nodes not found
+      const midPoint = path.getPointAtLength(pathLength / 2);
+      d.labelX = midPoint.x;
+      d.labelY = midPoint.y;
+      return `translate(${midPoint.x}, ${midPoint.y})`;
+    }
+    
+    // Determine if this is a connection from root to child or between other nodes
+    const rootNode = d3.select('.node.root').datum();
+    const isRootToChild = sourceNode.id === rootNode.id;
+    
+    // Position labels at different points along the path based on connection type
+    let positionRatio;
+    
+    if (isRootToChild) {
+      // For root-to-child connections, position labels at 70% along the path
+      // This places them closer to the child nodes and away from the crowded center
+      positionRatio = 0.7;
+    } else {
+      // For other connections, use a position that's 60% along the path
+      positionRatio = 0.6;
+    }
+    
+    // Get the point at the calculated position
+    const labelPoint = path.getPointAtLength(pathLength * positionRatio);
+    
+    // Store the position for collision detection
+    d.labelX = labelPoint.x;
+    d.labelY = labelPoint.y;
+    d.pathLength = pathLength;
+    d.path = path;
+    d.positionRatio = positionRatio;
+    
+    return `translate(${labelPoint.x}, ${labelPoint.y})`;
   });
   
   // Update label background sizes
@@ -1398,11 +1479,6 @@ function ticked() {
       .attr('width', maxX - minX + padding.x * 2)
       .attr('height', maxY - minY + padding.y * 2);
   });
-  
-  // Occasionally prevent label overlaps during simulation
-  if (Math.random() < 0.1) {
-    preventLabelOverlaps();
-  }
 }
 
 function dragStarted(event, d) {
@@ -1523,87 +1599,128 @@ function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
   return { x, y };
 }
 
-// After positioning all labels, adjust positions to prevent overlaps
+// Improved label overlap prevention
 function preventLabelOverlaps() {
-  const labels = labelElements.nodes();
   const labelData = labelElements.data();
+  if (!labelData.length) return;
   
-  // Create a quadtree for efficient collision detection
-  const quadtree = d3.quadtree()
-    .x(d => d.labelX)
-    .y(d => d.labelY)
-    .addAll(labelData);
+  // First pass: group labels by their vertical position into rows
+  const verticalThreshold = 30;
+  const rows = [];
+  let currentRow = [];
   
-  // For each label, check for overlaps and adjust position
-  labelElements.each(function(d, i) {
-    const labelGroup = d3.select(this);
-    const labelBg = labelGroup.select('.label-bg').node();
-    if (!labelBg) return;
-    
-    const bbox = labelBg.getBBox();
-    const padding = 10; // Extra space between labels
-    
-    // Define the bounds of this label
-    const x0 = d.labelX + bbox.x - padding;
-    const y0 = d.labelY + bbox.y - padding;
-    const x1 = d.labelX + bbox.x + bbox.width + padding;
-    const y1 = d.labelY + bbox.y + bbox.height + padding;
-    
-    // Find nearby labels that might overlap
-    quadtree.visit((node, x1q, y1q, x2q, y2q) => {
-      if (!node.length) {
-        do {
-          const d2 = node.data;
-          if (d2 && d2 !== d && labelOverlap(d, d2, bbox, padding)) {
-            // Adjust position to avoid overlap
-            adjustLabelPosition(d, d2);
-          }
-        } while (node = node.next);
+  // Sort labels by y-position first
+  const sortedLabels = [...labelData].sort((a, b) => a.labelY - b.labelY);
+  
+  sortedLabels.forEach(label => {
+    if (!currentRow.length) {
+      currentRow.push(label);
+    } else {
+      const lastLabel = currentRow[currentRow.length - 1];
+      if (Math.abs(label.labelY - lastLabel.labelY) < verticalThreshold) {
+        currentRow.push(label);
+      } else {
+        rows.push([...currentRow]);
+        currentRow = [label];
       }
-      return x1q > x1 || y1q > y1 || x2q < x0 || y2q < y0;
+    }
+  });
+  
+  // Add the last row
+  if (currentRow.length) rows.push(currentRow);
+  
+  // Second pass: for each row, resolve horizontal overlaps
+  rows.forEach(row => {
+    if (row.length <= 1) return; // No overlaps with single label
+    
+    // Sort by x-position
+    row.sort((a, b) => a.labelX - b.labelX);
+    
+    // Get label widths and calculate minimum required space
+    const labelWidths = row.map(label => {
+      const labelIndex = labelData.indexOf(label);
+      const labelElement = d3.select(labelElements.nodes()[labelIndex]);
+      const labelBg = labelElement.select('.label-bg').node();
+      return labelBg ? labelBg.getBBox().width : 0;
     });
     
-    // Update the transform with the potentially adjusted position
-    labelGroup.attr('transform', `translate(${d.labelX}, ${d.labelY})`);
+    // Calculate total width and required spacing
+    const minSpacing = 30; // Increased minimum spacing between labels
+    
+    // Check for overlaps and adjust positions
+    for (let i = 0; i < row.length - 1; i++) {
+      const currentLabel = row[i];
+      const nextLabel = row[i + 1];
+      
+      const currentWidth = labelWidths[i];
+      const nextWidth = labelWidths[i + 1];
+      
+      const currentRight = currentLabel.labelX + (currentWidth / 2);
+      const nextLeft = nextLabel.labelX - (nextWidth / 2);
+      
+      // If labels overlap or are too close
+      if (nextLeft - currentRight < minSpacing) {
+        // Calculate how much we need to move
+        const moveDistance = (minSpacing - (nextLeft - currentRight)) / 2;
+        
+        // Move current label left and next label right
+        if (currentLabel.path && nextLabel.path) {
+          // Adjust position ratios to move labels apart
+          currentLabel.positionRatio = Math.max(0.4, currentLabel.positionRatio - 0.1);
+          nextLabel.positionRatio = Math.min(0.9, nextLabel.positionRatio + 0.1);
+          
+          // Update positions based on new ratios
+          const currentPoint = currentLabel.path.getPointAtLength(currentLabel.pathLength * currentLabel.positionRatio);
+          const nextPoint = nextLabel.path.getPointAtLength(nextLabel.pathLength * nextLabel.positionRatio);
+          
+          currentLabel.labelX = currentPoint.x;
+          currentLabel.labelY = currentPoint.y;
+          nextLabel.labelX = nextPoint.x;
+          nextLabel.labelY = nextPoint.y;
+          
+          // Update the DOM
+          const currentIndex = labelData.indexOf(currentLabel);
+          const nextIndex = labelData.indexOf(nextLabel);
+          
+          d3.select(labelElements.nodes()[currentIndex])
+            .attr('transform', `translate(${currentLabel.labelX}, ${currentLabel.labelY})`);
+          
+          d3.select(labelElements.nodes()[nextIndex])
+            .attr('transform', `translate(${nextLabel.labelX}, ${nextLabel.labelY})`);
+        } else {
+          // Fallback if path information is not available
+          currentLabel.labelX -= moveDistance;
+          nextLabel.labelX += moveDistance;
+          
+          const currentIndex = labelData.indexOf(currentLabel);
+          const nextIndex = labelData.indexOf(nextLabel);
+          
+          d3.select(labelElements.nodes()[currentIndex])
+            .attr('transform', `translate(${currentLabel.labelX}, ${currentLabel.labelY})`);
+          
+          d3.select(labelElements.nodes()[nextIndex])
+            .attr('transform', `translate(${nextLabel.labelX}, ${nextLabel.labelY})`);
+        }
+      }
+    }
   });
-}
-
-// Check if two labels overlap
-function labelOverlap(d1, d2, bbox, padding) {
-  // Find the index of d2 in the data array
-  const d2Index = labelElements.data().indexOf(d2);
-  const labelGroup2 = d3.select(labelElements.nodes()[d2Index]);
-  const labelBg2 = labelGroup2.select('.label-bg').node();
-  if (!labelBg2) return false;
   
-  const bbox2 = labelBg2.getBBox();
-  
-  // Check for rectangle overlap
-  return !(
-    d1.labelX + bbox.x + bbox.width + padding < d2.labelX + bbox2.x ||
-    d1.labelX + bbox.x > d2.labelX + bbox2.x + bbox2.width + padding ||
-    d1.labelY + bbox.y + bbox.height + padding < d2.labelY + bbox2.y ||
-    d1.labelY + bbox.y > d2.labelY + bbox2.y + bbox2.height + padding
-  );
-}
-
-// Adjust label position to avoid overlap
-function adjustLabelPosition(d1, d2) {
-  // Calculate vector between labels
-  const dx = d2.labelX - d1.labelX;
-  const dy = d2.labelY - d1.labelY;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  
-  if (distance < 1) {
-    // If labels are at the same position, move in a random direction
-    const angle = Math.random() * Math.PI * 2;
-    d1.labelX += Math.cos(angle) * 30;
-    d1.labelY += Math.sin(angle) * 30;
-  } else {
-    // Move away from the other label
-    const moveDistance = 30; // Distance to move
-    d1.labelX -= (dx / distance) * moveDistance;
-    d1.labelY -= (dy / distance) * moveDistance;
-  }
+  // Third pass: stagger labels vertically within rows to further reduce overlaps
+  rows.forEach(row => {
+    if (row.length <= 2) return; // No need to stagger if only 1-2 labels
+    
+    row.forEach((label, i) => {
+      // Apply a slight vertical offset based on position in row
+      // Odd indices go up, even indices go down
+      const verticalOffset = (i % 2 === 0) ? -15 : 15;
+      
+      label.labelY += verticalOffset;
+      
+      // Update the DOM
+      const labelIndex = labelData.indexOf(label);
+      d3.select(labelElements.nodes()[labelIndex])
+        .attr('transform', `translate(${label.labelX}, ${label.labelY})`);
+    });
+  });
 }
 </script>
