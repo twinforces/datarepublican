@@ -3,7 +3,6 @@ import {graphScaleUp, graphScaleDown, graphScaleReset, GOV_EIN, Charity, Grant, 
 
 // Filter state
 let activeEINs = [];
-let hideEINs = [];
 let activeKeywords = [];
 
 // BFS / data-ready
@@ -40,16 +39,21 @@ const MIN_LINK_HEIGHT = 5;
 
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
 
+function updateStatus(message,color='black'){
+        $('#status').text(message).css('color', color);
+
+}
+
 $(document).ready(function() {
     parseQueryParams();
 
+    updateStatus("Loading Data...");
     loadData().then(() => {
         dataReady = true;
-        $('#status').text('Data loaded.').css('color', 'black');
         generateGraph();
     }).catch(err => {
         console.error(err);
-        $('#status').text('Failed to load data.').css('color', 'red');
+        updateStatus('Failed to load data.', 'red');
     });
 
     $('#addEinBtn').on('click', addEINFromInput);
@@ -173,13 +177,14 @@ function renderHideEINs() {
     $c.empty();
     $('#clearHideEINsBtn').toggle(hideEINs.length > 0);
 
-    hideEINs.forEach(ein => {
+    Charity.getHideList().forEach(ein => {
         const $tag = $('<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>');
         const $text = $('<span></span>').text(ein.slice(0,2) + '-' + ein.slice(2));
-        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>').attr('data-ein', ein);
+        const $rm = $('<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>')
+                .attr('data-nein', ein);
         $rm.on('click', function() {
             const rem = $(this).attr('data-nein');
-            hideEINs = hideEINs.filter(x => x !== rem);
+            Charity.removeFromHideList(rem);
             renderHideEINs();
             updateQueryParams();
             generateGraph();
@@ -245,7 +250,7 @@ function parseQueryParams() {
 
     const customParam = params.get('custom_graph');
     activeEINs=params.getAll('ein');
-    hideEINs=params.getAll('nein');
+    Charity.setHideList(params.getAll('nein'));
     activeKeywords=params.getAll('keywords');
     
 
@@ -254,27 +259,14 @@ function parseQueryParams() {
             'Use the search and keywords to filter charities, then BFS expansion is performed automatically.'
         );
 
-        renderActiveEINs();
-        renderHideEINs();
-        renderActiveKeywords();
-
-        activeEINs.forEach(ein => {
-            const charity = Charity.getCharity(ein);
-            if (charity) {
-                Charity.placeNode(ein);
-            }
-        });
-        Charity.matchKeys(activeKeywords).forEach( c=> {
-        
-                Charity.placeNode(c.ein);
-        });
+        Charity.matchURL(params);
 }
 
 function updateQueryParams() {
     if (!customGraphEdges) {
         return;
     }
-    const params = Charity.computeURLParams( hideEINs, activeKeywords);
+    const params = Charity.computeURLParams(activeKeywords);
     const newUrl = window.location.pathname + '?' + params.toString();
     window.history.replaceState({}, '', newUrl);
 }
@@ -345,7 +337,9 @@ function generateGraph() {
 
     if (!customGraphEdges && activeEINs.length === 0) {
         const usGov = Charity.getCharity(GOV_EIN);
+        updateStatus('placing US Government');
         Charity.placeNode(GOV_EIN);
+        updateStatus(`USG placed adding top ${TOP_N_INITIAL} roots`);
         Charity.getRootCharities().slice(0,TOP_N_INITIAL).forEach(c=> {
                 Charity.placeNode(c.id);
         });
@@ -730,20 +724,31 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
         } else if (d.isOther === true) {
             if (!d.handleClick(event))
             {
-                hideEINs.push(d.id);
+                Charity.addToHideList(d.id);
                 updateQueryParams();
                 renderHideEINs();
             }
-            renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
+            else
+            {
+                Charity.removeFromHideList(d.id);
+                updateQueryParams();
+                renderHideEINs();
+            }
+            renderFocusedSankey(g, sankey, svgRef, width, height, null);
         } else {
             console.log(`Expanding node: ${d.filer_ein}`);
             if (!d.handleClick(event))
             {
-                hideEINs.push(d.id);
+                Charity.addToHideList(d.id);
                 renderHideEINs()            
                 updateQueryParams();
             }
-            renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
+            else
+            {
+                updateQueryParams();
+                renderHideEINs();
+            }
+            renderFocusedSankey(g, sankey, svgRef, width, height, null);
         }
     }
     
@@ -756,7 +761,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
         }
         if (d.filer.isOther) 
         {
-                d.filer.handleGrantClick(e, d)
+                d.filer.handleGrantClick(e, d);
         } else if (d.grantee.isOther) {
                 d.grantee.handleGrantClick(e, d);
         }

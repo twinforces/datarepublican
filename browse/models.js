@@ -40,6 +40,7 @@
 
  class Charity {
     static charityLookup = {};
+    static hideList={};
 
     static getCharity(ein) {
         const parts = ein.split(':');
@@ -55,6 +56,33 @@
 
     static getCharityCount() {
         return Object.keys(Charity.charityLookup).length;
+    }
+    
+    
+    /**
+       Why: Maintain the hide list, like a good looked View Model
+    */
+    static addToHideList(ein) {
+        Charity.hideList[ein]=1;
+    }
+    
+    static removeFromHideList(ein) {
+        delete Charity.hideList[ein];
+    }
+    
+    static getHideList() {
+        return Object.keys(Charity.hideList);
+    }
+    
+    static setHideList(list)
+    {
+        Charity.hideList = {};
+        list.forEach(ein=> Charity.addToHideList(ein));
+        return Charity.getHideList();
+    }
+    
+    static shouldHide(ein) {
+        return (Charity.hideList[ein]);
     }
 
     constructor({ 
@@ -107,14 +135,30 @@
         if (this._isVisible != value)
         {
                 this._isVisible = value;
-                this.isOrganized = false; // force some recalck
+                this.isOrganized = false; // force some recalc
                 if (this.otherDown)
-                        this.otherDown.otherGrant.isVisible=value;
+                {
+                        this.otherDown.isVisible=value;
+                        //this.otherDown.otherGrant.isVisible=value;
+                }
                 if (this.otherUp)
-                        this.otherUp.otherGrant.isVisible=value;
+                {       
+                        this.otherUp.isVisible=value;
+                        //this.otherUp.otherGrant.isVisible=value;
+                }
         }
     }
     
+    // a terminal charity doesn't have any outflows.
+    get isTerminal() {
+        return (this.grants.length == 0);
+    }
+    
+    // a root charity doesn't have any inflows
+   get isRoot() {
+        return (this.grantsIn.length == 0);
+    }
+     
     // useful for overall scale
     get logGrantsTotal() {
         const cacheKey = `logGrantTotal-${POWER_LAW}`;
@@ -341,6 +385,9 @@
       the Government is implied by the data  
     */
     static buildGovCharity() {
+ 
+     updateStatus(`...Building US Govt from ${Charity.getCharityCount()}...`);
+
         const gov_ein = GOV_EIN;
         const gov_proto = {
             ein: gov_ein,
@@ -369,6 +416,7 @@
             }
         });
 
+        updateStatus(`...Gov Charity complete, ${govChar.grants.length} generated, ${formatNumber(govTotal)}`)
         console.log(`${govGrants} Implied Government Grants Generated`);
         console.log(`Gov Total: ${formatNumber(govTotal)}`);
         console.log(`USG grants count: ${govChar.grants.length}, sample:`, 
@@ -388,7 +436,9 @@
         const onStack = new Set();
         const cycleGrants = new Set();
         const stack = [];
+        let badTotal=0;
 
+    updateStatus("...Finding Loopback Grants...");
         for (const [startId, startCharity] of Object.entries(Charity.charityLookup)) {
             if (visited.has(startId)) continue;
 
@@ -437,11 +487,13 @@
                     grant.isCircular = true; // this triggers Charity.cycleGrant as a side effect
                     hasBadGrants = true;
                 }
+                badTotal += grant.amt;
             });
             if (hasBadGrants) {
                 charitiesWithBadGrants++;
             }
         }
+        updateStatus(`$${formatNumber(badTotal)} of loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`);
         console.log(`${charitiesWithBadGrants} charities had circular grants`);
         console.log(`${cycleGrants.size} circular grants`);
         Object.values(Charity.charityLookup).forEach(c => c.organize); // start out organized
@@ -452,7 +504,8 @@
     static getRootCharities()
     {
         return Object.values(Charity.charityLookup)
-                .filter(c => !c.grantsIn.length && !c.govt_amt && c.grants.length)
+                .filter(c => !Charity.shouldHide(c.id))
+                .filter(c => c.isRoot && !c.govt_amt && !c.isTerminal)
                 .sort((a,b)=> (b.grantsTotal - a.grantsTotal));
     }
     
@@ -462,31 +515,36 @@
     }    
     
     
-    handleClick(e, count=1) {
+    handleClick(e, count=-1) {
     
+        // option tunnels (removes everything but this node, gets some inflows, outfloses)
         if (e.altKey)
         {
                 return this.tunnelNode(e);
         }
     
-        if (!this.grants.length) // terminal node, click means hide
+        // command hides this node and all its grants
+        if (e.commandKey || this.isTerminal)
         {
-                this.isVisible=false;
-                this.grantsIn.forEach(g=> g.isVisible=false);
+                console.log(`Hiding ${this.id} ${this.name}`);
+                this.hide();
+                Charity.addToHideList(this.id);
                 return false;
         }
-        if (this.expanded)
+        if (this.expanded || e.shiftKey)
         {
-                this.shrink(e);
+                 console.log(`Shrinking ${this.id} ${this.name}`);
+                 this.shrink(e);
                  return false;
        
         }
         else
         {
+                 console.log(`Expanding ${this.id} ${this.name}`);
                 if (!this.otherUp)
-                        this.expandDown(e,1);
+                        this.expandDown(e,-1);
                 if (!this.otherDown)
-                        this.expandUp(e,1);
+                        this.expandUp(e,-1);
                  return true;
        }
      
@@ -515,22 +573,34 @@
                 {
                         throw('duplicate Other');
                 }
-                this._origOut = this.grantsTotal; // remememer for later
-                this.otherDown = new DownstreamOther({parent: this});
+                if (!this.isTerminal)
+                {
+                        this._origOut = this.grantsTotal; // remememer for later
+                        this.otherDown = new DownstreamOther({parent: this});
+                }
 
         }
 
-    expandDown(e) {
+    expandDown(e,count) {
         if (!this.otherDown)
                 this.buildDownstream();
         else
-                this.otherDown.handleClick(e,1); 
+                this.otherDown.handleClick(e,count); 
     }
     
     buildUpstream()
     {
-        this._origIn = this.grantsInTotal;
-        this.otherUp = new UpstreamOther({parent: this});
+        if (this.otherUp){
+        
+                        throw('duplicate Other Up');
+
+        }
+        if (!this.isRoot)
+        {
+                this._origIn = this.grantsInTotal;
+                this.otherUp = new UpstreamOther({parent: this});
+        
+        }
 
     }
     
@@ -538,7 +608,7 @@
         if (!this.otherUp)
                 this.buildUpstream();
         else
-                this.otherUp.handleClick(e,count,1); 
+                this.otherUp.handleClick(e,count); 
     
     }
     shrink(e) {
@@ -578,6 +648,18 @@
      
     }
     
+    show() {
+        this.isVisible=true;
+        this.grants.forEach(g=> g.isVisible=true);
+        this.grantsIn.forEach(g=> g.isVisible=false);
+    }
+    
+    hide() {
+        this.isVisible=false;
+        this.grants.forEach(g=> g.isVisible=false);
+        this.grantsIn.forEach(g=> g.isVisible=false);
+    }
+    
     /**
     
         So we want to be able to capture the state of the graph, so we need
@@ -601,7 +683,7 @@
     } 
     
     /* Given a list of URLs and a search string we compute the net URL*/
-    static computeURLParams( URLHideList, keywords) {
+    static computeURLParams (keywords) {
         const params = new URLSearchParams();
         let visibleMap = {};
         Charity.visibleCharities().forEach( c => {
@@ -616,31 +698,45 @@
                         delete visibleMap[c.ein];
                 });
         
-        URLHideList.forEach(ein => delete visibleMap[ein]);
+        Charity.getHideList().forEach(ein => delete visibleMap[ein]);
         Object.values(visibleMap).forEach(e=> params.append('ein', e));
-        URLHideList.forEach(e=> params.append('nein', e));
+        Charity.getHideList().forEach(e=> params.append('nein', e));
         keywords.forEach(k=> params.append('keywords',k));
         return params;
     }
     
     /* given a URL and a search list, which nodes are visible */
-    static matchURL(URLList, URLHideList, keywords){
+    static matchURL(params){
+    
+        const URLList = params.getAll('ein');
+        const keywords = params.getAll('keywords');
+        Charity.setHideList(params.getAll('nein'));
         URLList.forEach(ein => {
-                Charity.placeNode(ein);
+                const id = ein.split(':')[0];
+                if (!Charity.shouldHide(id))
+                        Charity.placeNode(ein);
                 
-        })
-        URLHideList.forEach(ein=> {
+        });
+        Charity.getHideList().forEach(ein=> {
                 const c = Charity.getCharity(ein)
                 if (c)
+                {
                         c.isVisible=false;
-        }
+        }       }
         
-        )
-         Object.values(visibleMap).forEach(c => {
-                if (c.searchMatch(s))
-                        delete visibleMap[ein];
-        });
-   
+        );
+        if (keywords.length)
+        {
+                Charity.invisibleCharities().forEach( c =>{
+                        if (!Charity.shouldHide(c.id))
+                        {
+                                if (c.searchMatch(keywords))
+                                        Charity.placeNode(c.ein);
+                
+                        }
+        
+                });
+        }
     }
     
     tunnelNode() {
@@ -653,7 +749,7 @@
     }
     
     /* show node and appropriate number of grants*/
-    static placeNode( startEIN) {
+    static placeNode( startEIN, simple=false) {
     
         const splits = startEIN.split(/:/);
         const c = Charity.getCharity(splits[0]);
@@ -661,20 +757,31 @@
         
                 c.isVisible=true;
                 c.organize();
-                c.expandDown({},splits[2]||1); //
-                c.expandUp({},splits[1]||1);
-                c.organize();
-                c.expanded=true;
-                c.grants.forEach(g => {
-                        g.isVisible=true;
-                        g.filer.isVisible=true;
-                        g.grantee.isVisible=true;
-                });
-                c.grantsIn.forEach(g => {
-                        g.isVisible=true;
-                        g.filer.isVisible=true;
-                        g.grantee.isVisible=true;
-                });
+                if (!simple)
+                {
+                        c.expandDown({},splits[2]||-1); //
+                        c.expandUp({},splits[1]||-1);
+                        c.organize();
+                        c.expanded=true;
+                        c.grants.forEach(g => {
+                                if (!g.shouldHide())
+                                        {
+                                g.isVisible=true;
+                                g.filer.isVisible=true;
+                                g.grantee.isVisible=true;
+                                }
+                        });
+                        c.grantsIn.forEach(g => {
+                                if (!g.shouldHide())
+                                        {
+                                g.isVisible=true;
+                                g.filer.isVisible=true;
+                                g.grantee.isVisible=true;
+                                        
+                                        }
+                        });
+                
+                }
                 
         }
         else
@@ -729,7 +836,7 @@ class DownstreamOther extends Charity
                         xml_name: `${parent.xml_name}-Down`, 
                         isVisible : true,
                         isOther:true,
-                        grantsIn : parent.grants.slice(count)
+                        grantsIn : parent.grants.filter(g=> !g.shouldHide()).slice(count)
                 } );
                 if (this.grantsIn.length ==0)
                 {
@@ -758,14 +865,18 @@ class DownstreamOther extends Charity
         }
         handleClick(e, count) { // every time we get clicked on, 3 more get shown
                 let revealGrants = [];
-                if (e.shiftKey)
-                        if(this.grantsIn.length > NEXT_REVEAL_MAX)
-                                revealGrants=this.grantsIn.slice(0,NEXT_REVEAL_MAX); // 10x for gov
-                        else
-                                revealGrants=this.grantsIn; // do all
-                else
-                        revealGrants = this.grantsIn.slice(0,NEXT_REVEAL);
-                        
+                let targetCount = NEXT_REVEAL;
+                if (e.shiftKey) tagetCount = NEXT_REVEAL_MAX;
+                let candidates = this.grantsIn.filter(g=> !g.shouldHide());
+                if (count > -1)  // loading from a URL piece, need to match number
+                {
+                        targetCount = candidates.length - count;
+                        if (targetCount < 1) targetCount=1;
+                }
+                if (targetCount > candidates.length) targetCount=candidates.length;
+                revealGrants=candidates.slice(0,targetCount);
+        
+                       
                 revealGrants.forEach( g=> {
                         g.isVisible=true;
                         g.grantee.isVisible=true;
@@ -784,9 +895,9 @@ class DownstreamOther extends Charity
                 this.parent.removeGrant(g);        
         }
         
-        get isVisible() {
+        get isVisible() { // we should only draw if our master is visible and we have more grants
         
-                return (this.grantsIn.length) && (super.isVisible);
+                return this.parent.isVisible && (this.grantsIn.length) && (super.isVisible);
         }
     set isVisible(v) { // javascript gotcha
         super.isVisible=v;
@@ -814,7 +925,7 @@ class UpstreamOther extends Charity
                         xml_name: `${parent.xml_name}-Down`, 
                         isVisible : true,
                         isOther:true,
-                        grants : parent.grantsIn.slice(count)
+                        grants : parent.grantsIn.filter(g=> !g.shouldHide()).slice(count)
                 } );
                 if (this.grants.length ==0)
                 {
@@ -823,7 +934,7 @@ class UpstreamOther extends Charity
                 this.parent = parent;
                 this.parent.otherUp = this;
                 this.grants.forEach( g => {
-                        g.isVisiblbe=false;
+                        g.isVisible=false;
                         parent.removeGrantIn(g);
                         //g.swapCharities(this, this.parent);
                 });
@@ -844,11 +955,17 @@ class UpstreamOther extends Charity
         }
         handleClick(e, count) { // every time we get clicked on, 3 more get shown
                 let revealGrants = [];
-                if (e.shiftKey) 
-                        revealGrants=this.grants; // do all
-                else
-                        revealGrants = this.grants.slice(0,NEXT_REVEAL);
-                        
+                let targetCount = NEXT_REVEAL;
+                if (e.shiftKey) tagetCount = NEXT_REVEAL_MAX;
+                let candidates = this.grants.filter(g=> !g.shouldHide());
+                if (count > -1)  // loading from a URL piece, need to match number
+                {
+                        targetCount = candidates.length - count;
+                        if (targetCount < 1) targetCount=1;
+                }
+                if (targetCount > candidates.length) targetCount=candidates.length;
+                revealGrants=candidates.slice(0,targetCount);
+                         
                  revealGrants.forEach( g=> {
                         g.isVisible=true;
                         g.filer.isVisible=true;
@@ -870,7 +987,7 @@ class UpstreamOther extends Charity
         
          get isVisible() {
         
-                return (this.grantsIn.length) && (super.isVisible);
+                return this.parent.isVisible && (this.grantsIn.length) && (super.isVisible);
         }
            set isVisible(v) { // javascript gotcha
                 super.isVisible= v;
@@ -925,6 +1042,12 @@ class UpstreamOther extends Charity
             console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
         }
         return null;
+    }
+    
+     shouldHide()
+    {
+        return (!Charity.shouldHide(this.ein) && (Charity.shouldHide(this.ein)))
+    
     }
     
     
@@ -1006,11 +1129,9 @@ class UpstreamOther extends Charity
         if (v != this._isVisible)
         {
                 this._isVisible = v;
-                if (v) {
                 // if we're visible, we have to have somewhere to draw from/to.
                   this.filer.isVisible = v;
                   this.grantee.isVisible = v;
-               }
                 this.disorganize();
         
         }
@@ -1054,15 +1175,20 @@ class UpstreamOther extends Charity
     }
         
 }
-
+function updateStatus(message, color='black')
+{
+        $('#status')
+        .html(`<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading...">${message}.</span>`);
+}
  async function loadData() {
-    $('#status').html('<span class="flex items-center text-sm"><img src="/assets/images/loading.svg" class="size-6" alt="Loading..."> Loading data...</span>');
+    updateStatus("...Loading Data...");
 
     const charitiesZipBuf = await fetch('../expose/charities.csv.zip').then(r => r.arrayBuffer());
     const charitiesZip = await JSZip.loadAsync(charitiesZipBuf);
     const charitiesCsvString = await charitiesZip.file('charities_truncated.csv').async('string');
 
     await new Promise((resolve, reject) => {
+    updateStatus("...Parsing Charities...");
         Papa.parse(charitiesCsvString, {
             header: true,
             skipEmptyLines: true,
@@ -1085,6 +1211,7 @@ class UpstreamOther extends Charity
     let totalGrantsRows = 0;
 
     await new Promise((resolve, reject) => {
+    updateStatus("...Parsing Grants...");
         Papa.parse(grantsCsvString, {
             header: true,
             skipEmptyLines: true,
