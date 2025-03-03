@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741031522">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741031522">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741033147">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741033147">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1435,6 +1435,24 @@ async function renderGraphForSubject(subjectName) {
     if (!subject) {
       throw new Error(`Subject "${subjectName}" not found`);
     }
+    
+    // Populate the root summary div with bullet points
+    const rootSummaryHtml = [];
+    if (subject.bullet_point1) {
+      rootSummaryHtml.push(`<p class="mb-1">${escapeHtml(subject.bullet_point1)}</p>`);
+    }
+    if (subject.bullet_point2) {
+      rootSummaryHtml.push(`<p>${escapeHtml(subject.bullet_point2)}</p>`);
+    }
+    // If no bullet points, add a default message
+    if (rootSummaryHtml.length === 0) {
+      rootSummaryHtml.push(`<p class="text-gray-500 italic">No detailed information available for ${escapeHtml(subjectName)}.</p>`);
+    }
+    // Add a title for the summary
+    $('#rootSummary').html(`
+      <h3 class="font-bold mb-2 text-navy">${escapeHtml(subjectName)}</h3>
+      ${rootSummaryHtml.join('')}
+    `);
     
     // Load relations data for this subject
     await loadRelationsData(subjectName);
