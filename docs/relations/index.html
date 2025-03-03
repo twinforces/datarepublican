@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741045012">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741045012">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741045261">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741045261">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1003,7 +1003,7 @@ It shows the generated graph and a legend, plus a button to go back to the searc
         <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
       <div id="loading-text" class="text-lg font-semibold text-navy mb-4">Loading graph...</div>
-      <div id="loading-nodes" class="text-gray-600 max-w-md mx-auto text-center max-h-[50vh] overflow-y-auto px-4">
+      <div id="loading-nodes" class="text-gray-600 max-w-md mx-auto text-center px-4 max-h-[80vh] overflow-y-auto">
         <!-- Node names will be added here -->
       </div>
     </div>
@@ -2596,7 +2596,6 @@ function displayNodesProgressively() {
       // Add text indicating this is the root node
       const relationSpan = document.createElement('div');
       relationSpan.className = 'text-sm opacity-80 ml-2';
-      relationSpan.textContent = '(root node)';
       rootDiv.appendChild(relationSpan);
       
       loadingNodesDiv.appendChild(rootDiv);
@@ -2604,7 +2603,7 @@ function displayNodesProgressively() {
       // Trigger fade in for root node
       setTimeout(() => {
         rootDiv.style.opacity = '1';
-      }, 100);
+      }, 150);
     }
     
     // Function to find relationship labels between root and a node
