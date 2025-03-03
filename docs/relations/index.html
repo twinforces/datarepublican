@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741038837">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741038837">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741043449">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741043449">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1910,10 +1910,11 @@ function initializeD3Graph() {
 }
 
 function resetZoom() {
-  // Center the graph with an appropriate scale
+  // Center the graph with an appropriate scale for hierarchical layout
+  // In hierarchical layout, we want to center more towards the top where the root node is
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(0, 0).scale(0.5) // More zoomed out to see the entire graph
+    d3.zoomIdentity.translate(0, height * 0.2).scale(0.5) // Shift up slightly to focus on root
   );
 }
 
@@ -1929,10 +1930,22 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Update loading text to show that the graph is being processed
   $('#loading-text').text('Rendering graph visualization...');
   
+  // Add a timeout to ensure loading overlay is hidden even if other mechanisms fail
+  setTimeout(() => {
+    console.log("Timeout check - ensuring loading overlay is hidden");
+    if (document.getElementById('loading')) {
+      document.getElementById('loading').style.display = 'none';
+    }
+    $('#loading-indicator').hide();
+  }, 10000); // 10 seconds should be plenty for the graph to render
+  
   // Initialize container dimensions
   const container = document.getElementById('graph-container');
   width = container.clientWidth;
   height = container.clientHeight;
+  
+  // Make edges available globally to prevent "edges is not defined" errors
+  window.edges = edges;
   
   // Initialize zoom behavior if not already done
   if (!zoom) {
@@ -1973,26 +1986,29 @@ function renderD3Graph(rootSubject, nodes, edges) {
     nodeMap.set(node.id, node);
   });
   
-  // Pre-position nodes in a structured layout
-  // Position root node in the center
+  // Pre-position nodes in a structured layout - critical for avoiding initial overlaps
+  // Position root node at the top center
   if (rootNode) {
-    rootNode.x = 0; // Position at origin (will be transformed to center)
-    rootNode.y = 0; // Position at origin (will be transformed to center)
-    rootNode.fx = 0; // Fix position at origin
-    rootNode.fy = 0; // Fix position at origin
+    rootNode.x = 0; // Center horizontally
+    rootNode.y = -height * 0.35; // Position at top
+    rootNode.fx = 0; // Fix position horizontally
+    rootNode.fy = -height * 0.35; // Fix position vertically
   }
   
-  // Arrange non-root nodes in a circle around the root node at the origin
+  // Arrange non-root nodes in a semi-circle below the root node
   const radius = Math.min(width, height) * 0.25; // Use 25% of the smaller dimension for radius
   nonRootNodes.forEach((node, i) => {
-    const angle = (i * 2 * Math.PI) / nonRootNodes.length;
-    node.x = radius * Math.cos(angle); // Position relative to origin
-    node.y = radius * Math.sin(angle); // Position relative to origin
-    // Don't fix these positions completely, allow force layout to adjust
+    // Use a semi-circle (180 degrees) below the root
+    const angle = (Math.PI * i) / (nonRootNodes.length - 1);
+    node.x = radius * Math.cos(angle); // Position in semi-circle
+    node.y = -height * 0.35 + radius * Math.sin(angle) + radius; // Position below root node
   });
   
   // Preprocess edges to ensure all source and target nodes exist
   console.log(`Processing ${edges.length} edges...`);
+  
+  // Create validEdges variable that references the edges array
+  // This ensures validEdges is defined for any code that references it
   const validEdges = edges.filter(edge => {
     const sourceId = edge.from;
     const targetId = edge.to;
@@ -2019,6 +2035,21 @@ function renderD3Graph(rootSubject, nodes, edges) {
   });
   
   console.log(`Filtered to ${validEdges.length} valid edges`);
+  
+  // Identify first-level nodes (directly connected to root)
+  const firstLevelNodeIds = new Set();
+  validEdges.forEach(edge => {
+    if (edge.from === rootSubject) {
+      firstLevelNodeIds.add(edge.to);
+      console.log(`Added first-level node from root: ${edge.to} via relation: ${edge.label || "unlabeled"}`);
+    } else if (edge.to === rootSubject) {
+      firstLevelNodeIds.add(edge.from);
+      console.log(`Added first-level node to root: ${edge.from} via relation: ${edge.label || "unlabeled"}`);
+    }
+  });
+  
+  console.log(`Identified ${firstLevelNodeIds.size} first-level nodes`);
+  console.log('First-level nodes:', Array.from(firstLevelNodeIds));
   
   // Add arrow markers for links
   const defs = g.append('defs');
@@ -2096,7 +2127,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .on('drag', dragged)
       .on('end', dragEnded)
     );
-    
+   
   // Add rectangles to nodes
   nodeElements.append('rect')
     .attr('rx', 4)
@@ -2199,30 +2230,140 @@ function renderD3Graph(rootSubject, nodes, edges) {
     
   // Add text labels with wrapping
   labelElements.each(function(d) {
-    const labelGroup = d3.select(this);
-    const label = d.label || "";
-    
-    // Skip empty labels
-    if (!label.trim()) {
-      labelGroup.append('text')
-        .attr('class', 'link-label')
-        .attr('fill', '#475569')
-        .text("");
-      return;
+    try {
+      const labelGroup = d3.select(this);
+      const label = d.label || "";
+      
+      // Skip empty labels
+      if (!label.trim()) {
+        labelGroup.append('text')
+          .attr('class', 'link-label')
+          .attr('fill', '#475569')
+          .text("");
+        return;
+      }
+      
+      // Wrap text to max 20 characters per line
+      const wrappedText = wrapText(label, 20);
+      
+      // Add each line of text
+      wrappedText.forEach((line, i) => {
+        labelGroup.append('text')
+          .attr('class', 'link-label')
+          .attr('fill', '#475569')
+          .attr('text-anchor', 'middle') // Center text
+          .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
+          .text(line);
+      });
+      
+      if (!d.pathPoints) {
+        return;
+      }
+      
+      const { source, target } = d.pathPoints;
+      const labelEl = d3.select(this);
+      
+      // Calculate basic position for labels
+      let labelX, labelY;
+      
+      // Create a unique identifier for this edge to ensure consistent offsets
+      const edgeId = `${d.from}-${d.to}`;
+      // Create a hash from the edge ID to get a deterministic but varied offset
+      const hash = Math.abs(edgeId.split('').reduce((a, b) => {
+        a = ((a << 5) - a) + b.charCodeAt(0);
+        return a & a;
+      }, 0));
+      
+      // Get nodes from source and target IDs
+      const sourceNode = nodeMap.get(d.from);
+      const targetNode = nodeMap.get(d.to);
+      
+      // Skip if nodes not found
+      if (!sourceNode || !targetNode) return;
+      
+      // Detect if this is a root connection
+      const isRootConnection = (d.from === rootSubject || d.to === rootSubject);
+      const isFromRoot = d.from === rootSubject;
+      
+      // Calculate the distance between nodes
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // Normalize the direction vector
+      const nx = dx / distance;
+      const ny = dy / distance;
+      
+      // Create perpendicular vector for offset
+      const px = -ny;
+      const py = nx;
+      
+      if (isRootConnection) {
+        // For connections with root
+        const t = isFromRoot ? 0.35 : 0.65; // Position along the path
+        
+        // Calculate base position along the path
+        labelX = source.x + dx * t;
+        labelY = source.y + dy * t;
+        
+        // Apply a perpendicular offset based on hash
+        const perpOffset = 60 + (hash % 40); // 60-100px perpendicular offset
+        labelX += px * perpOffset;
+        labelY += py * perpOffset;
+      } else {
+        // For non-root connections, position at midpoint with perpendicular offset
+        labelX = source.x + dx * 0.5;
+        labelY = source.y + dy * 0.5;
+        
+        // Apply larger perpendicular offset based on hash
+        const perpOffset = 80 + (hash % 60); // 80-140px perpendicular offset
+        
+        // Use a deterministic but varied sign for the offset
+        const sign = ((hash % 2) * 2 - 1); // Either 1 or -1
+        labelX += px * perpOffset * sign;
+        labelY += py * perpOffset * sign;
+      }
+      
+      // Get text elements to calculate size
+      const textElements = labelEl.selectAll('text.link-label');
+      
+      if (textElements.size() > 0) {
+        let labelWidth = 0;
+        let labelHeight = 0;
+        
+        // Calculate total width and height based on all text elements
+        textElements.each(function() {
+          try {
+            const bbox = this.getBBox();
+            labelWidth = Math.max(labelWidth, bbox.width);
+            labelHeight += bbox.height;
+          } catch (e) {
+            console.log("Error getting text bounding box", e);
+          }
+        });
+        
+        // Add more padding
+        labelWidth += 30;
+        labelHeight += 16;
+        
+        // Update background rectangle size
+        labelEl.select('rect.label-bg')
+          .attr('width', labelWidth)
+          .attr('height', labelHeight)
+          .attr('x', -labelWidth / 2)
+          .attr('y', -labelHeight / 2);
+      }
+      
+      // Apply the transform to position the label
+      labelEl.attr('transform', `translate(${labelX}, ${labelY})`);
+      
+      // Store position for collision detection
+      d.labelX = labelX;
+      d.labelY = labelY;
+      
+    } catch (error) {
+      console.error("Error positioning label:", error);
     }
-    
-    // Wrap text to max 20 characters per line
-    const wrappedText = wrapText(label, 20);
-    
-    // Add each line of text
-    wrappedText.forEach((line, i) => {
-      labelGroup.append('text')
-        .attr('class', 'link-label')
-        .attr('fill', '#475569')
-        .attr('text-anchor', 'middle') // Center text
-        .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
-        .text(line);
-    });
   });
   
   // Helper function to highlight a connection between two nodes
@@ -2305,35 +2446,125 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .attr('fill', '#475569');
   }
   
-  // Start the simulation with modified forces for structured layout
+  // First run the simulation without rendering for many iterations
+  // This helps find a better layout before rendering
+  let tempSimulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink()
+      .links(edges)
+      .id(d => d.id)
+      .distance(d => {
+        // Vary distance based on connection type
+        if (d.from === rootSubject || d.to === rootSubject) {
+          return 350; // Root connections get even more space
+        }
+        return 250; // More space for other connections
+      }))
+    .force('charge', d3.forceManyBody()
+      .strength(d => d.id === rootSubject ? -2500 : -1500)) // Stronger repulsion
+    .force('x', d3.forceX(d => {
+      if (d.id === rootSubject) return 0;
+      if (firstLevelNodeIds.has(d.id)) {
+        return d.x * 1.7; // Push first level nodes further out horizontally
+      }
+      return d.x;
+    }).strength(0.25))
+    .force('y', d3.forceY(d => {
+      if (d.id === rootSubject) return -height * 0.4;
+      if (firstLevelNodeIds.has(d.id)) {
+        return d.y; // Keep first level at their y positions
+      }
+      return height * 0.35; // Push other nodes down more
+    }).strength(0.25))
+    .force('collision', d3.forceCollide()
+      .radius(d => {
+        // Even larger collision radius to keep nodes well separated
+        const nodeWidth = getNodeWidth(d);
+        const nodeHeight = getNodeHeight(d);
+        
+        if (d.id === rootSubject) {
+          return Math.sqrt(nodeWidth * nodeHeight) + 180;
+        }
+        return Math.sqrt(nodeWidth * nodeHeight) + 130;
+      })
+      .strength(1)) // Full collision strength
+    .stop();
+  
+  // Run the pre-positioning simulation for more iterations
+  for (let i = 0; i < 150; i++) {
+    tempSimulation.tick();
+  }
+  
+  // Now create the actual simulation for rendering
   simulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink()
-      .links(validEdges)
+      .links(edges)
       .id(d => d.id)
-      .distance(forceParams.linkDistance * 2)) // Double the link distance
+      .distance(d => {
+        // Use different distances for different types of connections
+        if (d.from === rootSubject || d.to === rootSubject) {
+          return forceParams.linkDistance * 10; // More space for root connections
+        }
+        return forceParams.linkDistance * 7; // More space for non-root connections
+      }))
     .force('charge', d3.forceManyBody()
       .strength(d => {
-        // Stronger repulsion for structured layout
+        // Use stronger repulsion for the root
+        if (d.id === rootSubject) {
+          return forceParams.charge * -20;
+        }
+        // Use node size to scale repulsion
         const nodeSize = Math.sqrt(getNodeWidth(d) * getNodeHeight(d));
-        return forceParams.charge * (nodeSize / 200) * 2.5; // Significantly increased repulsion
+        return forceParams.charge * (nodeSize / 150) * -15;
       })
-      .distanceMin(400) // Increased minimum distance
-      .distanceMax(5000)) // Increased maximum distance
-    .force('x', d3.forceX(0).strength(0.2)) // Center nodes horizontally at origin
-    .force('y', d3.forceY(0).strength(0.2)) // Center nodes vertically at origin
+      .distanceMin(900)
+      .distanceMax(12000))
+    .force('x', d3.forceX(d => {
+      // Root node stays at center
+      if (d.id === rootSubject) return 0;
+      
+      // First level nodes maintain their existing x position but with scaling
+      if (firstLevelNodeIds.has(d.id)) {
+        return d.x * 1.3; // Expand the first level more
+      }
+      
+      // Second level nodes spread wider
+      return d.x * 1.4;
+    }).strength(d => d.id === rootSubject ? 1 : 0.2))
+    .force('y', d3.forceY(d => {
+      // Keep root at top
+      if (d.id === rootSubject) return -height * 0.4;
+      
+      // First level nodes position
+      if (firstLevelNodeIds.has(d.id)) {
+        return d.y * 0.95; // Keep in their semi-circle but slightly tighter
+      }
+      
+      // Second level nodes position
+      return d.y * 1.3; // Push further down
+    }).strength(d => d.id === rootSubject ? 1 : 0.35))
     .force('collision', d3.forceCollide().radius(d => {
-      // Make collision radius based on node size plus padding
+      // Use much larger collision radius
       const nodeWidth = getNodeWidth(d);
       const nodeHeight = getNodeHeight(d);
-      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 200; // Significantly increased padding
-    }).strength(1))
-    .alpha(0.8) // Higher alpha for more movement
-    .alphaDecay(0.01) // Slower decay for more time to find optimal positions
-    .velocityDecay(0.4)
+      // Different collision radii based on node type
+      if (d.id === rootSubject) {
+        return Math.sqrt(nodeWidth * nodeHeight) + 180;
+      }
+      return Math.sqrt(nodeWidth * nodeHeight) + 130;
+    }).strength(0.95).iterations(4)) // More iterations for better collision resolution
+    .alpha(0.4) // Start with lower alpha since we've pre-positioned
+    .alphaDecay(0.003) // Slower decay for more gradual layout
+    .velocityDecay(0.25) // Adjust velocity decay for smoother movement
     .on('tick', ticked)
     .on('end', () => {
       // When the simulation ends, center the graph based on actual content bounds
       centerGraph();
+      
+      // Failsafe: directly hide loading elements in case centerGraph didn't do it
+      console.log("Simulation ended - ensuring loading overlay is hidden");
+      document.getElementById('loading').style.display = 'none';
+      $('#loading-indicator').hide();
+      $('#loading-overlay').hide();
     });
 }
 
@@ -2342,269 +2573,376 @@ function centerGraph() {
   try {
     // Get the bounding box of the graph content
     const bbox = document.getElementById('graph-content').getBBox();
+    console.log("Graph bbox:", bbox);
     
-    // Calculate the center of the graph content
+    // Calculate the dimensions of the viewport
+    const viewportWidth = width;
+    const viewportHeight = height;
+    console.log("Viewport dimensions:", viewportWidth, viewportHeight);
+    
+    // Calculate the center of the graph content with emphasis on the root node
+    // For knowledge graphs, we want the root higher in the viewport
     const graphCenterX = bbox.x + bbox.width / 2;
-    const graphCenterY = bbox.y + bbox.height / 2;
+    const graphCenterY = bbox.y + bbox.height * 0.35; // 35% point to shift focus upward
     
     // Calculate the translation needed to center the graph
-    const translateX = width / 2 - graphCenterX;
-    const translateY = height / 2 - graphCenterY;
+    const translateX = viewportWidth / 2 - graphCenterX;
+    const translateY = viewportHeight / 2 - graphCenterY;
+    console.log("Translation:", translateX, translateY);
     
-    // Update the zoom transform to center the graph
-    d3.select('#graph').call(
-      zoom.transform,
-      d3.zoomIdentity.translate(translateX, translateY).scale(0.5)
+    // Determine appropriate initial scale based on the graph size
+    // We want to fit the graph with some margin
+    let initialScale = Math.min(
+      viewportWidth / (bbox.width * 1.25),  // 25% margin horizontally
+      viewportHeight / (bbox.height * 1.25) // 25% margin vertically
     );
     
-    console.log('Graph centered based on actual bounds:', { 
-      bbox, 
-      graphCenter: { x: graphCenterX, y: graphCenterY },
-      translation: { x: translateX, y: translateY }
-    });
+    // Limit scale to reasonable bounds
+    initialScale = Math.min(Math.max(initialScale, 0.15), 0.75);
+    console.log("Initial scale:", initialScale);
     
-    // Hide the loading overlay when the graph is fully loaded and centered
-    const loadingEl = document.getElementById('loading');
-    if (loadingEl) {
-      loadingEl.style.opacity = '0';
-      loadingEl.style.transition = 'opacity 0.3s ease-out';
-      setTimeout(() => {
-        loadingEl.style.display = 'none';
-      }, 300);
-    }
+    // Update the zoom transform to center the graph with appropriate scale
+    d3.select('#graph').call(
+      zoom.transform,
+      d3.zoomIdentity
+        .translate(translateX, translateY)
+        .scale(initialScale)
+    );
+    
+    // Hide loading overlay and indicators
+    document.getElementById('loading').style.display = 'none';
+    $('#loading-indicator').hide();
+    $('#loading-overlay').fadeOut();
+    
+    console.log("Loading overlay hidden");
   } catch (error) {
-    console.error('Error centering graph:', error);
+    console.error("Error centering graph:", error);
   }
 }
 
-// Update the ticked function to properly position nodes, links, and labels
+// Function for updating element positions on tick
 function ticked() {
   try {
-    // Update node positions
-    nodeElements.attr('transform', d => {
-      // Constrain to bounds relative to origin
-      const halfWidth = width / 2;
-      const halfHeight = height / 2;
-      d.x = Math.max(-halfWidth + 50, Math.min(halfWidth - 50, d.x));
-      d.y = Math.max(-halfHeight + 50, Math.min(halfHeight - 50, d.y));
-      return `translate(${d.x - getNodeWidth(d) / 2}, ${d.y - getNodeHeight(d) / 2})`;
+    // Keep the root node fixed at the top
+    simulation.nodes().forEach(d => {
+      if (d.id === rootSubject) {
+        d.x = 0;
+        d.y = -height * 0.4;
+        d.fx = 0;
+        d.fy = -height * 0.4;
+      }
     });
     
-    // Update link paths with improved orthogonal routing
-    linkElements.attr('d', d => {
+    // Get the bounds of the available canvas area
+    const graphWidth = width * 2;  // Make the bounding box larger than the visible area
+    const graphHeight = height * 2;
+    
+    // Add border constraints - keep nodes within bounds
+    simulation.nodes().forEach(function(d) {
+      // Don't apply to fixed nodes (like the root)
+      if (d.fx !== undefined || d.fy !== undefined) return;
+      
+      // Don't let nodes go too far off-canvas
+      const nodeWidth = getNodeWidth(d);
+      const nodeHeight = getNodeHeight(d);
+      
+      // Softer constraints - gradually increase force as nodes approach edges
+      const margin = 200; // Increased margin
+      
+      // X bounds
+      const xMin = -graphWidth/2 + nodeWidth/2 + margin;
+      const xMax = graphWidth/2 - nodeWidth/2 - margin;
+      
+      // Y bounds - allow more space at the top for the hierarchical layout
+      const yMin = -graphHeight/2 + nodeHeight/2 + margin;
+      const yMax = graphHeight/2 - nodeHeight/2 - margin;
+      
+      if (d.x < xMin) {
+        d.x = xMin + (d.x - xMin) * 0.1; // gradual enforcement
+        d.vx = Math.abs(d.vx) * 0.5; // dampen velocity and reverse direction
+      }
+      if (d.x > xMax) {
+        d.x = xMax - (xMax - d.x) * 0.1; // gradual enforcement
+        d.vx = -Math.abs(d.vx) * 0.5; // dampen velocity and reverse direction
+      }
+      
+      if (d.y < yMin) {
+        d.y = yMin + (d.y - yMin) * 0.1; // gradual enforcement
+        d.vy = Math.abs(d.vy) * 0.5; // dampen velocity and reverse direction
+      }
+      if (d.y > yMax) {
+        d.y = yMax - (yMax - d.y) * 0.1; // gradual enforcement
+        d.vy = -Math.abs(d.vy) * 0.5; // dampen velocity and reverse direction
+      }
+    });
+    
+    // Update node positions
+    nodeElements.attr('transform', d => `translate(${d.x - getNodeWidth(d) / 2},${d.y - getNodeHeight(d) / 2})`);
+    
+    // Helper function to get node layer for path generation
+    function getNodeLayer(nodeId, edgesList) {
+      // Root is always layer 0
+      if (nodeId === rootSubject) return 0;
+      
+      // First level: directly connected to root
+      const isConnectedToRoot = edgesList.some(e => 
+        (e.from === rootSubject && e.to === nodeId) || 
+        (e.to === rootSubject && e.from === nodeId)
+      );
+      
+      if (isConnectedToRoot) return 1;
+      
+      // Otherwise it's a deeper level
+      return 2;
+    }
+    
+    // Update link positions with more advanced path generation
+    linkElements.attr('d', function(d) {
       try {
-        // Get source and target IDs
         const sourceId = d.from;
         const targetId = d.to;
         
-        if (!sourceId || !targetId) {
-          console.warn("Missing source or target ID in link path calculation:", d);
-          return '';
-        }
-        
-        // Get the actual node objects using the nodeMap
+        // Get source and target nodes from the ID
         const sourceNode = nodeMap.get(sourceId);
         const targetNode = nodeMap.get(targetId);
         
         if (!sourceNode || !targetNode) {
-          console.warn("Missing node for link in ticked:", 
-                      !sourceNode ? `source: ${sourceId}` : `target: ${targetId}`);
+          console.warn(`Missing node data for ${sourceId} or ${targetId}`);
           return '';
         }
         
-        // Calculate dimensions
-        const sourceWidth = getNodeWidth(sourceNode);
-        const sourceHeight = getNodeHeight(sourceNode);
-        const targetWidth = getNodeWidth(targetNode);
-        const targetHeight = getNodeHeight(targetNode);
+        // Calculate source and target points
+        const sourcePoint = {
+          x: sourceNode.x,
+          y: sourceNode.y
+        };
         
-        // Calculate source and target centers
-        const sourceX = sourceNode.x;
-        const sourceY = sourceNode.y;
-        const targetX = targetNode.x;
-        const targetY = targetNode.y;
+        const targetPoint = {
+          x: targetNode.x,
+          y: targetNode.y
+        };
         
-        // Find intersection points with rectangles
-        const sourcePoint = findIntersectionPoint(
-          sourceX, sourceY, targetX, targetY,
-          sourceX - sourceWidth/2, sourceY - sourceHeight/2,
-          sourceWidth, sourceHeight
-        );
-        
-        const targetPoint = findIntersectionPoint(
-          targetX, targetY, sourceX, sourceY,
-          targetX - targetWidth/2, targetY - targetHeight/2,
-          targetWidth, targetHeight
-        );
-        
-        if (!sourcePoint || !targetPoint) {
-          console.warn("Could not find intersection points for link:", sourceId, targetId);
-          // Fallback to direct line between centers
+        // Direct line for debugging
+        if (window.debugMode) {
+          const sourceX = sourceNode.x;
+          const sourceY = sourceNode.y;
+          const targetX = targetNode.x;
+          const targetY = targetNode.y;
           return `M${sourceX},${sourceY} L${targetX},${targetY}`;
         }
         
-        // Create orthogonal (right-angled) paths with better routing
-        // Calculate if nodes are more horizontal or vertical to each other
-        const dx = Math.abs(targetPoint.x - sourcePoint.x);
-        const dy = Math.abs(targetPoint.y - sourcePoint.y);
-        const isHorizontal = dx > dy;
+        // Adjust path drawing based on whether this is a connection from/to root
+        const isRootConnection = (sourceId === rootSubject || targetId === rootSubject);
+        const isSourceHigher = sourcePoint.y < targetPoint.y;
         
-        // Create path with more segments to avoid running behind nodes
+        // Create path with more segments for hierarchical flow
         let path = '';
         
-        // Remove the offset to ensure lines connect directly to nodes without gaps
-        const arrowOffset = 0;
-        
-        // Adjust target point to account for arrow - no offset to avoid gaps
+        // Adjust target point to account for arrow
         const targetPointWithOffset = {
           x: targetPoint.x,
           y: targetPoint.y
         };
-        
-        if (isHorizontal) {
-          // For horizontal arrangement, use 3 segments with vertical middle segment
-          const midX = (sourcePoint.x + targetPointWithOffset.x) / 2;
-          path = `M${sourcePoint.x},${sourcePoint.y} 
-                  L${midX},${sourcePoint.y} 
-                  L${midX},${targetPointWithOffset.y} 
-                  L${targetPointWithOffset.x},${targetPointWithOffset.y}`;
+
+        // For hierarchical layout, use different path strategies
+        if (isRootConnection) {
+          // For connections involving the root, use more direct paths
+          if (sourceId === rootSubject) {
+            // Root to other nodes - create more spread out curves
+            const controlDistance = Math.abs(targetPoint.x - sourcePoint.x) * 0.5;
+            const midY = sourcePoint.y + (targetPoint.y - sourcePoint.y) * 0.4;
+            
+            // Use bezier curves with control points that spread out more
+            path = `M${sourcePoint.x},${sourcePoint.y} 
+                    C${sourcePoint.x},${sourcePoint.y + controlDistance} 
+                    ${targetPoint.x},${targetPoint.y - controlDistance} 
+                    ${targetPoint.x},${targetPoint.y}`;
+          } else {
+            // Other nodes to root - create more spread out curves going upward
+            const controlDistance = Math.abs(sourcePoint.x - targetPoint.x) * 0.5;
+            
+            // Use bezier curves with control points that spread out more
+            path = `M${sourcePoint.x},${sourcePoint.y} 
+                    C${sourcePoint.x},${sourcePoint.y - controlDistance} 
+                    ${targetPoint.x},${targetPoint.y + controlDistance} 
+                    ${targetPoint.x},${targetPoint.y}`;
+          }
         } else {
-          // For vertical arrangement, use 3 segments with horizontal middle segment
-          const midY = (sourcePoint.y + targetPointWithOffset.y) / 2;
-          path = `M${sourcePoint.x},${sourcePoint.y} 
-                  L${sourcePoint.x},${midY} 
-                  L${targetPointWithOffset.x},${midY} 
-                  L${targetPointWithOffset.x},${targetPointWithOffset.y}`;
+          // For connections between non-root nodes
+          // Calculate the "layer" of the node based on its position
+          const sourceLayer = getNodeLayer(sourceId, edges);
+          const targetLayer = getNodeLayer(targetId, edges);
+          
+          // Route differently based on whether nodes are on same layer or different layers
+          if (Math.abs(sourcePoint.y - targetPoint.y) > Math.abs(sourcePoint.x - targetPoint.x) * 1.2) {
+            // More vertical than horizontal - likely across layers
+            // Use S-curves for more separation between paths
+            const dx = targetPoint.x - sourcePoint.x;
+            const dy = targetPoint.y - sourcePoint.y;
+            
+            // Calculate offset based on the uniqueness of the connection
+            const connectionId = sourceId.length + targetId.length + sourcePoint.x;
+            const randomOffset = (connectionId % 100) / 100 * 0.4 + 0.3; // 0.3 to 0.7 range
+            
+            // Create control points for S-curve
+            const cp1x = sourcePoint.x + dx * 0.1;
+            const cp1y = sourcePoint.y + dy * randomOffset;
+            const cp2x = sourcePoint.x + dx * 0.9;
+            const cp2y = sourcePoint.y + dy * (1 - randomOffset);
+            
+            path = `M${sourcePoint.x},${sourcePoint.y} 
+                    C${cp1x},${cp1y} ${cp2x},${cp2y} ${targetPoint.x},${targetPoint.y}`;
+          } else if (Math.abs(sourceLayer - targetLayer) <= 1) {
+            // Nodes are on similar layers - use a curved path
+            const midX = (sourcePoint.x + targetPoint.x) / 2;
+            // Add some randomness to midY to reduce overlaps
+            const midYOffset = (sourceId.length + targetId.length) % 100;
+            const midY = (sourcePoint.y + targetPoint.y) / 2 + (midYOffset - 50);
+            
+            path = `M${sourcePoint.x},${sourcePoint.y} 
+                    Q${midX},${midY} ${targetPoint.x},${targetPoint.y}`;
+          } else {
+            // Significant horizontal distance - use orthogonal routing with randomized midpoints
+            const midX = (sourcePoint.x + targetPoint.x) / 2 + 
+                      ((sourceId.length * targetId.length) % 100 - 50);
+            const yDiff = Math.abs(targetPoint.y - sourcePoint.y);
+            const midY1 = sourcePoint.y + (isSourceHigher ? yDiff * 0.25 : -yDiff * 0.25);
+            const midY2 = targetPoint.y + (isSourceHigher ? -yDiff * 0.25 : yDiff * 0.25);
+            
+            path = `M${sourcePoint.x},${sourcePoint.y} 
+                    C${sourcePoint.x},${midY1} ${midX},${midY1} ${midX},${(midY1 + midY2) / 2}
+                    S${targetPoint.x},${midY2} ${targetPoint.x},${targetPoint.y}`;
+          }
         }
         
         // Store the path points for label positioning
         d.pathPoints = {
           source: sourcePoint,
           target: targetPointWithOffset,
-          isHorizontal: isHorizontal
+          isHorizontal: Math.abs(sourcePoint.x - targetPoint.x) > Math.abs(sourcePoint.y - targetPoint.y)
         };
         
         return path;
       } catch (error) {
-        console.error("Error in link path calculation:", error, d);
+        console.error("Error generating link path:", error);
         return '';
       }
     });
     
-    // Update label positions
+    // Update label positions on the links
     labelElements.each(function(d) {
       try {
-        const labelGroup = d3.select(this);
-        
-        // Get source and target IDs
-        const sourceId = d.from;
-        const targetId = d.to;
-        
-        if (!sourceId || !targetId) {
-          console.warn("Missing source or target ID in label positioning");
+        if (!d.pathPoints) {
           return;
         }
         
-        // Find the path element for this edge
-        const path = d3.select(`path.link[data-source="${sourceId}"][data-target="${targetId}"]`).node();
+        const { source, target } = d.pathPoints;
+        const labelEl = d3.select(this);
         
-        let midX, midY;
+        // Calculate basic position for labels
+        let labelX, labelY;
         
-        // If we have a path, position the label at its midpoint
-        if (path) {
-          const pathLength = path.getTotalLength();
-          if (pathLength) {
-            // Store the path for later use in overlap prevention
-            d.path = path;
-            
-            // Get the midpoint of the path
-            const midPoint = path.getPointAtLength(pathLength / 2);
-            midX = midPoint.x;
-            midY = midPoint.y;
-            
-            // If we have stored path points, use them for better label positioning
-            if (d.pathPoints) {
-              const { source, target, isHorizontal } = d.pathPoints;
-              
-              if (isHorizontal) {
-                // For horizontal paths, position label above or below the middle segment
-                const midX = (source.x + target.x) / 2;
-                midY = source.y + (target.y - source.y) / 2;
-                
-                // Increase offset to avoid overlap
-                midY += (source.y > target.y) ? -40 : 40;
-              } else {
-                // For vertical paths, position label to the left or right of the middle segment
-                midX = source.x + (target.x - source.x) / 2;
-                const midY = (source.y + target.y) / 2;
-                
-                // Increase offset to avoid overlap
-                midX += (source.x > target.x) ? -40 : 40;
-              }
-            }
-          } else {
-            // Fallback if path length is 0
-            const sourceNode = nodeMap.get(sourceId);
-            const targetNode = nodeMap.get(targetId);
-            
-            if (!sourceNode || !targetNode) {
-              console.warn("Missing node in label positioning fallback");
-              return;
-            }
-            
-            midX = (sourceNode.x + targetNode.x) / 2;
-            midY = (sourceNode.y + targetNode.y) / 2;
-          }
+        // Create a unique identifier for this edge to ensure consistent offsets
+        const edgeId = `${d.from}-${d.to}`;
+        // Create a hash from the edge ID to get a deterministic but varied offset
+        const hash = Math.abs(edgeId.split('').reduce((a, b) => {
+          a = ((a << 5) - a) + b.charCodeAt(0);
+          return a & a;
+        }, 0));
+        
+        // Get nodes from source and target IDs
+        const sourceNode = nodeMap.get(d.from);
+        const targetNode = nodeMap.get(d.to);
+        
+        // Skip if nodes not found
+        if (!sourceNode || !targetNode) return;
+        
+        // Detect if this is a root connection
+        const isRootConnection = (d.from === rootSubject || d.to === rootSubject);
+        const isFromRoot = d.from === rootSubject;
+        
+        // Calculate the distance between nodes
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Normalize the direction vector
+        const nx = dx / distance;
+        const ny = dy / distance;
+        
+        // Create perpendicular vector for offset
+        const px = -ny;
+        const py = nx;
+        
+        if (isRootConnection) {
+          // For connections with root
+          const t = isFromRoot ? 0.35 : 0.65; // Position along the path
+          
+          // Calculate base position along the path
+          labelX = source.x + dx * t;
+          labelY = source.y + dy * t;
+          
+          // Apply a perpendicular offset based on hash
+          const perpOffset = 60 + (hash % 40); // 60-100px perpendicular offset
+          labelX += px * perpOffset;
+          labelY += py * perpOffset;
         } else {
-          // Fallback: position between nodes if no path is found
-          const sourceNode = nodeMap.get(sourceId);
-          const targetNode = nodeMap.get(targetId);
+          // For non-root connections, position at midpoint with perpendicular offset
+          labelX = source.x + dx * 0.5;
+          labelY = source.y + dy * 0.5;
           
-          if (!sourceNode || !targetNode) {
-            console.warn("Missing node in label positioning fallback");
-            return;
-          }
+          // Apply larger perpendicular offset based on hash
+          const perpOffset = 80 + (hash % 60); // 80-140px perpendicular offset
           
-          midX = (sourceNode.x + targetNode.x) / 2;
-          midY = (sourceNode.y + targetNode.y) / 2;
+          // Use a deterministic but varied sign for the offset
+          const sign = ((hash % 2) * 2 - 1); // Either 1 or -1
+          labelX += px * perpOffset * sign;
+          labelY += py * perpOffset * sign;
         }
         
-        // Store label position for overlap prevention
-        d.labelX = midX;
-        d.labelY = midY;
+        // Get text elements to calculate size
+        const textElements = labelEl.selectAll('text.link-label');
         
-        // Update transform
-        labelGroup.attr('transform', `translate(${midX}, ${midY})`);
+        if (textElements.size() > 0) {
+          let labelWidth = 0;
+          let labelHeight = 0;
+          
+          // Calculate total width and height based on all text elements
+          textElements.each(function() {
+            try {
+              const bbox = this.getBBox();
+              labelWidth = Math.max(labelWidth, bbox.width);
+              labelHeight += bbox.height;
+            } catch (e) {
+              console.log("Error getting text bounding box", e);
+            }
+          });
+          
+          // Add more padding
+          labelWidth += 30;
+          labelHeight += 16;
+          
+          // Update background rectangle size
+          labelEl.select('rect.label-bg')
+            .attr('width', labelWidth)
+            .attr('height', labelHeight)
+            .attr('x', -labelWidth / 2)
+            .attr('y', -labelHeight / 2);
+        }
         
-        // Size the background rectangle based on the text content
-        const textElements = labelGroup.selectAll('.link-label');
-        let maxWidth = 0;
-        let totalHeight = 0;
+        // Apply the transform to position the label
+        labelEl.attr('transform', `translate(${labelX}, ${labelY})`);
         
-        textElements.each(function() {
-          const bbox = this.getBBox();
-          maxWidth = Math.max(maxWidth, bbox.width);
-          totalHeight += bbox.height;
-        });
+        // Store position for collision detection
+        d.labelX = labelX;
+        d.labelY = labelY;
         
-        // Add padding to the background rectangle
-        const padding = 8;
-        
-        // Update background rectangle size with padding
-        labelGroup.select('.label-bg')
-          .attr('width', maxWidth + padding * 2)
-          .attr('height', totalHeight + padding * 2)
-          .attr('x', -maxWidth / 2 - padding)
-          .attr('y', -totalHeight / 2 - padding);
       } catch (error) {
-        console.error("Error in label positioning:", error, d);
+        console.error("Error positioning label:", error);
       }
     });
-    
-    // Run label overlap prevention
-    preventLabelOverlaps();
   } catch (error) {
-    console.error("Error in ticked function:", error);
+    console.error("Error in tick function:", error);
   }
 }
 
@@ -3095,6 +3433,43 @@ function buildGraph(subject, filterKeywords = []) {
   // Start fetch process
   const relationsZip = `../data/${subject}.zip`;
   // ... existing code ...
+}
+
+// Helper function to determine the "layer" of a node based on distance from root
+function getNodeLayer(nodeId, edgesParam) {
+  // Use provided edges parameter or fall back to global edges
+  const edgesToUse = edgesParam || window.edges;
+  
+  if (nodeId === rootSubject) {
+    return 0; // Root node is layer 0
+  }
+  
+  // Check if directly connected to root
+  const isDirectlyConnected = edgesToUse.some(
+    edge => (edge.from === rootSubject && edge.to === nodeId) || 
+            (edge.to === rootSubject && edge.from === nodeId)
+  );
+  
+  if (isDirectlyConnected) {
+    return 1; // Directly connected to root is layer 1
+  }
+  
+  // Get nodes directly connected to root
+  const connectedToRoot = edgesToUse.filter(
+    edge => edge.from === rootSubject || edge.to === rootSubject
+  ).map(edge => edge.from === rootSubject ? edge.to : edge.from);
+  
+  // Check if connected to a node that's connected to root
+  const isTwoStepsAway = edgesToUse.some(
+    edge => (connectedToRoot.includes(edge.from) && edge.to === nodeId) || 
+            (connectedToRoot.includes(edge.to) && edge.from === nodeId)
+  );
+  
+  if (isTwoStepsAway) {
+    return 2; // Two steps away from root is layer 2
+  }
+  
+  return 3; // Everything else is layer 3 or beyond
 }
 </script>
 </body>
