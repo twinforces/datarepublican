@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741043449">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741043449">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741044464">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741044464">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1007,13 +1007,16 @@ It shows the generated graph and a legend, plus a button to go back to the searc
     <g id="graph-content"></g>
   </svg>
   <!-- Add loading overlay with the same styling as in expose/index.html -->
-  <div id="loading" class="absolute inset-0 flex flex-col items-center justify-center pt-5 bg-white z-30">
+  <div id="loading" class="absolute inset-0 flex flex-col items-center justify-start pt-16 bg-white z-30">
     <div class="text-center">
       <svg class="animate-spin h-8 w-8 text-navy mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
       <div id="loading-text" class="text-lg font-semibold text-navy mb-4">Loading graph...</div>
+      <div id="loading-nodes" class="text-gray-600 max-w-md mx-auto text-center max-h-[50vh] overflow-y-auto px-4">
+        <!-- Node names will be added here -->
+      </div>
     </div>
   </div>
   <div id="loading-indicator" class="absolute">
@@ -1930,14 +1933,8 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Update loading text to show that the graph is being processed
   $('#loading-text').text('Rendering graph visualization...');
   
-  // Add a timeout to ensure loading overlay is hidden even if other mechanisms fail
-  setTimeout(() => {
-    console.log("Timeout check - ensuring loading overlay is hidden");
-    if (document.getElementById('loading')) {
-      document.getElementById('loading').style.display = 'none';
-    }
-    $('#loading-indicator').hide();
-  }, 10000); // 10 seconds should be plenty for the graph to render
+  // Remove the premature timeout - we'll let the centerGraph function handle hiding the overlay
+  // instead of this fixed 10-second timer
   
   // Initialize container dimensions
   const container = document.getElementById('graph-container');
@@ -2037,7 +2034,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
   console.log(`Filtered to ${validEdges.length} valid edges`);
   
   // Identify first-level nodes (directly connected to root)
-  const firstLevelNodeIds = new Set();
+  window.firstLevelNodeIds = new Set();
   validEdges.forEach(edge => {
     if (edge.from === rootSubject) {
       firstLevelNodeIds.add(edge.to);
@@ -2050,6 +2047,8 @@ function renderD3Graph(rootSubject, nodes, edges) {
   
   console.log(`Identified ${firstLevelNodeIds.size} first-level nodes`);
   console.log('First-level nodes:', Array.from(firstLevelNodeIds));
+  
+  // We'll call displayNodesProgressively() after nodeElements is defined
   
   // Add arrow markers for links
   const defs = g.append('defs');
@@ -2128,6 +2127,9 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .on('end', dragEnded)
     );
    
+  // Start displaying first-level nodes progressively now that nodeElements is defined
+  displayNodesProgressively();
+  
   // Add rectangles to nodes
   nodeElements.append('rect')
     .attr('rx', 4)
@@ -2560,12 +2562,83 @@ function renderD3Graph(rootSubject, nodes, edges) {
       // When the simulation ends, center the graph based on actual content bounds
       centerGraph();
       
-      // Failsafe: directly hide loading elements in case centerGraph didn't do it
-      console.log("Simulation ended - ensuring loading overlay is hidden");
-      document.getElementById('loading').style.display = 'none';
-      $('#loading-indicator').hide();
-      $('#loading-overlay').hide();
+      // We'll move the progressive display and failsafe to after centerGraph completes
+      // by letting centerGraph call displayNodesProgressively
     });
+}
+
+// Function to display nodes progressively after data is fully loaded
+function displayNodesProgressively() {
+  try {
+    const loadingNodesDiv = document.getElementById('loading-nodes');
+    if (!loadingNodesDiv) {
+      console.warn("Loading nodes div not found");
+      return;
+    }
+    
+    loadingNodesDiv.innerHTML = ''; // Clear any existing content
+    
+    // Check if nodeElements exists - if not, we can't display nodes yet
+    if (!nodeElements) {
+      console.warn("Node elements not available yet, cannot display nodes progressively");
+      return;
+    }
+    
+    // Get root node
+    const rootNode = nodeElements.filter(d => d.id === rootSubject).data()[0];
+    
+    // Find first-level nodes (directly connected to root)
+    // Use window.firstLevelNodeIds to ensure we access the global variable
+    const firstLevelNodes = nodeElements.filter(d => window.firstLevelNodeIds.has(d.id)).data();
+    
+    console.log(`Displaying ${firstLevelNodes.length} first-level nodes progressively`);
+    
+    // Add root node first
+    if (rootNode) {
+      const rootDiv = document.createElement('div');
+      rootDiv.className = 'font-bold opacity-0 transition-opacity duration-300 py-1';
+      rootDiv.textContent = rootNode.id;
+      loadingNodesDiv.appendChild(rootDiv);
+      
+      // Trigger fade in for root node
+      setTimeout(() => {
+        rootDiv.style.opacity = '1';
+      }, 100);
+    }
+    
+    // Add first-level nodes progressively
+    let nodeIndex = 0;
+    function addNextNode() {
+      if (nodeIndex < firstLevelNodes.length) {
+        const node = firstLevelNodes[nodeIndex];
+        
+        // Create element for this node
+        const div = document.createElement('div');
+        div.className = 'opacity-0 transition-opacity duration-300 py-1';
+        div.textContent = node.id;
+        
+        // Add to container
+        loadingNodesDiv.appendChild(div);
+        
+        // Trigger fade in and scroll to bottom
+        setTimeout(() => {
+          div.style.opacity = '1';
+          loadingNodesDiv.scrollTop = loadingNodesDiv.scrollHeight;
+        }, 50);
+        
+        // Move to next node
+        nodeIndex++;
+        
+        // Schedule next node with 1 second delay
+        setTimeout(addNextNode, 1000);
+      }
+    }
+    
+    // Start adding nodes with a short delay
+    setTimeout(addNextNode, 500);
+  } catch (error) {
+    console.error("Error displaying nodes progressively:", error);
+  }
 }
 
 // Function to center the graph based on its actual rendered bounds
@@ -2609,14 +2682,21 @@ function centerGraph() {
         .scale(initialScale)
     );
     
+    console.log("Graph centered based on actual bounds");
+    
+    // Now the nodes are already being displayed progressively before centering
+    // so we don't need to call displayNodesProgressively here
+    
     // Hide loading overlay and indicators
     document.getElementById('loading').style.display = 'none';
     $('#loading-indicator').hide();
     $('#loading-overlay').fadeOut();
-    
-    console.log("Loading overlay hidden");
   } catch (error) {
     console.error("Error centering graph:", error);
+    
+    // Failsafe: Ensure loading overlay is hidden even if there's an error
+    document.getElementById('loading').style.display = 'none';
+    $('#loading-indicator').hide();
   }
 }
 
