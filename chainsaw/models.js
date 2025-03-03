@@ -20,7 +20,7 @@ class BudgetNode {
     }
   }
 
-  static agencyDepth = 4;
+  static agencyDepth = 3;
 
   /** Collect all agency nodes at agencyDepth and sort them by value in descending order */
   static collectAndSortAgencies() {

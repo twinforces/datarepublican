@@ -22,42 +22,38 @@ async function loadData(budgetCsvFile, functionSubfunctionCsvFile) {
 }
 
 function processFunctionSubfunctionCSV(csvString) {
-    const rows = csvString.split('\n').map(row => row.split(','));
     const functionCodeToName = new Map();
     const subfunctionCodeToName = new Map();
 
     let currentFunctionCode = null;
     let currentFunctionName = null;
     let currentDeptName = null;
+    let currentDepCode = null;
     let lookupMap={};
-    rows.forEach(row => {
-        let departmentName = row[0].trim() || currentDeptName || "";
-        let functionName = row[1]?.trim();
-        let functionCode = row[3]?.trim();
-        const subfunctionName = row[3]?.trim();
-        const subfunctionCode = row[4]?.trim();
-        
-        if (row[0].trim().length) 
-        {
-                currentDeptName = row[0].trim();
-                departmentName = currentDeptName;
-        }
+    
+     Papa.parse(csvString, {
+            header:true,
+            skipEmptyLines: true,
+            complete: results => {
+                results.data.forEach(row => {
+                
+        let departmentName = row['DepartmentName'] || currentDeptName || "";
+        let functionName = row['SubFunction']?.trim();
+        let depCode = row['DepCode']  || currentDepCode || "";
+        let subCode = row['SubCode']  || currentDepCode || "999";
+        currentDeptName=departmentName;
+        currentDepCode = depCode;
         if (!functionName.length) 
         {
-                functionName = "Top";
-                functionCode = row[2]?.trim()
+                functionName = departmentName;
         }
+        if (!departmentName && !! !functionName) return;
 
-        if (!functionName && !functionCode && !subfunctionName && !subfunctionCode) return;
         currentDeptName = departmentName.replace(/"/g,'');
-        if (functionName && functionCode) {
-            currentFunctionCode = functionCode;
-            currentFunctionName = functionName.replace(/"/g, '');
-            functionCodeToName.set(currentFunctionCode, [departmentName,currentFunctionName]);
-        } else if (subfunctionName && subfunctionCode && currentFunctionCode) {
-            subfunctionCodeToName.set(subfunctionCode, subfunctionName.replace(/"/g, ''));
-        }
-    });
+        functionCodeToName.set(depCode,departmentName);
+        subfunctionCodeToName.set(subCode,functionName);
+        });
+    }});
 
     return { functionCodeToName, subfunctionCodeToName };
 }
@@ -89,7 +85,18 @@ function storePath(path, keyStore,value){
     let resultsArr=[];
     let levelKeys={};
      let totalValue = 0;
-        Papa.parse(budgetCsvString, {
+     let rowNumber=0;
+     
+     // counters so we get an idea
+     const titleAgg ={};
+     const catAgg={};
+     const agencyAgg={};
+     const bureauAgg={};
+     const funcAgg={};
+      const subfuncAgg={};
+     const subPathAgg={};
+     const subSubAgg={};
+     Papa.parse(budgetCsvString, {
             header: true,
             skipEmptyLines: true,
             complete: results => {
@@ -109,26 +116,38 @@ function storePath(path, keyStore,value){
                     const tid = row['Treasury Identification Number']?.trim();
                     const tidParse=tid.split('-');
                     const title = row['Title']?.trim();
+                    titleAgg[title] =1;
                     const mandDisc = row['Discretionary or mandatory']?.trim();
                     const majorCat = row['Major spending category']?.trim();
-                    const agency = row['Agency']?.trim();
-                    const bureau = row['Bureau']?.trim();
+                     catAgg[majorCat]=1;
+                    let agency = row['Agency']?.trim();
+                     agencyAgg[agency]=1;
+                    let bureau = row['Bureau']?.trim();
+                    bureau=bureau.replace(/Office of /,'')
+                     bureauAgg[bureau]=1;
                     const func = row['Function']?.trim();
+                     funcAgg[func]=1;
                     const subfunc = row['Subfunction']?.trim();
+                     subfuncAgg[subfunc]=1;
                     const offBudget = row['Off-budget?'] || "on";
                     const subPath = functionCodeToName.get(func) || [func,func];
+                     subPathAgg[subPath]=1;
                     const subSubPath = subfunctionCodeToName.get(subfunc);
+                     subSubAgg[subSubPath]=1;
+                    const tidSplit = tid.split(/-/);
+                    agency = agency.split(/--/)[0]; //DOD has to be different
+                    agency = agency.replace(/Department of (the )*/,' '); // less wordy
                     const path=[
                                 'Budget',
-                            mandDisc,
-                            offBudget,
-                            agency,
-                            bureau,
                             majorCat,
-                            subPath[0],
-                            subPath[1],
+                            subPath,
+                            agency,
+                            subSubPath,
+                            bureau,
+                            mandDisc,
                             title,
-                            tid
+                            offBudget,
+                            ++rowNumber
                     ];
                     const value = parseFloat(row[`${selectedYear}-${selectedType}`]) || 0;
 
@@ -156,6 +175,16 @@ function storePath(path, keyStore,value){
                   });
 
         }});
+        
+     console.log(`titleAgg ${Object.keys(titleAgg).length} = ${Object.keys(titleAgg)}`);
+     console.log(`catAgg ${Object.keys(catAgg).length} = ${Object.keys(catAgg)}`);
+     console.log(`agencyAgg ${Object.keys(agencyAgg).length} = ${Object.keys(agencyAgg)}`);
+     console.log(`bureauAgg ${Object.keys(bureauAgg).length} = ${Object.keys(bureauAgg)}`);
+     console.log(`funcAgg {$Object.keys(funcAgg).length} = ${Object.keys(funcAgg)}`);
+     console.log(`subfuncAgg ${Object.keys(subfuncAgg).length} = ${Object.keys(subfuncAgg)}`);
+     console.log(`subPathAgg ${Object.keys(subPathAgg).length} = ${Object.keys(subPathAgg)}`);
+     console.log(`subSubAgg ${Object.keys(subSubAgg).length} = ${Object.keys(subSubAgg)}`);
+
     BudgetNode.setupModel(); // sets up color
     return BudgetNode.getRoot();
 }
@@ -295,7 +324,7 @@ function renderSunburst(rootNode) {
             .attr('text-anchor', 'middle')
             .text(d => {
                 const name = getName(d) || 'Unknown';
-                return name.length < 20 ? name : name.slice(0, 17) + '...';
+                return name.length < 20 ? name : `${name}`.slice(0, 17) + '...';
             })
             .style('font-size', '12px')
             .style('pointer-events', 'none');
