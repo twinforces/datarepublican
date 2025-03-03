@@ -897,7 +897,7 @@ class DownstreamOther extends Charity
         
         get isVisible() { // we should only draw if our master is visible and we have more grants
         
-                return this.parent.isVisible && (this.grantsIn.length) && (super.isVisible);
+                return this.parent.isVisible && (this.grantsIn.length);
         }
     set isVisible(v) { // javascript gotcha
         super.isVisible=v;
@@ -987,7 +987,7 @@ class UpstreamOther extends Charity
         
          get isVisible() {
         
-                return this.parent.isVisible && (this.grantsIn.length) && (super.isVisible);
+                return this.parent.isVisible && (this.grants.length);
         }
            set isVisible(v) { // javascript gotcha
                 super.isVisible= v;
