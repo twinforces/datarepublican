@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741018182">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741018182">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741018519">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741018519">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -2025,6 +2025,10 @@ function zoomToFitAll() {
     );
 }
 
+// Call the overlap prevention after the simulation has stabilized
+simulation.on('end', preventLabelOverlaps);
+
+// Update the ticked function to occasionally prevent overlaps
 function ticked() {
   // Update node positions
   nodeElements.attr('transform', d => {
@@ -2067,17 +2071,30 @@ function ticked() {
     
     if (!sourcePoint || !targetPoint) return '';
     
-    // Add a slight curve to the path to make overlapping paths more visible
-    const dx = targetPoint.x - sourcePoint.x;
-    const dy = targetPoint.y - sourcePoint.y;
-    const dr = Math.sqrt(dx * dx + dy * dy) * 1.2;
+    // Create orthogonal (right-angled) paths
+    // Determine if the path should go horizontally first or vertically first
+    const dx = Math.abs(targetPoint.x - sourcePoint.x);
+    const dy = Math.abs(targetPoint.y - sourcePoint.y);
     
-    // Use curved paths for better visibility when there are multiple edges
-    return `M${sourcePoint.x},${sourcePoint.y} A${dr},${dr} 0 0,1 ${targetPoint.x},${targetPoint.y}`;
+    // If nodes are more separated horizontally than vertically, go horizontal first
+    if (dx > dy) {
+      const midX = sourcePoint.x + (targetPoint.x - sourcePoint.x) / 2;
+      return `M${sourcePoint.x},${sourcePoint.y} 
+              L${midX},${sourcePoint.y} 
+              L${midX},${targetPoint.y} 
+              L${targetPoint.x},${targetPoint.y}`;
+    } else {
+      // Otherwise go vertical first
+      const midY = sourcePoint.y + (targetPoint.y - sourcePoint.y) / 2;
+      return `M${sourcePoint.x},${sourcePoint.y} 
+              L${sourcePoint.x},${midY} 
+              L${targetPoint.x},${midY} 
+              L${targetPoint.x},${targetPoint.y}`;
+    }
   });
   
-  // Update label positions
-  labelElements.attr('transform', d => {
+  // Update label positions with collision detection
+  labelElements.attr('transform', function(d) {
     const path = linkElements.filter(l => l === d).node();
     if (!path) return '';
     
@@ -2086,6 +2103,11 @@ function ticked() {
     
     // Position label at the midpoint of the path
     const midPoint = path.getPointAtLength(pathLength / 2);
+    
+    // Store the midpoint for collision detection
+    d.labelX = midPoint.x;
+    d.labelY = midPoint.y;
+    
     return `translate(${midPoint.x}, ${midPoint.y})`;
   });
   
@@ -2114,6 +2136,11 @@ function ticked() {
       .attr('width', maxX - minX + padding.x * 2)
       .attr('height', maxY - minY + padding.y * 2);
   });
+  
+  // Occasionally prevent label overlaps during simulation
+  if (Math.random() < 0.1) {
+    preventLabelOverlaps();
+  }
 }
 
 function dragStarted(event, d) {
@@ -2232,6 +2259,90 @@ function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
   const y = y1 + ua * (y2 - y1);
   
   return { x, y };
+}
+
+// After positioning all labels, adjust positions to prevent overlaps
+function preventLabelOverlaps() {
+  const labels = labelElements.nodes();
+  const labelData = labelElements.data();
+  
+  // Create a quadtree for efficient collision detection
+  const quadtree = d3.quadtree()
+    .x(d => d.labelX)
+    .y(d => d.labelY)
+    .addAll(labelData);
+  
+  // For each label, check for overlaps and adjust position
+  labelElements.each(function(d, i) {
+    const labelGroup = d3.select(this);
+    const labelBg = labelGroup.select('.label-bg').node();
+    if (!labelBg) return;
+    
+    const bbox = labelBg.getBBox();
+    const padding = 10; // Extra space between labels
+    
+    // Define the bounds of this label
+    const x0 = d.labelX + bbox.x - padding;
+    const y0 = d.labelY + bbox.y - padding;
+    const x1 = d.labelX + bbox.x + bbox.width + padding;
+    const y1 = d.labelY + bbox.y + bbox.height + padding;
+    
+    // Find nearby labels that might overlap
+    quadtree.visit((node, x1q, y1q, x2q, y2q) => {
+      if (!node.length) {
+        do {
+          const d2 = node.data;
+          if (d2 && d2 !== d && labelOverlap(d, d2, bbox, padding)) {
+            // Adjust position to avoid overlap
+            adjustLabelPosition(d, d2);
+          }
+        } while (node = node.next);
+      }
+      return x1q > x1 || y1q > y1 || x2q < x0 || y2q < y0;
+    });
+    
+    // Update the transform with the potentially adjusted position
+    labelGroup.attr('transform', `translate(${d.labelX}, ${d.labelY})`);
+  });
+}
+
+// Check if two labels overlap
+function labelOverlap(d1, d2, bbox, padding) {
+  // Find the index of d2 in the data array
+  const d2Index = labelElements.data().indexOf(d2);
+  const labelGroup2 = d3.select(labelElements.nodes()[d2Index]);
+  const labelBg2 = labelGroup2.select('.label-bg').node();
+  if (!labelBg2) return false;
+  
+  const bbox2 = labelBg2.getBBox();
+  
+  // Check for rectangle overlap
+  return !(
+    d1.labelX + bbox.x + bbox.width + padding < d2.labelX + bbox2.x ||
+    d1.labelX + bbox.x > d2.labelX + bbox2.x + bbox2.width + padding ||
+    d1.labelY + bbox.y + bbox.height + padding < d2.labelY + bbox2.y ||
+    d1.labelY + bbox.y > d2.labelY + bbox2.y + bbox2.height + padding
+  );
+}
+
+// Adjust label position to avoid overlap
+function adjustLabelPosition(d1, d2) {
+  // Calculate vector between labels
+  const dx = d2.labelX - d1.labelX;
+  const dy = d2.labelY - d1.labelY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  if (distance < 1) {
+    // If labels are at the same position, move in a random direction
+    const angle = Math.random() * Math.PI * 2;
+    d1.labelX += Math.cos(angle) * 30;
+    d1.labelY += Math.sin(angle) * 30;
+  } else {
+    // Move away from the other label
+    const moveDistance = 30; // Distance to move
+    d1.labelX -= (dx / distance) * moveDistance;
+    d1.labelY -= (dy / distance) * moveDistance;
+  }
 }
 </script>
 
