@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741045845">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741045845">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741046045">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741046045">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -3689,27 +3689,11 @@ function getNodeLayer(nodeId, edgesParam) {
   return 3; // Everything else is layer 3 or beyond
 }
 
-// Add text to labels
-labelElements.append('text')
-  .attr('class', 'link-label')
-  .attr('text-anchor', 'middle')
-  .attr('dominant-baseline', 'middle')
-  .attr('fill', '#374151')
-  .style('pointer-events', 'none')
-  .style('font-size', '12px')
-  .style('font-weight', 'bold')
-  .text(function(d) {
-    // For "Son of" relationships, highlight them with a special format
-    if (d.label && (d.label.includes("Son of") || d.label.includes("Child of") || 
-                    d.label.includes("Parent of") || d.label.includes("Father of") || 
-                    d.label.includes("Mother of"))) {
-      return d.label;
-    }
-    return d.label || '';
-  });
+
 </script>
 </body>
 </html>
+
     </main>
     
 <div class="flex justify-center">
