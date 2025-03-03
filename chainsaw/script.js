@@ -147,20 +147,16 @@ function storePath(path, keyStore,value){
                     }
 
                     const key = path.join('/');
-                    if (results[key]) 
-                            results[key] += value;
-                    else
-                            results[key] = value;
                     resultsArr.push({
                             key,
                             path,
                             value
                     });
                     BudgetNode.addPathToRoot(path, tid, value);
-                });
+                  });
 
         }});
-
+    BudgetNode.setupModel(); // sets up color
     return BudgetNode.getRoot();
 }
 
@@ -176,166 +172,34 @@ function formatNumber(value) {
     }
 }
 
-
-// Generate a color palette for your agencies
-function generateColors(n) {
-    const colors = [];
-    for (let i = 0; i < n; i++) {
-        const hue = (i * 360 / n) % 360;
-        colors.push(`hsl(${hue}, 70%, 50%)`);
-    }
-    return colors;
-}
-
-
-function renderSunburst(rootNode) {
-    // Constants for layout
-    const width = 800;           // SVG width and height
-    const radius = width / 2;    // Radius of the sunburst
-    const agencyDepth = 4;       // Depth where agencies are (adjust if needed)
-
-    // Helper to generate distinct colors for agencies
-    function generateColors(n) {
-        const colors = [];
-        for (let i = 0; i < n; i++) {
-            const hue = (i * 360 / n) % 360;
-            colors.push(`hsl(${hue}, 70%, 50%)`);
-        }
-        return colors;
-    }
-
-    // Set up the SVG
-    const svg = d3.select('#sunburst')
-        .html('')                             // Clear any existing content
-        .attr('width', width)
-        .attr('height', width)
-        .append('g')
-        .attr('transform', `translate(${width / 2},${width / 2})`);
-
-    // Build the hierarchy from BudgetNode
-    const root = d3.hierarchy(rootNode, d => d.children)  // Use children getter
-        .sum(d => Math.abs(d.value || 0))                 // Absolute values for full circle
-        .sort((a, b) => b.value - a.value);               // Sort for better layout
-
-console.log('Root name:', root.data.name);
-if (root.children) {
-    console.log('First child name:', root.children[0].data.name);
-}
-
-  // Collect unique agency names at agencyDepth for coloring
-    const agencies = new Set();
-    root.each(d => {
-        if (d.depth === agencyDepth) agencies.add(d.data.name);
-    });
-    const colorPalette = generateColors(agencies.size);
-    const color = d3.scaleOrdinal()
-        .domain(Array.from(agencies))
-        .range(colorPalette);
-
-    // Set up the partition layout
-    const partition = d3.partition()
-        .size([2 * Math.PI, radius * radius]);
-    partition(root);
-
-    // Define the arc generator
-    const arc = d3.arc()
-        .startAngle(d => d.x0)
-        .endAngle(d => d.x1)
-        .innerRadius(d => Math.sqrt(d.y0))
-        .outerRadius(d => Math.sqrt(d.y1));
-
-function averageColors(colors) {
-    let r = 0, g = 0, b = 0;
-    colors.forEach(color => {
-        const rgb = d3.color(color).rgb();
-        r += rgb.r;
-        g += rgb.g;
-        b += rgb.b;
-    });
-    const count = colors.length;
-    r = Math.round(r / count);
-    g = Math.round(g / count);
-    b = Math.round(b / count);
-    return `rgb(${r},${g},${b})`;
-}
 function getName(d) {
-    if (d.name) return d.name;                    // Direct name (unlikely in D3 hierarchy)
-    if (d.data && d.data.name) return d.data.name; // Standard D3 hierarchy
-    if (d.data && d.data.data && d.data.data.name) return d.data.data.name; // Nested data
-    return 'unknown';                            // Fallback
+        let start = d;
+        let recCount=0;
+        while (start && !start.name && start.data)
+        {
+                start=start.data; // recurse down
+                if (start.name)
+                    return start.name;
+                recCount++; // depth;
+        
+        }
+        return (start && start.name) || `unknown ${recCount}`;
+}
+function getColor(d) {
+        let start = d;
+        let recCount=0;
+        while (start && !start.color && start.data)
+        {
+                start=start.data; // recurse down
+                if (start.color)
+                    return start.color;
+                recCount++; // depth;
+        
+        }
+        return (start && start.color) || "pink";
 }
 
-function calcColor(d) {
-    if (d.depth >= agencyDepth) {
-        const agencyAncestor = d.ancestors().find(a => a.depth === agencyDepth);
-        const agencyName = agencyAncestor ? getName(agencyAncestor) : 'default';
-        const agencyColor = color(agencyName);
-        return d3.interpolate(agencyColor, '#fff')(0.2 * (d.depth - agencyDepth));
-    } else {
-        const descendantAgencies = d.descendants().filter(desc => desc.depth === agencyDepth);
-        if (descendantAgencies.length === 0) return '#ccc';
-        const agencyColors = descendantAgencies.map(agency => color(getName(agency)));
-        return averageColors(agencyColors);
-    }
-}
 
-function update() {
-    const descendants = root.descendants().filter(d => (d.x1 - d.x0) > 0.05 && d.value > 0);
-    const labelData = descendants; // Adjust filtering if needed
-
-    // Paths (with color fix)
-    svg.selectAll('path')
-        .data(descendants, d => (d.name || 'unknown') + d.depth)
-        .join('path')
-        .attr('d', arc)
-        .attr('fill', calcColor)
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 1)
-        .on('click', clicked);
-
-        // Labels (with error fix)
-    svg.selectAll('text')
-        .data(labelData, d => (d.name || d.data.name || d.data.data.name || 'unknown') + d.depth)
-        .join('text')
-        .attr('transform', d => {
-            const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
-            const y = (Math.sqrt(d.y0) + Math.sqrt(d.y1)) / 2;
-            return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
-        })
-        .attr('dy', '0.35em')
-        .attr('text-anchor', 'middle')
-        .text(d => {
-            const name = d.name || d.data.name || d.data.name || 'Unknown';
-            return name.length < 20 ? name : name.slice(0, 17) + '...';
-        })
-        .style('font-size', '12px')
-        .style('pointer-events', 'none');
-}
-    // Click handler for zooming
-    function clicked(event, p) {
-        const focusedRoot = p === root ? root : d3.hierarchy(p, d => d.children)
-            .sum(d => Math.abs(d.value || 0))
-            .sort((a, b) => b.value - a.value);
-        partition(focusedRoot);
-
-        // Animate the arcs
-        svg.selectAll('path')
-            .transition()
-            .duration(750)
-            .attrTween('d', d => {
-                const match = focusedRoot.descendants().find(f => f.name === d.data.name && f.depth === d.depth);
-                if (!match) return () => arc(d);
-                const interpolate = d3.interpolate({ x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 }, match);
-                return t => arc(interpolate(t));
-            });
-
-        // Update the view after animation
-        setTimeout(() => update(focusedRoot), 750);
-    }
-
-    // Render the initial view
-    update(root);
-}
 
 
 function showYearPopup() {
@@ -368,6 +232,101 @@ function statusUpdate(message) {
 
 function gel(id) {
         return document.getElementById(id)
+}
+
+function renderSunburst(rootNode) {
+    const width = 800;
+    const radius = width / 2;
+
+    // Initialize SVG
+    const svg = d3.select('#sunburst')
+        .html('')
+        .attr('width', width)
+        .attr('height', width)
+        .append('g')
+        .attr('transform', `translate(${width / 2},${width / 2})`);
+
+    // Build hierarchy
+    const root = d3.hierarchy(rootNode, d => d.children)
+        .sum(d => d.value || 0)
+        .sort((a, b) => b.value - a.value);
+
+    // Define partition layout
+    const partition = d3.partition()
+        .size([2 * Math.PI, radius * radius]);
+    partition(root);
+
+    // Define arc generator
+    const arc = d3.arc()
+        .startAngle(d => d.x0)
+        .endAngle(d => d.x1)
+        .innerRadius(d => Math.sqrt(d.y0))
+        .outerRadius(d => Math.sqrt(d.y1));
+
+    // Update function to render the visualization
+    function update(focus) {
+        const descendants = focus.descendants().filter(d => d.depth > 0 && d.value > 0);
+
+        // Render paths (arcs)
+      svg.selectAll("path")
+          .data(root.descendants().filter(d => d.value > 0))
+          .enter()
+          .append("path")
+          .attr("d", d3.arc()
+            .startAngle(d => d.x0)
+            .endAngle(d => d.x1)
+            .innerRadius(d => Math.sqrt(d.y0))
+            .outerRadius(d => Math.sqrt(d.y1)))
+          .attr("fill", d => d.data.color)
+          .append("title")
+              .text(d => `${d.data.id}: ${formatNumber(d.value)}`);
+
+        const fdescendants = focus.descendants().filter(d => d.depth > 0 && (d.x1 - d.x0) > 0.05 && d.value > 0);
+        // Render labels
+        svg.selectAll('text')
+            .data(fdescendants, d => d.data.path.join('/') || 'root') // Same unique key
+            .join('text')
+            .attr('transform', d => {
+                const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+                const y = (Math.sqrt(d.y0) + Math.sqrt(d.y1)) / 2;
+                return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+            })
+            .attr('dy', '0.35em')
+            .attr('text-anchor', 'middle')
+            .text(d => {
+                const name = getName(d) || 'Unknown';
+                return name.length < 20 ? name : name.slice(0, 17) + '...';
+            })
+            .style('font-size', '12px')
+            .style('pointer-events', 'none');
+    }
+
+    // Click handler
+    function clicked(event, p) {
+        // If clicking the current root, reset to original root; otherwise, focus on clicked node
+        const focusedRoot = p === root ? root : d3.hierarchy(p.data, d => d.children)
+            .sum(d => Math.abs(d.value || 0))
+            .sort((a, b) => b.value - a.value);
+        partition(focusedRoot);
+
+        // Transition paths
+        svg.selectAll('path')
+            .transition()
+            .duration(750)
+            .attrTween('d', d => {
+                // Find matching node in new hierarchy by path
+                const match = focusedRoot.descendants().find(f => f.data.path.join('/') === d.data.path.join('/'));
+                if (!match) return () => arc(d); // Keep current arc if no match
+                const interpolate = d3.interpolate({ x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 }, match);
+                return t => arc(interpolate(t));
+            });
+
+        // Update visualization after transition
+        setTimeout(() => update(focusedRoot), 750);
+    }
+
+    // Initial render
+    update(root);
 }
 
 async function render(budgetText, functionSubfunctionText, selectedYear, selectedType) {
