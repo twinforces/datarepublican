@@ -130,18 +130,28 @@
     }
 
     //useful for the sankey which doesn't know its values are scaled
+    //ok, so the problems is that sqrt(a)+sqrt(b) != sqrt(a+b)
+    // so what we have to do is return the size based on the visible grants only
+    // unless there aren't any, in which case logGrantsTotal is fine as a placeholder.
+    // this means the trapezoid will change as flows are revealed, but they'll match the trap
     get grantsLogTotal() {
-        const cacheKey = `grantsLogTotal-${POWER_LAW}`;
+        const vgrants = this.visibleGrants;
+        const cacheKey = `grantsLogTotal-${POWER_LAW}-${vgrants.length}`;
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
-        return this._valueCache[cacheKey]=this.grants.reduce((total, g) => total + g.value, 0);
+        if (vgrants.length)            
+                return this._valueCache[cacheKey]= vgrants.reduce((total, g) => total + g.value, 0);
+        return this.logGrantsTotal;
     }
 
     get grantsInLogTotal() {
-        const cacheKey = `grantsInLogTotal-${POWER_LAW}`;
+        const vgrants = this.visibleGrantsIn;
+        const cacheKey = `grantsInLogTotal-${POWER_LAW}-${vgrants.length}`;
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
-        return this._valueCache[cacheKey]=this.grantsIn.reduce((total, g) => total + g.value, 0);
+        if (vgrants.length)            
+                return this._valueCache[cacheKey]= vgrants.reduce((total, g) => total + g.value, 0);
+        return this.logGrantsInTotal;
     }
 
     get grantsTotal() {
@@ -198,6 +208,19 @@
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
         return this._valueCache[cacheKey]=   this.grants.filter(g => !g.isVisible);
+    }
+   get visibleGrantsIn() {
+        const cacheKey = `visibleGrantsIn`;
+        if (this._valueCache[cacheKey])
+                return this._valueCache[cacheKey];
+        return this._valueCache[cacheKey]=  this.grantsIn.filter(g => g.isVisible);
+    }
+
+    get invisibleGrantsIn() {
+        const cacheKey = `invisibleGrantsIn`;
+        if (this._valueCache[cacheKey])
+                return this._valueCache[cacheKey];
+        return this._valueCache[cacheKey]=   this.grantsIn.filter(g => !g.isVisible);
     }
     
     set isOrganized(value) {
@@ -965,7 +988,7 @@ class UpstreamOther extends Charity
                 // if we're visible, we have to have somewhere to draw from/to.
                   this.filer.isVisible = v;
                   this.grantee.isVisible = v;
-                }
+               }
                 this.disorganize();
         
         }
