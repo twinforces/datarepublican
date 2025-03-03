@@ -313,14 +313,14 @@ let globalActiveCategories = new Set(); // which categories are currently on dis
 
 // Force simulation parameters
 const forceParams = {
-  linkDistance: 600,     // Increased from 400
-  charge: -5000,         // Increased from -3000
-  collisionRadius: 300,  // Increased from 200
+  linkDistance: 1200,     // Doubled from 600
+  charge: -10000,         // Doubled from -5000
+  collisionRadius: 500,   // Increased from 300
   bounds: {
-    left: 150,
-    right: 150,
-    top: 150,
-    bottom: 150
+    left: 300,
+    right: 300,
+    top: 300,
+    bottom: 300
   }
 };
 
@@ -724,7 +724,7 @@ async function renderGraphForSubject(subjectName) {
     }
     // Add a title for the summary
     $('#rootSummary').html(`
-      <h3 class="font-bold mb-2 text-navy">${escapeHtml(subjectName)}</h3>
+      <h3 class="font-bold mt-0 mb-2 text-navy">${escapeHtml(subjectName)}</h3>
       ${rootSummaryHtml.join('')}
     `);
     
@@ -1128,7 +1128,7 @@ function initializeD3Graph() {
   
   // Set the SVG viewBox to cover the entire container
   d3.select('#graph')
-    .attr('viewBox', `${-width/2} ${-height/2} ${width} ${height}`)
+    .attr('viewBox', `${-width/1.5} ${-height/1.5} ${width*1.5} ${height*1.5}`)
     .attr('preserveAspectRatio', 'xMidYMid meet');
   
   // Initialize zoom behavior
@@ -1154,7 +1154,7 @@ function resetZoom() {
   // Center the graph with an appropriate scale
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(0, 0).scale(0.8)
+    d3.zoomIdentity.translate(0, 0).scale(0.5) // More zoomed out to see the entire graph
   );
 }
 
@@ -1187,7 +1187,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Reset zoom and pan with centered graph
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(0, 0).scale(0.8) // Center at origin
+    d3.zoomIdentity.translate(0, 0).scale(0.5) // More zoomed out to see the entire graph
   );
   
   // Create the graph content group with initial transform
@@ -1546,44 +1546,23 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .force('link', d3.forceLink()
       .links(validEdges)
       .id(d => d.id)
-      .distance(d => {
-        try {
-          // Get source and target nodes
-          const sourceNode = d.source;
-          const targetNode = d.target;
-          
-          if (!sourceNode || !targetNode) {
-            console.warn("Missing node in link distance calculation");
-            return forceParams.linkDistance * 1.5; // Moderately increased distance
-          }
-          
-          const sourceSize = Math.sqrt(getNodeWidth(sourceNode) * getNodeHeight(sourceNode));
-          const targetSize = Math.sqrt(getNodeWidth(targetNode) * getNodeHeight(targetNode));
-          
-          // Base distance on node sizes plus padding - increased for better spacing
-          return (sourceSize + targetSize) / 2 + forceParams.linkDistance;
-        } catch (error) {
-          console.error("Error in link distance calculation:", error, d);
-          return forceParams.linkDistance * 1.5; // Moderately increased default distance
-        }
-      })
-    )
+      .distance(forceParams.linkDistance * 2)) // Double the link distance
     .force('charge', d3.forceManyBody()
       .strength(d => {
         // Stronger repulsion for structured layout
         const nodeSize = Math.sqrt(getNodeWidth(d) * getNodeHeight(d));
-        return forceParams.charge * (nodeSize / 200) * 1.5; // Moderately increased repulsion
+        return forceParams.charge * (nodeSize / 200) * 2.5; // Significantly increased repulsion
       })
-      .distanceMin(300) // Further increased minimum distance
-      .distanceMax(3000)) // Further increased maximum distance
+      .distanceMin(400) // Increased minimum distance
+      .distanceMax(5000)) // Increased maximum distance
     .force('x', d3.forceX(0).strength(0.2)) // Center nodes horizontally at origin
     .force('y', d3.forceY(0).strength(0.2)) // Center nodes vertically at origin
     .force('collision', d3.forceCollide().radius(d => {
       // Make collision radius based on node size plus padding
       const nodeWidth = getNodeWidth(d);
       const nodeHeight = getNodeHeight(d);
-      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 100; // Increased padding significantly
-    }).strength(0.8))
+      return Math.sqrt(nodeWidth * nodeHeight) / 1.2 + 200; // Significantly increased padding
+    }).strength(1))
     .alpha(0.8) // Higher alpha for more movement
     .alphaDecay(0.01) // Slower decay for more time to find optimal positions
     .velocityDecay(0.4)
@@ -1611,7 +1590,7 @@ function centerGraph() {
     // Update the zoom transform to center the graph
     d3.select('#graph').call(
       zoom.transform,
-      d3.zoomIdentity.translate(translateX, translateY).scale(0.8)
+      d3.zoomIdentity.translate(translateX, translateY).scale(0.5)
     );
     
     console.log('Graph centered based on actual bounds:', { 
@@ -1699,13 +1678,13 @@ function ticked() {
         // Create path with more segments to avoid running behind nodes
         let path = '';
         
-        // Add a small offset to ensure arrows don't touch nodes
-        const arrowOffset = 10;
+        // Remove the offset to ensure lines connect directly to nodes without gaps
+        const arrowOffset = 0;
         
-        // Adjust target point to account for arrow
+        // Adjust target point to account for arrow - no offset to avoid gaps
         const targetPointWithOffset = {
-          x: targetPoint.x + (sourcePoint.x > targetPoint.x ? arrowOffset : -arrowOffset),
-          y: targetPoint.y + (sourcePoint.y > targetPoint.y ? arrowOffset : -arrowOffset)
+          x: targetPoint.x,
+          y: targetPoint.y
         };
         
         if (isHorizontal) {
@@ -1778,15 +1757,15 @@ function ticked() {
                 const midX = (source.x + target.x) / 2;
                 midY = source.y + (target.y - source.y) / 2;
                 
-                // Offset the label to avoid overlapping with the path
-                midY += (source.y > target.y) ? -20 : 20;
+                // Increase offset to avoid overlap
+                midY += (source.y > target.y) ? -40 : 40;
               } else {
                 // For vertical paths, position label to the left or right of the middle segment
                 midX = source.x + (target.x - source.x) / 2;
                 const midY = (source.y + target.y) / 2;
                 
-                // Offset the label to avoid overlapping with the path
-                midX += (source.x > target.x) ? -20 : 20;
+                // Increase offset to avoid overlap
+                midX += (source.x > target.x) ? -40 : 40;
               }
             }
           } else {
