@@ -2474,11 +2474,13 @@ function preventLabelOverlaps() {
     // First collect all node rectangles for overlap checking
     const nodeRects = [];
     nodeElements.each(function(d) {
+      // Add extra padding around nodes
+      const extraPadding = 40;
       nodeRects.push({
-        x: d.x - getNodeWidth(d) / 2,
-        y: d.y - getNodeHeight(d) / 2,
-        width: getNodeWidth(d),
-        height: getNodeHeight(d),
+        x: d.x - getNodeWidth(d) / 2 - extraPadding,
+        y: d.y - getNodeHeight(d) / 2 - extraPadding,
+        width: getNodeWidth(d) + extraPadding * 2,
+        height: getNodeHeight(d) + extraPadding * 2,
         id: d.id,
         type: 'node',
         center: { x: d.x, y: d.y }
@@ -2525,16 +2527,15 @@ function preventLabelOverlaps() {
     });
     
     // Process each label to avoid overlaps
-    for (let i = 0; i < labelRects.length; i++) {
-      const labelRect = labelRects[i];
+    for (const labelRect of labelRects) {
       let hasOverlap = true;
       let attempts = 0;
-      const maxAttempts = 10; // Limit repositioning attempts
+      const maxAttempts = 12; // Increased from default
       
-      // Try to find a position without overlaps
       while (hasOverlap && attempts < maxAttempts) {
         hasOverlap = false;
         attempts++;
+        
         
         // Check for overlaps with nodes
         for (const nodeRect of nodeRects) {
@@ -2570,11 +2571,14 @@ function preventLabelOverlaps() {
             const midX = (sourceCenter.x + targetCenter.x) / 2;
             const midY = (sourceCenter.y + targetCenter.y) / 2;
             
-            // Calculate distance to place label
-            const distance = Math.max(labelRect.width, labelRect.height) * 1.5;
+            // Calculate distance to place label - increased for more spacing
+            const baseDistance = Math.max(labelRect.width, labelRect.height) * 2;
+            const distance = baseDistance + (attempts * 20); // Gradually increase distance with each attempt
             
-            // Try different angles
-            const angle = (Math.PI * 2 * attempts) / maxAttempts;
+            // Try different angles with slight randomization
+            const angleStep = (Math.PI * 2) / maxAttempts;
+            const angle = angleStep * attempts + (Math.random() * 0.2 - 0.1);
+            
             labelRect.x = midX + Math.cos(angle) * distance - labelRect.width / 2;
             labelRect.y = midY + Math.sin(angle) * distance - labelRect.height / 2;
           }
@@ -2598,8 +2602,8 @@ function preventLabelOverlaps() {
 
 // Helper function to check if two rectangles overlap
 function rectsOverlap(rect1, rect2) {
-  // Add a buffer zone to ensure labels don't touch
-  const buffer = 25; // Increased buffer
+  // Add a larger buffer zone to ensure labels don't touch
+  const buffer = 35; // Increased from 25
   
   return !(
     rect1.x + rect1.width + buffer < rect2.x ||
