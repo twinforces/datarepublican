@@ -725,22 +725,12 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
         if (event.controlKey) {
             generateGraph();
         } else if (d.isOther === true) {
-            if (!d.handleClick(event))
-            {
-                Charity.addToHideList(d.id);
-                updateQueryParams();
-                renderHideEINs();
-            }
-            else
-            {
-                Charity.removeFromHideList(d.id);
-                updateQueryParams();
-                renderHideEINs();
-            }
-            renderFocusedSankey(g, sankey, svgRef, width, height, null);
+                const result=d.handleClick(event);
+                updateQueryParams(); // get new counts for the visible EINs
+                renderFocusedSankey(g, sankey, svgRef, width, height, null);
         } else {
             console.log(`Expanding node: ${d.filer_ein}`);
-            if (!d.handleClick(event))
+            if (!d.handleClick(event)) //handle click returns false for nodes we hide
             {
                 Charity.addToHideList(d.id);
                 renderHideEINs()            
