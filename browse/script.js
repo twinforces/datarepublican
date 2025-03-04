@@ -616,6 +616,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
     currentData = Charity.buildSankeyData();
 
     const graph = sankey(currentData);
+    
+
     const scale = calculateScale(graph, width, height);
     calculateNodePositions(graph.nodes, scale, height);
     normalizeStrokeWidths(graph);
@@ -810,6 +812,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
                 renderFocusedSankey(g, sankey, svgRef, width, height, [selectedNodeId]);
             }
         });
+    Charity.cleanAfterRender(currentData); // restore grants to their original values
 
 }
 
