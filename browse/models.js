@@ -5,6 +5,7 @@
  const NEXT_REVEAL = 1;
  const NEXT_REVEAL_MAX = 15;
  const GOV_EIN = '001';
+ const MAX_NODES = 100;
  let GOV_NODE = null; // for easier debugging
  
  function graphScaleDown()
@@ -588,7 +589,6 @@
     if (e.metaKey || this.isTerminal) {
         console.log(`Hiding ${this.id} ${this.name}`);
         this.hide();
-        Charity.addToHideList(this.id);
         return false;
     }
     if (this.expanded || e.shiftKey) {
@@ -703,14 +703,12 @@
     
     show() {
         this.isVisible=true;
-        //this.grants.forEach(g=> g.isVisible=true);
-        //this.grantsIn.forEach(g=> g.isVisible=false);
+        Charity.removeFromHideList(this.id);
     }
     
     hide() {
         this.isVisible=false;
-        //this.grants.forEach(g=> g.isVisible=false);
-        //this.grantsIn.forEach(g=> g.isVisible=false);
+        Charity.addToHideList(this.id);
     }
     
     /**
@@ -773,7 +771,7 @@
         Charity.setHideList(params.getAll('nein'));
         URLList.forEach(ein => {
                 const id = ein.split(':')[0];
-                if (!Charity.shouldHide(id))
+                if (!Charity.shouldHide(id) && ! Charity.getCharity(ein)?.isVisible)
                         Charity.placeNode(ein);
                 
         });
@@ -826,7 +824,8 @@
         const c = Charity.getCharity(splits[0]);
         if (c) {
         
-                c.place(splits[1],splits[2]);
+                if(!c.isVisible)
+                        c.place(splits[1],splits[2]);
                 
         }
         else
@@ -851,6 +850,17 @@
             Charity.matchURL();
             data.links = Grant.visibleGrants(); // All visible grants
             data.nodes = Charity.visibleCharities(); // All visible nodes
+            if (data.nodes.length > MAX_NODES)
+            {
+                updateStatus("Too Many Nodes, reducing");
+                Charity.visibleCharities()
+                .sort((a,b) =>
+                        (b.grantTotal+b.grantInTotal)-
+                        (a.grantTotal-b.grantInTotal)
+                ).slice(MAX_NODES).forEach(c=> c.isVisible=false);
+                data.nodes = Charity.visibleCharities();
+                data.links = Grant.visibleGrants();
+             }
     
              console.log(`Nodes: ${data.nodes.length}, Links: ${data.links.length}`);
             // Optional: Check for duplicate links
