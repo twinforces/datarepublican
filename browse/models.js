@@ -53,6 +53,9 @@
     static visibleCharities() {
         return Object.values(Charity.charityLookup).filter(g => g.isVisible);
     }
+   static invisibleCharities() {
+        return Object.values(Charity.charityLookup).filter(g => !g.isVisible);
+    }
 
     static getCharityCount() {
         return Object.keys(Charity.charityLookup).length;
@@ -442,11 +445,17 @@
         
         
     }
-
     /*
       for now, we simply hide any grant that circles back into a charities upstream
     */
-static findCircularGrants() {
+ static async findCircularGrants() {
+
+
+        function formatSimpleNumber(num) {
+            return num.toLocaleString();
+        }
+
+    // Initialize data structures
     const visited = new Set();
     const onStack = new Set();
     const cycleGrants = new Set();
@@ -454,76 +463,106 @@ static findCircularGrants() {
     let charitiesWithBadGrants = 0;
     let obviousCirclesCount = 0;
 
-    // Step 1: Detect obvious circular grants
-    Object.values(Charity.charityLookup).forEach(c => {
-        const obviousCircles = c.simpleCircular();
+    // Step 1: Handle obvious circular grants (fast pre-check)
+    Object.values(Charity.charityLookup).forEach(charity => {
+        const obviousCircles = charity.simpleCircular(); // Assumes this method exists
         obviousCirclesCount += obviousCircles.length;
         if (obviousCircles.length) charitiesWithBadGrants++;
-        obviousCircles.forEach(g => {
-            g.isCircular = true;
-            cycleGrants.add(g); // Include in cycleGrants for consistency
+        obviousCircles.forEach(grant => {
+            grant.isCircular = true;
+            cycleGrants.add(grant);
         });
     });
     console.log(`${obviousCirclesCount} obvious circular grants found`);
     updateStatus(`${obviousCirclesCount} obvious circular grants found`);
 
+    // Step 2: Deep cycle detection with chunking
     updateStatus("...Finding Deep Loopback Grants...");
 
-    // Step 2: Stack-based DFS with array indices
+    // Calculate total grants for progress tracking
+    const totalGrants = Object.values(Charity.charityLookup).reduce(
+        (sum, charity) => sum + charity.grants.length,
+        0
+    );
+    let processedGrants = 0;
+    const CHUNK_SIZE = 1000; // Number of grants per chunk; adjust as needed
+
+    // Process each unvisited charity as a starting point
     for (const [startId, startCharity] of Object.entries(Charity.charityLookup)) {
         if (visited.has(startId)) continue;
 
-        const stack = [{ charity: startCharity, grantIndex: 0, parentGrant: null }];
+        // Initialize stack for DFS
+        let stack = [{ charity: startCharity, grantIndex: 0, parentGrant: null }];
 
         while (stack.length > 0) {
-            const top = stack[stack.length - 1];
-            const { charity, grantIndex } = top;
-            const charityId = charity.id;
+            let grantCounter = 0;
 
-            if (!visited.has(charityId)) {
-                visited.add(charityId);
-                onStack.add(charityId);
+            // Process up to CHUNK_SIZE grants
+            while (stack.length > 0 && grantCounter < CHUNK_SIZE) {
+                const top = stack[stack.length - 1];
+                const { charity, grantIndex } = top;
+                const grants = charity.grants || [];
+
+                if (grantIndex < grants.length) {
+                    const grant = grants[grantIndex];
+                    const grantee = grant.grantee;
+                    const granteeId = grantee.id;
+
+                    top.grantIndex++; // Move to next grant in next iteration
+
+                    if (onStack.has(granteeId)) {
+                        // Cycle detected
+                        cycleGrants.add(grant);
+                        grant.isCircular = true;
+                    } else if (!visited.has(granteeId)) {
+                        // Explore new node
+                        visited.add(granteeId);
+                        onStack.add(granteeId);
+                        stack.push({ charity: grantee, grantIndex: 0, parentGrant: grant });
+                    }
+                } else {
+                    // Done with this charity’s grants
+                    stack.pop();
+                    onStack.delete(charity.id);
+                }
+
+                grantCounter++;
+                processedGrants++;
             }
 
-            const grants = charity.grants || [];
-            if (grantIndex < grants.length) {
-                const grant = grants[grantIndex];
-                const grantee = grant.grantee;
-                const granteeId = grantee.id;
-
-                top.grantIndex++; // Move to next grant
-
-                if (onStack.has(granteeId)) {
-                    cycleGrants.add(grant);
-                    grant.isCircular = true; // Mark immediately
-                } else if (!visited.has(granteeId)) {
-                    stack.push({ charity: grantee, grantIndex: 0, parentGrant: grant });
-                }
-            } else {
-                stack.pop();
-                onStack.delete(charityId);
+            // If more work remains, yield and update progress
+            if (stack.length > 0) {
+                updateStatus(
+                    `Processing: ${Math.round((processedGrants / totalGrants) * 100)}% complete`
+                );
+                await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
     }
 
-    // Step 3: Final stats update
+    // Step 3: Final stats and cleanup
     Object.values(Charity.charityLookup).forEach(charity => {
         let hasBadGrants = false;
         charity.grants.forEach(grant => {
             if (cycleGrants.has(grant)) {
                 hasBadGrants = true;
+                badTotal += grant.amt; // Assumes grant.amt is the amount
             }
-            badTotal += grant.amt; // Accumulate total even for non-circular grants
         });
         if (hasBadGrants) charitiesWithBadGrants++;
     });
 
-    updateStatus(`$${formatNumber(badTotal)} of deep loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`);
+    // Final update
+    updateStatus(
+        `$${formatSimpleNumber(badTotal)} of deep loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`
+    );
     console.log(`${charitiesWithBadGrants} charities had circular grants`);
     console.log(`${cycleGrants.size} circular grants (including obvious)`);
-    Object.values(Charity.charityLookup).forEach(c => c.organize());
+    Object.values(Charity.charityLookup).forEach(c => c.organize()); // Assumes this method exists
+
     return cycleGrants;
 }
+
     
 
     
@@ -689,7 +728,12 @@ static findCircularGrants() {
         name
     */
      searchMatch(keywords) {
-        return keywords.some(w => this.name.includes(w) || this.ein.includes(w));
+     
+    const lowerStr = this.name.toLowerCase();
+    return keywords
+        .map(kw => kw.trim().toLowerCase())
+        .filter(kw => kw !== '')
+        .some(kw => lowerStr.includes(kw));
     }
     
     static matchKeys(keywords) {
@@ -700,13 +744,14 @@ static findCircularGrants() {
     static computeURLParams (keywords) {
         const params = new URLSearchParams();
         let visibleMap = {};
-        Charity.visibleCharities().forEach( c => {
+        Charity.visibleCharities().forEach( c => { // URL starts with EIN of everything visible
                 const p =c.URLPiece();
                         if (p) {
                                 visibleMap[c.ein]=p;
                         }
                 },[]);
         
+        // but we remove thing that come up vis search. 
         Charity.matchKeys(keywords).forEach(c => {
                 if (c.isVisible) 
                         delete visibleMap[c.ein];
@@ -720,7 +765,8 @@ static findCircularGrants() {
     }
     
     /* given a URL and a search list, which nodes are visible */
-    static matchURL(params){
+    static matchURL(params= new URLSearchParams(window.location.search))
+    {
     
         const URLList = params.getAll('ein');
         const keywords = params.getAll('keywords');
@@ -802,6 +848,7 @@ static findCircularGrants() {
     
         static buildSankeyData() {
             const data = { nodes: [], links: [] };
+            Charity.matchURL();
             data.links = Grant.visibleGrants(); // All visible grants
             data.nodes = Charity.visibleCharities(); // All visible nodes
     
@@ -1254,16 +1301,8 @@ function updateStatus(message, color='black')
     console.log(`Total Grants Loaded ${totalGrantsCount}`);
     console.log(`Grants Net ${Object.keys(Grant.grantLookup).length}`);
 
-    let badCharsCounter = new Set();
-    let badGrants = Charity.findCircularGrants();
-    badGrants.forEach(g => {
-        badCharsCounter.add(g.grantee.id);
-    });
-
     return { 
         totalGrantsCount, 
-        badGrantsCount: badGrants.size, 
-        badCharsCount: badCharsCounter.size 
     };
 }
 
