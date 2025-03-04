@@ -1389,12 +1389,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .data(nodes)
     .join('g')
     .attr('class', d => d.id === rootSubject ? 'node root' : 'node')
-    .attr('data-id', d => d.id)
-    .call(d3.drag()
-      .on('start', dragStarted)
-      .on('drag', dragged)
-      .on('end', dragEnded)
-    );
+    .attr('data-id', d => d.id);
    
   // Start displaying first-level nodes progressively now that nodeElements is defined
   displayNodesProgressively();
@@ -1408,7 +1403,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .attr('fill', 'white')
     .attr('stroke', d => d.id === rootSubject ? '#2563EB' : '#94A3B8')
     .attr('stroke-width', d => d.id === rootSubject ? 3 : 1)
-    .style('cursor', 'grab')
+    .style('cursor', 'default') // Changed from 'grab' to 'default'
     .on('mouseover', function(event, d) {
       console.log('Node rect hover:', d);
       
@@ -2879,29 +2874,6 @@ function wrapText(text, maxChars) {
   return lines;
 }
 
-// Drag functions for nodes
-function dragStarted(event, d) {
-  if (!event.active) simulation.alphaTarget(0.3).restart();
-  d.fx = d.x;
-  d.fy = d.y;
-  d3.select(this).select('rect').style('cursor', 'grabbing');
-}
-
-function dragged(event, d) {
-  d.fx = event.x;
-  d.fy = event.y;
-}
-
-function dragEnded(event, d) {
-  if (!event.active) simulation.alphaTarget(0);
-  // Keep root node fixed, release others
-  if (d.id !== rootSubject) {
-    d.fx = null;
-    d.fy = null;
-  }
-  d3.select(this).select('rect').style('cursor', 'grab');
-}
-
 // Function to zoom to fit all nodes
 function zoomToFitAll() {
   // Get the bounds of all nodes
@@ -2938,6 +2910,8 @@ function zoomToFitAll() {
     d3.zoomIdentity.translate(translateX, translateY).scale(scale)
   );
 }
+
+// Remove drag functions since we disabled node dragging
 
 function buildGraph(subject, filterKeywords = []) {
   // Update page title with subject name
