@@ -265,7 +265,7 @@ It shows the generated graph and a legend, plus a button to go back to the searc
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
-      <div id="loading-text" class="text-lg font-semibold text-navy mb-4">Loading graph...</div>
+      <div id="loading-text" class="text-lg font-semibold text-navy">Loading data...</div>
       <div id="loading-nodes" class="text-gray-600 max-w-md mx-auto text-center px-4 max-h-[80vh] overflow-y-auto">
         <!-- Node names will be added here -->
       </div>
@@ -1238,18 +1238,36 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Position root node at the top center
   if (rootNode) {
     rootNode.x = 0; // Center horizontally
-    rootNode.y = -height * 0.7; // Increased negative value to position even higher
+    rootNode.y = -height * 0.9; // Position much higher (was 0.7)
     rootNode.fx = 0; // Fix position horizontally
-    rootNode.fy = -height * 0.7; // Increased negative value to position even higher
+    rootNode.fy = -height * 0.9; // Fix position vertically (was 0.7)
   }
   
-  // Arrange non-root nodes in a semi-circle below the root node
-  const radius = Math.min(width, height) * 0.25; // Use 25% of the smaller dimension for radius
-  nonRootNodes.forEach((node, i) => {
-    // Use a semi-circle (180 degrees) below the root
-    const angle = (Math.PI * i) / (nonRootNodes.length - 1);
-    node.x = radius * Math.cos(angle); // Position in semi-circle
-    node.y = -height * 0.7 + radius * Math.sin(angle) + radius; // Position below root node
+  // Arrange non-root nodes in a tiered layout instead of a semi-circle
+  // First identify first-level nodes (directly connected to root)
+  const firstLevelIds = new Set();
+  edges.forEach(edge => {
+    if (edge.from === rootSubject) {
+      firstLevelIds.add(edge.to);
+    } else if (edge.to === rootSubject) {
+      firstLevelIds.add(edge.from);
+    }
+  });
+  
+  // Now position nodes in tiers
+  nonRootNodes.forEach(node => {
+    // Randomize x position slightly for each node
+    const xOffset = (Math.random() - 0.5) * width * 0.6;
+    
+    if (firstLevelIds.has(node.id)) {
+      // First tier - below root but in a more spread out arrangement
+      node.x = xOffset;
+      node.y = -height * 0.5; // First tier below root
+    } else {
+      // Second+ tier - further below
+      node.x = xOffset * 1.2; // Wider spread for lower tiers
+      node.y = -height * 0.1 + (Math.random() * height * 0.3); // Variable positions lower down
+    }
   });
   
   // Preprocess edges to ensure all source and target nodes exist
@@ -1380,7 +1398,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
    
   // Start displaying first-level nodes progressively now that nodeElements is defined
   displayNodesProgressively();
-  
+    
   // Add rectangles to nodes
   nodeElements.append('rect')
     .attr('rx', 4)
@@ -1494,18 +1512,18 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Add text labels with wrapping
   labelElements.each(function(d) {
     try {
-      const labelGroup = d3.select(this);
-      const label = d.label || "";
-      
-      // Skip empty labels
-      if (!label.trim()) {
-        labelGroup.append('text')
-          .attr('class', 'link-label')
-          .attr('fill', '#475569')
-          .text("");
-        return;
-      }
-      
+    const labelGroup = d3.select(this);
+    const label = d.label || "";
+    
+    // Skip empty labels
+    if (!label.trim()) {
+      labelGroup.append('text')
+        .attr('class', 'link-label')
+        .attr('fill', '#475569')
+        .text("");
+      return;
+    }
+    
       // For "Son of" relationship, use special styling and don't wrap
       const isSonOfRelation = label.includes("Son of") || label.includes("Child of") || 
                              label.includes("Parent of") || label.includes("Father of") || 
@@ -1522,17 +1540,17 @@ function renderD3Graph(rootSubject, nodes, edges) {
           .text(label);
       } else {
         // Wrap text to max 20 characters per line for other relationships
-        const wrappedText = wrapText(label, 20);
-        
-        // Add each line of text
-        wrappedText.forEach((line, i) => {
-          labelGroup.append('text')
-            .attr('class', 'link-label')
-            .attr('fill', '#475569')
-            .attr('text-anchor', 'middle') // Center text
-            .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
-            .text(line);
-        });
+    const wrappedText = wrapText(label, 20);
+    
+    // Add each line of text
+    wrappedText.forEach((line, i) => {
+      labelGroup.append('text')
+        .attr('class', 'link-label')
+        .attr('fill', '#475569')
+        .attr('text-anchor', 'middle') // Center text
+        .attr('dy', (i - (wrappedText.length - 1) / 2) * 16)
+        .text(line);
+    });
       }
       
       if (!d.pathPoints) {
@@ -1742,17 +1760,25 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .force('x', d3.forceX(d => {
       if (d.id === rootSubject) return 0;
       if (firstLevelNodeIds.has(d.id)) {
-        return d.x * 1.7; // Push first level nodes further out horizontally
+        // Spread first level nodes horizontally
+        const index = Array.from(firstLevelNodeIds).indexOf(d.id);
+        const angleStep = Math.PI / Math.max(firstLevelNodeIds.size, 1);
+        const angle = (index * angleStep) - Math.PI/2;
+        return 300 * Math.cos(angle); // Circular arrangement
       }
-      return d.x;
-    }).strength(0.25))
+      return d.x * 0.5; // Weaker horizontal force for other nodes
+    }).strength(0.5))
     .force('y', d3.forceY(d => {
-      if (d.id === rootSubject) return -height * 0.7; // Increased negative value for higher positioning
+      if (d.id === rootSubject) return -height * 0.9; // Keep root very high
       if (firstLevelNodeIds.has(d.id)) {
-        return d.y; // Keep first level at their y positions
+        // Position first level nodes in a semi-circle below root
+        const index = Array.from(firstLevelNodeIds).indexOf(d.id);
+        const angleStep = Math.PI / Math.max(firstLevelNodeIds.size, 1);
+        const angle = (index * angleStep) - Math.PI/2;
+        return -height * 0.5 + 300 * Math.max(0, Math.sin(angle)); // Create arc below root
       }
-      return height * 0.35; // Push other nodes down more
-    }).strength(0.25))
+      return height * 0.2; // Push other nodes down more
+    }).strength(0.5)) // Stronger vertical force
     .force('collision', d3.forceCollide()
       .radius(d => {
         // Even larger collision radius to keep nodes well separated
@@ -1780,9 +1806,9 @@ function renderD3Graph(rootSubject, nodes, edges) {
       .distance(d => {
         // Use different distances for different types of connections
         if (d.from === rootSubject || d.to === rootSubject) {
-          return forceParams.linkDistance * 8; // Reduced from 10
+          return forceParams.linkDistance * 12; // Increased from 8 to create more vertical separation
         }
-        return forceParams.linkDistance * 5; // Reduced from 7
+        return forceParams.linkDistance * 6; // Slightly increased for all other connections
       }))
     .force('charge', d3.forceManyBody()
       .strength(d => {
@@ -1800,26 +1826,32 @@ function renderD3Graph(rootSubject, nodes, edges) {
       // Root node stays at center
       if (d.id === rootSubject) return 0;
       
-      // First level nodes maintain their existing x position but with scaling
+      // First level nodes - spread them horizontally in an arc
       if (firstLevelNodeIds.has(d.id)) {
-        return d.x * 1.2; // Reduced from 1.3
+        const index = Array.from(firstLevelNodeIds).indexOf(d.id);
+        const angleStep = Math.PI / Math.max(firstLevelNodeIds.size, 1);
+        const angle = (index * angleStep) - Math.PI/2;
+        return 350 * Math.cos(angle); // Circular arrangement
       }
       
       // Second level nodes spread wider
-      return d.x * 1.3; // Reduced from 1.4
-    }).strength(d => d.id === rootSubject ? 1 : 0.3)) // Increased from 0.2 for faster positioning
+      return d.x * 1.2;
+    }).strength(d => d.id === rootSubject ? 1 : 0.5)) // Stronger force to maintain structure
     .force('y', d3.forceY(d => {
       // Keep root at top
-      if (d.id === rootSubject) return -height * 0.7; // Increased negative value for higher positioning
+      if (d.id === rootSubject) return -height * 0.9; // Position root very high
       
-      // First level nodes position
+      // First level nodes positioned in arc below root
       if (firstLevelNodeIds.has(d.id)) {
-        return d.y * 0.9; // Adjust as needed
+        const index = Array.from(firstLevelNodeIds).indexOf(d.id);
+        const angleStep = Math.PI / Math.max(firstLevelNodeIds.size, 1);
+        const angle = (index * angleStep) - Math.PI/2;
+        return -height * 0.5 + 300 * Math.max(0, Math.sin(angle)); // Semi-circular arrangement
       }
       
-      // Second level nodes position
-      return d.y * 1.2; // Reduced from 1.3
-    }).strength(d => d.id === rootSubject ? 1 : 0.4)) // Increased from 0.35
+      // Second level nodes positioned at bottom
+      return height * 0.3; // Push other nodes further down
+    }).strength(d => d.id === rootSubject ? 1 : 0.6)) // Stronger vertical force
     .force('collision', d3.forceCollide().radius(d => {
       // Use much larger collision radius
       const nodeWidth = getNodeWidth(d);
@@ -1875,10 +1907,10 @@ function displayNodesProgressively() {
       rootDiv.className = 'opacity-0 transition-opacity duration-300 py-1';
       
       // Add the root node ID as the main text
-      const nodeIdSpan = document.createElement('div');
-      nodeIdSpan.className = 'font-bold';
-      nodeIdSpan.textContent = rootNode.id;
-      rootDiv.appendChild(nodeIdSpan);
+      // const nodeIdSpan = document.createElement('div');
+      // nodeIdSpan.className = 'font-bold';
+      // nodeIdSpan.textContent = rootNode.id;
+      // rootDiv.appendChild(nodeIdSpan);
       
       // Add text indicating this is the root node
       const relationSpan = document.createElement('div');
@@ -2025,9 +2057,25 @@ function ticked() {
     simulation.nodes().forEach(d => {
       if (d.id === rootSubject) {
         d.x = 0;
-        d.y = -height * 0.5; // Increased to position higher (was 0.4)
+        d.y = -height * 0.9; // Position root much higher
         d.fx = 0;
-        d.fy = -height * 0.5; // Increased to position higher (was 0.4)
+        d.fy = -height * 0.9; // Position root much higher
+      }
+      
+      // Keep first level nodes in their semi-circular arrangement
+      if (firstLevelNodeIds.has(d.id)) {
+        // Limit vertical movement - first level nodes shouldn't go above a certain point
+        if (d.y < -height * 0.3) {
+          d.y = Math.max(d.y, -height * 0.3);
+        }
+      }
+      
+      // Enforce hierarchical layout - non-root nodes should never go above the root
+      if (d.id !== rootSubject) {
+        // Keep all non-root nodes below the root node by at least some margin
+        if (d.y < -height * 0.7) {
+          d.y = -height * 0.7;
+        }
       }
     });
     
@@ -2125,10 +2173,10 @@ function ticked() {
         
         // Direct line for debugging
         if (window.debugMode) {
-          const sourceX = sourceNode.x;
-          const sourceY = sourceNode.y;
-          const targetX = targetNode.x;
-          const targetY = targetNode.y;
+        const sourceX = sourceNode.x;
+        const sourceY = sourceNode.y;
+        const targetX = targetNode.x;
+        const targetY = targetNode.y;
           return `M${sourceX},${sourceY} L${targetX},${targetY}`;
         }
         
@@ -2234,7 +2282,7 @@ function ticked() {
             const cp2x = sourcePoint.x + dx * 0.9;
             const cp2y = sourcePoint.y + dy * (1 - randomOffset);
             
-            path = `M${sourcePoint.x},${sourcePoint.y} 
+          path = `M${sourcePoint.x},${sourcePoint.y} 
                     C${cp1x},${cp1y} ${cp2x},${cp2y} ${targetPoint.x},${targetPoint.y}`;
           } else if (Math.abs(sourceLayer - targetLayer) <= 1) {
             // Nodes are on similar layers - use a curved path
@@ -2245,7 +2293,7 @@ function ticked() {
             
             path = `M${sourcePoint.x},${sourcePoint.y} 
                     Q${midX},${midY} ${targetPoint.x},${targetPoint.y}`;
-          } else {
+        } else {
             // Significant horizontal distance - use orthogonal routing with randomized midpoints
             const midX = (sourcePoint.x + targetPoint.x) / 2 + 
                       ((sourceId.length * targetId.length) % 100 - 50);
@@ -2253,7 +2301,7 @@ function ticked() {
             const midY1 = sourcePoint.y + (isSourceHigher ? yDiff * 0.25 : -yDiff * 0.25);
             const midY2 = targetPoint.y + (isSourceHigher ? -yDiff * 0.25 : yDiff * 0.25);
             
-            path = `M${sourcePoint.x},${sourcePoint.y} 
+          path = `M${sourcePoint.x},${sourcePoint.y} 
                     C${sourcePoint.x},${midY1} ${midX},${midY1} ${midX},${(midY1 + midY2) / 2}
                     S${targetPoint.x},${midY2} ${targetPoint.x},${targetPoint.y}`;
           }
@@ -2388,9 +2436,9 @@ function ticked() {
           let labelHeight = 0;
           
           // Calculate total width and height based on all text elements
-          textElements.each(function() {
+        textElements.each(function() {
             try {
-              const bbox = this.getBBox();
+          const bbox = this.getBBox();
               labelWidth = Math.max(labelWidth, bbox.width);
               labelHeight += bbox.height;
             } catch (e) {
