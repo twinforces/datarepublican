@@ -45,7 +45,8 @@ function updateStatus(message,color='black'){
 }
 
 $(document).ready(function() {
-    parseQueryParams();
+    if (dataReady)
+        parseQueryParams();
 
     updateStatus("Loading Data...");
     loadData().then(() => {

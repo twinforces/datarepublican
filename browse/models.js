@@ -2,7 +2,7 @@
  
  const START_REVEAL = 5;
  const MIN_REVEAL = 2;
- const NEXT_REVEAL = 3;
+ const NEXT_REVEAL = 1;
  const NEXT_REVEAL_MAX = 15;
  const GOV_EIN = '001';
  let GOV_NODE = null; // for easier debugging
@@ -68,6 +68,7 @@
     
     static removeFromHideList(ein) {
         delete Charity.hideList[ein];
+        Charity.getCharity(ein).show();
     }
     
     static getHideList() {
@@ -99,6 +100,7 @@
         loopbackgrants = [], 
         loopforwards = [],
         otherUp = null,
+        isOrganized=false,
         otherdown=null
     }) {
         this.id = ein;
@@ -116,7 +118,7 @@
         this.loopbackgrants = loopbackgrants;
         this.loopforwardgrants = loopforwards;
         this._isVisible = isVisible;
-        this.isOrganized = false;
+        this.isOrganized = isOrganized;
         this.isGov = false;
         this.isOther = isOther;
         this.expanded = false;
@@ -245,7 +247,7 @@
         const cacheKey = `visibleGrants`;
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
-        return this._valueCache[cacheKey]=  this.grants.filter(g => g.isVisible);
+        return this._valueCache[cacheKey]=  this.grants.filter(g => g.isVisible).sort((a,b)=>b.amt-a.amt);
     }
 
     get invisibleGrants() {
@@ -258,7 +260,7 @@
         const cacheKey = `visibleGrantsIn`;
         if (this._valueCache[cacheKey])
                 return this._valueCache[cacheKey];
-        return this._valueCache[cacheKey]=  this.grantsIn.filter(g => g.isVisible);
+        return this._valueCache[cacheKey]=  this.grantsIn.filter(g => g.isVisible).sort((a,b)=>b.amt-a.amt);
     }
 
     get invisibleGrantsIn() {
@@ -338,6 +340,7 @@
     static circularGrant(g) {
         g.grantee.circleGrant(g);
         g.filer.circleGrant(g);
+        Grant.unregisterGrant(g); // forget about it
     }
 
     /**
@@ -355,6 +358,7 @@
                 this.removeGrantIn(g);
         }
         this.isOrganized = false;
+        this.isCircular = true;
     }
 
     get grantsTotalString() { 
@@ -428,6 +432,17 @@
         return govChar;
     }
 
+   // check grants such that a gives to b, who gives to a
+   simpleCircular() {
+   
+        const simpleCircles = this.grants.filter( 
+                g1=> g1.grantee.grants.filter( 
+                        g2=> g2.grantee == this).length);
+        return simpleCircles;
+        
+        
+    }
+
     /*
       for now, we simply hide any grant that circles back into a charities upstream
     */
@@ -437,8 +452,23 @@
         const cycleGrants = new Set();
         const stack = [];
         let badTotal=0;
+        let charitiesWithBadGrants = 0;
+        
+        let obviousCirclesCount=0;
+        Object.values(Charity.charityLookup).forEach( c=> {
+        
+                const obviousCircles=c.simpleCircular();
+                obviousCirclesCount += obviousCircles.length;
+                if (obviousCircles.length)
+                        charitiesWithBadGrants++;
 
-    updateStatus("...Finding Loopback Grants...");
+                obviousCircles.forEach( g=> {
+                        g.isCircular=true; // marking a grant circular purges itself
+                });
+        })
+        console.log(`${obviousCirclesCount} obvious circular grants found`);
+ 
+    updateStatus("...Finding Deep Loopback Grants...");
         for (const [startId, startCharity] of Object.entries(Charity.charityLookup)) {
             if (visited.has(startId)) continue;
 
@@ -479,7 +509,6 @@
             }
         }
 
-        let charitiesWithBadGrants = 0;
         for (const [charityId, charity] of Object.entries(Charity.charityLookup)) {
             let hasBadGrants = false;
             charity.grants.forEach(grant => {
@@ -493,9 +522,9 @@
                 charitiesWithBadGrants++;
             }
         }
-        updateStatus(`$${formatNumber(badTotal)} of loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`);
+        updateStatus(`$${formatNumber(badTotal)} of deep loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`);
         console.log(`${charitiesWithBadGrants} charities had circular grants`);
-        console.log(`${cycleGrants.size} circular grants`);
+        console.log(`${cycleGrants.size+obviousCirclesCount } circular grants`);
         Object.values(Charity.charityLookup).forEach(c => c.organize); // start out organized
         return cycleGrants;
     }
@@ -504,8 +533,8 @@
     static getRootCharities()
     {
         return Object.values(Charity.charityLookup)
-                .filter(c => !Charity.shouldHide(c.id))
                 .filter(c => c.isRoot && !c.govt_amt && !c.isTerminal)
+                .filter(c => !Charity.shouldHide(c.id))
                 .sort((a,b)=> (b.grantsTotal - a.grantsTotal));
     }
     
@@ -650,14 +679,14 @@
     
     show() {
         this.isVisible=true;
-        this.grants.forEach(g=> g.isVisible=true);
-        this.grantsIn.forEach(g=> g.isVisible=false);
+        //this.grants.forEach(g=> g.isVisible=true);
+        //this.grantsIn.forEach(g=> g.isVisible=false);
     }
     
     hide() {
         this.isVisible=false;
-        this.grants.forEach(g=> g.isVisible=false);
-        this.grantsIn.forEach(g=> g.isVisible=false);
+        //this.grants.forEach(g=> g.isVisible=false);
+        //this.grantsIn.forEach(g=> g.isVisible=false);
     }
     
     /**
@@ -748,6 +777,17 @@
         return true;
     }
     
+    place(upCount= -1, downCount=-1) {
+        // show ourselves and generate the other notes
+        this.expandDown({},downCount);
+        this.expandUp({}, upCount);
+        this.organize();
+        this.expanded=true;
+        this.isVisible=true;
+        
+        
+    }
+    
     /* show node and appropriate number of grants*/
     static placeNode( startEIN, simple=false) {
     
@@ -755,33 +795,7 @@
         const c = Charity.getCharity(splits[0]);
         if (c) {
         
-                c.isVisible=true;
-                c.organize();
-                if (!simple)
-                {
-                        c.expandDown({},splits[2]||-1); //
-                        c.expandUp({},splits[1]||-1);
-                        c.organize();
-                        c.expanded=true;
-                        c.grants.forEach(g => {
-                                if (!g.shouldHide())
-                                        {
-                                g.isVisible=true;
-                                g.filer.isVisible=true;
-                                g.grantee.isVisible=true;
-                                }
-                        });
-                        c.grantsIn.forEach(g => {
-                                if (!g.shouldHide())
-                                        {
-                                g.isVisible=true;
-                                g.filer.isVisible=true;
-                                g.grantee.isVisible=true;
-                                        
-                                        }
-                        });
-                
-                }
+                c.place(splits[1],splits[2]);
                 
         }
         else
@@ -797,203 +811,161 @@
     static buildSankeyData() {
         const data = {nodes: [], links:[]};
         data.links = Grant.visibleGrants();
-        data.links.forEach(g=> {
-                if (!g.grantee.isVisible)
-                {
-                        g.grantee.isVisible=true; 
-                        console.log(`Not visible grantee ${g.grantee_ein}`);
-                        
-                }
-                if (!g.filer.isVisible)
-                {
-                        g.filer.isVisible=true; 
-                        console.log(`Not visible filer ${g.filer_ein}`);
-                        
-                }
-        });
         data.nodes = Charity.visibleCharities();
           return data;
         
     }
 }
-
-/**
-        This object holds the downstream grants taht we don't want to show. 
-        Clicking on it shows NEXT_REVEAL more grants and moves them back to the parent
-        for display
-        
-        Mindfuck: To the other node, the grants we're archiving are
-        incoming grants, so we have to store them in grantsIn, and reverse all the
-        flows!
-*/
-class DownstreamOther extends Charity
-{
-        constructor({parent, count=START_REVEAL})
-        {
-                super({       
-                        ein: `${parent.ein}-Down`, 
-                        name: `More...`, 
-                        xml_name: `${parent.xml_name}-Down`, 
-                        isVisible : true,
-                        isOther:true,
-                        grantsIn : parent.grants.filter(g=> !g.shouldHide()).slice(count)
-                } );
-                if (this.grantsIn.length ==0)
-                {
-                        this.isVisible=false; // we're unnecessary
-                }
-                this.parent = parent;
-                this.parent.otherDown = this;
-                this.grantsIn.forEach( g => {
-                        g.isVisible=false;
-                        parent.removeGrant(g);
-                        //g.swapCharities(this, parent);
-                        
-                });
-                //this.parent.addGrant( // grant constructor does this already
-                        this.otherGrant=new Grant({
-                            filer_ein: this.parent.ein,
-                            grantee_ein: this.ein,
-                            amt: this.grantsInTotal,
-                            isOther: true,
-                            isOtherDest: this
-                        });               
-                //);
-                this.otherGrant.isVisible= this.isVisible;
-                this.parent.grants.forEach(g => g.isVisible=true);
-        
+class DownstreamOther extends Charity {
+    constructor({parent, count=START_REVEAL}) {
+        super({       
+            ein: `${parent.ein}-Down`, 
+            name: `More...`, 
+            xml_name: `${parent.xml_name}-Down`, 
+            isVisible: true,
+            isOther: true,
+            isOrganized: false,
+            grantsIn: parent.grants.filter(g => !g.shouldHide() && !g.isOther).slice(count),
+            grants: [] // Enforce no outflows
+        });
+ 
+        if (this.grantsIn.length == 0) {
+            this.isVisible = false;
         }
-        handleClick(e, count) { // every time we get clicked on, 3 more get shown
-                let revealGrants = [];
-                let targetCount = NEXT_REVEAL;
-                if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
-                let candidates = this.grantsIn.filter(g=> !g.shouldHide());
-                if (count > -1)  // loading from a URL piece, need to match number
-                {
-                        targetCount = candidates.length - count;
-                        if (targetCount < 1) targetCount=1;
-                }
-                if (targetCount > candidates.length) targetCount=candidates.length;
-                revealGrants=candidates.slice(0,targetCount);
-        
-                       
-                revealGrants.forEach( g=> {
-                        g.isVisible=true;
-                        g.grantee.isVisible=true;
-                        this.parent.addGrant(g);
-                        this.removeGrantIn(g);
-                
-                });       
-                if (!this.grantsIn.length)
-                        this.otherGrant.isVisible=false;
-        }
-        // grants that get clicked hide their path and their node
-        handleGrantClick(g, event) {
-                g.isVisible=false;
-                g.grantee.recurseHide();
-                this.addGrant(g);
-                this.parent.removeGrant(g);        
-        }
-        
-        get isVisible() { // we should only draw if our master is visible and we have more grants
-        
-                return this.parent.isVisible && (this.grantsIn.length);
-        }
-    set isVisible(v) { // javascript gotcha
-        super.isVisible=v;
+        this.parent = parent;
+        this.parent.otherDown = this;
+        this.grantsIn.forEach(g => {
+            g.isVisible = false;
+            parent.removeGrant(g);
+            g.stashDown(this.parent,this);
+        });
+        this.otherGrant = new Grant({
+            filer_ein: this.parent.ein,
+            grantee_ein: this.ein,
+            amt: this.grantsInTotal,
+            isOther: true,
+            isOtherDest: this
+        });               
+        this.organize();
+        this.otherGrant.isVisible = this.isVisible;
+        this.parent.grants.forEach(g => g.isVisible = true);
+        this.grantsIn = this.grantsIn.filter(g => g !== this.otherGrant);
     }
 
+    handleClick(e, count) {
+        let targetCount = NEXT_REVEAL;
+        if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
+        let candidates = this.grantsIn.filter(g => 
+                {
+            return (!g.shouldHide() && !g.isOther )
+        });
+            
+        if (count > -1) {
+            targetCount = candidates.length - count;
+            if (targetCount < 1) targetCount = 1;
+        }
+        if (targetCount > candidates.length) targetCount = candidates.length;
+        let revealGrants = candidates.slice(0, targetCount);
+        
+        revealGrants.forEach(g => {
+            g.unstashDown(this.parent,this);
+            g.grantee.isVisible = true;
+            this.parent.addGrant(g);
+            this.removeGrantIn(g);
+        });       
+        if (!this.grantsIn.length) {
+            this.otherGrant.isVisible = false;
+        }
+    }
+
+    handleGrantClick(g, event) {
+        g.isVisible = false;
+        g.grantee.recurseHide();
+        this.addGrant(g);
+        this.parent.removeGrant(g);        
+    }
+    
+    get isVisible() {
+        const visible = this.parent.isVisible && (this.grantsIn.length);
+        return visible;
+    }
+    set isVisible(v) {
+        super.isVisible = v;
+    }
 }
 
-/**
-        This object holds the upstream grants taht we don't want to show. 
-        Clicking on it shows NEXT_REVEAL more grants and moves them back to the parent
-        for display
-        
-        Mindfuck: the grants that are coming from grantsIn become grants
-        to us that aren't displayed, and we have a grant that goes from us 
-        to our parent
-*/
+class UpstreamOther extends Charity {
+    constructor({parent, count=START_REVEAL}) {
+        super({       
+            ein: `${parent.ein}-Up`, 
+            name: `More...`, 
+            xml_name: `${parent.xml_name}-Down`, 
+            isVisible: true,
+            isOther: true,
+            isOrgnaized: false,
+            grants: parent.grantsIn.filter(g => !g.shouldHide() && !g.isOther).slice(count),
+            grantsIn: [] // Enforce no inflows
+        });
+         if (this.grants.length == 0) {
+            this.isVisible = false;
+        }
+        this.parent = parent;
+        this.parent.otherUp = this;
+        this.grants.forEach(g => {
+            g.isVisible = false;
+            this.stashUp(this.parent,this);
+            parent.removeGrantIn(g);
+        });
+        this.otherGrant = new Grant({
+            filer_ein: this.ein,
+            grantee_ein: this.parent.ein,
+            filer: this,
+            grantee: this.parent,
+            amt: this.grantsTotal,
+            isOther: true,
+            isOtherDest: this
+        });         
+        this.organize();
+        this.otherGrant.isVisible = true;
+        this.parent.grantsIn.forEach(g => g.isVisible = true);
+    }
 
-class UpstreamOther extends Charity
-{
-        constructor({parent, count=START_REVEAL})
-        {
-                super({       
-                        ein: `${parent.ein}-Up`, 
-                        name: `More...`, 
-                        xml_name: `${parent.xml_name}-Down`, 
-                        isVisible : true,
-                        isOther:true,
-                        grants : parent.grantsIn.filter(g=> !g.shouldHide()).slice(count)
-                } );
-                if (this.grants.length ==0)
-                {
-                        this.isVisible=false; // we're unnecessary
-                }
-                this.parent = parent;
-                this.parent.otherUp = this;
-                this.grants.forEach( g => {
-                        g.isVisible=false;
-                        parent.removeGrantIn(g);
-                        //g.swapCharities(this, this.parent);
-                });
-               // this.parent.addGrantIn( // grant constructor does this already
-                        this.otherGrant = new Grant({
-                            filer_ein: this.ein,
-                            grantee_ein: this.parent.ein,
-                            filer: this,
-                            grantee: this.parent,
-                            amt: this.grantsTotal,
-                            isOther: true,
-                            isOtherDest: this
-                        })      ;         
-                //);
-                this.otherGrant.isVisible=true;
-                this.parent.grantsIn.forEach(g => g.isVisible=true);
+    handleClick(e, count) { 
+        let targetCount = NEXT_REVEAL;
+        if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
+        let candidates = this.grants.filter(g => !g.shouldHide() && !g.isOther);
+        if (count > -1) { 
+            targetCount = candidates.length - count;
+            if (targetCount < 1) targetCount = 1;
+        }
+        if (targetCount > candidates.length) targetCount = candidates.length;
+        let revealGrants = candidates.slice(0, targetCount);
         
+        revealGrants.forEach(g => {
+            g.filer.isVisible = true;
+            g.unstashUp(this.parent,this);
+            this.parent.addGrantIn(g);
+            this.removeGrantIn(g);
+        });       
+         if (!this.grantsIn.length) {
+            this.otherGrant.isVisible = false;
         }
-        handleClick(e, count) { // every time we get clicked on, 3 more get shown
-                let revealGrants = [];
-                let targetCount = NEXT_REVEAL;
-                if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
-                let candidates = this.grants.filter(g=> !g.shouldHide());
-                if (count > -1)  // loading from a URL piece, need to match number
-                {
-                        targetCount = candidates.length - count;
-                        if (targetCount < 1) targetCount=1;
-                }
-                if (targetCount > candidates.length) targetCount=candidates.length;
-                revealGrants=candidates.slice(0,targetCount);
-                         
-                 revealGrants.forEach( g=> {
-                        g.isVisible=true;
-                        g.filer.isVisible=true;
-                        this.parent.addGrantIn(g);
-                        this.removeGrantIn(g);
-                        //g.swapCharities(this, this.parent);
-                
-                });       
-                if (!this.grantsIn.length)
-                        this.otherGrant.isVisible=false;
-        }
-        // grants that get clicked hide their path and their node
-        handleGrantClick(g) {
-                g.isVisible=false;
-                g.filer.recurseUpHide();
-                this.addGrantIn(g);
-                this.parent.removeGrantIn(g);        
-        }
-        
-         get isVisible() {
-        
-                return this.parent.isVisible && (this.grants.length);
-        }
-           set isVisible(v) { // javascript gotcha
-                super.isVisible= v;
-            }
-       
+    }
 
+    handleGrantClick(g) {
+        g.isVisible = false;
+        g.filer.recurseUpHide();
+        this.addGrantIn(g);
+        this.parent.removeGrantIn(g);        
+    }
+    
+    get isVisible() {
+        const visible = this.parent.isVisible && (this.grants.length);
+        return visible;
+    }
+    set isVisible(v) {
+        super.isVisible = v;
+    }
 }
 
 /**
@@ -1003,17 +975,36 @@ class UpstreamOther extends Charity
     static grantLookup = {};
 
     static getGrant(id) {
-        return Grant.grantLookup[id];
+        const g = Grant.grantLookup[id];
+//        if (!g) {
+//                console.log(`Couldn't find Grant ${id}`);
+//        }
+        return g;
     }
 
     static registerGrant(g) {
         Grant.grantLookup[g.id] = g;
     }
+    static unregisterGrant(g) {
+        delete Grant.grantLookup[g.id];
+    }
     
     static visibleGrants() {
-        return Object.values(Grant.grantLookup).filter(g => g.isVisible);
-    }
+    // Extract just the IDs during flatMap
+    const allGrantIds = Charity.visibleCharities()
+        .filter(c => !c.isOther)
+        .flatMap(c => [
+        ...c.visibleGrants.map(g => g.id),
+        ...c.visibleGrantsIn.map(g => g.id)
+    ]);
 
+    // Deduplicate the IDs
+    const uniqueGrantIds = [...new Set(allGrantIds)];
+
+    // Map back to full Grant objects
+    return uniqueGrantIds.map(gid => Grant.getGrant(gid));
+    }
+    
     static checkGrantMatch(filer_ein, grantee_ein) {
         return filer_ein !== grantee_ein && 
                Charity.getCharity(filer_ein) && 
@@ -1026,7 +1017,7 @@ class UpstreamOther extends Charity
         let amt = parseInt((row['grant_amt'] || '0').trim(), 10);
         if (isNaN(amt)) amt = 0;
         if (Grant.checkGrantMatch(filer, grantee)) {
-            const id = `${filer}~${grantee}`;
+            const id = Grant.grantIDBuilder(filer, grantee);
             const g = Grant.getGrant(id);
             if (g) {
                 g.addAmt(amt);
@@ -1080,6 +1071,11 @@ class UpstreamOther extends Charity
     get scaledAmt() {
         return scaleValue(this.amt);
     }
+    
+    static grantIDBuilder(filer_ein, grantee_ein)
+    {
+        return `${filer_ein}~${grantee_ein}`;
+    }
 
     constructor({ filer_ein, grantee_ein, amt = 0, isCircular = false,
              isVisible = false, 
@@ -1087,20 +1083,19 @@ class UpstreamOther extends Charity
              isOtherDest
      }) {
         this.registered=false;
-        this.id = `${filer_ein}~${grantee_ein}`;
         this.amt = amt;
         this.filer_ein = filer_ein;
         this.grantee_ein = grantee_ein;
         this.filer = Charity.getCharity(filer_ein);
         this.grantee = Charity.getCharity(grantee_ein);
-        Grant.registerGrant(this);
         Charity.addGrant(this);
         this.registered=true;
         this._isCircular = isCircular;
         this.isOther = isOther;
         this.isOtherDest = isOtherDest;
         this.isVisible = isVisible;
-   }
+        this.buildId();
+  }
 
     get relativeInAmount() {
         return this.amt / (this.filer.grantsTotal + 1);
@@ -1122,7 +1117,7 @@ class UpstreamOther extends Charity
     get isVisible() {
         if (this.isOther)
                 return this.isOtherDest.isVisible;
-        return this._isVisible;
+        return this.filer.isVisible && this.grantee.isVisible; // safest to compute this
     }
 
     set isVisible(v) {
@@ -1130,8 +1125,8 @@ class UpstreamOther extends Charity
         {
                 this._isVisible = v;
                 // if we're visible, we have to have somewhere to draw from/to.
-                  this.filer.isVisible = v;
-                  this.grantee.isVisible = v;
+                  //this.filer.isVisible = v;
+                  //this.grantee.isVisible = v;
                 this.disorganize();
         
         }
@@ -1143,27 +1138,46 @@ class UpstreamOther extends Charity
         }
         this._isCircular = value;
     }
-    
-    // special method for dealing with "other" nodes that have 
-    swapCharities(from, to) {
-        if (this.filer = from){
-                this.grantee_ein=to.ein;
-                this.grantee=to;
-                this.filer=from;
-                this.filer_ein=from.ein;
-        }
-        else if (this.grantee = from){
-                this.filer=to;
-                this.filer_ein=to.ein;
-                 this.grantee_ein=from.ein;
-                this.grantee=from;        
-        } else 
-        {
-                throw ("swap error with other?");
-        
-        }
+    buildId()
+    {
+        this.filer_ein=this.filer.ein;
+        this.grantee_ein=this.grantee.ein;
+        this.id=Grant.grantIDBuilder(this.filer_ein,this.grantee_ein);
+        Grant.registerGrant(this);
+        return this.id;
     }
-    tunnelGrant() {
+   // special methods for dealing with "other" nodes that have 
+   // we have a grant a->b, but we are introducing a new node o
+   // grants turns into a->o, so we store b in this.s
+   // to reverse we set it back to a-> this.s
+    stashDown(from, to) {
+        Grant.unregisterGrant(this);
+        this.stash=this.grantee;
+        this.grantee=to;
+        this.buildId();
+     }
+     
+     unstashDown(from, to) {
+        //Grant.unregisterGrant(this);
+        this.grantee=this.stash;
+        this.buildId();
+     
+     }
+    stashUp(from, to) {
+        Grant.unregisterGrant(this);
+        this.stash=this.filer;
+        this.filer=to;
+        this.buildId();
+     }
+     
+     unstashUp(from, to) {
+        //Grant.unregisterGrant(this);
+        this.filer=this.stash;
+        this.buildId();
+     
+     }
+    
+     tunnelGrant() {
        //mark every other node and grant invisible
         Object.values(Charity.charityLookup).forEach( c => c.isVisible=false);
         Object.values(Grant.grantLookup).forEach( g => g.isVisible=false );
