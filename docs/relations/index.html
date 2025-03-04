@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741050220">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741050220">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741050497">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741050497">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -779,7 +779,6 @@ $(document).ready(function() {
     display: flex;     /* Add flexbox to center content */
     justify-content: center; /* Center horizontally */
     align-items: flex-start; /* Align to the top instead of center */
-    padding-top: 20px; /* Add some padding at the top */
   }
   #legend {
     display: flex;
@@ -808,12 +807,6 @@ $(document).ready(function() {
     fill: none;
     stroke-width: 2px;
     filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.05));
-  }
-  .label-bg {
-    fill: #F3F4F6;
-    stroke: white;
-    stroke-width: 2px;
-    filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.1));
   }
   .link-label {
     fill: #475569;
@@ -2216,6 +2209,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     .attr('ry', 12)
     .attr('class', 'label-bg')
     .attr('fill', '#F3F4F6')
+    .attr('stroke', '#94A3B8')
     .attr('width', 10) // Initial size, will be updated in ticked
     .attr('height', 10)
     .attr('x', -5)
