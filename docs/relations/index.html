@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741046045">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741046045">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741046595">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741046595">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -778,7 +778,8 @@ $(document).ready(function() {
     overflow: hidden;  /* if you like; up to you */
     display: flex;     /* Add flexbox to center content */
     justify-content: center; /* Center horizontally */
-    align-items: center;     /* Center vertically */
+    align-items: flex-start; /* Align to the top instead of center */
+    padding-top: 20px; /* Add some padding at the top */
   }
   #legend {
     display: flex;
@@ -1906,7 +1907,7 @@ function resetZoom() {
   // In hierarchical layout, we want to center more towards the top where the root node is
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(0, height * 0.2).scale(0.5) // Shift up slightly to focus on root
+    d3.zoomIdentity.translate(0, height * -0.1).scale(0.5) // Move even higher by using negative value
   );
 }
 
@@ -1950,14 +1951,14 @@ function renderD3Graph(rootSubject, nodes, edges) {
   // Reset zoom and pan with centered graph
   d3.select('#graph').call(
     zoom.transform,
-    d3.zoomIdentity.translate(0, 0).scale(0.5) // More zoomed out to see the entire graph
+    d3.zoomIdentity.translate(0, -height * 0.25).scale(0.5) // Increase negative offset to move higher
   );
   
   // Create the graph content group with initial transform
   const g = d3.select('#graph-content');
   
   // Explicitly set an initial transform on the graph content to center it
-  g.attr('transform', `translate(${width/2}, ${height/2})`);
+  g.attr('transform', `translate(${width/2}, ${height/4})`); // Position at 1/4 height instead of 1/3
   
   // Store the root subject for reference in other functions
   window.rootSubject = rootSubject;
@@ -1972,13 +1973,12 @@ function renderD3Graph(rootSubject, nodes, edges) {
     nodeMap.set(node.id, node);
   });
   
-  // Pre-position nodes in a structured layout - critical for avoiding initial overlaps
   // Position root node at the top center
   if (rootNode) {
     rootNode.x = 0; // Center horizontally
-    rootNode.y = -height * 0.35; // Position at top
+    rootNode.y = -height * 0.7; // Increased negative value to position even higher
     rootNode.fx = 0; // Fix position horizontally
-    rootNode.fy = -height * 0.35; // Fix position vertically
+    rootNode.fy = -height * 0.7; // Increased negative value to position even higher
   }
   
   // Arrange non-root nodes in a semi-circle below the root node
@@ -1987,7 +1987,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     // Use a semi-circle (180 degrees) below the root
     const angle = (Math.PI * i) / (nonRootNodes.length - 1);
     node.x = radius * Math.cos(angle); // Position in semi-circle
-    node.y = -height * 0.35 + radius * Math.sin(angle) + radius; // Position below root node
+    node.y = -height * 0.7 + radius * Math.sin(angle) + radius; // Position below root node
   });
   
   // Preprocess edges to ensure all source and target nodes exist
@@ -2485,7 +2485,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
       return d.x;
     }).strength(0.25))
     .force('y', d3.forceY(d => {
-      if (d.id === rootSubject) return -height * 0.4;
+      if (d.id === rootSubject) return -height * 0.7; // Increased negative value for higher positioning
       if (firstLevelNodeIds.has(d.id)) {
         return d.y; // Keep first level at their y positions
       }
@@ -2548,7 +2548,7 @@ function renderD3Graph(rootSubject, nodes, edges) {
     }).strength(d => d.id === rootSubject ? 1 : 0.3)) // Increased from 0.2 for faster positioning
     .force('y', d3.forceY(d => {
       // Keep root at top
-      if (d.id === rootSubject) return -height * 0.3; // Reduced from 0.4
+      if (d.id === rootSubject) return -height * 0.7; // Increased negative value for higher positioning
       
       // First level nodes position
       if (firstLevelNodeIds.has(d.id)) {
@@ -2712,11 +2712,11 @@ function centerGraph() {
     // Calculate the center of the graph content with emphasis on the root node
     // For knowledge graphs, we want the root higher in the viewport
     const graphCenterX = bbox.x + bbox.width / 2;
-    const graphCenterY = bbox.y + bbox.height * 0.35; // 35% point to shift focus upward
+    const graphCenterY = bbox.y + bbox.height * 0.15; // 15% point to shift focus even further upward
     
     // Calculate the translation needed to center the graph
     const translateX = viewportWidth / 2 - graphCenterX;
-    const translateY = viewportHeight / 2 - graphCenterY;
+    const translateY = viewportHeight / 5 - graphCenterY; // Position at 1/5 of the height instead of 1/3
     console.log("Translation:", translateX, translateY);
     
     // Determine appropriate initial scale based on the graph size
@@ -2763,9 +2763,9 @@ function ticked() {
     simulation.nodes().forEach(d => {
       if (d.id === rootSubject) {
         d.x = 0;
-        d.y = -height * 0.4;
+        d.y = -height * 0.5; // Increased to position higher (was 0.4)
         d.fx = 0;
-        d.fy = -height * 0.4;
+        d.fy = -height * 0.5; // Increased to position higher (was 0.4)
       }
     });
     
