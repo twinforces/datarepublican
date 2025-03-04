@@ -446,88 +446,86 @@
     /*
       for now, we simply hide any grant that circles back into a charities upstream
     */
-    static findCircularGrants() {
-        const visited = new Set();
-        const onStack = new Set();
-        const cycleGrants = new Set();
-        const stack = [];
-        let badTotal=0;
-        let charitiesWithBadGrants = 0;
-        
-        let obviousCirclesCount=0;
-        Object.values(Charity.charityLookup).forEach( c=> {
-        
-                const obviousCircles=c.simpleCircular();
-                obviousCirclesCount += obviousCircles.length;
-                if (obviousCircles.length)
-                        charitiesWithBadGrants++;
+static findCircularGrants() {
+    const visited = new Set();
+    const onStack = new Set();
+    const cycleGrants = new Set();
+    let badTotal = 0;
+    let charitiesWithBadGrants = 0;
+    let obviousCirclesCount = 0;
 
-                obviousCircles.forEach( g=> {
-                        g.isCircular=true; // marking a grant circular purges itself
-                });
-        })
-        console.log(`${obviousCirclesCount} obvious circular grants found`);
- 
+    // Step 1: Detect obvious circular grants
+    Object.values(Charity.charityLookup).forEach(c => {
+        const obviousCircles = c.simpleCircular();
+        obviousCirclesCount += obviousCircles.length;
+        if (obviousCircles.length) charitiesWithBadGrants++;
+        obviousCircles.forEach(g => {
+            g.isCircular = true;
+            cycleGrants.add(g); // Include in cycleGrants for consistency
+        });
+    });
+    console.log(`${obviousCirclesCount} obvious circular grants found`);
+    updateStatus(`${obviousCirclesCount} obvious circular grants found`);
+
     updateStatus("...Finding Deep Loopback Grants...");
-        for (const [startId, startCharity] of Object.entries(Charity.charityLookup)) {
-            if (visited.has(startId)) continue;
 
-            stack.push([
-                startCharity,
-                (startCharity.grants || [])[Symbol.iterator](),
-                null
-            ]);
+    // Step 2: Stack-based DFS with array indices
+    for (const [startId, startCharity] of Object.entries(Charity.charityLookup)) {
+        if (visited.has(startId)) continue;
 
-            while (stack.length > 0) {
-                let [charity, grantIter, parentGrant] = stack[stack.length - 1];
-                const charityId = charity.id;
+        const stack = [{ charity: startCharity, grantIndex: 0, parentGrant: null }];
 
-                if (!visited.has(charityId)) {
-                    visited.add(charityId);
-                    onStack.add(charityId);
+        while (stack.length > 0) {
+            const top = stack[stack.length - 1];
+            const { charity, grantIndex } = top;
+            const charityId = charity.id;
+
+            if (!visited.has(charityId)) {
+                visited.add(charityId);
+                onStack.add(charityId);
+            }
+
+            const grants = charity.grants || [];
+            if (grantIndex < grants.length) {
+                const grant = grants[grantIndex];
+                const grantee = grant.grantee;
+                const granteeId = grantee.id;
+
+                top.grantIndex++; // Move to next grant
+
+                if (onStack.has(granteeId)) {
+                    cycleGrants.add(grant);
+                    grant.isCircular = true; // Mark immediately
+                } else if (!visited.has(granteeId)) {
+                    stack.push({ charity: grantee, grantIndex: 0, parentGrant: grant });
                 }
-
-                const iterResult = grantIter.next();
-                if (!iterResult.done) {
-                    const grant = iterResult.value;
-                    const grantee = grant.grantee;
-                    const granteeId = grantee.id;
-
-                    if (onStack.has(granteeId)) {
-                        cycleGrants.add(grant);
-                    } else if (!visited.has(granteeId)) {
-                        stack.push([
-                            grantee,
-                            (grantee.grants || [])[Symbol.iterator](),
-                            grant
-                        ]);
-                    }
-                } else {
-                    stack.pop();
-                    onStack.delete(charityId);
-                }
+            } else {
+                stack.pop();
+                onStack.delete(charityId);
             }
         }
-
-        for (const [charityId, charity] of Object.entries(Charity.charityLookup)) {
-            let hasBadGrants = false;
-            charity.grants.forEach(grant => {
-                if (cycleGrants.has(grant)) {
-                    grant.isCircular = true; // this triggers Charity.cycleGrant as a side effect
-                    hasBadGrants = true;
-                }
-                badTotal += grant.amt;
-            });
-            if (hasBadGrants) {
-                charitiesWithBadGrants++;
-            }
-        }
-        updateStatus(`$${formatNumber(badTotal)} of deep loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`);
-        console.log(`${charitiesWithBadGrants} charities had circular grants`);
-        console.log(`${cycleGrants.size+obviousCirclesCount } circular grants`);
-        Object.values(Charity.charityLookup).forEach(c => c.organize); // start out organized
-        return cycleGrants;
     }
+
+    // Step 3: Final stats update
+    Object.values(Charity.charityLookup).forEach(charity => {
+        let hasBadGrants = false;
+        charity.grants.forEach(grant => {
+            if (cycleGrants.has(grant)) {
+                hasBadGrants = true;
+            }
+            badTotal += grant.amt; // Accumulate total even for non-circular grants
+        });
+        if (hasBadGrants) charitiesWithBadGrants++;
+    });
+
+    updateStatus(`$${formatNumber(badTotal)} of deep loopbacks removed, ${cycleGrants.size} in ${charitiesWithBadGrants} charities`);
+    console.log(`${charitiesWithBadGrants} charities had circular grants`);
+    console.log(`${cycleGrants.size} circular grants (including obvious)`);
+    Object.values(Charity.charityLookup).forEach(c => c.organize());
+    return cycleGrants;
+}
+    
+
     
     // charities with no grants in are "root"
     static getRootCharities()
@@ -545,40 +543,27 @@
     
     
     handleClick(e, count=-1) {
-    
-        // option tunnels (removes everything but this node, gets some inflows, outfloses)
-        if (e.altKey)
-        {
-                return this.tunnelNode(e);
-        }
-    
-        // command hides this node and all its grants
-        if (e.metaKey || this.isTerminal)
-        {
-                console.log(`Hiding ${this.id} ${this.name}`);
-                this.hide();
-                Charity.addToHideList(this.id);
-                return false;
-        }
-        if (this.expanded || e.shiftKey)
-        {
-                 console.log(`Shrinking ${this.id} ${this.name}`);
-                 this.shrink(e);
-                 return false;
-       
-        }
-        else
-        {
-                 console.log(`Expanding ${this.id} ${this.name}`);
-                if (!this.otherUp)
-                        this.expandDown(e,-1);
-                if (!this.otherDown)
-                        this.expandUp(e,-1);
-                 return true;
-       }
-     
+    if (e.altKey) {
+        return this.tunnelNode(e);
     }
-    
+    if (e.metaKey || this.isTerminal) {
+        console.log(`Hiding ${this.id} ${this.name}`);
+        this.hide();
+        Charity.addToHideList(this.id);
+        return false;
+    }
+    if (this.expanded || e.shiftKey) {
+        console.log(`Shrinking ${this.id} ${this.name}`);
+        this.shrink(e);
+        return false;
+    }
+    else {
+        console.log(`Expanding ${this.id} ${this.name}`);
+        this.expandDown(e, -1);
+        this.expandUp(e, -1);
+        return true;
+    }
+}    
        // grants that get clicked hide their path and their destination node
         handleGrantClick(event,g) {
                 g.isVisible=false;
@@ -808,13 +793,27 @@
     
     }
     
-    static buildSankeyData() {
-        const data = {nodes: [], links:[]};
-        data.links = Grant.visibleGrants();
-        data.nodes = Charity.visibleCharities();
-          return data;
-        
+    static cleanAfterRender(data)
+    {
+      //rendering screws up source and target, so reset them.
+        data.links.forEach(link => {link.resetSourceTarget()});
+ 
     }
+    
+        static buildSankeyData() {
+            const data = { nodes: [], links: [] };
+            data.links = Grant.visibleGrants(); // All visible grants
+            data.nodes = Charity.visibleCharities(); // All visible nodes
+    
+             console.log(`Nodes: ${data.nodes.length}, Links: ${data.links.length}`);
+            // Optional: Check for duplicate links
+            const linkIds = new Set(data.links.map(link => `${link.source}~${link.target}`));
+            if (linkIds.size !== data.links.length) {
+                console.warn("Duplicate links detected!");
+            }
+            return data;
+        }
+
 }
 class DownstreamOther extends Charity {
     constructor({parent, count=START_REVEAL}) {
@@ -913,7 +912,7 @@ class UpstreamOther extends Charity {
         this.parent.otherUp = this;
         this.grants.forEach(g => {
             g.isVisible = false;
-            this.stashUp(this.parent,this);
+            g.stashUp(this.parent,this);
             parent.removeGrantIn(g);
         });
         this.otherGrant = new Grant({
@@ -930,27 +929,27 @@ class UpstreamOther extends Charity {
         this.parent.grantsIn.forEach(g => g.isVisible = true);
     }
 
-    handleClick(e, count) { 
-        let targetCount = NEXT_REVEAL;
-        if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
-        let candidates = this.grants.filter(g => !g.shouldHide() && !g.isOther);
-        if (count > -1) { 
-            targetCount = candidates.length - count;
-            if (targetCount < 1) targetCount = 1;
-        }
-        if (targetCount > candidates.length) targetCount = candidates.length;
-        let revealGrants = candidates.slice(0, targetCount);
-        
-        revealGrants.forEach(g => {
-            g.filer.isVisible = true;
-            g.unstashUp(this.parent,this);
-            this.parent.addGrantIn(g);
-            this.removeGrantIn(g);
-        });       
-         if (!this.grantsIn.length) {
-            this.otherGrant.isVisible = false;
-        }
+handleClick(e, count) { 
+    let targetCount = NEXT_REVEAL;
+    if (e.shiftKey) targetCount = NEXT_REVEAL_MAX;
+    let candidates = this.grants.filter(g => !g.shouldHide() && !g.isOther);
+    if (count > -1) { 
+        targetCount = candidates.length - count;
+        if (count < 1) targetCount = 1;
     }
+    if (targetCount > candidates.length) targetCount = candidates.length;
+    let revealGrants = candidates.slice(0, targetCount);
+    
+    revealGrants.forEach(g => {
+        g.filer.isVisible = true;
+        g.unstashUp(this.parent, this);
+        this.parent.addGrantIn(g);
+        this.removeGrant(g);  // Corrected to remove from this.grants
+    });       
+    if (!this.grants.length) {  // Corrected to check this.grants
+        this.otherGrant.isVisible = false;  // Optional, see note
+    }
+}
 
     handleGrantClick(g) {
         g.isVisible = false;
@@ -1041,7 +1040,13 @@ class UpstreamOther extends Charity {
     
     }
     
-    
+    resetSourceTarget()
+    {
+        this._source=null;
+        this.sourceLinks=[];
+        this._target=null;
+        this.targetLinks=[];
+    }
     /* next few accessors implement the sankey API*/
     get source() { // name alias for sankey
         return this._source || this.filer_ein;
@@ -1151,32 +1156,34 @@ class UpstreamOther extends Charity {
    // we have a grant a->b, but we are introducing a new node o
    // grants turns into a->o, so we store b in this.s
    // to reverse we set it back to a-> this.s
-    stashDown(from, to) {
-        Grant.unregisterGrant(this);
-        this.stash=this.grantee;
-        this.grantee=to;
-        this.buildId();
-     }
-     
-     unstashDown(from, to) {
-        //Grant.unregisterGrant(this);
-        this.grantee=this.stash;
-        this.buildId();
-     
-     }
-    stashUp(from, to) {
-        Grant.unregisterGrant(this);
-        this.stash=this.filer;
-        this.filer=to;
-        this.buildId();
-     }
-     
-     unstashUp(from, to) {
-        //Grant.unregisterGrant(this);
-        this.filer=this.stash;
-        this.buildId();
-     
-     }
+// In Grant class
+stashDown(from, to) {
+    Grant.unregisterGrant(this);
+    this.stash = this.grantee;
+    this.grantee = to;
+    this.grantee_ein = to.ein; // Update grantee_ein
+    this.buildId();
+}
+
+unstashDown(from, to) {
+    this.grantee = this.stash;
+    this.grantee_ein = this.stash.ein; // Update grantee_ein
+    this.buildId();
+}
+
+stashUp(from, to) {
+    Grant.unregisterGrant(this);
+    this.stash = this.filer;
+    this.filer = to;
+    this.filer_ein = to.ein; // Update filer_ein
+    this.buildId();
+}
+
+unstashUp(from, to) {
+    this.filer = this.stash;
+    this.filer_ein = this.stash.ein; // Update filer_ein
+    this.buildId();
+}
     
      tunnelGrant() {
        //mark every other node and grant invisible
