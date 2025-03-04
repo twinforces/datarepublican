@@ -143,8 +143,8 @@ function addEINFromInput() {
     }
     $('#einInput').val('');
     renderActiveEINs();
-    updateQueryParams();
     Charity.placeNode(val);
+    updateQueryParams();
     generateGraph();
 }
 
@@ -270,6 +270,8 @@ function updateQueryParams() {
     const params = Charity.computeURLParams(activeKeywords);
     const newUrl = window.location.pathname + '?' + params.toString();
     window.history.replaceState({}, '', newUrl);
+    if (dataReady)
+        parseQueryParams();
 }
 
 
