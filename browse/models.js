@@ -1115,6 +1115,7 @@ class UpstreamOther extends Charity {
     }
     
     get isVisible() {
+        if (this.isCircular) return false; // never show circular grants
         if (this.isOther)
                 return this.isOtherDest.isVisible;
         return this.filer.isVisible && this.grantee.isVisible; // safest to compute this
