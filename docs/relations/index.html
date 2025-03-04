@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741051087">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741051087">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741052050">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741052050">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1442,7 +1442,13 @@ function renderSearchResult(subject, desc) {
   `);
 
   $div.css('cursor','pointer').on('click', function() {
-    window.location.href = '?subject=' + encodeURIComponent(subject);
+    // Get current search value
+    const searchValue = $('#searchBox').val().trim();
+    let url = '?subject=' + encodeURIComponent(subject);
+    if (searchValue) {
+      url += '&search=' + encodeURIComponent(searchValue);
+    }
+    window.location.href = url;
   });
 
   return $div;
@@ -1453,8 +1459,16 @@ function renderSearchResult(subject, desc) {
 * BACK TO SEARCH
 ***************************************/
 $('#backToSearch').on('click', function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const searchValue = urlParams.get('search');
+  
   const newUrl = new URL(window.location);
   newUrl.searchParams.delete('subject');
+  
+  if (searchValue) {
+    newUrl.searchParams.set('search', searchValue);
+  }
+  
   window.history.pushState({}, '', newUrl);
   window.location.reload();
 });
