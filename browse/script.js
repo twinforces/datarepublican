@@ -34,6 +34,7 @@ let topNodes = [];
 let expandedOutflows = new Map();
 
 const NODE_WIDTH = 50;
+const OTHER_WIDTH = 20;
 const NODE_PADDING = 10;
 const MIN_LINK_HEIGHT = 5;
 
@@ -475,19 +476,28 @@ function generateOctagonPath(d) {
 }
 
 function generatePlusPath(d) {
-    const radius = NODE_WIDTH/2; //d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
-    const armWidth = radius * 0.8; // Skinny arms (20% of radius)
+    const radius = OTHER_WIDTH/2; //d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
+    const armWidth = radius * 0.4; // Skinny arms (20% of radius)
     let cx = d.x0; // Absolute center at d.x0
-    if (!d.isRight)
+    if (d.isRight)
         cx= d.x1; //other side for upstream
     const cy = (d.y0 + d.y1) / 2; // Absolute vertical center
 
     // Circle path (filled)
-    const circlePath = `
+    /*const circlePath = `
         M${cx},${cy - radius}
         A${radius},${radius} 0 1 1 ${cx},${cy + radius}
         A${radius},${radius} 0 1 1 ${cx},${cy - radius}
+        Z`;*/
+   let circlePath= `
+        M${cx},${cy-radius}
+        A${radius},${radius} 0 0 1 ${cx},${cy+radius}
         Z`;
+    if (d.isRight) circlePath= `
+        M${cx},${cy - radius}
+        A${radius},${radius} 0 1 1 ${cx},${cy + radius}
+        Z`;
+    
 
     // Skinny plus sign path (lines)
     const plusPath = `
@@ -577,19 +587,17 @@ function calculateOtherPosition(node,scale, height)
     const y1In = midY + node.parent.inflowHeight / 2;
     const y0Out = midY - node.parent.outflowHeight / 2;
     const y1Out = midY + node.parent.outflowHeight / 2;
+                node.y0= midY - OTHER_WIDTH/2;
+                node.y1= midY + OTHER_WIDTH/2;      
        if (node.isRight)
         {
-                node.x0= node.parent.x1+NODE_WIDTH*2;
-                node.x1 = node.parent.x1+NODE_WIDTH;   
-                node.y0= y0Out - height2;
-                node.y1= y1Out - height2;      
+                node.x0= node.parent.x1-OTHER_WIDTH;
+                node.x1 = node.parent.x1;   
           }
         else
         {
-                node.x0= node.parent.x0-NODE_WIDTH;
-                node.x1 = node.parent.x0-2*NODE_WIDTH;        
-                node.y0= y0In - height2;
-                node.y1= y1In - height2;      
+                node.x0= node.parent.x0;
+                node.x1 = node.parent.x0+OTHER_WIDTH;        
         }
         calculateRegularPosition(node, scale, height) // make sure parent is calculated
 
@@ -713,14 +721,14 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
         .attr("class", "graph-group")
         .attr("transform", `scale(${scale})`);
         
-   
+   const filteredLinks = graph.links.filter(l => !l.isOther);
 
     const link = masterGroup.append("g")
         .attr("fill", "none")
         .attr("stroke-opacity", 1)
         .style("mix-blend-mode", "multiply")
         .selectAll(".link")
-        .data(graph.links)
+        .data(filteredLinks)
         .join("path")
         .attr("d", sankeyLinkHorizontalTrapezoid())
         .style("stroke", d => d.target.isOther ? "#ccc" : `url(#${d.gradientId})`)
