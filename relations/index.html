@@ -844,7 +844,14 @@ function renderCytoscape(rootSubject, elements) {
   // Clear previous instance if exists
   if (window.cy) {
     try {
-      window.cy.destroy();
+      // Check if destroy method exists before calling it
+      if (typeof window.cy.destroy === 'function') {
+        window.cy.destroy();
+      } else {
+        // If destroy doesn't exist, try to clean up manually
+        window.cy.elements().remove();
+        window.cy = null;
+      }
     } catch (e) {
       console.warn("Could not destroy previous Cytoscape instance:", e);
       // Just continue, we'll create a new one
@@ -866,10 +873,10 @@ function renderCytoscape(rootSubject, elements) {
             'border-width': 1,
             'shape': 'round-rectangle',
             'width': 180,
-            'height': 'label',
-            'padding': '2px 8px',  // Minimal vertical padding, normal horizontal
+            'height': 'auto',
+            'padding': '1px 4px',  // Reduced from '2px 8px' to '1px 4px'
             'text-wrap': 'wrap',
-            'text-max-width': 164,
+            'text-max-width': 172,  // Increased from 164 to compensate for reduced padding
             'text-valign': 'center',
             'text-halign': 'center',
             'text-margin-y': 0,  // No extra margin
@@ -879,31 +886,20 @@ function renderCytoscape(rootSubject, elements) {
             'color': '#000000',
             'text-outline-width': 0,
             'text-outline-opacity': 0,
-            'font-weight': 'normal',  // Default weight for all text
+            'font-weight': 'normal',  // Default weight
             'text-transform': 'none',
-            'label': function(ele) {
-              const title = ele.data('title');
-              const desc = ele.data('description');
-              if (desc) {
-                return title + '\n' + desc;  // Single newline between title and description
-              }
-              return title;
-            }
+            // Use a custom function to create the label content
+            'label': ''  // Empty label - we'll use HTML overlay
           }
         },
-        // Description style for nodes with descriptions
+        // Style for nodes with descriptions
         {
           selector: 'node[description]',
           style: {
             'height': function(ele) {
-              if (!ele.scratch('fixedHeight')) {
-                const textHeight = ele.boundingBox().h;
-                ele.scratch('fixedHeight', textHeight + 8);
-              }
-              return ele.scratch('fixedHeight');
-            },
-            'text-margin-y': 2,
-            'font-size': '11px'
+              // Make the node taller to accommodate both title and description
+              return 80; // Fixed height for nodes with description
+            }
           }
         },
         // Root node style
@@ -911,9 +907,9 @@ function renderCytoscape(rootSubject, elements) {
           selector: 'node[?isRoot]',
           style: {
             'border-color': '#2563EB',
-            'border-width': 3,
+            'border-width': 2,
             'background-color': '#EFF6FF',
-            'font-size': '14px',
+            'font-size': '13px',
             'z-index': 10
           }
         },
@@ -962,6 +958,11 @@ function renderCytoscape(rootSubject, elements) {
       ],
       layout: {
         name: 'preset' // Start with preset to position root node
+      },
+      // Add renderer configuration to optimize Canvas operations
+      renderer: {
+        name: 'canvas',
+        willReadFrequently: true
       }
     });
     
@@ -989,7 +990,7 @@ function renderCytoscape(rootSubject, elements) {
     const minViewportDim = Math.min(cy.width(), cy.height());
     
     // Determine how many circles we need based on node count
-    const nodesPerCircle = Math.max(8, Math.min(12, Math.floor(minViewportDim / 100)));
+    const nodesPerCircle = Math.max(8, Math.min(12, Math.floor(minViewportDim / 100))); // Reverted to original values
     const circleCount = Math.ceil(nodeCount / nodesPerCircle);
     
     // Distribute nodes across multiple concentric circles
@@ -999,11 +1000,11 @@ function renderCytoscape(rootSubject, elements) {
       const nodeIndexInCircle = i % nodesPerCircle;
       
       // Calculate radius for this circle (outer circles are larger)
-      const baseRadius = minViewportDim * 0.45; // Increased from 0.4 to 0.45
+      const baseRadius = minViewportDim * 0.45; // Restored to original value
       
       // Add slight randomness to radius to prevent perfect circles
-      const radiusVariation = baseRadius * 0.15 * (Math.random() - 0.5);
-      const radius = baseRadius * (1 + (circleIndex * 0.6)) + radiusVariation; // Increased spacing between circles
+      const radiusVariation = baseRadius * 0.15 * (Math.random() - 0.5); // Restored to original value
+      const radius = baseRadius * (1 + (circleIndex * 0.6)) + radiusVariation; // Restored to original value
       
       // Calculate angle with offset for each circle to stagger nodes
       // Add slight angle variation to prevent perfect alignment
@@ -1070,6 +1071,21 @@ function renderCytoscape(rootSubject, elements) {
       
       cy.on('mouseout', 'node, edge', function() {
         $('.cy-tooltip').css('opacity', 0);
+      });
+      
+      // Update HTML labels on node movement
+      cy.on('position', 'node', function(e) {
+        const node = e.target;
+        const updateFn = node.scratch('updateLabelPosition');
+        if (updateFn) updateFn();
+      });
+      
+      // Update all HTML labels on viewport changes
+      cy.on('viewport', function() {
+        cy.nodes().forEach(node => {
+          const updateFn = node.scratch('updateLabelPosition');
+          if (updateFn) updateFn();
+        });
       });
       
       // Show download button
@@ -1159,23 +1175,24 @@ $('#downloadBtn').on('click', function() {
   }
   
   try {
-    // Create a PNG image
+    // Create a PNG image with the current styling
     const png64 = window.cy.png({
       output: 'blob',
       scale: 2, // Higher resolution
       bg: 'white',
-      full: true
+      full: true,
+      willReadFrequently: true // Add this attribute to address Canvas2D warnings
     });
     
     // Create download link
     const url = URL.createObjectURL(png64);
     const link = document.createElement('a');
-  link.href = url;
+    link.href = url;
     link.download = 'relation_graph.png';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   } catch (err) {
     console.error("Error generating PNG:", err);
     alert("Could not generate PNG. Please try again.");
@@ -1195,59 +1212,90 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// Replace the entire fixNodeStyling function with this simplified version
+// Replace the entire fixNodeStyling function with this improved version
 function fixNodeStyling() {
   console.log("fixNodeStyling called");
   
-  setTimeout(() => {
-    const allNodes = cy.nodes();
-    
-    allNodes.forEach(node => {
-      try {
-        const nodeId = node.id();
-        const svgContainer = document.querySelector('#cy');
-        if (!svgContainer) return;
-        
-        const textEle = svgContainer.querySelector(`[id="${nodeId}"] > text`);
-        if (!textEle) return;
-        
-        const title = node.data('title') || nodeId;
-        const description = node.data('description') || "";
-        
-        // Clear existing content
-        textEle.innerHTML = '';
-        
-        // Add title with bold weight
-        const titleEle = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
-        titleEle.setAttribute('x', '0');
-        titleEle.setAttribute('dy', '0');
-        titleEle.setAttribute('font-weight', 'bold');
-        titleEle.textContent = title;
-        textEle.appendChild(titleEle);
-        
-        // Add description if it exists
-        if (description) {
-          const descEle = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
-          descEle.setAttribute('x', '0');
-          descEle.setAttribute('dy', '1.2em');
-          descEle.setAttribute('font-weight', 'normal');
-          descEle.textContent = description;
-          textEle.appendChild(descEle);
-        }
-        
-        // Let Cytoscape handle the sizing based on its style
-        const bbox = textEle.getBBox();
-        node.style({
-          'width': Math.max(180, bbox.width + 16),  // 8px padding on each side
-          'height': bbox.height + 4   // 2px padding top and bottom
-        });
-        
-      } catch (err) {
-        console.error(`Error styling node ${node.id()}:`, err);
+  // Get all nodes
+  const allNodes = cy.nodes();
+  
+  // Update node styling to use Cytoscape's built-in labels
+  allNodes.forEach(node => {
+    try {
+      const title = node.data('title') || node.id();
+      const description = node.data('description') || "";
+      
+      // Format the label with the title and description
+      let labelText = title;
+      if (description) {
+        labelText = title + '\n\n' + description;
       }
-    });
-    
-    cy.style().update();
-  }, 500);
+      
+      // Calculate appropriate height based on content
+      let nodeHeight = 40; // Base height for title-only nodes
+      
+      if (description) {
+        // Estimate height based on description length and width
+        // Assuming average of 25 chars per line at 160px width with 13px font
+        const charsPerLine = 25;
+        const lineHeight = 18; // pixels per line of text
+        
+        // Calculate approximate number of lines needed for description
+        const descriptionLines = Math.ceil(description.length / charsPerLine);
+        
+        // Add height for title (1 line) + spacing (1 line) + description lines + extra space
+        nodeHeight = 40 + (descriptionLines * lineHeight) + 15; // Extra space for padding
+        
+        // Ensure minimum height
+        nodeHeight = Math.max(80, nodeHeight);
+      }
+      
+      // Common styling for all nodes
+      const commonStyles = {
+        'label': labelText,
+        'text-wrap': 'wrap',
+        'text-max-width': 180,
+        'font-size': 13,
+        'color': '#000000',
+        'text-outline-width': 0,
+        'text-outline-opacity': 0,
+        'width': 180,
+        'shape': 'round-rectangle',
+        'background-color': node.data('isRoot') ? '#EFF6FF' : '#F3F4F6',
+        'border-color': node.data('isRoot') ? '#2563EB' : '#94A3B8',
+        'border-width': node.data('isRoot') ? 2 : 1,
+        'font-weight': 'bold'
+      };
+      
+      // Apply styling to the node - different for nodes with and without descriptions
+      if (description) {
+        // Nodes WITH descriptions
+        node.style({
+          ...commonStyles,
+          'height': nodeHeight, // Calculated height based on content
+          'padding': 12, // Uniform padding
+          'text-valign': 'center', // Center text vertically instead of top
+          'text-halign': 'center',
+          'text-margin-y': 0, // No extra margin needed with center alignment
+          'line-height': 1.4 // Improve readability for multi-line text
+        });
+      } else {
+        // Nodes WITHOUT descriptions - centered text with minimal padding
+        node.style({
+          ...commonStyles,
+          'height': 40, // Fixed height for single-line nodes
+          'padding': 4, // Minimal padding for nodes without descriptions
+          'text-valign': 'center', // Center text vertically
+          'text-halign': 'center',
+          'text-margin-y': 0 // No extra margin needed for centered single-line text
+        });
+      }
+    } catch (err) {
+      console.error(`Error styling node ${node.id()}:`, err);
+    }
+  });
+  
+  // Update the stylesheet
+  cy.style().update();
 }
 </script>
