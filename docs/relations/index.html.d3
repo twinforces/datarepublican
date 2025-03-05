@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741187119">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741187119">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741192169">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741192169">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -38,7 +38,7 @@ $(document).ready(function() {
 
   <!-- Begin Jekyll SEO tag v2.8.0 -->
 <title>People Relations (BETA) | DataRepublican</title>
-<meta name="generator" content="Jekyll v3.10.0" />
+<meta name="generator" content="Jekyll v3.9.5" />
 <meta property="og:title" content="People Relations (BETA)" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />

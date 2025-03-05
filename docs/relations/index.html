@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741187119">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741187119">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741192169">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741192169">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -38,7 +38,7 @@ $(document).ready(function() {
 
   <!-- Begin Jekyll SEO tag v2.8.0 -->
 <title>People Relations (BETA) | DataRepublican</title>
-<meta name="generator" content="Jekyll v3.10.0" />
+<meta name="generator" content="Jekyll v3.9.5" />
 <meta property="og:title" content="People Relations (BETA)" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
@@ -760,10 +760,7 @@ $(document).ready(function() {
 <script src="murmurHash3.js"></script>
 
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    margin: 1rem;
-  }
+
   .shidden { display: none; }
   .toggle-btn {
     background: none;
@@ -771,23 +768,7 @@ $(document).ready(function() {
     color: #2563EB;
     cursor: pointer;
     padding: 0;
-    font-size: 1rem;
   }
-  .border { border: 1px solid #ccc; }
-  .rounded { border-radius: 4px; }
-  .p-2 { padding: 0.5rem; }
-  .p-4 { padding: 1rem; }
-  .mb-2 { margin-bottom: 0.5rem; }
-  .mb-3 { margin-bottom: 0.75rem; }
-  .mb-4 { margin-bottom: 1rem; }
-  .mt-2 { margin-top: 0.5rem; }
-  .mt-3 { margin-top: 0.75rem; }
-  .mt-4 { margin-top: 1rem; }
-  .text-sm { font-size: 0.9rem; }
-  .text-base { font-size: 1rem; }
-  .font-bold { font-weight: bold; }
-  .text-center { text-align: center; }
-  .w-full { width: 100%; }
   .loading-spinner {
     vertical-align: middle;
   }
@@ -804,30 +785,6 @@ $(document).ready(function() {
     gap: 8px;
     margin-bottom: 0.5rem;
   }
-  .legend-item {
-    display: flex;
-    align-items: center;
-    font-size: 0.85rem;
-    border-radius: 4px;
-    padding: 2px 6px;
-    color: #fff;
-    cursor: pointer; /* clickable */
-    opacity: 1.0;    /* default to fully visible */
-  }
-  .legend-item.disabled {
-    opacity: 0.3;    /* visually show it's off */
-  }
-  /* Example categories to color mapping */
-  .legend-FAMILY { background-color: #E11D48; }
-  .legend-WORK { background-color: #2563EB; }
-  .legend-POLITICAL { background-color: #9333EA; }
-  .legend-LEGAL { background-color: #DC2626; }
-  .legend-MEDIA { background-color: #EA580C; }
-  .legend-EDUCATION { background-color: #4ADE80; color: #000; }
-  .legend-HISTORICAL { background-color: #D97706; }
-  .legend-SOCIAL { background-color: #14B8A6; }
-  .legend-OTHER { background-color: #6B7280; }
-  .legend-UNKNOWN { background-color: #6B7280; }
 </style>
 
 <!-- 
@@ -840,28 +797,28 @@ letting the user enter a name, see results, and click to load GraphViz mode.
 -->
 
 <div id="searchMode" class="mb-4 shidden">
-<h1 class="mb-1">People & Relationships Lookup</h1>
+<h1 class="mb-1">People &amp; relationships lookup</h1>
 <p class="text-sm mb-3">
   Search for a name or phrase. We'll do an inclusive search (all tokens must appear).
-  Each matching subject is displayed along with a quick description. Click on a subject to load its relationship graph.
+  Each matching subject is displayed along with a quick description. Click on a name to load its relationship graph.
 </p>
 
 <div id="searchFormWrapper" class="mb-4">
   <form id="searchForm" class="flex flex-wrap gap-2 items-end">
     <div>
       <label for="searchBox" class="text-sm font-bold mb-1">Name/Keyword(s)</label><br/>
-      <input type="text" id="searchBox" class="border rounded p-2 w-full" placeholder="E.g. ‘aaron’ or ‘14th Dalai Lama’"/>
+      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. ‘aaron’ or ‘14th Dalai Lama’"/>
     </div>
 
-    <div class="mt-2">
-      <input type="checkbox" id="prefixCheck"/>
-      <label for="prefixCheck" class="text-sm">Use prefix matching</label>
-    </div>
-
-    <button type="submit" id="searchButton" class="p-2 border rounded font-bold text-sm">
+    <button type="submit" id="searchButton" class="p-2 border border-gray-200 rounded font-bold text-sm">
       <span class="button-text">Search</span>
       <img src="../assets/images/loading-white.svg" class="loading-spinner" style="display:none;width:16px;height:16px" alt="Loading..."/>
     </button>
+
+    <div class="relative -top-1">
+      <input type="checkbox" id="prefixCheck"/>
+      <label for="prefixCheck" class="text-sm">Use prefix matching</label>
+    </div>
 
     <span id="statusMessage" class="text-sm"></span>
   </form>
@@ -881,13 +838,13 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 -->
 
 <div id="graphMode" class="shidden">
-<button id="backToSearch" class="toggle-btn mb-2">&larr; Return to Search</button>
+<button id="backToSearch" class="toggle-btn frameless !mb-2">&larr; Return to search</button>
 
 <div id="graphExplanation" class="mb-3">
   <h1 id="graphTitle" class="mb-1">Relationship Graph</h1>
   <p class="text-sm mb-2" id="graphInstructions">
     Below is a visualization of our selected subject’s relationships, color-coded by category.  
-    **Click any color** in the legend below to toggle that category on/off. The graph will re-render automatically.  
+    <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
     Click “Download SVG” to get an offline copy of the image.
   </p>
 </div>
@@ -896,10 +853,10 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <div id="legend"></div>
 
 <!-- A spot to show short summary about the root subject from bullets.csv -->
-<div id="rootSummary" class="mb-4 p-2 border rounded text-sm"></div>
+<div id="rootSummary" class="mb-4 p-2 md:px-4 md:pt-3 border rounded text-sm bg-white"></div>
 
 <!-- Where the graph renders -->
-<div id="graph-container" class="border rounded flex items-center justify-center">
+<div id="graph-container" class="border rounded flex items-center justify-center bg-white">
   <div>
     <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
   </div>
@@ -1222,9 +1179,9 @@ function renderSearchResult(subject, desc) {
   const safeDesc = escapeHtml(desc);
 
   let $div = $(`
-    <div class="border rounded p-2">
-      <strong>${safeSubject}</strong><br/>
-      <span class="text-sm">${safeDesc}</span>
+    <div class="group border border-gray-200 hover:border-gray-400 bg-white rounded p-2 md:px-4 leading-tight">
+      <strong class="text-navy group-hover:text-blue text-sm">${safeSubject}</strong><br/>
+      <span class="text-[13px]">${safeDesc}</span>
     </div>
   `);
 
@@ -1603,7 +1560,6 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 </script>
-
     </main>
     
 <div class="flex justify-center">
