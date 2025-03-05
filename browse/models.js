@@ -2,7 +2,7 @@
  
  const START_REVEAL = 5;
  const MIN_REVEAL = 2;
- const NEXT_REVEAL = 1;
+ const NEXT_REVEAL = 3;
  const NEXT_REVEAL_MAX = 15;
  const GOV_EIN = '001';
  const MAX_NODES = 100;
@@ -441,7 +441,7 @@
    
         const simpleCircles = this.grants.filter( 
                 g1=> g1.grantee.grants.filter( 
-                        g2=> g2.grantee == this).length);
+                        g2=> g2.grantee_ein == this.ein).length);
         return simpleCircles;
         
         
@@ -591,7 +591,7 @@
         this.hide();
         return false;
     }
-    if (this.expanded || e.shiftKey) {
+    if (this.expanded || !e.shiftKey) {
         console.log(`Shrinking ${this.id} ${this.name}`);
         this.shrink(e);
         return false;
@@ -604,9 +604,9 @@
     }
 }    
        // grants that get clicked hide their path and their destination node
-        handleGrantClick(event,g) {
-                g.isVisible=false;
-                g.grantee.recurseHide();
+        handleGrantClick(e,g) {
+                g.filer.handleClick(e, -1);
+                g.grantee.handleClick(e, -1);
         }
         
         get origOut()
@@ -668,9 +668,9 @@
         let start = this.grants.length-NEXT_REVEAL;
         let end = start+NEXT_REVEAL;
         if (start < 0) start = 0;
-        this.grants.slice(start, end).forEach( g =>{
+        /*this.grants.slice(start, end).forEach( g =>{
                 this.handleGrantClick(e,g);
-        });
+        });*/
     
     }
     
@@ -680,7 +680,6 @@
         {
                 this.isVisible=false;
                 this.grants.forEach(g => {
-                        g.isVisible=false;
                         g.grantee.recurseHide();
                 });
         
@@ -694,7 +693,6 @@
         {
                 this.isVisible=false;
                 this.grantsIn.forEach(g => {
-                        g.isVisible=false;
                         g.filer.recurseUpHide();
                 });
        }
@@ -885,16 +883,15 @@ class DownstreamOther extends Charity {
             grants: [] // Enforce no outflows
         });
  
-        if (this.grantsIn.length == 0) {
-            this.isVisible = false;
-        }
         this.parent = parent;
         this.parent.otherDown = this;
         this.grantsIn.forEach(g => {
-            g.isVisible = false;
             parent.removeGrant(g);
             g.stashDown(this.parent,this);
-        });
+            g.isVisible=true;
+            g.resetSourceTarget(); //sankey cleanup
+       });
+        this.parent.grants.forEach(g => g.isVisible=true); // remaining should be visible
         this.otherGrant = new Grant({
             filer_ein: this.parent.ein,
             grantee_ein: this.ein,
@@ -903,9 +900,6 @@ class DownstreamOther extends Charity {
             isOtherDest: this
         });               
         this.organize();
-        this.otherGrant.isVisible = this.isVisible;
-        this.parent.grants.forEach(g => g.isVisible = true);
-        this.grantsIn = this.grantsIn.filter(g => g !== this.otherGrant);
     }
 
     handleClick(e, count) {
@@ -925,24 +919,19 @@ class DownstreamOther extends Charity {
         
         revealGrants.forEach(g => {
             g.unstashDown(this.parent,this);
-            g.grantee.isVisible = true;
+            g.isVisible = true; // propagate visibility
             this.parent.addGrant(g);
             this.removeGrantIn(g);
+            g.resetSourceTarget(); //sankey cleanup
         });       
-        if (!this.grantsIn.length) {
-            this.otherGrant.isVisible = false;
-        }
     }
 
-    handleGrantClick(g, event) {
-        g.isVisible = false;
-        g.grantee.recurseHide();
-        this.addGrant(g);
-        this.parent.removeGrant(g);        
+    handleGrantClick(event, g) {
+        g.grantee.handleClick(event,-1);        
     }
     
     get isVisible() {
-        const visible = this.parent.isVisible && (this.grantsIn.length);
+        const visible = this.parent.isVisible && (this.grantsIn.length > 1); // don't count ours
         return visible;
     }
     set isVisible(v) {
@@ -962,16 +951,15 @@ class UpstreamOther extends Charity {
             grants: parent.grantsIn.filter(g => !g.shouldHide() && !g.isOther).slice(count),
             grantsIn: [] // Enforce no inflows
         });
-         if (this.grants.length == 0) {
-            this.isVisible = false;
-        }
+
         this.parent = parent;
         this.parent.otherUp = this;
         this.grants.forEach(g => {
-            g.isVisible = false;
             g.stashUp(this.parent,this);
             parent.removeGrantIn(g);
+            g.resetSourceTarget(); //sankey cleanup
         });
+        this.parent.grantsIn.forEach(g => g.isVisible=true); // remaining should be visible
         this.otherGrant = new Grant({
             filer_ein: this.ein,
             grantee_ein: this.parent.ein,
@@ -981,9 +969,8 @@ class UpstreamOther extends Charity {
             isOther: true,
             isOtherDest: this
         });         
-        this.organize();
         this.otherGrant.isVisible = true;
-        this.parent.grantsIn.forEach(g => g.isVisible = true);
+        this.organize();
     }
 
 handleClick(e, count) { 
@@ -998,25 +985,20 @@ handleClick(e, count) {
     let revealGrants = candidates.slice(0, targetCount);
     
     revealGrants.forEach(g => {
-        g.filer.isVisible = true;
+        g.resetSourceTarget(); //sankey cleanup
+        g.isVisible = true;
         g.unstashUp(this.parent, this);
         this.parent.addGrantIn(g);
         this.removeGrant(g);  // Corrected to remove from this.grants
     });       
-    if (!this.grants.length) {  // Corrected to check this.grants
-        this.otherGrant.isVisible = false;  // Optional, see note
-    }
 }
 
-    handleGrantClick(g) {
-        g.isVisible = false;
-        g.filer.recurseUpHide();
-        this.addGrantIn(g);
-        this.parent.removeGrantIn(g);        
+    handleGrantClick(e, g) {
+        g.filer.handleClick(e,-1);
     }
     
     get isVisible() {
-        const visible = this.parent.isVisible && (this.grants.length);
+        const visible = this.parent.isVisible && (this.grants.length > 1); //don't count ours
         return visible;
     }
     set isVisible(v) {
@@ -1093,7 +1075,7 @@ handleClick(e, count) {
     
      shouldHide()
     {
-        return (!Charity.shouldHide(this.ein) && (Charity.shouldHide(this.ein)))
+        return (!Charity.shouldHide(this.filer_ein) && (Charity.shouldHide(this.grantee_ein)))
     
     }
     
@@ -1178,8 +1160,6 @@ handleClick(e, count) {
     
     get isVisible() {
         if (this.isCircular) return false; // never show circular grants
-        if (this.isOther)
-                return this.isOtherDest.isVisible;
         return this.filer.isVisible && this.grantee.isVisible; // safest to compute this
     }
 
@@ -1188,8 +1168,8 @@ handleClick(e, count) {
         {
                 this._isVisible = v;
                 // if we're visible, we have to have somewhere to draw from/to.
-                  //this.filer.isVisible = v;
-                  //this.grantee.isVisible = v;
+                  this.filer.isVisible = v;
+                  this.grantee.isVisible = v;
                 this.disorganize();
         
         }
@@ -1306,7 +1286,7 @@ function updateStatus(message, color='black')
             error: err => reject(err)
         });
     });
-
+    await Charity.findCircularGrants();
     console.log(`Total Grants Rows ${totalGrantsRows}`);
     console.log(`Total Grants Loaded ${totalGrantsCount}`);
     console.log(`Grants Net ${Object.keys(Grant.grantLookup).length}`);

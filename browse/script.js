@@ -338,6 +338,7 @@ function generateGraph() {
         .nodeSort(compareCharities)
         .size([width - 100, height - 100]);
 
+    parseQueryParams();
     if (!customGraphEdges && activeEINs.length === 0) {
         const usGov = Charity.getCharity(GOV_EIN);
         updateStatus('placing US Government');
@@ -674,7 +675,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
         .on('click', function(event, d) {
             event.stopPropagation();
             handlePathClick(event,d);
-            renderFocusedSankey(g, sankey, svgRef, width, height, selectedNodeId);
+            renderFocusedSankey(g, sankey, svgRef, width, height, null);
         });
 
     link.each(function(d) {
@@ -761,8 +762,8 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
                 d.grantee.handleGrantClick(e, d);
         }
         else {
-                d.filer.handleGrantClick(e, d);
-                d.grantee.handleGrantClick(e, d);
+                d.filer.handleClick(e, d);
+                d.grantee.handleClick(e, d);
         }
     
     }
