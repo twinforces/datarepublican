@@ -597,12 +597,12 @@
         this.hide();
         return false;
     }
-    if (this.expanded || !e.shiftKey) {
+    /*if (this.expanded || !e.shiftKey) {
         console.log(`Shrinking ${this.id} ${this.name}`);
         this.shrink(e);
         return false;
     }
-    else {
+    else*/ {
         console.log(`Expanding ${this.id} ${this.name}`);
         this.expandDown(e, -1);
         this.expandUp(e, -1);
@@ -888,7 +888,7 @@ class DownstreamOther extends Charity {
             grantsIn: parent.grants.filter(g => !g.shouldHide() && !g.isOther).slice(count),
             grants: [] // Enforce no outflows
         });
- 
+        this.isRight=true;
         this.parent = parent;
         this.parent.otherDown = this;
         this.grantsIn.forEach(g => {
@@ -925,10 +925,10 @@ class DownstreamOther extends Charity {
         
         revealGrants.forEach(g => {
             g.unstashDown(this.parent,this);
-            g.isVisible = true; // propagate visibility
             this.parent.addGrant(g);
             this.removeGrantIn(g);
             g.resetSourceTarget(); //sankey cleanup
+            g.isVisible = true; // propagate visibility
         });       
     }
 
@@ -957,7 +957,7 @@ class UpstreamOther extends Charity {
             grants: parent.grantsIn.filter(g => !g.shouldHide() && !g.isOther).slice(count),
             grantsIn: [] // Enforce no inflows
         });
-
+        this.isRight = false;
         this.parent = parent;
         this.parent.otherUp = this;
         this.grants.forEach(g => {
@@ -992,10 +992,10 @@ handleClick(e, count) {
     
     revealGrants.forEach(g => {
         g.resetSourceTarget(); //sankey cleanup
-        g.isVisible = true;
         g.unstashUp(this.parent, this);
         this.parent.addGrantIn(g);
         this.removeGrant(g);  // Corrected to remove from this.grants
+        g.isVisible = true;
     });       
 }
 
@@ -1170,7 +1170,7 @@ handleClick(e, count) {
     }
 
     set isVisible(v) {
-        if (v != this._isVisible)
+        //if (v != this._isVisible)
         {
                 this._isVisible = v;
                 // if we're visible, we have to have somewhere to draw from/to.
