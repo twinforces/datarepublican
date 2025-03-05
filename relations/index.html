@@ -1382,18 +1382,32 @@ function renderCytoscape(rootSubject, elements) {
         }
         
         // Ensure all nodes are visible by fitting to the viewport with padding
-        cy.fit(cy.elements(), 90); // Increased padding from 70 to 90
+        cy.fit(cy.elements(), 40); // Reduced padding from 90 to 40
         
-        // Make sure we're not too zoomed in
-        const maxZoomLevel = 0.5; // Lower value = more zoomed out
+        // Make sure we're not too zoomed in or out
+        const maxZoomLevel = 1.0; // Increased from 0.5 to 1.0 to allow more zoom
+        const minZoomLevel = 0.2;
         const currentZoom = cy.zoom();
         
-        if (currentZoom > maxZoomLevel) {
-          cy.zoom({
-            level: maxZoomLevel,
-            renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-          });
-        }
+        // Calculate optimal zoom based on graph size and viewport
+        const graphBB = cy.elements().boundingBox();
+        const graphWidth = graphBB.w;
+        const graphHeight = graphBB.h;
+        const viewportWidth = cy.width();
+        const viewportHeight = cy.height();
+        
+        // Calculate zoom that would make the graph fill 85% of the viewport
+        const widthRatio = (viewportWidth * 0.85) / graphWidth;
+        const heightRatio = (viewportHeight * 0.85) / graphHeight;
+        const optimalZoom = Math.min(widthRatio, heightRatio);
+        
+        // Apply optimal zoom if it's within our bounds
+        const targetZoom = Math.min(Math.max(optimalZoom, minZoomLevel), maxZoomLevel);
+        
+        cy.zoom({
+          level: targetZoom,
+          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+        });
         
         // Final check to ensure root is centered
         setTimeout(() => {
