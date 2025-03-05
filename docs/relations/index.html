@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741192169">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741192169">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741195086">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741195086">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -43,16 +43,16 @@ $(document).ready(function() {
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
 <meta property="og:description" content="Tracking where the money goes" />
-<link rel="canonical" href="https://datarepublican.com/relations/" />
-<meta property="og:url" content="https://datarepublican.com/relations/" />
+<link rel="canonical" href="http://localhost:4000/relations/" />
+<meta property="og:url" content="http://localhost:4000/relations/" />
 <meta property="og:site_name" content="DataRepublican" />
-<meta property="og:image" content="https://datarepublican.com/assets/images/og-3-1.png" />
+<meta property="og:image" content="http://localhost:4000/assets/images/og-3-1.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta property="twitter:image" content="https://datarepublican.com/assets/images/og-3-1.png" />
+<meta property="twitter:image" content="http://localhost:4000/assets/images/og-3-1.png" />
 <meta property="twitter:title" content="People Relations (BETA)" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"People Relations (BETA)","image":"https://datarepublican.com/assets/images/og-3-1.png","url":"https://datarepublican.com/relations/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"People Relations (BETA)","image":"http://localhost:4000/assets/images/og-3-1.png","url":"http://localhost:4000/relations/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
@@ -745,11 +745,14 @@ $(document).ready(function() {
 <script src="jquery.min.js"></script>
 
 <!-- Viz.js (core + full render) -->
-<script src="viz.js"></script>
-<script src="full.render.js"></script>
+<!-- <script src="viz.js"></script>
+<script src="full.render.js"></script> -->
+
+<!-- Cytoscape.js for modern graph visualization -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
 
 <!-- svg-pan-zoom for panning/zooming the resulting SVG -->
-<script src="svg-pan-zoom.min.js"></script>
+<!-- <script src="svg-pan-zoom.min.js"></script> -->
 
 <!-- JSZip for reading zipped CSVs -->
 <script src="jszip.min.js"></script>
@@ -785,6 +788,94 @@ $(document).ready(function() {
     gap: 8px;
     margin-bottom: 0.5rem;
   }
+  .legend-item {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .legend-item.disabled {
+    opacity: 0.5;
+  }
+  /* Category colors */
+  .legend-FAMILY { background-color: #E11D48; }
+  .legend-WORK { background-color: #2563EB; }
+  .legend-POLITICAL { background-color: #9333EA; }
+  .legend-LEGAL { background-color: #DC2626; }
+  .legend-MEDIA { background-color: #EA580C; }
+  .legend-EDUCATION { background-color: #4ADE80; }
+  .legend-HISTORICAL { background-color: #D97706; }
+  .legend-SOCIAL { background-color: #14B8A6; }
+  .legend-OTHER { background-color: #6B7280; }
+  .legend-UNKNOWN { background-color: #6B7280; }
+  
+  /* Cytoscape specific styles */
+  #cy-controls {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 10;
+  }
+  
+  .cy-button {
+    width: 40px;
+    height: 40px;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .cy-button:hover {
+    background: #f5f5f5;
+  }
+  
+  /* Node tooltip styles */
+  .cy-tooltip {
+    position: absolute;
+    z-index: 1000;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 8px;
+    max-width: 300px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    pointer-events: none;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    line-height: 1.4;
+  }
+
+  /* Node styling */
+  #cy node {
+    text-wrap: wrap;
+    text-max-width: 200px;
+    text-overflow: ellipsis;
+    border-width: 1px;
+    font-size: 12px;
+    min-width: 50px;
+    min-height: 50px;
+  }
+
+  #loading-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+  }
 </style>
 
 <!-- 
@@ -807,7 +898,7 @@ letting the user enter a name, see results, and click to load GraphViz mode.
   <form id="searchForm" class="flex flex-wrap gap-2 items-end">
     <div>
       <label for="searchBox" class="text-sm font-bold mb-1">Name/Keyword(s)</label><br/>
-      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. ‘aaron’ or ‘14th Dalai Lama’"/>
+      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. 'aaron' or '14th Dalai Lama'"/>
     </div>
 
     <button type="submit" id="searchButton" class="p-2 border border-gray-200 rounded font-bold text-sm">
@@ -843,9 +934,9 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <div id="graphExplanation" class="mb-3">
   <h1 id="graphTitle" class="mb-1">Relationship Graph</h1>
   <p class="text-sm mb-2" id="graphInstructions">
-    Below is a visualization of our selected subject’s relationships, color-coded by category.  
+    Below is a visualization of our selected subject's relationships, color-coded by category.  
     <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
-    Click “Download SVG” to get an offline copy of the image.
+    Click "Download PNG" to get an offline copy of the image.
   </p>
 </div>
 
@@ -857,14 +948,21 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 
 <!-- Where the graph renders -->
 <div id="graph-container" class="border rounded flex items-center justify-center bg-white">
-  <div>
+  <div id="cy" style="width: 100%; height: 100%;"></div>
+  <div id="cy-controls">
+    <button class="cy-button" id="zoom-in">+</button>
+    <button class="cy-button" id="zoom-out">-</button>
+    <button class="cy-button" id="reset-view">⟲</button>
+  </div>
+  <div class="cy-tooltip"></div>
+  <div id="loading-indicator">
     <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
   </div>
 </div>
 
 <!-- Download button -->
 <div class="mt-2 text-right">
-  <button id="downloadBtn" class="toggle-btn" style="display: none;">Download SVG</button>
+  <button id="downloadBtn" class="toggle-btn" style="display: none;">Download PNG</button>
 </div>
 </div>
 
@@ -1209,9 +1307,11 @@ $('#backToSearch').on('click', function() {
 ***************************************/
 async function renderGraphForSubject(subjectName) {
   // Show spinner in #graph-container
-  $('#graph-container').html(`
-    <div><img src="../assets/images/loading.svg" style="width:32px;height:32px" alt="Loading..."></div>
-  `);
+  $('#loading-indicator').show();
+  $('#cy').empty();
+  
+  // Make sure download button is hidden while loading
+  $('#downloadBtn').hide();
 
   // Set the search param in the URL
   const newUrl = new URL(window.location);
@@ -1359,13 +1459,6 @@ async function renderGraphForSubject(subjectName) {
   }
 }
 
-// Build & render the DOT from globalNodesMap + filtered edges
-function reRenderGraph(rootSubject) {
-  let activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
-  let dotSrc = buildDotSource(rootSubject, globalNodesMap, activeEdges);
-  renderDot(dotSrc);
-}
-
 // A function to ensure node exists
 function addNodeIfNeeded(map, subject) {
   if (!map.has(subject)) {
@@ -1395,7 +1488,6 @@ async function getZipText(zipObj, filename) {
   return await zipObj.file(filename).async('string');
 }
 
-
 /***************************************
 * DOT BUILDING / RENDERING
 ***************************************/
@@ -1417,80 +1509,530 @@ function insertLineBreaks(str, maxLen=50) {
     }
   }
   if (current) lines.push(escapeHtml(current));
-  return lines.join("<BR/>");
+  return lines.join("<br>");
 }
 
-function buildDotSource(rootSubject, nodesMap, edges) {
-  let dot = `digraph G {
-rankdir="TB";
-node [ shape=box, style="filled", fillcolor="#F3F4F6", color="#94A3B8", fontname="Arial", fontsize=13 ];
-edge [ fontname="Arial", color="#DADBE7", penwidth=2, fontsize=11 ];
-`;
-
+// Convert graph data to Cytoscape.js format
+function buildCytoscapeElements(rootSubject, nodesMap, edges) {
+  let elements = [];
+  
+  // Add nodes
   for (let [subj, bulletData] of nodesMap.entries()) {
-    let p1Wrapped = insertLineBreaks(bulletData.bullet_point1 || "");
-    let p2Wrapped = insertLineBreaks(bulletData.bullet_point2 || "");
-    let subjWrapped = insertLineBreaks(subj);
+    let isRoot = subj === rootSubject;
+    
+    // Create a label that includes the name and first bullet point
+    let displayLabel = subj;
+    let description = '';
+    
+    // Add first bullet point if available (truncated)
+    if (bulletData.bullet_point1) {
+      let bp1 = bulletData.bullet_point1;
+      if (bp1.length > 80) {
+        bp1 = bp1.substring(0, 77) + '...';
+      }
+      description = bp1;
+    }
+    
+    elements.push({
+      data: {
+        id: subj,
+        label: displayLabel,
+        description: description,
+        fullName: subj,
+        bulletPoint1: bulletData.bullet_point1 || "",
+        bulletPoint2: bulletData.bullet_point2 || "",
+        isRoot: isRoot
+      }
+    });
+  }
+  
+  // Add edges
+  for (let e of edges) {
+    // Truncate long edge labels for display
+    let displayLabel = e.label;
+    if (displayLabel.length > 40) {
+      displayLabel = displayLabel.substring(0, 37) + '...';
+    }
+    
+    // Generate more varied control points for better curve distribution
+    // Use larger random offsets to create more distinct curves
+    const randomOffset1 = Math.floor(Math.random() * 160) - 80;
+    const randomOffset2 = Math.floor(Math.random() * 160) - 80;
+    
+    elements.push({
+      data: {
+        id: `${e.from}-${e.to}-${e.category}`,
+        source: e.from,
+        target: e.to,
+        label: displayLabel,
+        fullLabel: e.label,
+        category: e.category,
+        color: e.color,
+        controlPointDistances: [randomOffset1, randomOffset2]
+      }
+    });
+  }
+  
+  return elements;
+}
 
-    // HTML-like label
-    let label = `<<table border="0" cellborder="0" cellpadding="2" cellspacing="0">
-      <tr><td align="left"><b>${subjWrapped}</b></td></tr>
-      ${ p1Wrapped ? `<tr><td align="left"><font point-size="10">${p1Wrapped}</font></td></tr>` : '' }
-      ${ p2Wrapped ? `<tr><td align="left"><font point-size="10">${p2Wrapped}</font></td></tr>` : '' }
-    </table>>`;
-
-    if (subj === rootSubject) {
-      dot += `"${subj}" [ color="#2563EB", penwidth=3, label=${label} ];\n`;
-    } else {
-      dot += `"${subj}" [ label=${label} ];\n`;
+// Initialize and render Cytoscape graph
+function renderCytoscape(rootSubject, elements) {
+  // Hide loading indicator
+  $('#loading-indicator').hide();
+  
+  // Clear previous instance if exists
+  if (window.cy) {
+    try {
+      window.cy.destroy();
+    } catch (e) {
+      console.warn("Could not destroy previous Cytoscape instance:", e);
+      // Just continue, we'll create a new one
     }
   }
-
-  for (let e of edges) {
-    dot += `"${e.from}" -> "${e.to}" [ label="${escapeHtml(e.label)}", color="${e.color}" ];\n`;
-  }
-
-  dot += `}\n`;
-  return dot;
-}
-
-function renderDot(dotSrc) {
-  $('#graph-container').empty();
-  let viz = new Viz();
-
-  viz.renderSVGElement(dotSrc)
-    .then(svgEl => {
-      // let it fill the container
-      svgEl.setAttribute('width', '100%');
-      svgEl.setAttribute('height', '100%');
-      svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-
-      $('#graph-container').append(svgEl);
-
-      // enable pan/zoom
-      if (panZoomInstance) {
-        panZoomInstance.destroy();
+  
+  // Create new Cytoscape instance
+  try {
+    window.cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: elements,
+      style: [
+        // Node styles
+        {
+          selector: 'node',
+          style: {
+            'background-color': '#F3F4F6',
+            'border-color': '#94A3B8',
+            'border-width': 1,
+            'shape': 'rectangle',
+            'width': function(ele) { return ele.data('label') ? 'label' : 180; },
+            'height': function(ele) { return ele.data('label') ? 'label' : 60; },
+            'padding': '15px', // Increased padding
+            'text-wrap': 'wrap',
+            'text-max-width': '180px', // Slightly reduced to help with layout
+            'text-overflow-wrap': 'ellipsis', // Fixed deprecated property
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'font-family': 'Arial',
+            'font-size': '13px',
+            'label': function(ele) {
+              const data = ele.data();
+              if (data.description) {
+                return data.label + '\n\n' + data.description;
+              }
+              return data.label;
+            },
+            'text-margin-y': 5,
+            'text-wrap': 'wrap'
+          }
+        },
+        // Root node style
+        {
+          selector: 'node[?isRoot]',
+          style: {
+            'border-color': '#2563EB',
+            'border-width': 3,
+            'background-color': '#EFF6FF',
+            'font-weight': 'bold',
+            'font-size': '15px',
+            'z-index': 10 // Make sure root node is on top
+          }
+        },
+        // Edge styles
+        {
+          selector: 'edge',
+          style: {
+            'width': 2,
+            'line-color': 'data(color)',
+            'target-arrow-color': 'data(color)',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'unbundled-bezier',
+            'control-point-distances': function(ele) {
+              // More pronounced curves to avoid overlaps
+              return ele.data('controlPointDistances') || [180, -180]; // Increased curve distance
+            },
+            'control-point-weights': [0.4, 0.6], // Adjusted for smoother curves
+            'label': 'data(label)',
+            'font-size': '11px',
+            'text-background-color': 'white',
+            'text-background-opacity': 0.9,
+            'text-background-padding': '3px',
+            'text-background-shape': 'rectangle',
+            'font-family': 'Arial',
+            'text-wrap': 'wrap',
+            'text-max-width': '150px',
+            'edge-text-rotation': 'autorotate'
+          }
+        }
+      ],
+      layout: {
+        name: 'preset' // Start with preset to position root node
       }
-      panZoomInstance = svgPanZoom(svgEl, {
-        zoomEnabled: true,
-        controlIconsEnabled: true,
-        fit: true,
-        center: true
-      });
-      // Force another fit + center so it uses max space
-      panZoomInstance.resize();
-      panZoomInstance.fit();
-      panZoomInstance.center();
-
-      // show download button
-      $('#downloadBtn').show();
-    })
-    .catch(err => {
-      console.error(err);
-      $('#graph-container').html(`<div class="p-2 text-center text-sm text-red-500">Error generating graph: ${err}</div>`);
     });
+    
+    // Calculate the center of the viewport
+    const centerX = cy.width() / 2;
+    const centerY = cy.height() / 2;
+    
+    // First position the root node at the exact center
+    const rootNode = cy.nodes().filter(node => node.data('isRoot'));
+    if (rootNode.length > 0) {
+      rootNode.position({
+        x: centerX,
+        y: centerY
+      });
+      
+      // Lock the root node position to prevent it from moving during layout
+      rootNode.lock();
+    }
+    
+    // Get all non-root nodes for circular distribution
+    const nonRootNodes = cy.nodes().filter(node => !node.data('isRoot'));
+    
+    // Calculate optimal spacing based on node count
+    const nodeCount = nonRootNodes.length;
+    const minViewportDim = Math.min(cy.width(), cy.height());
+    
+    // Determine how many circles we need based on node count
+    const nodesPerCircle = Math.max(8, Math.min(12, Math.floor(minViewportDim / 100)));
+    const circleCount = Math.ceil(nodeCount / nodesPerCircle);
+    
+    // Distribute nodes across multiple concentric circles
+    nonRootNodes.forEach((node, i) => {
+      // Determine which circle this node belongs to
+      const circleIndex = Math.floor(i / nodesPerCircle);
+      const nodeIndexInCircle = i % nodesPerCircle;
+      
+      // Calculate radius for this circle (outer circles are larger)
+      const baseRadius = minViewportDim * 0.35;
+      const radius = baseRadius * (1 + (circleIndex * 0.4));
+      
+      // Calculate angle with offset for each circle to stagger nodes
+      const angleOffset = circleIndex * (Math.PI / nodesPerCircle);
+      const angle = (2 * Math.PI * nodeIndexInCircle / nodesPerCircle) + angleOffset;
+      
+      // Set position
+      node.position({
+        x: centerX + radius * Math.cos(angle),
+        y: centerY + radius * Math.sin(angle)
+      });
+    });
+    
+    // After layout completes, ensure the root node is still centered
+    setTimeout(() => {
+      // Force root node to center again
+      if (rootNode.length > 0) {
+        rootNode.unlock();
+        rootNode.position({
+          x: centerX,
+          y: centerY
+        });
+        rootNode.lock(); // Lock it again
+      }
+      
+      // Improved overlap prevention algorithm
+      // First, get accurate node dimensions including labels
+      const nodeData = [];
+      cy.nodes().forEach(node => {
+        const bb = node.boundingBox({includeLabels: true, includeOverlays: true});
+        const pos = node.position();
+        nodeData.push({
+          node: node,
+          x: pos.x,
+          y: pos.y,
+          width: bb.w,
+          height: bb.h,
+          isRoot: node.data('isRoot')
+        });
+      });
+      
+      // Run multiple passes of overlap removal with increasing strength
+      for (let pass = 0; pass < 3; pass++) {
+        const strength = 0.3 + (pass * 0.3); // Increase force with each pass
+        
+        // Multiple iterations per pass
+        for (let iter = 0; iter < 50; iter++) {
+          let moved = false;
+          
+          // Check each pair of nodes for overlap
+          for (let i = 0; i < nodeData.length; i++) {
+            if (nodeData[i].isRoot) continue; // Skip root node
+            
+            let totalForceX = 0;
+            let totalForceY = 0;
+            let forcesApplied = 0;
+            
+            for (let j = 0; j < nodeData.length; j++) {
+              if (i === j) continue;
+              
+              const nodeA = nodeData[i];
+              const nodeB = nodeData[j];
+              
+              // Calculate distance between node centers
+              const dx = nodeB.x - nodeA.x;
+              const dy = nodeB.y - nodeA.y;
+              const distanceSquared = dx * dx + dy * dy;
+              
+              // Calculate minimum required distance to avoid overlap (with padding)
+              const minDistX = (nodeA.width + nodeB.width) / 2 + 30; // 30px extra padding
+              const minDistY = (nodeA.height + nodeB.height) / 2 + 30;
+              
+              // Check if nodes overlap or are too close
+              const overlapX = minDistX * minDistX > distanceSquared * (dx * dx) / distanceSquared;
+              const overlapY = minDistY * minDistY > distanceSquared * (dy * dy) / distanceSquared;
+              
+              if (overlapX || overlapY || distanceSquared < Math.pow(Math.max(minDistX, minDistY), 2)) {
+                // Calculate repulsion force
+                const distance = Math.sqrt(distanceSquared) || 0.1; // Avoid division by zero
+                const minDist = Math.sqrt(minDistX * minDistX + minDistY * minDistY);
+                const force = strength * (minDist - distance) / distance;
+                
+                // Apply force vector
+                totalForceX -= (dx / distance) * force;
+                totalForceY -= (dy / distance) * force;
+                forcesApplied++;
+                
+                moved = true;
+              }
+              
+              // Add repulsion from root node (stronger for closer nodes)
+              if (nodeB.isRoot) {
+                const rootRepulsionStrength = 0.5;
+                const rootDistance = Math.sqrt(distanceSquared) || 0.1;
+                const rootForce = rootRepulsionStrength * (200 / rootDistance);
+                
+                totalForceX -= (dx / rootDistance) * rootForce;
+                totalForceY -= (dy / rootDistance) * rootForce;
+                forcesApplied++;
+              }
+            }
+            
+            // Apply accumulated forces
+            if (forcesApplied > 0) {
+              // Limit maximum movement per iteration
+              const maxMove = 20;
+              const forceMagnitude = Math.sqrt(totalForceX * totalForceX + totalForceY * totalForceY);
+              
+              if (forceMagnitude > maxMove) {
+                const scale = maxMove / forceMagnitude;
+                totalForceX *= scale;
+                totalForceY *= scale;
+              }
+              
+              // Update node position
+              nodeData[i].x += totalForceX;
+              nodeData[i].y += totalForceY;
+              nodeData[i].node.position({
+                x: nodeData[i].x,
+                y: nodeData[i].y
+              });
+            }
+          }
+          
+          if (!moved) break; // Stop if no nodes were moved
+        }
+      }
+      
+      // Apply a radial constraint to maintain circular distribution
+      // but with less weight than the overlap prevention
+      const idealRadius = Math.min(cy.width(), cy.height()) * 0.45;
+      
+      nodeData.forEach(data => {
+        if (data.isRoot) return; // Skip root node
+        
+        // Calculate current angle and distance from center
+        const dx = data.x - centerX;
+        const dy = data.y - centerY;
+        const angle = Math.atan2(dy, dx);
+        const currentDistance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Calculate ideal position on circle
+        const idealX = centerX + idealRadius * Math.cos(angle);
+        const idealY = centerY + idealRadius * Math.sin(angle);
+        
+        // Blend current position with ideal circular position (30% circular, 70% current)
+        // This is a weaker circular constraint than before
+        const blendFactor = 0.3;
+        const newX = idealX * blendFactor + data.x * (1 - blendFactor);
+        const newY = idealY * blendFactor + data.y * (1 - blendFactor);
+        
+        // Update node position
+        data.node.position({
+          x: newX,
+          y: newY
+        });
+        
+        // Update stored position
+        data.x = newX;
+        data.y = newY;
+      });
+      
+      // Final overlap check with stronger forces
+      for (let iter = 0; iter < 30; iter++) {
+        let moved = false;
+        
+        for (let i = 0; i < nodeData.length; i++) {
+          if (nodeData[i].isRoot) continue;
+          
+          for (let j = 0; j < nodeData.length; j++) {
+            if (i === j) continue;
+            
+            const nodeA = nodeData[i];
+            const nodeB = nodeData[j];
+            
+            // Skip if one node is far from the other
+            const dx = nodeB.x - nodeA.x;
+            const dy = nodeB.y - nodeA.y;
+            const distSquared = dx * dx + dy * dy;
+            
+            // Quick distance check before detailed calculation
+            const maxDimSum = nodeA.width + nodeA.height + nodeB.width + nodeB.height;
+            if (distSquared > maxDimSum * maxDimSum / 4) continue;
+            
+            // Calculate minimum required distance to avoid overlap (with padding)
+            const minDistX = (nodeA.width + nodeB.width) / 2 + 40; // Extra padding
+            const minDistY = (nodeA.height + nodeB.height) / 2 + 40;
+            
+            // Check if nodes overlap
+            if (Math.abs(dx) < minDistX && Math.abs(dy) < minDistY) {
+              // Calculate movement direction
+              const distance = Math.sqrt(distSquared) || 0.1;
+              const overlapAmount = Math.sqrt(minDistX * minDistX + minDistY * minDistY) - distance;
+              
+              if (overlapAmount > 0) {
+                // Move nodeA away from nodeB
+                const moveX = (dx / distance) * overlapAmount * 0.6;
+                const moveY = (dy / distance) * overlapAmount * 0.6;
+                
+                nodeData[i].x -= moveX;
+                nodeData[i].y -= moveY;
+                nodeData[i].node.position({
+                  x: nodeData[i].x,
+                  y: nodeData[i].y
+                });
+                
+                moved = true;
+              }
+            }
+          }
+        }
+        
+        if (!moved) break;
+      }
+      
+      // Ensure all nodes are visible by fitting to the viewport with padding
+      cy.fit(cy.elements(), 50);
+      
+      // Make sure we're not too zoomed in
+      const maxZoomLevel = 0.5; // Lower value = more zoomed out
+      const currentZoom = cy.zoom();
+      
+      if (currentZoom > maxZoomLevel) {
+        cy.zoom({
+          level: maxZoomLevel,
+          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+        });
+      }
+      
+      // Final check to ensure root is centered
+      setTimeout(() => {
+        rootNode.unlock();
+        rootNode.position({
+          x: centerX,
+          y: centerY
+        });
+        cy.center(rootNode);
+      }, 100);
+      
+      // Add event listeners for tooltips
+      cy.on('mouseover', 'node', function(e) {
+        const node = e.target;
+        const data = node.data();
+        
+        // Only show tooltip if there's a second bullet point that's not shown in the node
+        if (data.bulletPoint2) {
+          const tooltip = $('.cy-tooltip');
+          let content = `<strong>Additional info:</strong><br><br>${escapeHtml(data.bulletPoint2)}`;
+          
+          tooltip.html(content);
+          
+          const renderedPosition = node.renderedPosition();
+          const containerOffset = $('#cy').offset();
+          
+          tooltip.css({
+            'left': containerOffset.left + renderedPosition.x + 10,
+            'top': containerOffset.top + renderedPosition.y - 10,
+            'opacity': 1
+          });
+        }
+      });
+      
+      cy.on('mouseover', 'edge', function(e) {
+        const edge = e.target;
+        const data = edge.data();
+        
+        if (data.fullLabel && data.fullLabel !== data.label) {
+          const tooltip = $('.cy-tooltip');
+          tooltip.html(`<strong>${escapeHtml(data.fullLabel)}</strong>`);
+          
+          const midpoint = edge.midpoint();
+          const containerOffset = $('#cy').offset();
+          
+          tooltip.css({
+            'left': containerOffset.left + midpoint.x,
+            'top': containerOffset.top + midpoint.y,
+            'opacity': 1
+          });
+        }
+      });
+      
+      cy.on('mouseout', 'node, edge', function() {
+        $('.cy-tooltip').css('opacity', 0);
+      });
+      
+      // Show download button
+      $('#downloadBtn').show();
+      
+      // Add event listeners for control buttons
+      $('#zoom-in').off('click').on('click', function() {
+        cy.zoom({
+          level: cy.zoom() * 1.2,
+          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+        });
+      });
+      
+      $('#zoom-out').off('click').on('click', function() {
+        cy.zoom({
+          level: cy.zoom() * 0.8,
+          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+        });
+      });
+      
+      $('#reset-view').off('click').on('click', function() {
+        cy.fit();
+        cy.center();
+      });
+      
+      // Enable touch gestures for mobile
+      cy.userZoomingEnabled(true);
+      cy.userPanningEnabled(true);
+      cy.boxSelectionEnabled(false);
+    }, 100);
+    
+  } catch (err) {
+    console.error("Error initializing Cytoscape:", err);
+    $('#graph-container').html(
+      `<div class="p-2 text-center text-sm text-red-500">Error rendering graph: ${err.message}</div>`
+    );
+  }
 }
 
+// Re-render the graph with filtered edges
+function reRenderGraph(rootSubject) {
+  let activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
+  let elements = buildCytoscapeElements(rootSubject, globalNodesMap, activeEdges);
+  renderCytoscape(rootSubject, elements);
+}
 
 /***************************************
 * LEGEND & CATEGORY TOGGLING
@@ -1499,8 +2041,8 @@ function renderLegend(categories) {
   let html = '';
   categories.sort(); // optional: sort them alphabetically
   for (let c of categories) {
-    let colorClass = 'legend-' + c;
-    html += `<div class="legend-item ${colorClass}" data-cat="${c}">${c}</div>`;
+    let color = categoryColors[c] || categoryColors["UNKNOWN"];
+    html += `<div class="legend-item" style="background-color: ${color};" data-cat="${c}">${c}</div>`;
   }
   $('#legend').html(html);
 
@@ -1526,25 +2068,36 @@ function toggleCategory(cat) {
 
 
 /***************************************
-* DOWNLOAD SVG
+* DOWNLOAD PNG
 ***************************************/
 $('#downloadBtn').on('click', function() {
-  let svgEl = document.querySelector('#graph-container svg');
-  if (!svgEl) {
-    alert('No SVG to download');
+  if (!window.cy) {
+    alert('No graph to download');
     return;
   }
-  let svgData = new XMLSerializer().serializeToString(svgEl);
-  let blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-  let url = URL.createObjectURL(blob);
-
-  let link = document.createElement('a');
-  link.href = url;
-  link.download = 'relation_graph.svg';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  
+  try {
+    // Create a PNG image
+    const png64 = window.cy.png({
+      output: 'blob',
+      scale: 2, // Higher resolution
+      bg: 'white',
+      full: true
+    });
+    
+    // Create download link
+    const url = URL.createObjectURL(png64);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'relation_graph.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Error generating PNG:", err);
+    alert("Could not generate PNG. Please try again.");
+  }
 });
 
 
