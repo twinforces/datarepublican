@@ -277,11 +277,11 @@ function updateQueryParams() {
 const sortOffset = +0.001;
 function compareCharities( a, b)
 {
-        let sortIndexA = a.index;
-        let sortIndexB = b.index;
-        if (a.isOther) sortIndexA = a.parent.index+sortOffset;
-        if (b.isOther) sortIndexB = b.parent.index+sortOffset;
-        return  (sortIndexA-sortIndexB) ||
+        let sortgrantsInTotalA = a.grantsInTotal;
+        let sortgrantsInTotalB = b.grantsInTotal;
+        if (a.isOther) sortgrantsInTotalA = a.parent.grantsInTotal+sortOffset;
+        if (b.isOther) sortgrantsInTotalB = b.parent.grantsInTotal+sortOffset;
+        return  (sortgrantsInTotalA-sortgrantsInTotalB) ||
                 (b.grantsTotal-a.grantsTotal) || (b.grantsInTotal - a.grantsInTotal);
         return (b.govt_amt - a.govt_amt) || 
                 (b.grantsInTotal+b.grantsTotal - a.grantsInTotal-b.grantsTotal) || 
@@ -475,7 +475,7 @@ function generateOctagonPath(d) {
 }
 
 function generatePlusPath(d) {
-    const radius = d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
+    const radius = NODE_WIDTH/2; //d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
     const armWidth = radius * 0.8; // Skinny arms (20% of radius)
     let cx = d.x0; // Absolute center at d.x0
     if (!d.isRight)
@@ -565,36 +565,78 @@ function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
     };
 }
 
+// force expantion nodess to the bottom of the parent
+function calculateOtherPosition(node,scale, height)
+{
+        calculateRegularPosition(node.parent, scale, height) // make sure parent is calculated
+        const width = node.x1-node.x0;
+        const height2 = node.y1- node.y0;
+    // calculate trap corners
+    const midY = (node.parent.y0 + node.parent.y1) / 2;
+    const y0In = midY - node.parent.inflowHeight / 2;
+    const y1In = midY + node.parent.inflowHeight / 2;
+    const y0Out = midY - node.parent.outflowHeight / 2;
+    const y1Out = midY + node.parent.outflowHeight / 2;
+       if (node.isRight)
+        {
+                node.x0= node.parent.x1+NODE_WIDTH*2;
+                node.x1 = node.parent.x1+NODE_WIDTH;   
+                node.y0= y0Out - height2;
+                node.y1= y1Out - height2;      
+          }
+        else
+        {
+                node.x0= node.parent.x0-NODE_WIDTH;
+                node.x1 = node.parent.x0-2*NODE_WIDTH;        
+                node.y0= y0In - height2;
+                node.y1= y1In - height2;      
+        }
+        calculateRegularPosition(node, scale, height) // make sure parent is calculated
+
+}
+function calculateRegularPosition(node, scale, height)
+{
+       let scaleFactor = 100; // placeholder for 0,0
+        const sankeyHeight = node.y1 - node.y0;
+        if (node.grantsInLogTotal > node.grantsLogTotal)
+                scaleFactor = sankeyHeight/node.grantsInLogTotal; // we know its greater so must be not zero
+        else
+                scaleFactor = sankeyHeight/node.grantsLogTotal;
+        node.outflowHeight =  Math.min(sankeyHeight, node.grantsLogTotal * scaleFactor);
+        node.inflowHeight = Math.min(sankeyHeight, node.grantsInLogTotal * scaleFactor);
+        if (node.grantsLogTotal === 0) {
+            node.inflowHeight = sankeyHeight;
+            node.outflowHeight = 5;
+        }
+        if (node.grantsLogInTotal === 0){
+            node.inflowHeight = 5;
+            node.outflowHeight = sankeyHeight;
+        }
+
+        if (!isFinite(node.outflowHeight) || !isFinite(node.inflowHeight)) {
+            console.error(`Invalid heights for ${node.filer_ein}: outflow=${node.outflowHeight}, inflow=${node.inflowHeight}`);
+            node.outflowHeight = 50;
+            node.inflowHeight = 50;
+        }
+
+        node.x0Original = node.x0;
+        node.x1Original = node.x1;
+        node.y0Original = node.y0;
+        node.y1Original = node.y1;
+}
+
 function calculateNodePositions(nodes, scale, height) {
     nodes.forEach(d => {
+        if (d.isOther)
+        {
+                calculateOtherPosition(d, scale, height);
 
-        let scaleFactor = 100; // placeholder for 0,0
-        const sankeyHeight = d.y1 - d.y0;
-        if (d.grantsInLogTotal > d.grantsLogTotal)
-                scaleFactor = sankeyHeight/d.grantsInLogTotal; // we know its greater so must be not zero
+        }
         else
-                scaleFactor = sankeyHeight/d.grantsLogTotal;
-        d.outflowHeight =  Math.min(sankeyHeight, d.grantsLogTotal * scaleFactor);
-        d.inflowHeight = Math.min(sankeyHeight, d.grantsInLogTotal * scaleFactor);
-        if (d.grantsLogTotal === 0) {
-            d.inflowHeight = sankeyHeight;
-            d.outflowHeight = 5;
+        {
+                calculateRegularPosition(d, scale, height);
         }
-        if (d.grantsLogInTotal === 0){
-            d.inflowHeight = 5;
-            d.outflowHeight = sankeyHeight;
-        }
-
-        if (!isFinite(d.outflowHeight) || !isFinite(d.inflowHeight)) {
-            console.error(`Invalid heights for ${d.filer_ein}: outflow=${d.outflowHeight}, inflow=${d.inflowHeight}`);
-            d.outflowHeight = 50;
-            d.inflowHeight = 50;
-        }
-
-        d.x0Original = d.x0;
-        d.x1Original = d.x1;
-        d.y0Original = d.y0;
-        d.y1Original = d.y1;
+ 
     });
 }
 
@@ -786,7 +828,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
         .text(d => {
             const inflow = d.origIn;
             const outflow = d.origOut;
-            const top = `${d.name || d.id}\nEIN:${d.id}\nInflow: $${formatNumber(inflow)}\nOutflow: $${formatNumber(outflow)}`;
+            const top = d.toolTipText();
             const loopback = d.loopbackgrants.reduce((sum, g) => sum + g.amt, 0);
             if (loopback) return `${top}\nLoop: $${formatNumber(loopback)}`;
             return top;

@@ -54,18 +54,24 @@ title: Charity graph - multi-root BFS & taxpayer totals
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
         <ol class="!list-decimal space-y-1 text-sm pl-4">
-          <li>We filter charities by user-specified EINs + any keywords. EINs are always included, everything else must match at least one keyword <em>unless</em> no keywords are set (then all are included).</li>
-          <li>We pick the BFS root from the largest-<code>receipt_amt</code> EIN (if any exist), otherwise the largest from the filtered set. If that BFS yields fewer than 5 nodes, we pick the next-largest unvisited charity in the filtered set, BFS again, and so on, until the subgraph has 5 or more nodes or we run out.</li>
-          <li>We always include all user-specified EINs plus direct edges among them. Node labels highlight <strong>Taxpayer Funds Received</strong> from <code>govt_amt</code>, and we sum that for the final subgraph.</li>
-        </ol>
+        <li>We show NGOs and the money that flows between them.</li>
+        <li>Octogons (aka stop sign) are NGOs that don't have any outflows to other NGOs.</li>
+        <li>Gray "plus" circles roll up grants to keep the graph from being overwhelming, click to see 3 more.</li>
+       <li> Jump Start <a href="/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761">NED Hydra!</a></a>
+       <li> Jump Start <a href="/browse/?ein=001">Root of all Evil!</a></li>
+       <li> Jump Start <a href="/browse/?ein=110303001">Fidelity Aid</a></li>
+       <li> Jump Start <a href="/browse/?ein=800835023">Turning Point</a></li>
+       <li> Jump Start <a href="/browse/?ein=831567380">Bill Kriston's NGO</a></li>
+
+
+       </ol>
       </div>
     </div>
   </div>
-
-  <!-- BFS controls are BFS-only -->
+   <!-- BFS controls are BFS-only -->
   <div id="controls" class="mt-2 mb-4 flex flex-col @xl:items-start @xl:justify-between @xl:flex-row gap-4 bfs-only">
     <!-- EIN Input & Add Button -->
-    <div class="relative flex flex-col gap-2 max-w-lg">
+     <div class="relative flex flex-col gap-2 max-w-lg">
       {% include input.html 
         label="Add EIN(s)" 
         id="einInput" 
