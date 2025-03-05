@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741195086">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741195086">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741195413">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741195413">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1559,6 +1559,12 @@ function buildCytoscapeElements(rootSubject, nodesMap, edges) {
     const randomOffset1 = Math.floor(Math.random() * 160) - 80;
     const randomOffset2 = Math.floor(Math.random() * 160) - 80;
     
+    // Calculate edge angle to help with bundling
+    const sourceNode = nodesMap.get(e.from);
+    const targetNode = nodesMap.get(e.to);
+    const isSourceRoot = e.from === rootSubject;
+    const isTargetRoot = e.to === rootSubject;
+    
     elements.push({
       data: {
         id: `${e.from}-${e.to}-${e.category}`,
@@ -1568,7 +1574,9 @@ function buildCytoscapeElements(rootSubject, nodesMap, edges) {
         fullLabel: e.label,
         category: e.category,
         color: e.color,
-        controlPointDistances: [randomOffset1, randomOffset2]
+        controlPointDistances: [randomOffset1, randomOffset2],
+        isFromRoot: isSourceRoot,
+        isToRoot: isTargetRoot
       }
     });
   }
@@ -1649,9 +1657,10 @@ function renderCytoscape(rootSubject, elements) {
             'curve-style': 'unbundled-bezier',
             'control-point-distances': function(ele) {
               // More pronounced curves to avoid overlaps
-              return ele.data('controlPointDistances') || [180, -180]; // Increased curve distance
+              const randomBase = 200 + (Math.random() * 100);
+              return [randomBase * (Math.random() > 0.5 ? 1 : -1), randomBase * (Math.random() > 0.5 ? 1 : -1)];
             },
-            'control-point-weights': [0.4, 0.6], // Adjusted for smoother curves
+            'control-point-weights': [0.3, 0.7], // More asymmetric for better curve distribution
             'label': 'data(label)',
             'font-size': '11px',
             'text-background-color': 'white',
@@ -1662,6 +1671,18 @@ function renderCytoscape(rootSubject, elements) {
             'text-wrap': 'wrap',
             'text-max-width': '150px',
             'edge-text-rotation': 'autorotate'
+          }
+        },
+        // Special style for edges from/to root
+        {
+          selector: 'edge[?isFromRoot], edge[?isToRoot]',
+          style: {
+            'width': 2.5, // Slightly thicker
+            'line-style': 'solid',
+            'control-point-distances': function(ele) {
+              // Less curved for root connections to reduce clutter
+              return [100, 100];
+            }
           }
         }
       ],
@@ -1704,12 +1725,17 @@ function renderCytoscape(rootSubject, elements) {
       const nodeIndexInCircle = i % nodesPerCircle;
       
       // Calculate radius for this circle (outer circles are larger)
-      const baseRadius = minViewportDim * 0.35;
-      const radius = baseRadius * (1 + (circleIndex * 0.4));
+      const baseRadius = minViewportDim * 0.4; // Increased from 0.35 to 0.4
+      
+      // Add slight randomness to radius to prevent perfect circles
+      const radiusVariation = baseRadius * 0.1 * (Math.random() - 0.5);
+      const radius = baseRadius * (1 + (circleIndex * 0.5)) + radiusVariation;
       
       // Calculate angle with offset for each circle to stagger nodes
+      // Add slight angle variation to prevent perfect alignment
+      const angleVariation = (Math.random() * 0.2 - 0.1) * (Math.PI / nodesPerCircle);
       const angleOffset = circleIndex * (Math.PI / nodesPerCircle);
-      const angle = (2 * Math.PI * nodeIndexInCircle / nodesPerCircle) + angleOffset;
+      const angle = (2 * Math.PI * nodeIndexInCircle / nodesPerCircle) + angleOffset + angleVariation;
       
       // Set position
       node.position({
@@ -1730,6 +1756,73 @@ function renderCytoscape(rootSubject, elements) {
         rootNode.lock(); // Lock it again
       }
       
+      // Optimize edge routing to reduce overlaps
+      // Group edges by their general direction (in 8 sectors)
+      const edgeGroups = {};
+      cy.edges().forEach(edge => {
+        const source = edge.source().position();
+        const target = edge.target().position();
+        
+        // Skip edges to/from root as they're already handled
+        if (edge.data('isFromRoot') || edge.data('isToRoot')) {
+          return;
+        }
+        
+        // Calculate angle
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const angle = Math.atan2(dy, dx);
+        
+        // Convert to sector (0-7, dividing the circle into 8 parts)
+        const sector = Math.floor(((angle + Math.PI) / (2 * Math.PI) * 8) % 8);
+        
+        if (!edgeGroups[sector]) {
+          edgeGroups[sector] = [];
+        }
+        edgeGroups[sector].push(edge);
+      });
+      
+      // For each sector, adjust control points to reduce overlaps
+      Object.keys(edgeGroups).forEach(sector => {
+        const edges = edgeGroups[sector];
+        const sectorAngle = (parseInt(sector) / 8) * 2 * Math.PI - Math.PI;
+        
+        // Sort edges by length
+        edges.sort((a, b) => {
+          const aLength = getEdgeLength(a);
+          const bLength = getEdgeLength(b);
+          return aLength - bLength;
+        });
+        
+        // Adjust control points based on position in group
+        edges.forEach((edge, i) => {
+          const baseDistance = 150 + (i * 30); // Increasing distance for each edge
+          const perpDistance = 80 + (i % 3) * 60; // Perpendicular offset
+          
+          // Calculate perpendicular vector
+          const perpX = Math.sin(sectorAngle);
+          const perpY = -Math.cos(sectorAngle);
+          
+          // Set control points
+          const cp1 = baseDistance * (i % 2 === 0 ? 1 : -1);
+          const cp2 = baseDistance * (i % 2 === 0 ? -1 : 1);
+          
+          edge.style({
+            'control-point-distances': [cp1, cp2],
+            'control-point-weights': [0.3, 0.7]
+          });
+        });
+      });
+      
+      // Function to calculate edge length
+      function getEdgeLength(edge) {
+        const source = edge.source().position();
+        const target = edge.target().position();
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      
       // Improved overlap prevention algorithm
       // First, get accurate node dimensions including labels
       const nodeData = [];
@@ -1747,7 +1840,7 @@ function renderCytoscape(rootSubject, elements) {
       });
       
       // Run multiple passes of overlap removal with increasing strength
-      for (let pass = 0; pass < 3; pass++) {
+      for (let pass = 0; pass < 4; pass++) { // Increased from 3 to 4 passes
         const strength = 0.3 + (pass * 0.3); // Increase force with each pass
         
         // Multiple iterations per pass
@@ -1774,8 +1867,8 @@ function renderCytoscape(rootSubject, elements) {
               const distanceSquared = dx * dx + dy * dy;
               
               // Calculate minimum required distance to avoid overlap (with padding)
-              const minDistX = (nodeA.width + nodeB.width) / 2 + 30; // 30px extra padding
-              const minDistY = (nodeA.height + nodeB.height) / 2 + 30;
+              const minDistX = (nodeA.width + nodeB.width) / 2 + 50; // Increased from 30 to 50px extra padding
+              const minDistY = (nodeA.height + nodeB.height) / 2 + 50; // Increased from 30 to 50px
               
               // Check if nodes overlap or are too close
               const overlapX = minDistX * minDistX > distanceSquared * (dx * dx) / distanceSquared;
@@ -1835,7 +1928,7 @@ function renderCytoscape(rootSubject, elements) {
       
       // Apply a radial constraint to maintain circular distribution
       // but with less weight than the overlap prevention
-      const idealRadius = Math.min(cy.width(), cy.height()) * 0.45;
+      const idealRadius = Math.min(cy.width(), cy.height()) * 0.5; // Increased from 0.45 to 0.5
       
       nodeData.forEach(data => {
         if (data.isRoot) return; // Skip root node
@@ -1846,13 +1939,17 @@ function renderCytoscape(rootSubject, elements) {
         const angle = Math.atan2(dy, dx);
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
         
-        // Calculate ideal position on circle
-        const idealX = centerX + idealRadius * Math.cos(angle);
-        const idealY = centerY + idealRadius * Math.sin(angle);
+        // Calculate ideal position on circle with some randomness
+        // This prevents nodes from forming perfect circles which can cause edge overlaps
+        const radiusVariation = idealRadius * 0.1 * (Math.random() - 0.5);
+        const idealRadius2 = idealRadius + radiusVariation;
         
-        // Blend current position with ideal circular position (30% circular, 70% current)
-        // This is a weaker circular constraint than before
-        const blendFactor = 0.3;
+        const idealX = centerX + idealRadius2 * Math.cos(angle);
+        const idealY = centerY + idealRadius2 * Math.sin(angle);
+        
+        // Blend current position with ideal circular position (25% circular, 75% current)
+        // Reduced from 30% to 25% to prioritize overlap prevention even more
+        const blendFactor = 0.25;
         const newX = idealX * blendFactor + data.x * (1 - blendFactor);
         const newY = idealY * blendFactor + data.y * (1 - blendFactor);
         
@@ -1868,7 +1965,7 @@ function renderCytoscape(rootSubject, elements) {
       });
       
       // Final overlap check with stronger forces
-      for (let iter = 0; iter < 30; iter++) {
+      for (let iter = 0; iter < 40; iter++) { // Increased from 30 to 40 iterations
         let moved = false;
         
         for (let i = 0; i < nodeData.length; i++) {
@@ -1890,8 +1987,8 @@ function renderCytoscape(rootSubject, elements) {
             if (distSquared > maxDimSum * maxDimSum / 4) continue;
             
             // Calculate minimum required distance to avoid overlap (with padding)
-            const minDistX = (nodeA.width + nodeB.width) / 2 + 40; // Extra padding
-            const minDistY = (nodeA.height + nodeB.height) / 2 + 40;
+            const minDistX = (nodeA.width + nodeB.width) / 2 + 60; // Increased from 40 to 60px
+            const minDistY = (nodeA.height + nodeB.height) / 2 + 60; // Increased from 40 to 60px
             
             // Check if nodes overlap
             if (Math.abs(dx) < minDistX && Math.abs(dy) < minDistY) {
@@ -1901,8 +1998,8 @@ function renderCytoscape(rootSubject, elements) {
               
               if (overlapAmount > 0) {
                 // Move nodeA away from nodeB
-                const moveX = (dx / distance) * overlapAmount * 0.6;
-                const moveY = (dy / distance) * overlapAmount * 0.6;
+                const moveX = (dx / distance) * overlapAmount * 0.7; // Increased from 0.6 to 0.7
+                const moveY = (dy / distance) * overlapAmount * 0.7; // Increased from 0.6 to 0.7
                 
                 nodeData[i].x -= moveX;
                 nodeData[i].y -= moveY;
@@ -1921,7 +2018,7 @@ function renderCytoscape(rootSubject, elements) {
       }
       
       // Ensure all nodes are visible by fitting to the viewport with padding
-      cy.fit(cy.elements(), 50);
+      cy.fit(cy.elements(), 70); // Increased padding from 50 to 70
       
       // Make sure we're not too zoomed in
       const maxZoomLevel = 0.5; // Lower value = more zoomed out
