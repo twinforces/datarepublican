@@ -277,6 +277,12 @@ function updateQueryParams() {
 
 function compareCharities( a, b)
 {
+        let sortIndexA = a.index;
+        let sortIndexB = b.index;
+        if (a.isOther) sortIndexA = a.parent.index+0.01;
+        if (b.isOther) sortIndexB = b.parent.index+0.01;
+        return  (sortIndexA-sortIndexB) ||
+                (b.grantsTotal-a.grantsTotal) || (b.grantsInTotal - a.grantsInTotal);
         return (b.govt_amt - a.govt_amt) || 
                 (b.grantsInTotal+b.grantsTotal - a.grantsInTotal-b.grantsTotal) || 
                         (a.name.localeCompare(b.name));
@@ -460,7 +466,9 @@ function generateOctagonPath(d) {
 function generatePlusPath(d) {
     const radius = d.inflowHeight / 2 || 10; // Circle radius from inflowHeight, min 10
     const armWidth = radius * 0.8; // Skinny arms (20% of radius)
-    const cx = d.x0; // Absolute center at d.x0
+    let cx = d.x0; // Absolute center at d.x0
+    if (!d.isRight)
+        cx= d.x1; //other side for upstream
     const cy = (d.y0 + d.y1) / 2; // Absolute vertical center
 
     // Circle path (filled)
