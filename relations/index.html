@@ -1,0 +1,824 @@
+---
+layout: default
+title: People Relations (BETA)
+---
+
+<!-- jQuery for convenience -->
+<script src="jquery.min.js"></script>
+
+<!-- Viz.js (core + full render) -->
+<script src="viz.js"></script>
+<script src="full.render.js"></script>
+
+<!-- svg-pan-zoom for panning/zooming the resulting SVG -->
+<script src="svg-pan-zoom.min.js"></script>
+
+<!-- JSZip for reading zipped CSVs -->
+<script src="jszip.min.js"></script>
+
+<!-- Papa Parse for CSV parsing -->
+<script src="papaparse.min.js"></script>
+
+<script src="murmurHash3.js"></script>
+
+<style>
+
+  .shidden { display: none; }
+  .toggle-btn {
+    background: none;
+    border: none;
+    color: #2563EB;
+    cursor: pointer;
+    padding: 0;
+  }
+  .loading-spinner {
+    vertical-align: middle;
+  }
+  #graph-container {
+    width: 100%;
+    height: 80vh;      /* or calc(100vh - someOffset) */
+    position: relative;
+    overflow: hidden;  /* if you like; up to you */
+  }
+  #legend {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 0.5rem;
+  }
+</style>
+
+<!-- 
+=========================
+======== SEARCH UI ======
+=========================
+
+This container is displayed in "Search Mode" (no ?subject= in the URL),
+letting the user enter a name, see results, and click to load GraphViz mode.
+-->
+
+<div id="searchMode" class="mb-4 shidden">
+<h1 class="mb-1">People &amp; relationships lookup</h1>
+<p class="text-sm mb-3">
+  Search for a name or phrase. We'll do an inclusive search (all tokens must appear).
+  Each matching subject is displayed along with a quick description. Click on a name to load its relationship graph.
+</p>
+
+<div id="searchFormWrapper" class="mb-4">
+  <form id="searchForm" class="flex flex-wrap gap-2 items-end">
+    <div>
+      <label for="searchBox" class="text-sm font-bold mb-1">Name/Keyword(s)</label><br/>
+      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. ‘aaron’ or ‘14th Dalai Lama’"/>
+    </div>
+
+    <button type="submit" id="searchButton" class="p-2 border border-gray-200 rounded font-bold text-sm">
+      <span class="button-text">Search</span>
+      <img src="../assets/images/loading-white.svg" class="loading-spinner" style="display:none;width:16px;height:16px" alt="Loading..."/>
+    </button>
+
+    <div class="relative -top-1">
+      <input type="checkbox" id="prefixCheck"/>
+      <label for="prefixCheck" class="text-sm">Use prefix matching</label>
+    </div>
+
+    <span id="statusMessage" class="text-sm"></span>
+  </form>
+</div>
+
+<div id="resultsContainer" class="flex flex-col gap-2"></div>
+<div id="resultsStatus" class="mt-2 text-sm"></div>
+</div>
+
+<!-- 
+===============================
+======== GRAPHVIZ UI =========
+===============================
+
+This container is displayed in "GraphViz Mode" (when ?subject= is in the URL, or after user clicks on a result).
+It shows the generated graph and a legend, plus a button to go back to the search mode.
+-->
+
+<div id="graphMode" class="shidden">
+<button id="backToSearch" class="toggle-btn frameless !mb-2">&larr; Return to search</button>
+
+<div id="graphExplanation" class="mb-3">
+  <h1 id="graphTitle" class="mb-1">Relationship Graph</h1>
+  <p class="text-sm mb-2" id="graphInstructions">
+    Below is a visualization of our selected subject’s relationships, color-coded by category.  
+    <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
+    Click “Download SVG” to get an offline copy of the image.
+  </p>
+</div>
+
+<!-- Legend for edge categories -->
+<div id="legend"></div>
+
+<!-- A spot to show short summary about the root subject from bullets.csv -->
+<div id="rootSummary" class="mb-4 p-2 md:px-4 md:pt-3 border rounded text-sm bg-white"></div>
+
+<!-- Where the graph renders -->
+<div id="graph-container" class="border rounded flex items-center justify-center bg-white">
+  <div>
+    <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
+  </div>
+</div>
+
+<!-- Download button -->
+<div class="mt-2 text-right">
+  <button id="downloadBtn" class="toggle-btn" style="display: none;">Download SVG</button>
+</div>
+</div>
+
+
+<script>
+/***************************************
+* GLOBALS
+***************************************/
+let allReverseIndex = new Map();      // token -> array of lineIDs (with ranges)
+let allSubjects = [];                 // lines from subjects.csv (index = line-1)
+let allBullets = new Map();           // subject -> { bullet_point1, bullet_point2 }
+let searchInProgress = false;
+let searchCanceled = false;
+let hasInitialDataLoaded = false;
+
+// For Graph Mode
+const NUM_PARTITIONS = 47;           
+let categoryColors = {               
+  "FAMILY": "#E11D48",
+  "WORK": "#2563EB",
+  "POLITICAL": "#9333EA",
+  "LEGAL": "#DC2626",
+  "MEDIA": "#EA580C",
+  "EDUCATION": "#4ADE80",
+  "HISTORICAL": "#D97706",
+  "SOCIAL": "#14B8A6",
+  "OTHER": "#6B7280",
+  "UNKNOWN": "#6B7280"
+};
+
+let panZoomInstance = null;
+
+// We store all graph edges in memory so toggling categories is easy:
+let globalNodesMap = new Map();  // subject -> bullet info
+let globalAllEdges = [];         // all edges (including duplicates filtered out)
+let globalActiveCategories = new Set(); // which categories are currently on display
+
+
+/***************************************
+* ON LOAD
+***************************************/
+$(document).ready(async function() {
+  // Check if we have a ?subject= param
+  const urlParams = new URLSearchParams(window.location.search);
+  const subj = urlParams.get('subject');
+
+  // Show/hide respective modes
+  if (subj) {
+    $('#graphMode').removeClass('shidden');
+  } else {
+    $('#searchMode').removeClass('shidden');
+  }
+
+  // Start loading data in background
+  await loadInitialData();
+
+  // If we have ?subject=, go straight to GraphViz mode after data loads
+  if (subj) {
+    renderGraphForSubject(subj);
+  }
+
+  // Otherwise, remain in search mode, but if the user typed any text in ?search= param, do that:
+  const searchParam = urlParams.get('search');
+  if (!subj && searchParam) {
+    $('#searchBox').val(searchParam);
+    $('#searchForm').trigger('submit');
+  }
+});
+
+
+/***************************************
+* Load initial data: reverse_index, subjects.csv, bullets.csv
+***************************************/
+async function loadInitialData() {
+  if (hasInitialDataLoaded) return;
+  $('#statusMessage').text('Loading data...');
+
+  try {
+    // Show spinner
+    $('#searchButton .button-text').hide();
+    $('#searchButton .loading-spinner').show();
+    $('#searchButton').prop('disabled', true);
+
+    // 1) Load reverse_index.txt
+    await loadReverseIndex("reverse_index.txt");
+
+    // 2) Load subjects.csv (from subjects.csv.zip)
+    await loadSubjectsCSV("subjects.csv.zip", "subjects.csv");
+
+    // 3) Load bullets.csv (from bullets.csv.zip)
+    await loadBulletsCSV("bullets.csv.zip", "bullets.csv");
+
+    hasInitialDataLoaded = true;
+    $('#statusMessage').empty();
+  } catch (err) {
+    console.error(err);
+    $('#statusMessage').text("Error: " + err);
+  } finally {
+    // Hide spinner
+    $('#searchButton .loading-spinner').hide();
+    $('#searchButton .button-text').show();
+    $('#searchButton').prop('disabled', false);
+  }
+}
+
+async function loadReverseIndex(txtUrl) {
+  // If it's zipped, do fetch -> JSZip -> read string. 
+  // For demo, assume it's just "reverse_index.txt".
+  const resp = await fetch(txtUrl);
+  if (!resp.ok) throw new Error(`Could not fetch ${txtUrl}`);
+  const text = await resp.text();
+
+  // parse lines like "aaron:75-110,6194,8048,13186,20098,34603"
+  const lines = text.split(/\r?\n/);
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+    const parts = line.split(':');
+    if (parts.length !== 2) continue;
+    const token = parts[0];
+    const ranges = parts[1].split(',');
+
+    let lineIDs = [];
+    for (let r of ranges) {
+      if (r.includes('-')) {
+        const [start, end] = r.split('-').map(x=>parseInt(x,10));
+        for (let i=start; i<=end; i++) {
+          lineIDs.push(i);
+        }
+      } else {
+        let val = parseInt(r, 10);
+        if (!isNaN(val)) {
+          lineIDs.push(val);
+        }
+      }
+    }
+    if (!allReverseIndex.has(token)) {
+      allReverseIndex.set(token, []);
+    }
+    allReverseIndex.get(token).push(...lineIDs);
+  }
+}
+
+async function loadSubjectsCSV(zipUrl, csvFile) {
+  const resp = await fetch(zipUrl);
+  if (!resp.ok) throw new Error('Could not fetch ' + zipUrl);
+  const buffer = await resp.arrayBuffer();
+
+  const z = await JSZip.loadAsync(buffer);
+  if (!z.file(csvFile)) throw new Error(`Missing file ${csvFile} in zip.`);
+
+  const csvData = await z.file(csvFile).async('string');
+  const parsed = Papa.parse(csvData, {
+    header: true,
+    skipEmptyLines: true
+  });
+  allSubjects = parsed.data; 
+}
+
+async function loadBulletsCSV(zipUrl, csvFile) {
+  const resp = await fetch(zipUrl);
+  if (!resp.ok) throw new Error('Could not fetch ' + zipUrl);
+  const buffer = await resp.arrayBuffer();
+
+  const z = await JSZip.loadAsync(buffer);
+  if (!z.file(csvFile)) throw new Error(`Missing file ${csvFile} in zip.`);
+
+  const csvData = await z.file(csvFile).async('string');
+  const parsed = Papa.parse(csvData, {
+    header: true,
+    skipEmptyLines: true
+  });
+
+  for (let row of parsed.data) {
+    const s = row['subject']?.trim() ?? '';
+    if (!s) continue;
+    allBullets.set(s, {
+      bullet_point1: row['bullet_point1'] || '',
+      bullet_point2: row['bullet_point2'] || ''
+    });
+  }
+}
+
+
+/***************************************
+* SEARCH FORM
+***************************************/
+$('#searchForm').on('submit', async function(e) {
+  e.preventDefault();
+  if (searchInProgress) {
+    // If in progress, let user cancel
+    searchCanceled = true;
+    return;
+  }
+  searchCanceled = false;
+  searchInProgress = true;
+
+  // clear old results
+  $('#resultsContainer').empty();
+  $('#resultsStatus').empty();
+
+  // show spinner
+  $('#searchButton .button-text').text("Stop");
+  $('#searchBox').prop('disabled', true);
+
+  try {
+    await doSearch();
+  } catch (err) {
+    console.error(err);
+    $('#resultsContainer').html(`<div class="p-2 text-center text-sm text-red-500">Error: ${err}</div>`);
+  }
+
+  // restore
+  searchInProgress = false;
+  $('#searchButton .button-text').text("Search");
+  $('#searchBox').prop('disabled', false);
+});
+
+
+async function doSearch() {
+  const rawInput = $('#searchBox').val().toLowerCase().trim();
+  if (!rawInput) {
+    $('#resultsContainer').html('<div class="p-2 text-center text-sm">No input provided.</div>');
+    return;
+  }
+
+  // update URL param ?search= 
+  const newUrl = new URL(window.location);
+  newUrl.searchParams.delete('subject');
+  newUrl.searchParams.set('search', rawInput);
+  window.history.pushState({}, '', newUrl);
+
+  // tokenize
+  let tokens = tokenizeInput(rawInput);
+
+  // intersect sets
+  let finalLineSet = null;
+  for (let t of tokens) {
+    if (searchCanceled) break;
+
+    let linesForT = new Set();
+    // exact matches
+    if (allReverseIndex.has(t)) {
+      for (let ln of allReverseIndex.get(t)) {
+        linesForT.add(ln);
+      }
+    }
+    // prefix if box is checked
+    if ($('#prefixCheck').is(':checked') && t.length >= 4) {
+      // find anything that starts with t
+      for (let [kw, lines] of allReverseIndex.entries()) {
+        if (kw.startsWith(t) && kw !== t) {
+          for (let ln of lines) {
+            linesForT.add(ln);
+          }
+        }
+      }
+    }
+
+    // intersect
+    if (finalLineSet === null) {
+      finalLineSet = linesForT;
+    } else {
+      let tmp = new Set();
+      for (let x of finalLineSet) {
+        if (linesForT.has(x)) tmp.add(x);
+      }
+      finalLineSet = tmp;
+    }
+    if (!finalLineSet.size) break;
+  }
+
+  if (!finalLineSet || !finalLineSet.size) {
+    $('#resultsContainer').html('<div class="p-2 text-center text-sm">No matches found.</div>');
+    return;
+  }
+
+  let sortedLines = Array.from(finalLineSet).sort((a,b)=>a-b);
+  let limit = 100;
+  let displayed = 0;
+
+  for (let ln of sortedLines) {
+    if (searchCanceled) break;
+    if (displayed >= limit) break;
+
+    let idx = ln - 1;
+    if (idx >= 0 && idx < allSubjects.length) {
+      let row = allSubjects[idx];
+      let subject = row['subject'] || '';
+      let desc = row['bullet_point1'] || '';
+      $('#resultsContainer').append(renderSearchResult(subject, desc));
+      displayed++;
+    }
+  }
+
+  if (displayed > 0) {
+    let extra = searchCanceled ? ' (stopped)' : (displayed === limit ? ' (limit)' : '');
+    $('#resultsStatus').text(`Showing ${displayed}${extra} results`);
+  } else {
+    $('#resultsContainer').html('<div class="p-2 text-center text-sm">No results found.</div>');
+  }
+}
+
+function tokenizeInput(txt) {
+  // remove non-alphanumeric except for ' and "
+  txt = txt.replace(/[^\w\s"']+/g, ' ');
+  return txt.split(/\s+/).filter(Boolean);
+}
+
+function renderSearchResult(subject, desc) {
+  const safeSubject = escapeHtml(subject);
+  const safeDesc = escapeHtml(desc);
+
+  let $div = $(`
+    <div class="group border border-gray-200 hover:border-gray-400 bg-white rounded p-2 md:px-4 leading-tight">
+      <strong class="text-navy group-hover:text-blue text-sm">${safeSubject}</strong><br/>
+      <span class="text-[13px]">${safeDesc}</span>
+    </div>
+  `);
+
+  $div.css('cursor','pointer').on('click', function() {
+    window.location.href = '?subject=' + encodeURIComponent(subject);
+  });
+
+  return $div;
+}
+
+
+/***************************************
+* BACK TO SEARCH
+***************************************/
+$('#backToSearch').on('click', function() {
+  const newUrl = new URL(window.location);
+  newUrl.searchParams.delete('subject');
+  window.history.pushState({}, '', newUrl);
+  window.location.reload();
+});
+
+
+/***************************************
+* GRAPH MODE
+***************************************/
+async function renderGraphForSubject(subjectName) {
+  // Show spinner in #graph-container
+  $('#graph-container').html(`
+    <div><img src="../assets/images/loading.svg" style="width:32px;height:32px" alt="Loading..."></div>
+  `);
+
+  // Set the search param in the URL
+  const newUrl = new URL(window.location);
+  newUrl.searchParams.set('subject', subjectName);
+  window.history.pushState({}, '', newUrl);
+
+  // Put subject name in title
+  $('#graphTitle').text(subjectName);
+
+  // Summarize from bullets.csv if found
+  let bulletInfo = allBullets.get(subjectName) || {};
+  let b1 = bulletInfo.bullet_point1 || "";
+  let b2 = bulletInfo.bullet_point2 || "";
+  let summaryHtml = `<p class="mb-2"><strong>${escapeHtml(subjectName)}</strong></p>`;
+  if (b1) summaryHtml += `<p class="mb-2">${escapeHtml(b1)}</p>`;
+  if (b2) summaryHtml += `<p>${escapeHtml(b2)}</p>`;
+  if (!b1 && !b2) {
+    summaryHtml += `<p class="text-sm text-gray-600">(No extended info available.)</p>`;
+  }
+  $('#rootSummary').html(summaryHtml);
+
+  // Clear globals for new subject
+  globalNodesMap.clear();
+  globalAllEdges = [];
+  globalActiveCategories.clear();
+
+  // Add the root node
+  addNodeIfNeeded(globalNodesMap, subjectName);
+
+  // figure out which partition
+  const partitionIdx = partitionIndex(subjectName);
+  let pStr = partitionIdx.toString().padStart(2,'0');
+  const relationsZip = `relations_${pStr}.zip`;
+
+  try {
+    const resp = await fetch(relationsZip);
+    if (!resp.ok) {
+      throw new Error(`Unable to fetch ${relationsZip}`);
+    }
+    const buffer = await resp.arrayBuffer();
+    const z = await JSZip.loadAsync(buffer);
+
+    // parse relations.csv, relations_reverse.csv, intergraph_edges.csv
+    const relationsCsv     = await getZipText(z, 'relations.csv');
+    const revCsv           = await getZipText(z, 'relations_reverse.csv');
+    const interCsv         = await getZipText(z, 'intergraph_edges.csv');
+
+    const parsedRelations  = Papa.parse(relationsCsv,     { header:true, skipEmptyLines:true }).data;
+    const parsedReverse    = Papa.parse(revCsv,           { header:true, skipEmptyLines:true }).data;
+    const parsedIntergraph = Papa.parse(interCsv,         { header:true, skipEmptyLines:true }).data;
+
+    let edgesSet = new Set(); // to ensure no duplicates
+
+    // 1) Forward edges
+    for (let row of parsedRelations) {
+      let s = row.subject?.trim() || "";
+      if (s !== subjectName) continue;
+      let o = (row.object || "").trim();
+      if (!o) continue;
+
+      addNodeIfNeeded(globalNodesMap, o);
+      let c = row.category?.trim() || "UNKNOWN";
+      let color = categoryColors[c] || categoryColors["UNKNOWN"];
+      addEdge(edgesSet, globalAllEdges, s, o, (row.label||""), c, color);
+    }
+
+    // 2) Reverse edges
+    for (let revRow of parsedReverse) {
+      let obj = revRow.object?.trim() || "";
+      if (obj !== subjectName) continue;
+
+      let s = revRow.subject?.trim() || "";
+      if (!s) continue;
+
+      let symmetrical = parseInt(revRow.is_symmetrical,10) === 1;
+      if (symmetrical) {
+        // skip if forward set had the mirror
+        let hasMirror = parsedRelations.some(rel => {
+          return (rel.subject?.trim() === subjectName && rel.object?.trim() === s);
+        });
+        if (hasMirror) continue;
+      }
+      addNodeIfNeeded(globalNodesMap, s);
+      let c = revRow.category?.trim() || "UNKNOWN";
+      let color = categoryColors[c] || categoryColors["UNKNOWN"];
+      addEdge(edgesSet, globalAllEdges, s, subjectName, (revRow.label||""), c, color);
+    }
+
+    // 3) Intergraph edges
+    const potentialEdges = [];
+    for (let iRow of parsedIntergraph) {
+      let rp = iRow.root_person?.trim() || "";
+      if (rp !== subjectName) continue;
+
+      let s = iRow.subject?.trim() || "";
+      let o = iRow.object?.trim() || "";
+      if (!s || !o) continue;
+
+      if (globalNodesMap.has(s) && globalNodesMap.has(o)) {
+        potentialEdges.push({
+          from: s,
+          to: o,
+          label: iRow.label || "",
+          symmetrical: parseInt(iRow.is_symmetrical,10)===1,
+          category: iRow.category?.trim() || "UNKNOWN"
+        });
+      }
+    }
+    // Filter symmetrical duplicates
+    let finalInterEdges = [];
+    for (let pe of potentialEdges) {
+      let swapped = potentialEdges.find(e => {
+        return (e.from === pe.to && e.to === pe.from && e.symmetrical === true && pe.symmetrical === true);
+      });
+      if (swapped && pe.from > pe.to) {
+        // skip
+        continue;
+      }
+      finalInterEdges.push(pe);
+    }
+    // Add them
+    for (let pe of finalInterEdges) {
+      let c = pe.category;
+      let color = categoryColors[c] || categoryColors["UNKNOWN"];
+      addEdge(edgesSet, globalAllEdges, pe.from, pe.to, pe.label, c, color);
+    }
+
+    // Initialize active categories
+    let uniqueCats = new Set(globalAllEdges.map(e => e.category));
+    for (let c of uniqueCats) {
+      globalActiveCategories.add(c);
+    }
+
+    // Render the legend
+    renderLegend([...uniqueCats]);
+
+    // Build and render final
+    reRenderGraph(subjectName);
+
+  } catch (err) {
+    console.error(err);
+    $('#graph-container').html(
+      `<div class="p-2 text-center text-sm text-red-500">Error loading relationships: ${err}</div>`
+    );
+  }
+}
+
+// Build & render the DOT from globalNodesMap + filtered edges
+function reRenderGraph(rootSubject) {
+  let activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
+  let dotSrc = buildDotSource(rootSubject, globalNodesMap, activeEdges);
+  renderDot(dotSrc);
+}
+
+// A function to ensure node exists
+function addNodeIfNeeded(map, subject) {
+  if (!map.has(subject)) {
+    let bullet = allBullets.get(subject) || { bullet_point1:'', bullet_point2:'' };
+    map.set(subject, bullet);
+  }
+}
+
+// Deduplicate edges
+function addEdge(edgesSet, edgesArray, from, to, label, category, color) {
+  let key = `${from}||${to}||${category}||${label}`;
+  if (edgesSet.has(key)) {
+    return; // skip duplicates
+  }
+  edgesSet.add(key);
+  edgesArray.push({ from, to, label, category, color });
+}
+
+// Partition
+function partitionIndex(subj) {
+  const h = murmurHash3.x86.hash32(subj);
+  return h % NUM_PARTITIONS;
+}
+
+async function getZipText(zipObj, filename) {
+  if (!zipObj.file(filename)) throw new Error(`Missing ${filename} in zip.`);
+  return await zipObj.file(filename).async('string');
+}
+
+
+/***************************************
+* DOT BUILDING / RENDERING
+***************************************/
+// We insert <br> every ~50 chars on word boundaries
+function insertLineBreaks(str, maxLen=50) {
+  if (!str) return '';
+  const words = str.split(/\s+/);
+  let lines = [];
+  let current = '';
+
+  for (let w of words) {
+    if (!current) {
+      current = w;
+    } else if ((current + ' ' + w).length > maxLen) {
+      lines.push(escapeHtml(current));
+      current = w;
+    } else {
+      current += ' ' + w;
+    }
+  }
+  if (current) lines.push(escapeHtml(current));
+  return lines.join("<BR/>");
+}
+
+function buildDotSource(rootSubject, nodesMap, edges) {
+  let dot = `digraph G {
+rankdir="TB";
+node [ shape=box, style="filled", fillcolor="#F3F4F6", color="#94A3B8", fontname="Arial", fontsize=13 ];
+edge [ fontname="Arial", color="#DADBE7", penwidth=2, fontsize=11 ];
+`;
+
+  for (let [subj, bulletData] of nodesMap.entries()) {
+    let p1Wrapped = insertLineBreaks(bulletData.bullet_point1 || "");
+    let p2Wrapped = insertLineBreaks(bulletData.bullet_point2 || "");
+    let subjWrapped = insertLineBreaks(subj);
+
+    // HTML-like label
+    let label = `<<table border="0" cellborder="0" cellpadding="2" cellspacing="0">
+      <tr><td align="left"><b>${subjWrapped}</b></td></tr>
+      ${ p1Wrapped ? `<tr><td align="left"><font point-size="10">${p1Wrapped}</font></td></tr>` : '' }
+      ${ p2Wrapped ? `<tr><td align="left"><font point-size="10">${p2Wrapped}</font></td></tr>` : '' }
+    </table>>`;
+
+    if (subj === rootSubject) {
+      dot += `"${subj}" [ color="#2563EB", penwidth=3, label=${label} ];\n`;
+    } else {
+      dot += `"${subj}" [ label=${label} ];\n`;
+    }
+  }
+
+  for (let e of edges) {
+    dot += `"${e.from}" -> "${e.to}" [ label="${escapeHtml(e.label)}", color="${e.color}" ];\n`;
+  }
+
+  dot += `}\n`;
+  return dot;
+}
+
+function renderDot(dotSrc) {
+  $('#graph-container').empty();
+  let viz = new Viz();
+
+  viz.renderSVGElement(dotSrc)
+    .then(svgEl => {
+      // let it fill the container
+      svgEl.setAttribute('width', '100%');
+      svgEl.setAttribute('height', '100%');
+      svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+      $('#graph-container').append(svgEl);
+
+      // enable pan/zoom
+      if (panZoomInstance) {
+        panZoomInstance.destroy();
+      }
+      panZoomInstance = svgPanZoom(svgEl, {
+        zoomEnabled: true,
+        controlIconsEnabled: true,
+        fit: true,
+        center: true
+      });
+      // Force another fit + center so it uses max space
+      panZoomInstance.resize();
+      panZoomInstance.fit();
+      panZoomInstance.center();
+
+      // show download button
+      $('#downloadBtn').show();
+    })
+    .catch(err => {
+      console.error(err);
+      $('#graph-container').html(`<div class="p-2 text-center text-sm text-red-500">Error generating graph: ${err}</div>`);
+    });
+}
+
+
+/***************************************
+* LEGEND & CATEGORY TOGGLING
+***************************************/
+function renderLegend(categories) {
+  let html = '';
+  categories.sort(); // optional: sort them alphabetically
+  for (let c of categories) {
+    let colorClass = 'legend-' + c;
+    html += `<div class="legend-item ${colorClass}" data-cat="${c}">${c}</div>`;
+  }
+  $('#legend').html(html);
+
+  // Attach click handler
+  $('#legend .legend-item').on('click', function() {
+    let cat = $(this).data('cat');
+    toggleCategory(cat);
+    $(this).toggleClass('disabled', !globalActiveCategories.has(cat));
+  });
+}
+
+// Toggle a category in/out of the active set
+function toggleCategory(cat) {
+  if (globalActiveCategories.has(cat)) {
+    globalActiveCategories.delete(cat);
+  } else {
+    globalActiveCategories.add(cat);
+  }
+  // re-render
+  let rootName = $('#graphTitle').text().trim();
+  reRenderGraph(rootName);
+}
+
+
+/***************************************
+* DOWNLOAD SVG
+***************************************/
+$('#downloadBtn').on('click', function() {
+  let svgEl = document.querySelector('#graph-container svg');
+  if (!svgEl) {
+    alert('No SVG to download');
+    return;
+  }
+  let svgData = new XMLSerializer().serializeToString(svgEl);
+  let blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  let url = URL.createObjectURL(blob);
+
+  let link = document.createElement('a');
+  link.href = url;
+  link.download = 'relation_graph.svg';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+});
+
+
+/***************************************
+* HELPER
+***************************************/
+function escapeHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
