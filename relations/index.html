@@ -226,6 +226,8 @@ It shows the generated graph and a legend, plus a button to go back to the searc
     <button class="cy-button" id="zoom-in">+</button>
     <button class="cy-button" id="zoom-out">-</button>
     <button class="cy-button" id="reset-view">⟲</button>
+    <button class="cy-button" id="toggle-labels" title="Toggle edge labels">L</button>
+    <button class="cy-button" id="toggle-secondary" title="Show only root connections">R</button>
   </div>
   <div class="cy-tooltip"></div>
   <div id="loading-indicator">
@@ -844,288 +846,675 @@ function renderCytoscape(rootSubject, elements) {
   // Clear previous instance if exists
   if (window.cy) {
     try {
-      // Check if destroy method exists before calling it
-      if (typeof window.cy.destroy === 'function') {
-        window.cy.destroy();
-      } else {
-        // If destroy doesn't exist, try to clean up manually
-        window.cy.elements().remove();
-        window.cy = null;
-      }
+      // Remove the container element and recreate it
+      $('#cy').remove();
+      $('#graph-container').append('<div id="cy" style="width: 100%; height: 100%;"></div>');
+      window.cy = null;
     } catch (e) {
-      console.warn("Could not destroy previous Cytoscape instance:", e);
-      // Just continue, we'll create a new one
+      console.warn("Could not clean up previous Cytoscape instance:", e);
     }
   }
   
-  // Create new Cytoscape instance
-  try {
-    window.cy = cytoscape({
-      container: document.getElementById('cy'),
-      elements: elements,
-      style: [
-        // Node styles
-        {
-          selector: 'node',
-          style: {
-            'background-color': '#F3F4F6',
-            'border-color': '#94A3B8',
-            'border-width': 1,
-            'shape': 'round-rectangle',
-            'width': 180,
-            'height': 'auto',
-            'padding': '1px 4px',  // Reduced from '2px 8px' to '1px 4px'
-            'text-wrap': 'wrap',
-            'text-max-width': 172,  // Increased from 164 to compensate for reduced padding
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'text-margin-y': 0,  // No extra margin
-            'text-justification': 'left',
-            'font-family': '"Libre Franklin", serif',
-            'font-size': '13px',
-            'color': '#000000',
-            'text-outline-width': 0,
-            'text-outline-opacity': 0,
-            'font-weight': 'normal',  // Default weight
-            'text-transform': 'none',
-            // Use a custom function to create the label content
-            'label': ''  // Empty label - we'll use HTML overlay
-          }
-        },
-        // Style for nodes with descriptions
-        {
-          selector: 'node[description]',
-          style: {
-            'height': function(ele) {
-              // Make the node taller to accommodate both title and description
-              return 80; // Fixed height for nodes with description
+  // Create new Cytoscape instance with a delay to ensure DOM is ready
+  setTimeout(() => {
+    try {
+      window.cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: elements,
+        style: [
+          // Node styles
+          {
+            selector: 'node',
+            style: {
+              'background-color': '#F3F4F6',
+              'border-color': '#94A3B8',
+              'border-width': 1,
+              'shape': 'round-rectangle',
+              'width': 180,
+              'height': 40, // Default height for nodes without descriptions
+              'padding': 4,  // Default padding
+              'text-wrap': 'wrap',
+              'text-max-width': 172,
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'text-margin-y': 0,
+              'text-justification': 'left',
+              'font-family': '"Libre Franklin", serif',
+              'font-size': '13px',
+              'color': '#000000',
+              'text-outline-width': 0,
+              'text-outline-opacity': 0,
+              'font-weight': 'normal',
+              'text-transform': 'none',
+              'label': function(ele) {
+                return ele.data('title') || ele.id();
+              }
+            }
+          },
+          // Style for nodes with descriptions
+          {
+            selector: 'node[description]',
+            style: {
+              'height': 80, // Fixed height for nodes with description
+              'padding': 12, // More padding for nodes with descriptions
+              'label': function(ele) {
+                const title = ele.data('title') || ele.id();
+                const description = ele.data('description') || "";
+                return title + '\n\n' + description;
+              },
+              'line-height': 1.4 // Improve readability for multi-line text
+            }
+          },
+          // Root node style
+          {
+            selector: 'node[?isRoot]',
+            style: {
+              'border-color': '#2563EB',
+              'border-width': 2,
+              'background-color': '#EFF6FF',
+              'font-size': '13px',
+              'z-index': 10
+            }
+          },
+          // Edge styles
+          {
+            selector: 'edge',
+            style: {
+              'width': 2,
+              'line-color': 'data(color)',
+              'target-arrow-color': 'data(color)',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'unbundled-bezier',
+              'control-point-distances': [100, 100],
+              'control-point-weights': [0.3, 0.7],
+              'label': 'data(label)',
+              'font-size': '11px',
+              'text-background-color': 'white',
+              'text-background-opacity': 0.9,
+              'text-background-padding': '3px',
+              'text-background-shape': 'rectangle',
+              'font-family': 'Arial',
+              'text-wrap': 'wrap',
+              'text-max-width': '200px',
+              'text-justification': 'center',
+              'text-rotation': 'autorotate',
+              'text-margin-y': '-10px',
+              'text-events': 'yes'
+            }
+          },
+          // Special style for edges from/to root
+          {
+            selector: 'edge[?isFromRoot], edge[?isToRoot]',
+            style: {
+              'width': 2.5,
+              'line-style': 'solid',
+              'curve-style': 'straight',
+              'control-point-distances': [0, 0],
+              'line-color': 'data(color)'
             }
           }
-        },
-        // Root node style
-        {
-          selector: 'node[?isRoot]',
-          style: {
-            'border-color': '#2563EB',
-            'border-width': 2,
-            'background-color': '#EFF6FF',
-            'font-size': '13px',
-            'z-index': 10
-          }
-        },
-        // Edge styles
-        {
-          selector: 'edge',
-          style: {
-            'width': 2,
-            'line-color': 'data(color)',
-            'target-arrow-color': 'data(color)',
-            'target-arrow-shape': 'triangle',
-            'curve-style': 'unbundled-bezier',
-            'control-point-distances': function(ele) {
-              const randomBase = 200 + (Math.random() * 100);
-              return [randomBase * (Math.random() > 0.5 ? 1 : -1), randomBase * (Math.random() > 0.5 ? 1 : -1)];
-            },
-            'control-point-weights': [0.3, 0.7],
-            'label': 'data(label)',
-            'font-size': '11px',
-            'text-background-color': 'white',
-            'text-background-opacity': 0.9,
-            'text-background-padding': '3px',
-            'text-background-shape': 'rectangle',
-            'font-family': 'Arial',
-            'text-wrap': 'wrap',
-            'text-max-width': '200px',  // Increased width for labels
-            'text-justification': 'center',
-            'text-rotation': 'autorotate',
-            'text-margin-y': '-10px',  // Offset label slightly above the edge line
-            'text-events': 'yes'  // Enable text interactions
-          }
-        },
-        // Special style for edges from/to root
-        {
-          selector: 'edge[?isFromRoot], edge[?isToRoot]',
-          style: {
-            'width': 2.5, // Slightly thicker
-            'line-style': 'solid',
-            'curve-style': 'straight', // Use straight lines for root connections
-            'control-point-distances': function(ele) {
-              // No curve for root connections
-              return [0, 0];
-            }
-          }
+        ],
+        layout: {
+          name: 'preset' // Start with preset to position root node
         }
-      ],
-      layout: {
-        name: 'preset' // Start with preset to position root node
-      },
-      // Add renderer configuration to optimize Canvas operations
-      renderer: {
-        name: 'canvas',
-        willReadFrequently: true
+      });
+      
+      // Calculate the center of the viewport
+      const centerX = cy.width() / 2;
+      const centerY = cy.height() / 2;
+      
+      // First position the root node at the exact center
+      const rootNode = cy.$('node[?isRoot]');
+      if (rootNode.length > 0) {
+        rootNode.position({
+          x: centerX,
+          y: centerY
+        });
+        
+        // Lock the root node position to prevent it from moving during layout
+        rootNode.lock();
       }
-    });
-    
-    // Calculate the center of the viewport
-    const centerX = cy.width() / 2;
-    const centerY = cy.height() / 2;
-    
-    // First position the root node at the exact center
-    const rootNode = cy.nodes().filter(node => node.data('isRoot'));
-    if (rootNode.length > 0) {
-      rootNode.position({
-        x: centerX,
-        y: centerY
-      });
       
-      // Lock the root node position to prevent it from moving during layout
-      rootNode.lock();
-    }
-    
-    // Get all non-root nodes for circular distribution
-    const nonRootNodes = cy.nodes().filter(node => !node.data('isRoot'));
-    
-    // Calculate optimal spacing based on node count
-    const nodeCount = nonRootNodes.length;
-    const minViewportDim = Math.min(cy.width(), cy.height());
-    
-    // Determine how many circles we need based on node count
-    const nodesPerCircle = Math.max(8, Math.min(12, Math.floor(minViewportDim / 100))); // Reverted to original values
-    const circleCount = Math.ceil(nodeCount / nodesPerCircle);
-    
-    // Distribute nodes across multiple concentric circles
-    nonRootNodes.forEach((node, i) => {
-      // Determine which circle this node belongs to
-      const circleIndex = Math.floor(i / nodesPerCircle);
-      const nodeIndexInCircle = i % nodesPerCircle;
+      // Get all non-root nodes for circular distribution
+      const nonRootNodes = cy.$('node:not([?isRoot])');
       
-      // Calculate radius for this circle (outer circles are larger)
-      const baseRadius = minViewportDim * 0.45; // Base radius value
+      // Calculate optimal spacing based on node count and content
+      const nodeCount = nonRootNodes.length;
+      const minViewportDim = Math.min(cy.width(), cy.height());
       
-      // Increase spacing when there are more nodes
-      const spacingMultiplier = nodeCount > 10 ? 1.3 : 1.0; // Increase spacing by 30% when more than 10 nodes
-      
-      // Add slight randomness to radius to prevent perfect circles
-      const radiusVariation = baseRadius * 0.15 * (Math.random() - 0.5);
-      const radius = (baseRadius * (1 + (circleIndex * 0.6)) + radiusVariation) * spacingMultiplier;
-      
-      // Calculate angle with offset for each circle to stagger nodes
-      // Add slight angle variation to prevent perfect alignment
-      const angleVariation = (Math.random() * 0.3 - 0.15) * (Math.PI / nodesPerCircle);
-      const angleOffset = circleIndex * (Math.PI / nodesPerCircle);
-      const angle = (2 * Math.PI * nodeIndexInCircle / nodesPerCircle) + angleOffset + angleVariation;
-      
-      // Set position
-      node.position({
-        x: centerX + radius * Math.cos(angle),
-        y: centerY + radius * Math.sin(angle)
-      });
-      
-      // Store the original angle for this node to help with edge routing
-      node.scratch('angle', angle);
-    });
-    
-    // After layout completes, ensure the root node is still centered
-    setTimeout(() => {
-      try {
-        // Force root node to center again
-        if (rootNode.length > 0) {
-          rootNode.unlock();
-          rootNode.position({
-            x: centerX,
-            y: centerY
-          });
-          rootNode.lock(); // Lock it again
+      // Estimate node sizes based on content
+      const nodeSizes = new Map();
+      nonRootNodes.forEach(node => {
+        const description = node.data('description') || "";
+        let nodeHeight = 40; // Base height for title-only nodes
+        
+        if (description) {
+          // Estimate height based on description length
+          const charsPerLine = 25;
+          const lineHeight = 18; // pixels per line of text
+          const descriptionLines = Math.ceil(description.length / charsPerLine);
+          nodeHeight = 40 + (descriptionLines * lineHeight) + 15;
+          nodeHeight = Math.max(80, nodeHeight);
         }
         
-        // Apply custom styling to nodes with descriptions
-        console.log("Starting node styling process");
-        fixNodeStyling();
+        // Store the estimated size
+        nodeSizes.set(node.id(), {
+          width: 180, // Fixed width
+          height: nodeHeight
+        });
+      });
+      
+      // Distribute nodes across multiple concentric circles
+      // Group nodes by category for better organization
+      const nodesByCategory = {};
+      const edgeCategories = new Set();
+  
+      // Collect edge categories and organize nodes by their connection categories
+      nonRootNodes.forEach(node => {
+        const connectedEdges = node.connectedEdges();
         
-        // Add a second timeout to ensure styling is complete before fitting
-        setTimeout(() => {
+        if (connectedEdges && connectedEdges.length > 0) {
+          connectedEdges.forEach(edge => {
+            if (edge && edge.data) {
+              const category = edge.data('category');
+              if (category) {
+                edgeCategories.add(category);
+                
+                if (!nodesByCategory[category]) {
+                  nodesByCategory[category] = [];
+                }
+                
+                // Only add the node once per category
+                if (!nodesByCategory[category].includes(node)) {
+                  nodesByCategory[category].push(node);
+                }
+              }
+            }
+          });
+        }
+        
+        // If node has no connections, add to "OTHER" category
+        if (!connectedEdges || connectedEdges.length === 0) {
+          if (!nodesByCategory["OTHER"]) {
+            nodesByCategory["OTHER"] = [];
+          }
+          nodesByCategory["OTHER"].push(node);
+        }
+      });
+  
+      // Convert categories to array and sort
+      const categories = Array.from(edgeCategories);
+      categories.sort();
+      
+      // Calculate spacing multiplier based on node count and average node size
+      let totalHeight = 0;
+      nodeSizes.forEach(size => {
+        totalHeight += size.height;
+      });
+      const avgNodeHeight = totalHeight / nodeSizes.size || 60;
+      
+      // Adjust spacing based on node count and average size
+      let spacingMultiplier = 1.0;
+      if (nodeCount > 30) {
+        spacingMultiplier = 2.0; // Much more spacing for very large graphs
+      } else if (nodeCount > 20) {
+        spacingMultiplier = 1.7; // More spacing for large graphs
+      } else if (nodeCount > 10) {
+        spacingMultiplier = 1.4; // Moderate spacing for medium graphs
+      }
+      
+      // Further adjust based on average node height
+      if (avgNodeHeight > 100) {
+        spacingMultiplier *= 1.2; // Increase spacing for taller nodes
+      }
+      
+      // Calculate the number of nodes per circle to avoid overcrowding
+      const nodesPerCircle = Math.min(Math.max(8, Math.floor(20 / spacingMultiplier)), 12);
+      
+      // Position nodes by category in sectors around the root
+      let nodeIndex = 0;
+      const nodePositions = new Map(); // Store positions to check for collisions
+      
+      // Function to check if a position would cause overlap
+      function wouldOverlap(x, y, nodeId) {
+        const nodeSize = nodeSizes.get(nodeId);
+        const nodeWidth = nodeSize.width;
+        const nodeHeight = nodeSize.height;
+        const padding = 20; // Minimum space between nodes
+        
+        for (const [id, pos] of nodePositions.entries()) {
+          const otherSize = nodeSizes.get(id);
+          const dx = Math.abs(x - pos.x);
+          const dy = Math.abs(y - pos.y);
+          
+          // Check if nodes would overlap
+          if (dx < (nodeWidth + otherSize.width) / 2 + padding && 
+              dy < (nodeHeight + otherSize.height) / 2 + padding) {
+            return true;
+          }
+        }
+        return false;
+      }
+      
+      // Function to find a non-overlapping position
+      function findNonOverlappingPosition(baseX, baseY, nodeId, attempts = 10) {
+        if (!wouldOverlap(baseX, baseY, nodeId)) {
+          return { x: baseX, y: baseY };
+        }
+        
+        // Try different positions with increasing distance
+        for (let i = 1; i <= attempts; i++) {
+          const angle = Math.random() * 2 * Math.PI;
+          const distance = 30 * i; // Increase distance with each attempt
+          const newX = baseX + Math.cos(angle) * distance;
+          const newY = baseY + Math.sin(angle) * distance;
+          
+          if (!wouldOverlap(newX, newY, nodeId)) {
+            return { x: newX, y: newY };
+          }
+        }
+        
+        // If all attempts fail, return the original position
+        return { x: baseX, y: baseY };
+      }
+      
+      categories.forEach((category, categoryIndex) => {
+        const categoryNodes = nodesByCategory[category] || [];
+        const categorySize = categoryNodes.length;
+        
+        if (categorySize === 0) return;
+        
+        // Calculate the sector angle for this category
+        const sectorAngle = (2 * Math.PI) / categories.length;
+        const sectorStart = categoryIndex * sectorAngle;
+        
+        // Position nodes in this category
+        categoryNodes.forEach((node, i) => {
+          // Calculate circle index based on position in category
+          const circleIndex = Math.floor(i / nodesPerCircle);
+          
+          // Base radius increases with each circle
+          const baseRadius = minViewportDim * 0.35; // Reduced from 0.45 to avoid edges
+          
+          // Calculate radius with spacing multiplier
+          const radius = (baseRadius * (1 + (circleIndex * 0.5))) * spacingMultiplier;
+          
+          // Calculate angle within sector
+          const nodesInThisCircle = Math.min(nodesPerCircle, categorySize - (circleIndex * nodesPerCircle));
+          const nodeAngleInSector = (i % nodesPerCircle) / nodesInThisCircle;
+          const angle = sectorStart + (nodeAngleInSector * sectorAngle);
+          
+          // Calculate base position
+          const baseX = centerX + radius * Math.cos(angle);
+          const baseY = centerY + radius * Math.sin(angle);
+          
+          // Find non-overlapping position
+          const position = findNonOverlappingPosition(baseX, baseY, node.id());
+          
+          // Set position
+          node.position(position);
+          
+          // Store position for collision detection
+          nodePositions.set(node.id(), position);
+          
+          nodeIndex++;
+        });
+      });
+  
+      // Handle any remaining nodes not assigned to categories
+      if (nodesByCategory["OTHER"] && nodesByCategory["OTHER"].length > 0) {
+        const otherNodes = nodesByCategory["OTHER"];
+        
+        otherNodes.forEach((node, i) => {
+          const circleIndex = Math.floor(i / nodesPerCircle);
+          const baseRadius = minViewportDim * 0.35;
+          const radius = (baseRadius * (1 + (circleIndex * 0.5))) * spacingMultiplier;
+          
+          // Distribute "OTHER" nodes evenly around the circle
+          const angle = (2 * Math.PI * i) / Math.min(nodesPerCircle, otherNodes.length);
+          
+          // Calculate base position
+          const baseX = centerX + radius * Math.cos(angle);
+          const baseY = centerY + radius * Math.sin(angle);
+          
+          // Find non-overlapping position
+          const position = findNonOverlappingPosition(baseX, baseY, node.id());
+          
+          // Set position
+          node.position(position);
+          
+          // Store position for collision detection
+          nodePositions.set(node.id(), position);
+        });
+      }
+      
+      // After layout completes, ensure the root node is still centered
+      setTimeout(() => {
+        try {
+          // Force root node to center again
+          if (rootNode.length > 0) {
+            rootNode.unlock();
+            rootNode.position({
+              x: centerX,
+              y: centerY
+            });
+            rootNode.lock(); // Lock it again
+          }
+          
           // Fit all elements in the viewport with padding
           cy.fit(cy.elements(), 50); // 50px padding around the graph
           
-          // If there are many nodes, zoom out a bit more to ensure everything is visible
-          if (cy.nodes().length > 10) {
+          // Adjust zoom level based on node count
+          if (nodeCount > 30) {
             const currentZoom = cy.zoom();
             cy.zoom({
-              level: currentZoom * 0.8, // Zoom out by 20% instead of 15% for better visibility
+              level: currentZoom * 0.6, // Zoom out more for very large graphs
+              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+            });
+          } else if (nodeCount > 20) {
+            const currentZoom = cy.zoom();
+            cy.zoom({
+              level: currentZoom * 0.7, // Zoom out more for large graphs
+              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+            });
+          } else if (nodeCount > 10) {
+            const currentZoom = cy.zoom();
+            cy.zoom({
+              level: currentZoom * 0.8, // Standard zoom out for medium graphs
               renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
             });
           }
           
-          console.log("Adjusted zoom level to fit all nodes");
-        }, 600);
-        
-      } catch (err) {
-        console.error("Error in layout processing:", err);
-      }
+          // Show download button
+          $('#downloadBtn').show();
+          
+          // Add event listeners for control buttons
+          $('#zoom-in').off('click').on('click', function() {
+            cy.zoom({
+              level: cy.zoom() * 1.2,
+              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+            });
+          });
+          
+          $('#zoom-out').off('click').on('click', function() {
+            cy.zoom({
+              level: cy.zoom() * 0.8,
+              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+            });
+          });
+          
+          $('#reset-view').off('click').on('click', function() {
+            cy.fit();
+            cy.center();
+          });
+          
+          // Add toggle for edge labels
+          let edgeLabelsVisible = true;
+          $('#toggle-labels').off('click').on('click', function() {
+            edgeLabelsVisible = !edgeLabelsVisible;
+            
+            // Update edge styles
+            cy.style()
+              .selector('edge')
+              .style({
+                'label': function(ele) {
+                  if (!edgeLabelsVisible) return '';
+                  return nodeCount > 15 ? '' : ele.data('label');
+                }
+              })
+              .selector('edge[?isFromRoot], edge[?isToRoot]')
+              .style({
+                'label': function(ele) {
+                  if (!edgeLabelsVisible) return '';
+                  return ele.data('label');
+                }
+              })
+              .update();
+            
+            // Update button appearance
+            $(this).css('background-color', edgeLabelsVisible ? 'white' : '#f0f0f0');
+          });
+          
+          // Add toggle for showing only root connections
+          let onlyRootConnections = false;
+          $('#toggle-secondary').off('click').on('click', function() {
+            onlyRootConnections = !onlyRootConnections;
+            
+            if (onlyRootConnections) {
+              // Hide non-root edges
+              cy.edges().forEach(edge => {
+                const isRootEdge = edge.data('isFromRoot') || edge.data('isToRoot');
+                edge.style('opacity', isRootEdge ? 1 : 0.1);
+              });
+            } else {
+              // Restore all edges
+              cy.edges().forEach(edge => {
+                edge.style('opacity', 1);
+              });
+            }
+            
+            // Update button appearance
+            $(this).css('background-color', onlyRootConnections ? '#e6f7ff' : 'white');
+          });
+          
+          // Enable touch gestures for mobile
+          cy.userZoomingEnabled(true);
+          cy.userPanningEnabled(true);
+          cy.boxSelectionEnabled(false);
+          
+          // Add hover interactions for nodes
+          cy.on('mouseover', 'node', function(e) {
+            try {
+              const node = e.target;
+              if (!node) return;
+              
+              // Safely get connected edges
+              let connectedEdges = [];
+              try {
+                const tempEdges = node.connectedEdges();
+                if (tempEdges && typeof tempEdges.forEach === 'function') {
+                  connectedEdges = tempEdges;
+                }
+              } catch (err) {
+                console.warn('Error getting connected edges:', err);
+              }
+              
+              // Safely get connected nodes
+              let connectedNodes = [];
+              try {
+                if (connectedEdges && typeof connectedEdges.connectedNodes === 'function') {
+                  const tempNodes = connectedEdges.connectedNodes();
+                  if (tempNodes && typeof tempNodes.forEach === 'function') {
+                    connectedNodes = tempNodes;
+                  }
+                }
+              } catch (err) {
+                console.warn('Error getting connected nodes:', err);
+              }
+              
+              // Safely get difference
+              let difference = [];
+              try {
+                if (connectedNodes && typeof connectedNodes.difference === 'function') {
+                  const tempDiff = connectedNodes.difference(node);
+                  if (tempDiff && typeof tempDiff.forEach === 'function') {
+                    difference = tempDiff;
+                  }
+                }
+              } catch (err) {
+                console.warn('Error calculating node difference:', err);
+              }
+              
+              // Dim all elements safely
+              try {
+                let elementsToFade = [];
+                const allElements = cy.elements();
+                if (allElements && typeof allElements.difference === 'function') {
+                  const tempElements = allElements.difference(node);
+                  if (tempElements && typeof tempElements.forEach === 'function') {
+                    elementsToFade = tempElements;
+                  }
+                }
+                
+                // Apply opacity to each element individually
+                if (elementsToFade.length > 0) {
+                  elementsToFade.forEach(ele => {
+                    if (ele && typeof ele.style === 'function') {
+                      ele.style('opacity', 0.2);
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn('Error dimming elements:', err);
+              }
+              
+              // Highlight connected elements safely
+              try {
+                if (connectedEdges.length > 0) {
+                  connectedEdges.forEach(edge => {
+                    if (edge && typeof edge.style === 'function') {
+                      edge.style('opacity', 1);
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn('Error highlighting connected edges:', err);
+              }
+              
+              try {
+                if (difference.length > 0) {
+                  difference.forEach(connNode => {
+                    if (connNode && typeof connNode.style === 'function') {
+                      connNode.style('opacity', 1);
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn('Error highlighting connected nodes:', err);
+              }
+              
+              // Make the hovered node stand out
+              try {
+                if (typeof node.style === 'function') {
+                  node.style('border-width', 3);
+                  node.style('border-color', '#FFA500');
+                }
+              } catch (err) {
+                console.warn('Error styling hovered node:', err);
+              }
+              
+              // Show edge labels for connected edges if there are many nodes
+              try {
+                if (nodeCount > 15 && connectedEdges.length > 0) {
+                  connectedEdges.forEach(edge => {
+                    if (!edge || typeof edge.data !== 'function' || typeof edge.style !== 'function') return;
+                    try {
+                      const label = edge.data('label');
+                      edge.style('label', label || '');
+                    } catch (labelErr) {
+                      console.warn('Error setting edge label:', labelErr);
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn('Error showing edge labels:', err);
+              }
+            } catch (err) {
+              console.warn('Error in mouseover handler:', err);
+            }
+          });
+          
+          cy.on('mouseout', 'node', function() {
+            try {
+              // Restore all elements to original state - with safer collection handling
+              try {
+                let elements = [];
+                const tempElements = cy.elements();
+                if (tempElements && typeof tempElements.forEach === 'function') {
+                  elements = tempElements;
+                }
+                
+                if (elements.length > 0) {
+                  elements.forEach(ele => {
+                    if (ele && typeof ele.style === 'function') {
+                      ele.style('opacity', 1);
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn('Error restoring element opacity:', err);
+              }
+              
+              // Restore node border - with safer collection handling
+              try {
+                let nodes = [];
+                const tempNodes = cy.nodes();
+                if (tempNodes && typeof tempNodes.forEach === 'function') {
+                  nodes = tempNodes;
+                }
+                
+                if (nodes.length > 0) {
+                  nodes.forEach(node => {
+                    if (!node || typeof node.data !== 'function' || typeof node.style !== 'function') return;
+                    try {
+                      const isRoot = node.data('isRoot');
+                      node.style('border-width', isRoot ? 3 : 1);
+                      node.style('border-color', isRoot ? '#2563EB' : '#94A3B8');
+                    } catch (nodeErr) {
+                      console.warn('Error styling node border:', nodeErr);
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn('Error restoring node borders:', err);
+              }
+              
+              // Hide edge labels again if there are many nodes - with safer collection handling
+              try {
+                if (nodeCount > 15) {
+                  let edges = [];
+                  const tempEdges = cy.edges();
+                  if (tempEdges && typeof tempEdges.forEach === 'function') {
+                    edges = tempEdges;
+                  }
+                  
+                  if (edges.length > 0) {
+                    edges.forEach(edge => {
+                      if (!edge || typeof edge.data !== 'function' || typeof edge.style !== 'function') return;
+                      try {
+                        if (!edgeLabelsVisible) {
+                          edge.style('label', '');
+                        } else {
+                          const isFromRoot = edge.data('isFromRoot');
+                          const isToRoot = edge.data('isToRoot');
+                          edge.style('label', (isFromRoot || isToRoot) ? edge.data('label') || '' : '');
+                        }
+                      } catch (edgeErr) {
+                        console.warn('Error styling edge label:', edgeErr);
+                      }
+                    });
+                  }
+                }
+              } catch (err) {
+                console.warn('Error hiding edge labels:', err);
+              }
+            } catch (err) {
+              console.warn('Error in mouseout handler:', err);
+            }
+          });
+          
+        } catch (err) {
+          console.error("Error in layout processing:", err);
+        }
+      }, 100);
       
-      // Remove the tooltip event listeners since we're showing all content in the node
-      cy.on('mouseover', 'node', function(e) {
-        // Do nothing - tooltips are disabled
-      });
-      
-      cy.on('mouseover', 'edge', function(e) {
-        // No tooltips needed for edges anymore since we show full text
-      });
-      
-      cy.on('mouseout', 'node, edge', function() {
-        $('.cy-tooltip').css('opacity', 0);
-      });
-      
-      // Update HTML labels on node movement
-      cy.on('position', 'node', function(e) {
-        const node = e.target;
-        const updateFn = node.scratch('updateLabelPosition');
-        if (updateFn) updateFn();
-      });
-      
-      // Update all HTML labels on viewport changes
-      cy.on('viewport', function() {
-        cy.nodes().forEach(node => {
-          const updateFn = node.scratch('updateLabelPosition');
-          if (updateFn) updateFn();
-        });
-      });
-      
-      // Show download button
-      $('#downloadBtn').show();
-      
-      // Add event listeners for control buttons
-      $('#zoom-in').off('click').on('click', function() {
-        cy.zoom({
-          level: cy.zoom() * 1.2,
-          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-        });
-      });
-      
-      $('#zoom-out').off('click').on('click', function() {
-        cy.zoom({
-          level: cy.zoom() * 0.8,
-          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-        });
-      });
-      
-      $('#reset-view').off('click').on('click', function() {
-        cy.fit();
-        cy.center();
-      });
-      
-      // Enable touch gestures for mobile
-      cy.userZoomingEnabled(true);
-      cy.userPanningEnabled(true);
-      cy.boxSelectionEnabled(false);
-    }, 100);
-    
-  } catch (err) {
-    console.error("Error initializing Cytoscape:", err);
-    $('#graph-container').html(
-      `<div class="p-2 text-center text-sm text-red-500">Error rendering graph: ${err.message}</div>`
-    );
-  }
+    } catch (err) {
+      console.error("Error initializing Cytoscape:", err);
+      $('#graph-container').html(
+        `<div class="p-2 text-center text-sm text-red-500">Error rendering graph: ${err.message}</div>`
+      );
+    }
+  }, 50); // Short delay to ensure DOM is ready
 }
 
 // Re-render the graph with filtered edges
