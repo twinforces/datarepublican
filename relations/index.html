@@ -941,9 +941,10 @@ function renderCytoscape(rootSubject, elements) {
           style: {
             'width': 2.5, // Slightly thicker
             'line-style': 'solid',
+            'curve-style': 'straight', // Use straight lines for root connections
             'control-point-distances': function(ele) {
-              // Less curved for root connections to reduce clutter
-              return [100, 100];
+              // No curve for root connections
+              return [0, 0];
             }
           }
         }
@@ -987,15 +988,15 @@ function renderCytoscape(rootSubject, elements) {
       const nodeIndexInCircle = i % nodesPerCircle;
       
       // Calculate radius for this circle (outer circles are larger)
-      const baseRadius = minViewportDim * 0.4; // Increased from 0.35 to 0.4
+      const baseRadius = minViewportDim * 0.45; // Increased from 0.4 to 0.45
       
       // Add slight randomness to radius to prevent perfect circles
-      const radiusVariation = baseRadius * 0.1 * (Math.random() - 0.5);
-      const radius = baseRadius * (1 + (circleIndex * 0.5)) + radiusVariation;
+      const radiusVariation = baseRadius * 0.15 * (Math.random() - 0.5);
+      const radius = baseRadius * (1 + (circleIndex * 0.6)) + radiusVariation; // Increased spacing between circles
       
       // Calculate angle with offset for each circle to stagger nodes
       // Add slight angle variation to prevent perfect alignment
-      const angleVariation = (Math.random() * 0.2 - 0.1) * (Math.PI / nodesPerCircle);
+      const angleVariation = (Math.random() * 0.3 - 0.15) * (Math.PI / nodesPerCircle);
       const angleOffset = circleIndex * (Math.PI / nodesPerCircle);
       const angle = (2 * Math.PI * nodeIndexInCircle / nodesPerCircle) + angleOffset + angleVariation;
       
@@ -1004,118 +1005,335 @@ function renderCytoscape(rootSubject, elements) {
         x: centerX + radius * Math.cos(angle),
         y: centerY + radius * Math.sin(angle)
       });
+      
+      // Store the original angle for this node to help with edge routing
+      node.scratch('angle', angle);
     });
     
     // After layout completes, ensure the root node is still centered
     setTimeout(() => {
-      // Force root node to center again
-      if (rootNode.length > 0) {
-        rootNode.unlock();
-        rootNode.position({
-          x: centerX,
-          y: centerY
-        });
-        rootNode.lock(); // Lock it again
-      }
-      
-      // Optimize edge routing to reduce overlaps
-      // Group edges by their general direction (in 8 sectors)
-      const edgeGroups = {};
-      cy.edges().forEach(edge => {
-        const source = edge.source().position();
-        const target = edge.target().position();
-        
-        // Skip edges to/from root as they're already handled
-        if (edge.data('isFromRoot') || edge.data('isToRoot')) {
-          return;
+      try {
+        // Force root node to center again
+        if (rootNode.length > 0) {
+          rootNode.unlock();
+          rootNode.position({
+            x: centerX,
+            y: centerY
+          });
+          rootNode.lock(); // Lock it again
         }
         
-        // Calculate angle
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const angle = Math.atan2(dy, dx);
-        
-        // Convert to sector (0-7, dividing the circle into 8 parts)
-        const sector = Math.floor(((angle + Math.PI) / (2 * Math.PI) * 8) % 8);
-        
-        if (!edgeGroups[sector]) {
-          edgeGroups[sector] = [];
-        }
-        edgeGroups[sector].push(edge);
-      });
-      
-      // For each sector, adjust control points to reduce overlaps
-      Object.keys(edgeGroups).forEach(sector => {
-        const edges = edgeGroups[sector];
-        const sectorAngle = (parseInt(sector) / 8) * 2 * Math.PI - Math.PI;
-        
-        // Sort edges by length
-        edges.sort((a, b) => {
-          const aLength = getEdgeLength(a);
-          const bLength = getEdgeLength(b);
-          return aLength - bLength;
+        // Optimize edge routing to reduce overlaps
+        // First, optimize positions of nodes connected to root to minimize crossings
+        const rootConnectedNodes = cy.nodes().filter(node => {
+          if (node.data('isRoot')) return false;
+          return node.connectedEdges().some(edge => 
+            edge.data('isFromRoot') || edge.data('isToRoot')
+          );
         });
         
-        // Adjust control points based on position in group
-        edges.forEach((edge, i) => {
-          const baseDistance = 150 + (i * 30); // Increasing distance for each edge
-          const perpDistance = 80 + (i % 3) * 60; // Perpendicular offset
+        // Sort root-connected nodes by their angle from center
+        rootConnectedNodes.sort((a, b) => {
+          const angleA = a.scratch('angle') || 0;
+          const angleB = b.scratch('angle') || 0;
+          return angleA - angleB;
+        });
+        
+        // Adjust positions of root-connected nodes to be more evenly distributed
+        const rootNodeCount = rootConnectedNodes.length;
+        if (rootNodeCount > 0) {
+          rootConnectedNodes.forEach((node, i) => {
+            // Calculate a more evenly distributed angle
+            const evenAngle = (2 * Math.PI * i / rootNodeCount);
+            
+            // Get current position and distance from center
+            const pos = node.position();
+            const dx = pos.x - centerX;
+            const dy = pos.y - centerY;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+            
+            // Maintain the same distance but adjust angle
+            // Blend between current position and ideal position
+            const blendFactor = 0.7; // 70% toward ideal position
+            const idealX = centerX + currentDistance * Math.cos(evenAngle);
+            const idealY = centerY + currentDistance * Math.sin(evenAngle);
+            
+            const newX = idealX * blendFactor + pos.x * (1 - blendFactor);
+            const newY = idealY * blendFactor + pos.y * (1 - blendFactor);
+            
+            // Update position
+            node.position({
+              x: newX,
+              y: newY
+            });
+            
+            // Update scratch data
+            node.scratch('angle', evenAngle);
+          });
+        }
+        
+        // Group edges by their general direction (in 16 sectors)
+        const edgeGroups = {};
+        cy.edges().forEach(edge => {
+          const source = edge.source().position();
+          const target = edge.target().position();
           
-          // Calculate perpendicular vector
-          const perpX = Math.sin(sectorAngle);
-          const perpY = -Math.cos(sectorAngle);
+          // Skip edges to/from root as they're already handled with straight lines
+          if (edge.data('isFromRoot') || edge.data('isToRoot')) {
+            return;
+          }
           
-          // Set control points
-          const cp1 = baseDistance * (i % 2 === 0 ? 1 : -1);
-          const cp2 = baseDistance * (i % 2 === 0 ? -1 : 1);
+          // Calculate angle
+          const dx = target.x - source.x;
+          const dy = target.y - source.y;
+          const angle = Math.atan2(dy, dx);
           
-          edge.style({
-            'control-point-distances': [cp1, cp2],
-            'control-point-weights': [0.3, 0.7]
+          // Convert to sector (0-15, dividing the circle into 16 parts for finer control)
+          const sector = Math.floor(((angle + Math.PI) / (2 * Math.PI) * 16) % 16);
+          
+          if (!edgeGroups[sector]) {
+            edgeGroups[sector] = [];
+          }
+          edgeGroups[sector].push(edge);
+        });
+        
+        // For each sector, adjust control points to reduce overlaps
+        Object.keys(edgeGroups).forEach(sector => {
+          const edges = edgeGroups[sector];
+          const sectorAngle = (parseInt(sector) / 16) * 2 * Math.PI - Math.PI;
+          
+          // Sort edges by length
+          edges.sort((a, b) => {
+            const aLength = getEdgeLength(a);
+            const bLength = getEdgeLength(b);
+            return aLength - bLength;
+          });
+          
+          // Adjust control points based on position in group
+          edges.forEach((edge, i) => {
+            const baseDistance = 200 + (i * 40); // Increased distance for each edge
+            const perpDistance = 100 + (i % 3) * 80; // Increased perpendicular offset
+            
+            // Calculate perpendicular vector
+            const perpX = Math.sin(sectorAngle);
+            const perpY = -Math.cos(sectorAngle);
+            
+            // Set control points
+            const cp1 = baseDistance * (i % 2 === 0 ? 1 : -1);
+            const cp2 = baseDistance * (i % 2 === 0 ? -1 : 1);
+            
+            edge.style({
+              'control-point-distances': [cp1, cp2],
+              'control-point-weights': [0.3, 0.7]
+            });
           });
         });
-      });
-      
-      // Function to calculate edge length
-      function getEdgeLength(edge) {
-        const source = edge.source().position();
-        const target = edge.target().position();
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        return Math.sqrt(dx * dx + dy * dy);
-      }
-      
-      // Improved overlap prevention algorithm
-      // First, get accurate node dimensions including labels
-      const nodeData = [];
-      cy.nodes().forEach(node => {
-        const bb = node.boundingBox({includeLabels: true, includeOverlays: true});
-        const pos = node.position();
-        nodeData.push({
-          node: node,
-          x: pos.x,
-          y: pos.y,
-          width: bb.w,
-          height: bb.h,
-          isRoot: node.data('isRoot')
-        });
-      });
-      
-      // Run multiple passes of overlap removal with increasing strength
-      for (let pass = 0; pass < 4; pass++) { // Increased from 3 to 4 passes
-        const strength = 0.3 + (pass * 0.3); // Increase force with each pass
         
-        // Multiple iterations per pass
-        for (let iter = 0; iter < 50; iter++) {
+        // Function to calculate edge length
+        function getEdgeLength(edge) {
+          const source = edge.source().position();
+          const target = edge.target().position();
+          const dx = target.x - source.x;
+          const dy = target.y - source.y;
+          return Math.sqrt(dx * dx + dy * dy);
+        }
+        
+        // Improved overlap prevention algorithm
+        // First, get accurate node dimensions including labels
+        const nodeData = [];
+        cy.nodes().forEach(node => {
+          const bb = node.boundingBox({includeLabels: true, includeOverlays: true});
+          const pos = node.position();
+          nodeData.push({
+            node: node,
+            x: pos.x,
+            y: pos.y,
+            width: bb.w,
+            height: bb.h,
+            isRoot: node.data('isRoot')
+          });
+        });
+        
+        // Run multiple passes of overlap removal with increasing strength
+        for (let pass = 0; pass < 4; pass++) { // Increased from 3 to 4 passes
+          const strength = 0.3 + (pass * 0.3); // Increase force with each pass
+          
+          // Multiple iterations per pass
+          for (let iter = 0; iter < 50; iter++) {
+            let moved = false;
+            
+            // Check each pair of nodes for overlap
+            for (let i = 0; i < nodeData.length; i++) {
+              if (nodeData[i].isRoot) continue; // Skip root node
+              
+              let totalForceX = 0;
+              let totalForceY = 0;
+              let forcesApplied = 0;
+              
+              for (let j = 0; j < nodeData.length; j++) {
+                if (i === j) continue;
+                
+                const nodeA = nodeData[i];
+                const nodeB = nodeData[j];
+                
+                // Calculate distance between node centers
+                const dx = nodeB.x - nodeA.x;
+                const dy = nodeB.y - nodeA.y;
+                const distanceSquared = dx * dx + dy * dy;
+                
+                // Calculate minimum required distance to avoid overlap (with padding)
+                const minDistX = (nodeA.width + nodeB.width) / 2 + 70; // Increased from 50 to 70px extra padding
+                const minDistY = (nodeA.height + nodeB.height) / 2 + 70; // Increased from 50 to 70px
+                
+                // Check if nodes overlap or are too close
+                const overlapX = minDistX * minDistX > distanceSquared * (dx * dx) / distanceSquared;
+                const overlapY = minDistY * minDistY > distanceSquared * (dy * dy) / distanceSquared;
+                
+                if (overlapX || overlapY || distanceSquared < Math.pow(Math.max(minDistX, minDistY), 2)) {
+                  // Calculate repulsion force
+                  const distance = Math.sqrt(distanceSquared) || 0.1; // Avoid division by zero
+                  const minDist = Math.sqrt(minDistX * minDistX + minDistY * minDistY);
+                  const force = strength * (minDist - distance) / distance;
+                  
+                  // Apply force vector
+                  totalForceX -= (dx / distance) * force;
+                  totalForceY -= (dy / distance) * force;
+                  forcesApplied++;
+                  
+                  moved = true;
+                }
+                
+                // Add repulsion from root node (stronger for closer nodes)
+                if (nodeB.isRoot) {
+                  const rootRepulsionStrength = 0.5;
+                  const rootDistance = Math.sqrt(distanceSquared) || 0.1;
+                  const rootForce = rootRepulsionStrength * (200 / rootDistance);
+                  
+                  totalForceX -= (dx / rootDistance) * rootForce;
+                  totalForceY -= (dy / rootDistance) * rootForce;
+                  forcesApplied++;
+                }
+              }
+              
+              // Apply accumulated forces
+              if (forcesApplied > 0) {
+                // Limit maximum movement per iteration
+                const maxMove = 20;
+                const forceMagnitude = Math.sqrt(totalForceX * totalForceX + totalForceY * totalForceY);
+                
+                if (forceMagnitude > maxMove) {
+                  const scale = maxMove / forceMagnitude;
+                  totalForceX *= scale;
+                  totalForceY *= scale;
+                }
+                
+                // Update node position
+                nodeData[i].x += totalForceX;
+                nodeData[i].y += totalForceY;
+                nodeData[i].node.position({
+                  x: nodeData[i].x,
+                  y: nodeData[i].y
+                });
+              }
+            }
+            
+            if (!moved) break; // Stop if no nodes were moved
+          }
+        }
+        
+        // Apply a radial constraint to maintain circular distribution
+        // but with less weight than the overlap prevention
+        const idealRadius = Math.min(cy.width(), cy.height()) * 0.55; // Increased from 0.5 to 0.55
+        
+        // First, handle nodes connected to root to ensure they're well-distributed
+        const rootConnectedData = nodeData.filter(data => {
+          if (data.isRoot) return false;
+          return data.node.connectedEdges().some(edge => 
+            edge.data('isFromRoot') || edge.data('isToRoot')
+          );
+        });
+        
+        // Sort by angle for more even distribution
+        rootConnectedData.sort((a, b) => {
+          const angleA = Math.atan2(a.y - centerY, a.x - centerX);
+          const angleB = Math.atan2(b.y - centerY, b.x - centerX);
+          return angleA - angleB;
+        });
+        
+        // Adjust positions to be more evenly distributed
+        const rootConnCount = rootConnectedData.length;
+        if (rootConnCount > 0) {
+          rootConnectedData.forEach((data, i) => {
+            // Calculate ideal angle and position
+            const idealAngle = (2 * Math.PI * i / rootConnCount);
+            const idealX = centerX + idealRadius * Math.cos(idealAngle);
+            const idealY = centerY + idealRadius * Math.sin(idealAngle);
+            
+            // Strong blend toward ideal position (80%)
+            const blendFactor = 0.8;
+            const newX = idealX * blendFactor + data.x * (1 - blendFactor);
+            const newY = idealY * blendFactor + data.y * (1 - blendFactor);
+            
+            // Update position
+            data.node.position({
+              x: newX,
+              y: newY
+            });
+            
+            // Update stored position
+            data.x = newX;
+            data.y = newY;
+          });
+        }
+        
+        // Then handle remaining nodes with a weaker circular constraint
+        nodeData.forEach(data => {
+          if (data.isRoot) return; // Skip root node
+          
+          // Skip nodes that are connected to root (already handled)
+          if (data.node.connectedEdges().some(edge => 
+            edge.data('isFromRoot') || edge.data('isToRoot')
+          )) {
+            return;
+          }
+          
+          // Calculate current angle and distance from center
+          const dx = data.x - centerX;
+          const dy = data.y - centerY;
+          const angle = Math.atan2(dy, dx);
+          const currentDistance = Math.sqrt(dx * dx + dy * dy);
+          
+          // Calculate ideal position on circle with some randomness
+          // This prevents nodes from forming perfect circles which can cause edge overlaps
+          const radiusVariation = idealRadius * 0.15 * (Math.random() - 0.5);
+          const idealRadius2 = idealRadius + radiusVariation;
+          
+          const idealX = centerX + idealRadius2 * Math.cos(angle);
+          const idealY = centerY + idealRadius2 * Math.sin(angle);
+          
+          // Blend current position with ideal circular position (20% circular, 80% current)
+          // Reduced from 25% to 20% to prioritize overlap prevention even more
+          const blendFactor = 0.2;
+          const newX = idealX * blendFactor + data.x * (1 - blendFactor);
+          const newY = idealY * blendFactor + data.y * (1 - blendFactor);
+          
+          // Update node position
+          data.node.position({
+            x: newX,
+            y: newY
+          });
+          
+          // Update stored position
+          data.x = newX;
+          data.y = newY;
+        });
+        
+        // Final overlap check with stronger forces
+        for (let iter = 0; iter < 40; iter++) { // Increased from 30 to 40 iterations
           let moved = false;
           
-          // Check each pair of nodes for overlap
           for (let i = 0; i < nodeData.length; i++) {
-            if (nodeData[i].isRoot) continue; // Skip root node
-            
-            let totalForceX = 0;
-            let totalForceY = 0;
-            let forcesApplied = 0;
+            if (nodeData[i].isRoot) continue;
             
             for (let j = 0; j < nodeData.length; j++) {
               if (i === j) continue;
@@ -1123,185 +1341,73 @@ function renderCytoscape(rootSubject, elements) {
               const nodeA = nodeData[i];
               const nodeB = nodeData[j];
               
-              // Calculate distance between node centers
+              // Skip if one node is far from the other
               const dx = nodeB.x - nodeA.x;
               const dy = nodeB.y - nodeA.y;
-              const distanceSquared = dx * dx + dy * dy;
+              const distSquared = dx * dx + dy * dy;
+              
+              // Quick distance check before detailed calculation
+              const maxDimSum = nodeA.width + nodeA.height + nodeB.width + nodeB.height;
+              if (distSquared > maxDimSum * maxDimSum / 4) continue;
               
               // Calculate minimum required distance to avoid overlap (with padding)
-              const minDistX = (nodeA.width + nodeB.width) / 2 + 50; // Increased from 30 to 50px extra padding
-              const minDistY = (nodeA.height + nodeB.height) / 2 + 50; // Increased from 30 to 50px
+              const minDistX = (nodeA.width + nodeB.width) / 2 + 80; // Increased from 60 to 80px
+              const minDistY = (nodeA.height + nodeB.height) / 2 + 80; // Increased from 60 to 80px
               
-              // Check if nodes overlap or are too close
-              const overlapX = minDistX * minDistX > distanceSquared * (dx * dx) / distanceSquared;
-              const overlapY = minDistY * minDistY > distanceSquared * (dy * dy) / distanceSquared;
-              
-              if (overlapX || overlapY || distanceSquared < Math.pow(Math.max(minDistX, minDistY), 2)) {
-                // Calculate repulsion force
-                const distance = Math.sqrt(distanceSquared) || 0.1; // Avoid division by zero
-                const minDist = Math.sqrt(minDistX * minDistX + minDistY * minDistY);
-                const force = strength * (minDist - distance) / distance;
+              // Check if nodes overlap
+              if (Math.abs(dx) < minDistX && Math.abs(dy) < minDistY) {
+                // Calculate movement direction
+                const distance = Math.sqrt(distSquared) || 0.1;
+                const overlapAmount = Math.sqrt(minDistX * minDistX + minDistY * minDistY) - distance;
                 
-                // Apply force vector
-                totalForceX -= (dx / distance) * force;
-                totalForceY -= (dy / distance) * force;
-                forcesApplied++;
-                
-                moved = true;
-              }
-              
-              // Add repulsion from root node (stronger for closer nodes)
-              if (nodeB.isRoot) {
-                const rootRepulsionStrength = 0.5;
-                const rootDistance = Math.sqrt(distanceSquared) || 0.1;
-                const rootForce = rootRepulsionStrength * (200 / rootDistance);
-                
-                totalForceX -= (dx / rootDistance) * rootForce;
-                totalForceY -= (dy / rootDistance) * rootForce;
-                forcesApplied++;
-              }
-            }
-            
-            // Apply accumulated forces
-            if (forcesApplied > 0) {
-              // Limit maximum movement per iteration
-              const maxMove = 20;
-              const forceMagnitude = Math.sqrt(totalForceX * totalForceX + totalForceY * totalForceY);
-              
-              if (forceMagnitude > maxMove) {
-                const scale = maxMove / forceMagnitude;
-                totalForceX *= scale;
-                totalForceY *= scale;
-              }
-              
-              // Update node position
-              nodeData[i].x += totalForceX;
-              nodeData[i].y += totalForceY;
-              nodeData[i].node.position({
-                x: nodeData[i].x,
-                y: nodeData[i].y
-              });
-            }
-          }
-          
-          if (!moved) break; // Stop if no nodes were moved
-        }
-      }
-      
-      // Apply a radial constraint to maintain circular distribution
-      // but with less weight than the overlap prevention
-      const idealRadius = Math.min(cy.width(), cy.height()) * 0.5; // Increased from 0.45 to 0.5
-      
-      nodeData.forEach(data => {
-        if (data.isRoot) return; // Skip root node
-        
-        // Calculate current angle and distance from center
-        const dx = data.x - centerX;
-        const dy = data.y - centerY;
-        const angle = Math.atan2(dy, dx);
-        const currentDistance = Math.sqrt(dx * dx + dy * dy);
-        
-        // Calculate ideal position on circle with some randomness
-        // This prevents nodes from forming perfect circles which can cause edge overlaps
-        const radiusVariation = idealRadius * 0.1 * (Math.random() - 0.5);
-        const idealRadius2 = idealRadius + radiusVariation;
-        
-        const idealX = centerX + idealRadius2 * Math.cos(angle);
-        const idealY = centerY + idealRadius2 * Math.sin(angle);
-        
-        // Blend current position with ideal circular position (25% circular, 75% current)
-        // Reduced from 30% to 25% to prioritize overlap prevention even more
-        const blendFactor = 0.25;
-        const newX = idealX * blendFactor + data.x * (1 - blendFactor);
-        const newY = idealY * blendFactor + data.y * (1 - blendFactor);
-        
-        // Update node position
-        data.node.position({
-          x: newX,
-          y: newY
-        });
-        
-        // Update stored position
-        data.x = newX;
-        data.y = newY;
-      });
-      
-      // Final overlap check with stronger forces
-      for (let iter = 0; iter < 40; iter++) { // Increased from 30 to 40 iterations
-        let moved = false;
-        
-        for (let i = 0; i < nodeData.length; i++) {
-          if (nodeData[i].isRoot) continue;
-          
-          for (let j = 0; j < nodeData.length; j++) {
-            if (i === j) continue;
-            
-            const nodeA = nodeData[i];
-            const nodeB = nodeData[j];
-            
-            // Skip if one node is far from the other
-            const dx = nodeB.x - nodeA.x;
-            const dy = nodeB.y - nodeA.y;
-            const distSquared = dx * dx + dy * dy;
-            
-            // Quick distance check before detailed calculation
-            const maxDimSum = nodeA.width + nodeA.height + nodeB.width + nodeB.height;
-            if (distSquared > maxDimSum * maxDimSum / 4) continue;
-            
-            // Calculate minimum required distance to avoid overlap (with padding)
-            const minDistX = (nodeA.width + nodeB.width) / 2 + 60; // Increased from 40 to 60px
-            const minDistY = (nodeA.height + nodeB.height) / 2 + 60; // Increased from 40 to 60px
-            
-            // Check if nodes overlap
-            if (Math.abs(dx) < minDistX && Math.abs(dy) < minDistY) {
-              // Calculate movement direction
-              const distance = Math.sqrt(distSquared) || 0.1;
-              const overlapAmount = Math.sqrt(minDistX * minDistX + minDistY * minDistY) - distance;
-              
-              if (overlapAmount > 0) {
-                // Move nodeA away from nodeB
-                const moveX = (dx / distance) * overlapAmount * 0.7; // Increased from 0.6 to 0.7
-                const moveY = (dy / distance) * overlapAmount * 0.7; // Increased from 0.6 to 0.7
-                
-                nodeData[i].x -= moveX;
-                nodeData[i].y -= moveY;
-                nodeData[i].node.position({
-                  x: nodeData[i].x,
-                  y: nodeData[i].y
-                });
-                
-                moved = true;
+                if (overlapAmount > 0) {
+                  // Move nodeA away from nodeB
+                  const moveX = (dx / distance) * overlapAmount * 0.7; // Increased from 0.6 to 0.7
+                  const moveY = (dy / distance) * overlapAmount * 0.7; // Increased from 0.6 to 0.7
+                  
+                  nodeData[i].x -= moveX;
+                  nodeData[i].y -= moveY;
+                  nodeData[i].node.position({
+                    x: nodeData[i].x,
+                    y: nodeData[i].y
+                  });
+                  
+                  moved = true;
+                }
               }
             }
           }
+          
+          if (!moved) break;
         }
         
-        if (!moved) break;
+        // Ensure all nodes are visible by fitting to the viewport with padding
+        cy.fit(cy.elements(), 90); // Increased padding from 70 to 90
+        
+        // Make sure we're not too zoomed in
+        const maxZoomLevel = 0.5; // Lower value = more zoomed out
+        const currentZoom = cy.zoom();
+        
+        if (currentZoom > maxZoomLevel) {
+          cy.zoom({
+            level: maxZoomLevel,
+            renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+          });
+        }
+        
+        // Final check to ensure root is centered
+        setTimeout(() => {
+          rootNode.unlock();
+          rootNode.position({
+            x: centerX,
+            y: centerY
+          });
+          cy.center(rootNode);
+        }, 100);
+        
+      } catch (err) {
+        console.error("Error in layout processing:", err);
       }
-      
-      // Ensure all nodes are visible by fitting to the viewport with padding
-      cy.fit(cy.elements(), 70); // Increased padding from 50 to 70
-      
-      // Make sure we're not too zoomed in
-      const maxZoomLevel = 0.5; // Lower value = more zoomed out
-      const currentZoom = cy.zoom();
-      
-      if (currentZoom > maxZoomLevel) {
-        cy.zoom({
-          level: maxZoomLevel,
-          renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-        });
-      }
-      
-      // Final check to ensure root is centered
-      setTimeout(() => {
-        rootNode.unlock();
-        rootNode.position({
-          x: centerX,
-          y: centerY
-        });
-        cy.center(rootNode);
-      }, 100);
       
       // Add event listeners for tooltips
       cy.on('mouseover', 'node', function(e) {
