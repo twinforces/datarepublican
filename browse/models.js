@@ -604,8 +604,10 @@
     }
     else*/ {
         console.log(`Expanding ${this.id} ${this.name}`);
-        this.expandDown(e, -1);
+        this.expandDown(e, -1); 
+        this.recurseDownShow(0,1);
         this.expandUp(e, -1);
+        this.recurseUpShow(0,1);
         return true;
     }
 }    
@@ -681,12 +683,12 @@
     }
     
     /*when we get turned off, we have to flow down to other nodes*/
-    recurseHide() {
-        if (this.isVisible)
+    recurseHide(depth=0,limit=2) {
+        if (this.isVisible && depth < limit)
         {
                 this.isVisible=false;
                 this.grants.forEach(g => {
-                        g.grantee.recurseHide();
+                        g.grantee.recurseHide(depth+1);
                 });
         
         }
@@ -694,17 +696,40 @@
     }
     
     /* recurse upwards through nodes we're hiding to hide flows*/
-    recurseUpHide() {
-        if (this.isVisible)
+    recurseUpHide(depth=0,limit=2) {
+        if (this.isVisible && depth < limit)
         {
                 this.isVisible=false;
                 this.grantsIn.forEach(g => {
-                        g.filer.recurseUpHide();
+                        g.filer.recurseUpHide(depth+1);
                 });
        }
      
     }
+   /*when we get turned off, we have to flow down to other nodes*/
+    recurseDownShow(depth=0,limit=2) {
+        if (!this.isVisible && depth < limit)
+        {
+                this.isVisible=true;
+                this.grants.forEach(g => {
+                        g.grantee.recurseDownShow(depth+1);
+                });
+        
+        }
     
+    }
+    
+    /* recurse upwards through nodes we're hiding to hide flows*/
+    recurseUpShow(depth=0,limit=2) {
+        if (!this.isVisible && depth < limit)
+        {
+                this.isVisible=true;
+                this.grantsIn.forEach(g => {
+                        g.filer.recurseUpShow(depth+1);
+                });
+       }
+     
+    }    
     show() {
         this.isVisible=true;
         Charity.removeFromHideList(this.id);
@@ -874,6 +899,24 @@
             }
             return data;
         }
+        toolTipText() {
+                let outFlows='';
+                let inFlows='';
+                if (this.grantsInTotal) 
+                        inFlows=`\ngrants in: $${formatNumber(this.grantsInTotal)}`;
+                else
+                        inFlows=`\n in: N/A`;
+                if (this.grantsTotal) 
+                        outFlows=`\ngrants out: $${formatNumber(this.grantsTotal)}`;
+                else
+                        outFlows=`\nout: N/A`;
+                if (this.otherUp?.grants.length>1)
+                        inFlows += ` more in: ${this.otherUp.grants.length}/$${formatNumber(this.otherUp.grantsTotal)})`
+                if (this.otherDown?.grantsIn.length>1)
+                        outFlows += ` more out: ${this.otherUp.grantsIn.length}/$${formatNumber(this.otherUp.grantsInTotal)})`
+                return `${this.name}\n${this.ein}${inFlows}${outFlows}`;
+        
+        }
 
 }
 class DownstreamOther extends Charity {
@@ -943,6 +986,14 @@ class DownstreamOther extends Charity {
     set isVisible(v) {
         super.isVisible = v;
     }
+    
+           toolTipText() {
+                const hiddenflow=`\nhidden: $${formatNumber(this.grantsInTotal)}`;
+
+                return `Rolldown ${this.parent.name}\n${this.parent.ein}${hiddenflow}`;
+        
+        }
+
 }
 
 class UpstreamOther extends Charity {
@@ -1010,6 +1061,14 @@ handleClick(e, count) {
     set isVisible(v) {
         super.isVisible = v;
     }
+
+           toolTipText() {
+                const hiddenflow=`\nhidden: $${formatNumber(this.grantsTotal)}`;
+
+                return `Rollup ${this.parent.name}\n${this.parent.ein}${hiddenflow}`;
+        
+        }
+
 }
 
 /**
