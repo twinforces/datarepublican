@@ -274,13 +274,13 @@ function updateQueryParams() {
         parseQueryParams();
 }
 
-
+const sortOffset = +0.001;
 function compareCharities( a, b)
 {
         let sortIndexA = a.index;
         let sortIndexB = b.index;
-        if (a.isOther) sortIndexA = a.parent.index+0.01;
-        if (b.isOther) sortIndexB = b.parent.index+0.01;
+        if (a.isOther) sortIndexA = a.parent.index+sortOffset;
+        if (b.isOther) sortIndexB = b.parent.index+sortOffset;
         return  (sortIndexA-sortIndexB) ||
                 (b.grantsTotal-a.grantsTotal) || (b.grantsInTotal - a.grantsInTotal);
         return (b.govt_amt - a.govt_amt) || 
@@ -290,11 +290,22 @@ function compareCharities( a, b)
 
 function compareLinks(a,b)
 {
-        //sort other links to bottom
-        if (a.isOther) return 1;
-        if (b.isOther) return -1;
-        //return (a.index-b.index);
-        return (b.value-a.value);
+        let sortvalueA = a.value;
+        let sortvalueB = b.value;
+        if (a.isOther) {
+                if (a.target.isOther)
+                        sortvalueA = a.target.parent.otherDown.otherGrant.value+sortOffset;
+                if (a.source.isOther)
+                        sortvalueA = a.source.parent.otherUp.otherGrant.value+sortOffset;
+        }
+      if (b.isOther) {
+                if (b.target.isOther)
+                        sortvalueA = b.target.parent.otherDown.otherGrant.value-+sortOffset;
+                if (b.source.isOther)
+                        sortvalueA = b.source.parent.otherUp.otherGrant.value+sortOffset;
+        }
+       //return (a.value-b.value);
+        return (sortvalueB-sortvalueA);
 
 }
 
@@ -338,7 +349,7 @@ function generateGraph() {
         .nodeId(d => d.id )
         .nodeWidth(NODE_WIDTH)
         .nodePadding(NODE_PADDING)
-        .linkSort(sortLinks)
+        .linkSort(compareLinks)
         .nodeId(d => d.id)
         .nodeAlign(d3.sankeyCenter)
         .nodeSort(compareCharities)
@@ -489,18 +500,10 @@ function generatePlusPath(d) {
     const fullPath = `${circlePath} ${plusPath}`;
     return fullPath;
 }
-function sortLinks(a,b) {
-
-       const aIsOther = a.isOther || false;
-        const bIsOther = b.isOther || false;
-        if (aIsOther && !bIsOther) return 1; // "Other" goes to the bottom
-        if (!aIsOther && bIsOther) return -1;
-        return b.value - a.value; // Sort by value (descending)
-}
 
 function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
     // Sort links: "Other" links go to the bottom, others by value (descending)
-    const sortedLinks = [...links].sort(sortLinks);
+    const sortedLinks = [...links].sort(compareLinks);
     
     // Compute the cumulative height up to this link
     const cumulativeHeight = d3.sum(sortedLinks.slice(0, linkIndex), l => l.width);
@@ -516,7 +519,7 @@ function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
     
     // For the source side (right edge), start from the top of the right edge (centerY - height/2)
     // For the target side (left edge), start from the bottom of the left edge (y1)
-    const startY = isSourceSide ? (centerY - height / 2) : node.y1;
+    const startY = isSourceSide? (centerY - height / 2) : (centerY + height / 2);
     
     // Compute the top of the segment:
     // - Source side: Stack downward from startY
