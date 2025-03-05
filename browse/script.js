@@ -489,15 +489,14 @@ function generatePlusPath(d) {
         A${radius},${radius} 0 1 1 ${cx},${cy + radius}
         A${radius},${radius} 0 1 1 ${cx},${cy - radius}
         Z`;*/
-   let circlePath= `
-        M${cx},${cy-radius}
-        A${radius},${radius} 0 0 1 ${cx},${cy+radius}
+    let circlePath = `
+        M${cx},${cy + radius}
+        A${radius},${radius} 0 0 1 ${cx},${cy - radius}
         Z`;
-    if (d.isRight) circlePath= `
+    if (d.isRight) circlePath = `
         M${cx},${cy - radius}
-        A${radius},${radius} 0 1 1 ${cx},${cy + radius}
-        Z`;
-    
+        A${radius},${radius} 0 0 1 ${cx},${cy + radius}
+        Z`;    
 
     // Skinny plus sign path (lines)
     const plusPath = `
