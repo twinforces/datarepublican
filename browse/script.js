@@ -613,7 +613,8 @@ function normalizeStrokeWidths(sankey) {
 
 function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
 
-    if (nodeIds) nodeIds.forEach(nid => Charity.placeNode(nid));
+     $('#downloadBtn').hide();
+   if (nodeIds) nodeIds.forEach(nid => Charity.placeNode(nid));
  
     // Brute-force build currentData from visible nodes and grants
     currentData = Charity.buildSankeyData();
@@ -806,6 +807,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
             }
         });
     Charity.cleanAfterRender(currentData); // restore grants to their original values
+    $('#downloadBtn').show();
 
 }
 

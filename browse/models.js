@@ -67,12 +67,18 @@
        Why: Maintain the hide list, like a good looked View Model
     */
     static addToHideList(ein) {
+        const c = Charity.getCharity(ein);
+        const visible = !Charity.hideList[ein];
         Charity.hideList[ein]=1;
-    }
+        if (visible)
+                c.hide();
+   }
     
     static removeFromHideList(ein) {
+        const visible = Charity.hideList[ein];
         delete Charity.hideList[ein];
-        Charity.getCharity(ein).show();
+        if (visible)
+                Charity.getCharity(ein).show();
     }
     
     static getHideList() {
@@ -874,7 +880,7 @@ class DownstreamOther extends Charity {
     constructor({parent, count=START_REVEAL}) {
         super({       
             ein: `${parent.ein}-Down`, 
-            name: `More...`, 
+            name: `More grants from ${parent.name}...`, 
             xml_name: `${parent.xml_name}-Down`, 
             isVisible: true,
             isOther: true,
@@ -943,7 +949,7 @@ class UpstreamOther extends Charity {
     constructor({parent, count=START_REVEAL}) {
         super({       
             ein: `${parent.ein}-Up`, 
-            name: `More...`, 
+            name: `More for ${parent.name}...`, 
             xml_name: `${parent.xml_name}-Down`, 
             isVisible: true,
             isOther: true,
