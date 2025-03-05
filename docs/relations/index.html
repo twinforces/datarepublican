@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741211189">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741211189">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741211298">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741211298">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1738,11 +1738,14 @@ function renderCytoscape(rootSubject, elements) {
       const nodeIndexInCircle = i % nodesPerCircle;
       
       // Calculate radius for this circle (outer circles are larger)
-      const baseRadius = minViewportDim * 0.45; // Restored to original value
+      const baseRadius = minViewportDim * 0.45; // Base radius value
+      
+      // Increase spacing when there are more nodes
+      const spacingMultiplier = nodeCount > 10 ? 1.3 : 1.0; // Increase spacing by 30% when more than 10 nodes
       
       // Add slight randomness to radius to prevent perfect circles
-      const radiusVariation = baseRadius * 0.15 * (Math.random() - 0.5); // Restored to original value
-      const radius = baseRadius * (1 + (circleIndex * 0.6)) + radiusVariation; // Restored to original value
+      const radiusVariation = baseRadius * 0.15 * (Math.random() - 0.5);
+      const radius = (baseRadius * (1 + (circleIndex * 0.6)) + radiusVariation) * spacingMultiplier;
       
       // Calculate angle with offset for each circle to stagger nodes
       // Add slight angle variation to prevent perfect alignment
@@ -1786,7 +1789,7 @@ function renderCytoscape(rootSubject, elements) {
           if (cy.nodes().length > 10) {
             const currentZoom = cy.zoom();
             cy.zoom({
-              level: currentZoom * 0.85, // Zoom out by 15%
+              level: currentZoom * 0.8, // Zoom out by 20% instead of 15% for better visibility
               renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
             });
           }
