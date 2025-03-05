@@ -913,7 +913,7 @@
                 if (this.otherUp?.grants.length>1)
                         inFlows += ` more in: ${this.otherUp.grants.length}/$${formatNumber(this.otherUp.grantsTotal)})`
                 if (this.otherDown?.grantsIn.length>1)
-                        outFlows += ` more out: ${this.otherUp.grantsIn.length}/$${formatNumber(this.otherUp.grantsInTotal)})`
+                        outFlows += ` more out: ${this.otherDown.grantsIn.length}/$${formatNumber(this.otherDown.grantsInTotal)})`
                 return `${this.name}\n${this.ein}${inFlows}${outFlows}`;
         
         }
