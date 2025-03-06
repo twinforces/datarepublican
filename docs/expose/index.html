@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741279618">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741279618">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741301418">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741301418">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -193,7 +193,7 @@ $(document).ready(function() {
   <strong class="md:text-sm">
     People relations
     
-      <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">Beta</span>
+      <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">New</span>
     
   </strong>
   
@@ -771,7 +771,7 @@ $(document).ready(function() {
 
 <div id="topbar" class="">
   <div id="explanation">
-    <h1 class="mb-1">Charity graph</h1>
+    <h1 id="pageTitle" class="mb-1">Charity graph</h1>
     <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
     <p id="instructions" class="opacity-80 mb-0 text-[15px]">
       <!-- Will be dynamically set in parseQueryParams() -->
@@ -783,6 +783,111 @@ $(document).ready(function() {
         document.write(`<div class="mt-1 mb-2"><button class="frameless" onclick="window.location.href='${returnUrl}'">&larr; Back to officer search</button></div>`);
       }
     </script>
+    
+    <!-- Include search metadata functionality -->
+    
+
+
+
+
+<script>
+  // Function to update page metadata based on search parameters
+  function updateSearchMetadata(params, baseTitle, baseUrl, searchId) {
+    const paramNames = JSON.parse('["ein", "keyword", "custom_graph"]');
+    let searchTerms = [];
+    let canonicalUrl = baseUrl;
+    
+    // Extract search terms from URL parameters
+    for (const param of paramNames) {
+      const value = params.get(param);
+      if (value) {
+        searchTerms.push(value);
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + param + '=' + encodeURIComponent(value);
+      }
+    }
+    
+    // Handle EINs and keywords specifically
+    if (params.get('eins')) {
+      const eins = params.get('eins').split(',');
+      if (eins.length > 0) {
+        searchTerms.push('EINs: ' + eins.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'eins=' + encodeURIComponent(params.get('eins'));
+      }
+    }
+    
+    if (params.get('keywords')) {
+      const keywords = params.get('keywords').split(',');
+      if (keywords.length > 0) {
+        searchTerms.push('Keywords: ' + keywords.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'keywords=' + encodeURIComponent(params.get('keywords'));
+      }
+    }
+    
+    // Update page title and metadata if we have search terms
+    if (searchTerms.length > 0) {
+      const searchTermsStr = searchTerms.join(', ');
+      const pageTitle = `Search results for ${searchTermsStr} - ${baseTitle}`;
+      
+      // Update the H1 with search terms
+      const titleElement = document.getElementById(searchId);
+      if (titleElement) {
+        titleElement.textContent = `Search results for "${searchTermsStr}"`;
+      }
+      
+      // Update document title
+      document.title = pageTitle;
+      
+      // Update JSON-LD metadata
+      const metadata = {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": pageTitle,
+        "url": canonicalUrl
+      };
+      
+      // Add or update JSON-LD
+      let jsonLd = document.getElementById('searchMetadata');
+      if (!jsonLd) {
+        jsonLd = document.createElement('script');
+        jsonLd.id = 'searchMetadata';
+        jsonLd.type = 'application/ld+json';
+        document.head.appendChild(jsonLd);
+      }
+      jsonLd.textContent = JSON.stringify(metadata);
+      
+      // Add or update canonical link
+      let canonicalLink = document.querySelector('link[rel="canonical"]');
+      if (!canonicalLink) {
+        canonicalLink = document.createElement('link');
+        canonicalLink.rel = 'canonical';
+        document.head.appendChild(canonicalLink);
+      }
+      canonicalLink.href = canonicalUrl;
+    }
+  }
+  
+  // Run on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    updateSearchMetadata(urlParams, "Charity graph", "https://datarepublican.com/expose/", "pageTitle");
+  });
+  
+  // Helper function to be called after form submissions
+  function updateMetadataAfterSearch(formElement) {
+    if (!formElement) return;
+    
+    const formData = new FormData(formElement);
+    const params = new URLSearchParams();
+    
+    for (const [key, value] of formData.entries()) {
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    
+    updateSearchMetadata(params, "Charity graph", "https://datarepublican.com/expose/", "pageTitle");
+  }
+</script> 
     
     <!-- "How it works" toggle is BFS-only -->
     <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works</button>
@@ -1182,6 +1287,31 @@ $(document).ready(function() {
     const params = new URLSearchParams(window.location.search);
     customTitle = params.get('title') || null;
 
+    // Update metadata based on URL parameters
+    const metadataParams = new URLSearchParams();
+    if (params.has('custom_graph') && customTitle) {
+      metadataParams.set('custom_graph', params.get('custom_graph'));
+      metadataParams.set('title', customTitle);
+    } else if (params.has('eins')) {
+      metadataParams.set('eins', params.get('eins'));
+    }
+    if (params.has('keywords')) {
+      metadataParams.set('keywords', params.get('keywords'));
+    }
+    
+    // Update metadata
+    if (metadataParams.toString()) {
+      // Use the production URL for canonical links
+      const baseUrl = window.location.hostname.includes('localhost') ? 
+        "http://localhost:4000/expose/" : 
+        "https://datarepublican.com/expose/";
+      
+      updateSearchMetadata(metadataParams, 
+                          "Charity graph", 
+                          baseUrl, 
+                          "pageTitle");
+    }
+
     const customParam = params.get('custom_graph');
     if (customParam) {
       // We are in custom-graph mode
@@ -1301,8 +1431,21 @@ const addendum = `
     if (activeKeywords.length > 0) {
       params.set('keywords', activeKeywords.join(','));
     }
-    const newUrl = window.location.pathname + '?' + params.toString();
+    const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
     window.history.replaceState({}, '', newUrl);
+    
+    // Update metadata after URL is updated
+    if (params.toString()) {
+      // Use the production URL for canonical links
+      const baseUrl = window.location.hostname.includes('localhost') ? 
+        "http://localhost:4000/expose/" : 
+        "https://datarepublican.com/expose/";
+      
+      updateSearchMetadata(params, 
+                          "Charity graph", 
+                          baseUrl, 
+                          "pageTitle");
+    }
   }
 
   /**
@@ -3410,7 +3553,11 @@ labelloc="t";\n`;
       };
     }
   }
+
 </script>
+</body>
+</html>
+
 
     </main>
     
