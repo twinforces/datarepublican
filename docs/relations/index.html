@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741300391">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741300391">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741300894">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741300894">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -741,7 +741,192 @@ $(document).ready(function() {
       })();
     </script>
     <main class="@container p-4 xl:px-6 min-h-[calc(100vh-200px)]">
-      <!-- jQuery for convenience -->
+      
+
+
+
+
+<script>
+  // Function to update page metadata based on search parameters
+  function updateSearchMetadata(params, baseTitle, baseUrl, searchId) {
+    const paramNames = JSON.parse('["subject", "search"]');
+    let searchTerms = [];
+    let canonicalUrl = baseUrl;
+    
+    // Extract search terms from URL parameters
+    for (const param of paramNames) {
+      const value = params.get(param);
+      if (value) {
+        searchTerms.push(value);
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + param + '=' + encodeURIComponent(value);
+      }
+    }
+    
+    // Handle EINs and keywords specifically
+    if (params.get('eins')) {
+      const eins = params.get('eins').split(',');
+      if (eins.length > 0) {
+        searchTerms.push('EINs: ' + eins.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'eins=' + encodeURIComponent(params.get('eins'));
+      }
+    }
+    
+    if (params.get('keywords')) {
+      const keywords = params.get('keywords').split(',');
+      if (keywords.length > 0) {
+        searchTerms.push('Keywords: ' + keywords.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'keywords=' + encodeURIComponent(params.get('keywords'));
+      }
+    }
+    
+    // Update page title and metadata if we have search terms
+    if (searchTerms.length > 0) {
+      const searchTermsStr = searchTerms.join(', ');
+      const pageTitle = `Search results for ${searchTermsStr} - ${baseTitle}`;
+      
+      // Update the H1 with search terms
+      const titleElement = document.getElementById(searchId);
+      if (titleElement) {
+        titleElement.textContent = `Search results for "${searchTermsStr}"`;
+      }
+      
+      // Update document title
+      document.title = pageTitle;
+      
+      // Update JSON-LD metadata
+      const metadata = {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": pageTitle,
+        "url": canonicalUrl
+      };
+      
+      // Add or update JSON-LD
+      let jsonLd = document.getElementById('searchMetadata');
+      if (!jsonLd) {
+        jsonLd = document.createElement('script');
+        jsonLd.id = 'searchMetadata';
+        jsonLd.type = 'application/ld+json';
+        document.head.appendChild(jsonLd);
+      }
+      jsonLd.textContent = JSON.stringify(metadata);
+      
+      // Add or update canonical link
+      let canonicalLink = document.querySelector('link[rel="canonical"]');
+      if (!canonicalLink) {
+        canonicalLink = document.createElement('link');
+        canonicalLink.rel = 'canonical';
+        document.head.appendChild(canonicalLink);
+      }
+      canonicalLink.href = canonicalUrl;
+    }
+  }
+  
+  // Run on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    updateSearchMetadata(urlParams, "People Relations", "https://datarepublican.com/relations/", "graphTitle");
+  });
+  
+  // Helper function to be called after form submissions
+  function updateMetadataAfterSearch(formElement) {
+    if (!formElement) return;
+    
+    const formData = new FormData(formElement);
+    const params = new URLSearchParams();
+    
+    for (const [key, value] of formData.entries()) {
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    
+    updateSearchMetadata(params, "People Relations", "https://datarepublican.com/relations/", "graphTitle");
+  }
+</script> 
+
+<!-- Custom override for updateSearchMetadata to omit "Search results for" text -->
+<script>
+  // Store the original function
+  const originalUpdateSearchMetadata = window.updateSearchMetadata;
+  
+  // Override with our custom version
+  window.updateSearchMetadata = function(params, baseTitle, baseUrl, searchId) {
+    const paramNames = JSON.parse('["subject", "search"]');
+    let searchTerms = [];
+    let canonicalUrl = baseUrl;
+    
+    // Extract search terms from URL parameters
+    for (const param of paramNames) {
+      const value = params.get(param);
+      if (value) {
+        searchTerms.push(value);
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + param + '=' + encodeURIComponent(value);
+      }
+    }
+    
+    // Handle EINs and keywords specifically
+    if (params.get('eins')) {
+      const eins = params.get('eins').split(',');
+      if (eins.length > 0) {
+        searchTerms.push('EINs: ' + eins.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'eins=' + encodeURIComponent(params.get('eins'));
+      }
+    }
+    
+    if (params.get('keywords')) {
+      const keywords = params.get('keywords').split(',');
+      if (keywords.length > 0) {
+        searchTerms.push('Keywords: ' + keywords.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'keywords=' + encodeURIComponent(params.get('keywords'));
+      }
+    }
+    
+    // Update page title and metadata if we have search terms
+    if (searchTerms.length > 0) {
+      const searchTermsStr = searchTerms.join(', ');
+      const pageTitle = `${searchTermsStr} - ${baseTitle}`;
+      
+      // Update the H1 with just the search term (no "Search results for" text)
+      const titleElement = document.getElementById(searchId);
+      if (titleElement) {
+        titleElement.textContent = searchTermsStr;
+      }
+      
+      // Update document title
+      document.title = pageTitle;
+      
+      // Update JSON-LD metadata
+      const metadata = {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": pageTitle,
+        "url": canonicalUrl
+      };
+      
+      // Add or update JSON-LD
+      let jsonLd = document.getElementById('searchMetadata');
+      if (!jsonLd) {
+        jsonLd = document.createElement('script');
+        jsonLd.id = 'searchMetadata';
+        jsonLd.type = 'application/ld+json';
+        document.head.appendChild(jsonLd);
+      }
+      jsonLd.textContent = JSON.stringify(metadata);
+      
+      // Add or update canonical link
+      let canonicalLink = document.querySelector('link[rel="canonical"]');
+      if (!canonicalLink) {
+        canonicalLink = document.createElement('link');
+        canonicalLink.rel = 'canonical';
+        document.head.appendChild(canonicalLink);
+      }
+      canonicalLink.href = canonicalUrl;
+    }
+  };
+</script>
+
+<!-- jQuery for convenience -->
 <script src="jquery.min.js"></script>
 
 <!-- Viz.js (core + full render) -->
@@ -807,7 +992,7 @@ letting the user enter a name, see results, and click to load GraphViz mode.
   <form id="searchForm" class="flex flex-wrap gap-2 items-end">
     <div>
       <label for="searchBox" class="text-sm font-bold mb-1">Name/Keyword(s)</label><br/>
-      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. ‘aaron’ or ‘14th Dalai Lama’"/>
+      <input type="text" id="searchBox" class="border border-gray-200 rounded p-2 w-full" placeholder="E.g. 'aaron' or '14th Dalai Lama'"/>
     </div>
 
     <button type="submit" id="searchButton" class="p-2 border border-gray-200 rounded font-bold text-sm">
@@ -843,9 +1028,9 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <div id="graphExplanation" class="mb-3">
   <h1 id="graphTitle" class="mb-1">Relationship Graph</h1>
   <p class="text-sm mb-2" id="graphInstructions">
-    Below is a visualization of our selected subject’s relationships, color-coded by category.  
+    Below is a visualization of our selected subject's relationships, color-coded by category.  
     <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
-    Click “Download SVG” to get an offline copy of the image.
+    Click "Download SVG" to get an offline copy of the image.
   </p>
 </div>
 
@@ -910,6 +1095,15 @@ $(document).ready(async function() {
   // Check if we have a ?subject= param
   const urlParams = new URLSearchParams(window.location.search);
   const subj = urlParams.get('subject');
+  const searchParam = urlParams.get('search');
+
+  // Initialize metadata based on URL parameters
+  if (subj || searchParam) {
+    const baseUrl = window.location.hostname.includes('localhost') ? 
+      "http://localhost:4000/relations/" : 
+      "https://datarepublican.com/relations/";
+    updateSearchMetadata(urlParams, "People Relations", baseUrl, "graphTitle");
+  }
 
   // Show/hide respective modes
   if (subj) {
@@ -927,7 +1121,6 @@ $(document).ready(async function() {
   }
 
   // Otherwise, remain in search mode, but if the user typed any text in ?search= param, do that:
-  const searchParam = urlParams.get('search');
   if (!subj && searchParam) {
     $('#searchBox').val(searchParam);
     $('#searchForm').trigger('submit');
@@ -1096,6 +1289,14 @@ async function doSearch() {
   newUrl.searchParams.delete('subject');
   newUrl.searchParams.set('search', rawInput);
   window.history.pushState({}, '', newUrl);
+  
+  // Update metadata for SEO
+  const params = new URLSearchParams();
+  params.set('search', rawInput);
+  const baseUrl = window.location.hostname.includes('localhost') ? 
+    "http://localhost:4000/relations/" : 
+    "https://datarepublican.com/relations/";
+  updateSearchMetadata(params, "People Relations", baseUrl, "graphTitle");
 
   // tokenize
   let tokens = tokenizeInput(rawInput);
@@ -1200,6 +1401,30 @@ $('#backToSearch').on('click', function() {
   const newUrl = new URL(window.location);
   newUrl.searchParams.delete('subject');
   window.history.pushState({}, '', newUrl);
+  
+  // Reset the title to default
+  document.title = "People Relations (BETA)";
+  
+  // Reset canonical URL
+  let canonicalLink = document.querySelector('link[rel="canonical"]');
+  if (canonicalLink) {
+    const baseUrl = window.location.hostname.includes('localhost') ? 
+      "http://localhost:4000/relations/" : 
+      "https://datarepublican.com/relations/";
+    canonicalLink.href = baseUrl;
+  }
+  
+  // Reset JSON-LD metadata
+  let jsonLd = document.getElementById('searchMetadata');
+  if (jsonLd) {
+    jsonLd.textContent = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "People Relations (BETA)",
+      "url": canonicalLink ? canonicalLink.href : window.location.href
+    });
+  }
+  
   window.location.reload();
 });
 
@@ -1220,6 +1445,14 @@ async function renderGraphForSubject(subjectName) {
 
   // Put subject name in title
   $('#graphTitle').text(subjectName);
+  
+  // Update metadata for SEO
+  const params = new URLSearchParams();
+  params.set('subject', subjectName);
+  const baseUrl = window.location.hostname.includes('localhost') ? 
+    "http://localhost:4000/relations/" : 
+    "https://datarepublican.com/relations/";
+  updateSearchMetadata(params, "People Relations", baseUrl, "graphTitle");
 
   // Summarize from bullets.csv if found
   let bulletInfo = allBullets.get(subjectName) || {};
