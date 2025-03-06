@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741280653">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741280653">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741281153">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741281153">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -812,33 +812,9 @@ $(document).ready(function() {
   .legend-OTHER { background-color: #6B7280; }
   .legend-UNKNOWN { background-color: #6B7280; }
   
-  /* Cytoscape specific styles */
-  #cy-controls {
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    z-index: 10;
-  }
-  
-  .cy-button {
-    width: 40px;
-    height: 40px;
-    background: white;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  }
-  
-  .cy-button:hover {
-    background: #f5f5f5;
+  /* Special styling for reset button */
+  #reset-view {
+    font-size: 16px;
   }
   
   /* Node tooltip styles */
@@ -960,12 +936,26 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <!-- Where the graph renders -->
 <div id="graph-container" class="border rounded flex items-center justify-center bg-white">
   <div id="cy" style="width: 100%; height: 100%;"></div>
-  <div id="cy-controls">
-    <button class="cy-button" id="zoom-in">+</button>
-    <button class="cy-button" id="zoom-out">-</button>
-    <button class="cy-button" id="reset-view">⟲</button>
-    <button class="cy-button" id="toggle-labels" title="Toggle edge labels">L</button>
-    <button class="cy-button" id="toggle-secondary" title="Show only root connections">R</button>
+  <div id="cy-controls" class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
+    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="zoom-in" title="Zoom in">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+      </svg>
+    </button>
+    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="zoom-out" title="Zoom out">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
+      </svg>
+    </button>
+    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="reset-view" title="Reset view">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
+      </svg>
+    </button>
+    <!--
+    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="toggle-labels" title="Toggle edge labels">L</button>
+    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="toggle-secondary" title="Show only root connections">R</button>
+    -->
   </div>
   <div class="cy-tooltip"></div>
   <div id="loading-indicator">
