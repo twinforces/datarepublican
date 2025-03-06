@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741297889">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741297889">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741300322">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741300322">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -768,6 +768,23 @@ $(document).ready(function() {
       if (value) {
         searchTerms.push(value);
         canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + param + '=' + encodeURIComponent(value);
+      }
+    }
+    
+    // Handle EINs and keywords specifically
+    if (params.get('eins')) {
+      const eins = params.get('eins').split(',');
+      if (eins.length > 0) {
+        searchTerms.push('EINs: ' + eins.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'eins=' + encodeURIComponent(params.get('eins'));
+      }
+    }
+    
+    if (params.get('keywords')) {
+      const keywords = params.get('keywords').split(',');
+      if (keywords.length > 0) {
+        searchTerms.push('Keywords: ' + keywords.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'keywords=' + encodeURIComponent(params.get('keywords'));
       }
     }
     
