@@ -1146,25 +1146,39 @@ function renderCytoscape(rootSubject, elements) {
       });
       const avgNodeHeight = totalHeight / nodeSizes.size || 60;
       
-      // Adjust spacing based on node count and average size - INCREASED VALUES
-      let spacingMultiplier = 1.5; // Increased base spacing
+      // Check if we're on a mobile device
+      const isMobile = window.innerWidth < 768;
+      
+      // Adjust spacing based on node count and average size
+      let spacingMultiplier = isMobile ? 1.3 : 1.4; // Adjusted from 1.5 to be more responsive
       if (nodeCount > 30) {
-        spacingMultiplier = 3.0; // Much more spacing for very large graphs
+        spacingMultiplier = isMobile ? 2.2 : 2.3; // Adjusted from 2.5 to be more responsive
       } else if (nodeCount > 20) {
-        spacingMultiplier = 2.5; // More spacing for large graphs
+        spacingMultiplier = isMobile ? 1.8 : 1.9; // Adjusted from 2.0 to be more responsive
       } else if (nodeCount > 10) {
-        spacingMultiplier = 2.0; // Moderate spacing for medium graphs
+        spacingMultiplier = isMobile ? 1.6 : 1.7; // Adjusted from 1.8 to be more responsive
       }
       
       // Further adjust based on average node height
       if (avgNodeHeight > 100) {
-        spacingMultiplier *= 1.5; // Increase spacing for taller nodes
+        spacingMultiplier *= isMobile ? 1.25 : 1.3; // Adjusted for mobile
       } else if (avgNodeHeight > 80) {
-        spacingMultiplier *= 1.3; // Slightly increase spacing for medium height nodes
+        spacingMultiplier *= isMobile ? 1.15 : 1.2; // Adjusted for mobile
       }
       
-      // Calculate the number of nodes per circle to avoid overcrowding - REDUCED VALUES
-      const nodesPerCircle = Math.min(Math.max(6, Math.floor(16 / spacingMultiplier)), 10);
+      // Adjust based on viewport size
+      const viewportArea = cy.width() * cy.height();
+      if (viewportArea < 250000) { // Small viewport (e.g., mobile)
+        spacingMultiplier *= 0.85; // Reduce spacing on small screens
+      } else if (viewportArea > 800000) { // Large viewport
+        spacingMultiplier *= 1.1; // Increase spacing on large screens
+      }
+      
+      // Calculate the number of nodes per circle to avoid overcrowding
+      const nodesPerCircle = Math.min(
+        Math.max(isMobile ? 4 : 5, Math.floor(12 / spacingMultiplier)), 
+        isMobile ? 7 : 8
+      );
       
       // Position nodes by category in sectors around the root
       let nodeIndex = 0;
@@ -1177,7 +1191,10 @@ function renderCytoscape(rootSubject, elements) {
         
         const nodeWidth = nodeSize.width;
         const nodeHeight = nodeSize.height;
-        const padding = 30; // Increased minimum space between nodes
+        
+        // Increase padding based on screen size
+        const isMobile = window.innerWidth < 768;
+        const padding = isMobile ? 50 : 45; // Increased from 40 to 45/50 for even better spacing
         
         for (const [id, pos] of nodePositions.entries()) {
           if (id === nodeId) continue; // Skip self
@@ -1198,14 +1215,17 @@ function renderCytoscape(rootSubject, elements) {
       }
       
       // Improved function to find a non-overlapping position with spiral pattern
-      function findNonOverlappingPosition(baseX, baseY, nodeId, attempts = 20) {
+      function findNonOverlappingPosition(baseX, baseY, nodeId, attempts = 40) { // Increased from 30 to 40 attempts
         if (!wouldOverlap(baseX, baseY, nodeId)) {
           return { x: baseX, y: baseY };
         }
         
+        // Check if we're on a mobile device
+        const isMobile = window.innerWidth < 768;
+        
         // Try spiral pattern for better distribution
-        const spiralStep = 30; // Distance between spiral steps
-        const angleStep = Math.PI / 6; // 30 degrees
+        const spiralStep = isMobile ? 45 : 40; // Increased from 40 to 45 on mobile
+        const angleStep = Math.PI / 16; // Decreased from PI/12 to PI/16 for more positions per circle
         let angle = 0;
         let radius = spiralStep;
         
@@ -1220,14 +1240,14 @@ function renderCytoscape(rootSubject, elements) {
           
           // Increase angle and occasionally increase radius for spiral effect
           angle += angleStep;
-          if (i % 6 === 0) { // After full circle (6 * 30 degrees = 180 degrees)
+          if (i % 16 === 0) { // After full circle (16 * PI/16 = PI)
             radius += spiralStep;
           }
         }
         
         // If all attempts fail, try a random position further away
         const randomAngle = Math.random() * 2 * Math.PI;
-        const randomDistance = 100 + Math.random() * 100; // Between 100-200px away
+        const randomDistance = 150 + Math.random() * 150; // Between 150-300px away (increased from 100-200)
         return { 
           x: baseX + Math.cos(randomAngle) * randomDistance, 
           y: baseY + Math.sin(randomAngle) * randomDistance 
@@ -1235,7 +1255,9 @@ function renderCytoscape(rootSubject, elements) {
       }
       
       // Apply force-directed adjustments to reduce overlaps
-      function applyForceDirectedAdjustments(maxIterations = 3) {
+      function applyForceDirectedAdjustments(maxIterations = 15) { // Increased from 10 to 15 iterations
+        const isMobile = window.innerWidth < 768;
+        
         for (let iteration = 0; iteration < maxIterations; iteration++) {
           let overlapsFound = false;
           
@@ -1259,14 +1281,16 @@ function renderCytoscape(rootSubject, elements) {
               const dy = pos2.y - pos1.y;
               const distance = Math.sqrt(dx * dx + dy * dy);
               
-              const minDistance = (size1.width + size2.width) / 2 + 30; // Width + padding
+              // Increase minimum distance on mobile
+              const padding = isMobile ? 50 : 45; // Increased from 40 to 45/50
+              const minDistance = (size1.width + size2.width) / 2 + padding;
               
               // If overlapping, push nodes apart
               if (distance < minDistance) {
                 overlapsFound = true;
                 
-                // Calculate repulsion force
-                const force = (minDistance - distance) / 2;
+                // Calculate repulsion force - use a stronger force
+                const force = (minDistance - distance) / (isMobile ? 1.2 : 1.4); // Adjusted from 1.5 to 1.4/1.2 for stronger adjustment
                 const forceX = force * dx / distance;
                 const forceY = force * dy / distance;
                 
@@ -1286,6 +1310,72 @@ function renderCytoscape(rootSubject, elements) {
           
           if (!overlapsFound) break;
         }
+        
+        // Add an additional pass to ensure root node connections are well-spaced
+        if (safeRootId) {
+          const rootPos = nodePositions.get(safeRootId);
+          if (rootPos) {
+            // Get all nodes directly connected to root
+            const rootConnections = [];
+            for (const [nodeId, _] of nodePositions.entries()) {
+              if (nodeId !== safeRootId) {
+                // Check if this node has a direct edge to/from root
+                const hasDirectConnection = globalAllEdges.some(e => 
+                  (e.from === rootSubject && e.to === nodeId.replace(/_/g, ' ')) || 
+                  (e.to === rootSubject && e.from === nodeId.replace(/_/g, ' '))
+                );
+                
+                if (hasDirectConnection) {
+                  rootConnections.push(nodeId);
+                }
+              }
+            }
+            
+            // Apply additional spacing to root connections
+            for (let i = 0; i < rootConnections.length; i++) {
+              const nodeId1 = rootConnections[i];
+              const pos1 = nodePositions.get(nodeId1);
+              if (!pos1) continue;
+              
+              for (let j = i + 1; j < rootConnections.length; j++) {
+                const nodeId2 = rootConnections[j];
+                const pos2 = nodePositions.get(nodeId2);
+                if (!pos2) continue;
+                
+                const size1 = nodeSizes.get(nodeId1);
+                const size2 = nodeSizes.get(nodeId2);
+                if (!size1 || !size2) continue;
+                
+                // Calculate distance between these two root connections
+                const dx = pos2.x - pos1.x;
+                const dy = pos2.y - pos1.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Use extra padding for root connections
+                const extraPadding = isMobile ? 60 : 55;
+                const minDistance = (size1.width + size2.width) / 2 + extraPadding;
+                
+                if (distance < minDistance) {
+                  // Apply stronger force for root connections
+                  const force = (minDistance - distance) / (isMobile ? 1.0 : 1.2);
+                  const forceX = force * dx / distance;
+                  const forceY = force * dy / distance;
+                  
+                  // Apply force to both nodes
+                  nodePositions.set(nodeId1, { 
+                    x: pos1.x - forceX, 
+                    y: pos1.y - forceY 
+                  });
+                  
+                  nodePositions.set(nodeId2, { 
+                    x: pos2.x + forceX, 
+                    y: pos2.y + forceY 
+                  });
+                }
+              }
+            }
+          }
+        }
       }
       
       categories.forEach((category, categoryIndex) => {
@@ -1304,10 +1394,10 @@ function renderCytoscape(rootSubject, elements) {
           const circleIndex = Math.floor(i / nodesPerCircle);
           
           // Base radius increases with each circle - INCREASED BASE RADIUS
-          const baseRadius = minViewportDim * 0.4; // Increased from 0.35 to spread nodes out more
+          const baseRadius = minViewportDim * 0.5; // Increased from 0.4 to 0.5 to spread nodes out more
           
           // Calculate radius with spacing multiplier
-          const radius = (baseRadius * (1 + (circleIndex * 0.6))) * spacingMultiplier; // Increased multiplier
+          const radius = (baseRadius * (1 + (circleIndex * 0.7))) * spacingMultiplier; // Increased multiplier from 0.6 to 0.7
           
           // Calculate angle within sector
           const nodesInThisCircle = Math.min(nodesPerCircle, categorySize - (circleIndex * nodesPerCircle));
@@ -1337,8 +1427,8 @@ function renderCytoscape(rootSubject, elements) {
         
         otherNodes.forEach((node, i) => {
           const circleIndex = Math.floor(i / nodesPerCircle);
-          const baseRadius = minViewportDim * 0.4; // Increased from 0.35
-          const radius = (baseRadius * (1 + (circleIndex * 0.6))) * spacingMultiplier; // Increased multiplier
+          const baseRadius = minViewportDim * 0.5; // Increased from 0.4 to 0.5
+          const radius = (baseRadius * (1 + (circleIndex * 0.7))) * spacingMultiplier; // Increased multiplier from 0.6 to 0.7
           
           // Distribute "OTHER" nodes evenly around the circle
           const angle = (2 * Math.PI * i) / Math.min(nodesPerCircle, otherNodes.length);
@@ -1382,29 +1472,95 @@ function renderCytoscape(rootSubject, elements) {
             rootNode.lock(); // Lock it again
           }
           
-          // Fit all elements in the viewport with padding
-          cy.fit(cy.elements(), 50); // 50px padding around the graph
+          // First fit all elements to ensure everything is in view
+          cy.fit();
           
-          // Adjust zoom level based on node count
-          if (nodeCount > 30) {
-            const currentZoom = cy.zoom();
-            cy.zoom({
-              level: currentZoom * 0.5, // Zoom out more for very large graphs
-              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-            });
-          } else if (nodeCount > 20) {
-            const currentZoom = cy.zoom();
-            cy.zoom({
-              level: currentZoom * 0.6, // Zoom out more for large graphs
-              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-            });
-          } else if (nodeCount > 10) {
-            const currentZoom = cy.zoom();
-            cy.zoom({
-              level: currentZoom * 0.7, // Standard zoom out for medium graphs
-              renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-            });
+          // Calculate optimal zoom level based on graph dimensions
+          function calculateOptimalZoom() {
+            // Get the graph's bounding box
+            const boundingBox = cy.elements().boundingBox();
+            
+            // Get viewport dimensions
+            const viewportWidth = cy.width();
+            const viewportHeight = cy.height();
+            
+            // Calculate the graph's aspect ratio
+            const graphWidth = boundingBox.w;
+            const graphHeight = boundingBox.h;
+            
+            // Calculate how much we need to scale to fit the graph in the viewport
+            // with more padding (80% of viewport instead of 90%)
+            const widthRatio = (viewportWidth * 0.9) / graphWidth;  // Increased from 0.8 to 0.9
+            const heightRatio = (viewportHeight * 0.9) / graphHeight;  // Increased from 0.8 to 0.9
+            
+            // Use the smaller ratio to ensure the graph fits in both dimensions
+            let optimalZoom = Math.min(widthRatio, heightRatio);
+            
+            // Apply a more aggressive adjustment based on node count
+            const nodeCount = cy.nodes().length;
+            const edgeCount = cy.edges().length;
+            
+            // Check if we're on a mobile device
+            const isMobile = window.innerWidth < 768;
+            
+            // For very large graphs or graphs with many connections, reduce zoom significantly
+            // But use less aggressive reduction factors to keep graph more zoomed in
+            if (nodeCount > 40 || edgeCount > 80) {
+              optimalZoom *= isMobile ? 0.5 : 0.6;  // Increased from 0.4 to 0.6 (desktop) and 0.5 (mobile)
+            } else if (nodeCount > 30 || edgeCount > 60) {
+              optimalZoom *= isMobile ? 0.6 : 0.7;  // Increased from 0.5 to 0.7 (desktop) and 0.6 (mobile)
+            } else if (nodeCount > 20 || edgeCount > 40) {
+              optimalZoom *= isMobile ? 0.7 : 0.8;  // Increased from 0.6 to 0.8 (desktop) and 0.7 (mobile)
+            } else if (nodeCount > 10 || edgeCount > 20) {
+              optimalZoom *= isMobile ? 0.8 : 0.9;  // Increased from 0.7 to 0.9 (desktop) and 0.8 (mobile)
+            } else {
+              // For very small graphs, still ensure everything fits
+              optimalZoom *= isMobile ? 0.9 : 1.0;  // Increased from 0.8 to 1.0 (desktop) and 0.9 (mobile)
+            }
+            
+            // Ensure zoom is within reasonable bounds
+            // Increase minimum zoom level to avoid too zoomed out view
+            optimalZoom = Math.max(isMobile ? 0.3 : 0.4, Math.min(optimalZoom, 1.2));  // Changed from 0.2 to 0.4/0.3, max from 1.0 to 1.2
+            
+            console.log(`Calculated optimal zoom: ${optimalZoom} for ${nodeCount} nodes and ${edgeCount} edges (mobile: ${isMobile})`);
+            
+            return optimalZoom;
           }
+          
+          // Apply the calculated optimal zoom and ensure everything fits
+          const optimalZoom = calculateOptimalZoom();
+          
+          // First fit all elements to the viewport with less padding
+          cy.fit(cy.elements(), 30); // Reduced from 50px to 30px padding
+          
+          // Then apply our calculated zoom
+          cy.zoom({
+            level: optimalZoom,
+            renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+          });
+          
+          // Center the graph again
+          cy.center();
+          
+          // Add a window resize handler to maintain proper zoom and centering
+          $(window).off('resize.cytoscape').on('resize.cytoscape', function() {
+            // Debounce the resize event
+            clearTimeout(window.cytoscapeResizeTimer);
+            window.cytoscapeResizeTimer = setTimeout(function() {
+              if (cy) {
+                // Recalculate optimal zoom
+                const newOptimalZoom = calculateOptimalZoom();
+                
+                // Fit and apply new zoom
+                cy.fit(cy.elements(), 30);
+                cy.zoom({
+                  level: newOptimalZoom,
+                  renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                });
+                cy.center();
+              }
+            }, 250); // Wait 250ms after resize ends
+          });
           
           // Show download button
           $('#downloadBtn').show();
