@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741292494">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741292494">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741292615">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741292615">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -3115,26 +3115,45 @@ $('#downloadBtn').on('click', function() {
   }
   
   try {
-    // Create a PNG image with the current styling
-    const png64 = window.cy.png({
-      output: 'blob',
-      scale: 2, // Higher resolution
-      bg: 'white',
-      full: true,
-      willReadFrequently: true // Add this attribute to address Canvas2D warnings
-    });
+    // Show a loading indicator
+    const $loadingIndicator = $('#loading-indicator');
+    $loadingIndicator.show();
     
-    // Create download link
-    const url = URL.createObjectURL(png64);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'relation_graph.png';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Use setTimeout to allow the UI to update before the potentially heavy PNG generation
+    setTimeout(() => {
+      try {
+        // Create a PNG image with the current styling
+        const png64 = cy.png({
+          output: 'blob',
+          scale: 2, // Higher resolution
+          bg: 'white',
+          full: true,
+          maxWidth: 8000, // Set reasonable max dimensions
+          maxHeight: 8000
+        });
+        
+        // Create download link
+        const url = URL.createObjectURL(png64);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'relation_graph.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up the object URL after a short delay to ensure the download starts
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+          $loadingIndicator.hide();
+        }, 100);
+      } catch (err) {
+        console.error("Error generating PNG:", err);
+        alert("Could not generate PNG. Error: " + err.message);
+        $loadingIndicator.hide();
+      }
+    }, 100); // Small delay to allow UI to update
   } catch (err) {
-    console.error("Error generating PNG:", err);
+    console.error("Error in PNG download process:", err);
     alert("Could not generate PNG. Please try again.");
   }
 });
