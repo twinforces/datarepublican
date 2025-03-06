@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741290253">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741290253">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741292026">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741292026">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1752,8 +1752,10 @@ function renderCytoscape(rootSubject, elements) {
             style: {
               'border-color': '#2563EB',
               'border-width': 2,
-              'background-color': '#EFF6FF',
+              'background-color': '#2563EB',
+              'color': '#FFFFFF',
               'font-size': '13px',
+              'font-weight': 'bold',
               'z-index': 10
             }
           },
@@ -2725,7 +2727,13 @@ function renderCytoscape(rootSubject, elements) {
           // Add touch start handler for long press detection
           cy.on('touchstart', 'node', function(e) {
             try {
+              console.log('touchstart on node triggered');
               const node = e.target;
+              
+              // Immediately highlight the node on touch start
+              resetHighlighting();
+              highlightNode(node);
+              selectedNode = node;
               
               // Clear any existing timer
               if (longPressTimer) {
@@ -2734,6 +2742,7 @@ function renderCytoscape(rootSubject, elements) {
               
               // Set a timer for long press
               longPressTimer = setTimeout(function() {
+                console.log('long press detected');
                 // Reset any previous selection
                 resetHighlighting();
                 
@@ -2754,20 +2763,227 @@ function renderCytoscape(rootSubject, elements) {
             }
           });
           
-          // Cancel long press on touch move
-          cy.on('touchmove', function() {
+          // Cancel long press on touch move and check for nodes under touch
+          cy.on('touchmove', function(e) {
+            console.log('touchmove triggered');
+            
             if (longPressTimer) {
               clearTimeout(longPressTimer);
               longPressTimer = null;
+            }
+            
+            // Check if we're dragging over a node
+            try {
+              // Get the position of the touch event
+              if (!e.originalEvent || !e.originalEvent.touches || e.originalEvent.touches.length === 0) {
+                console.log('No touch data available');
+                return;
+              }
+              
+              // Get the touch position relative to the canvas
+              const touch = e.originalEvent.touches[0];
+              const container = cy.container();
+              const rect = container.getBoundingClientRect();
+              const touchPosition = {
+                x: touch.clientX - rect.left,
+                y: touch.clientY - rect.top
+              };
+              
+              console.log(`Touch position: x=${touchPosition.x}, y=${touchPosition.y}`);
+              
+              // Convert touch position to rendered position
+              const renderedPosition = {
+                x: touchPosition.x,
+                y: touchPosition.y
+              };
+              
+              // Try to find the node at this position using multiple methods
+              let nodeUnderTouch = null;
+              let nodeDistance = Infinity; // Track distance to closest node
+              const MAX_TOUCH_DISTANCE = 50; // Maximum distance in pixels to consider a node as "touched"
+              
+              // Method 1: Use findNearestElement with distance check
+              try {
+                const nearestElement = cy.renderer().findNearestElement(renderedPosition.x, renderedPosition.y, true);
+                
+                if (nearestElement && nearestElement.isNode && nearestElement.isNode()) {
+                  // Calculate distance to the nearest node
+                  const nodePos = nearestElement.renderedPosition();
+                  const dx = nodePos.x - renderedPosition.x;
+                  const dy = nodePos.y - renderedPosition.y;
+                  const distance = Math.sqrt(dx*dx + dy*dy);
+                  
+                  console.log(`Method 1: Distance to nearest node (${nearestElement.id()}): ${distance.toFixed(2)}px`);
+                  
+                  // Only consider the node if it's within the threshold distance
+                  if (distance <= MAX_TOUCH_DISTANCE) {
+                    nodeUnderTouch = nearestElement;
+                    nodeDistance = distance;
+                    console.log('Method 1 (findNearestElement) result:', nodeUnderTouch.id(), 'distance:', distance.toFixed(2));
+                  } else {
+                    console.log('Method 1: Node too far away (', distance.toFixed(2), '>', MAX_TOUCH_DISTANCE, ')');
+                  }
+                }
+              } catch (err) {
+                console.warn('Error using findNearestElement:', err);
+              }
+              
+              // Method 2: If Method 1 fails, try using document.elementFromPoint
+              if (!nodeUnderTouch) {
+                try {
+                  const element = document.elementFromPoint(touch.clientX, touch.clientY);
+                  if (element && element.id) {
+                    // Try to find a node with this ID or a node containing this element
+                    const nodeId = element.id.replace('cy-', '');
+                    const potentialNode = cy.$(`#${nodeId}`);
+                    
+                    if (potentialNode && potentialNode.isNode && potentialNode.isNode()) {
+                      // Calculate distance to this node
+                      const nodePos = potentialNode.renderedPosition();
+                      const dx = nodePos.x - renderedPosition.x;
+                      const dy = nodePos.y - renderedPosition.y;
+                      const distance = Math.sqrt(dx*dx + dy*dy);
+                      
+                      console.log(`Method 2: Distance to element node (${potentialNode.id()}): ${distance.toFixed(2)}px`);
+                      
+                      // Only consider the node if it's within the threshold distance
+                      if (distance <= MAX_TOUCH_DISTANCE) {
+                        nodeUnderTouch = potentialNode;
+                        nodeDistance = distance;
+                        console.log('Method 2 (elementFromPoint) result:', nodeUnderTouch.id(), 'distance:', distance.toFixed(2));
+                      } else {
+                        console.log('Method 2: Node too far away (', distance.toFixed(2), '>', MAX_TOUCH_DISTANCE, ')');
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.warn('Error using elementFromPoint:', err);
+                }
+              }
+              
+              // Method 3: If Methods 1 and 2 fail, check all nodes to see if the touch point is within their bounding box
+              if (!nodeUnderTouch) {
+                try {
+                  cy.nodes().forEach(node => {
+                    // Calculate distance to this node
+                    const nodePos = node.renderedPosition();
+                    const dx = nodePos.x - renderedPosition.x;
+                    const dy = nodePos.y - renderedPosition.y;
+                    const distance = Math.sqrt(dx*dx + dy*dy);
+                    
+                    // Check if this node is closer than our current best match and within threshold
+                    if (distance <= MAX_TOUCH_DISTANCE && distance < nodeDistance) {
+                      // Additional check: is the touch point within the node's bounding box?
+                      const bbox = node.renderedBoundingBox();
+                      const inBoundingBox = (
+                        renderedPosition.x >= bbox.x1 && 
+                        renderedPosition.x <= bbox.x2 &&
+                        renderedPosition.y >= bbox.y1 && 
+                        renderedPosition.y <= bbox.y2
+                      );
+                      
+                      if (inBoundingBox) {
+                        nodeUnderTouch = node;
+                        nodeDistance = distance;
+                        console.log('Method 3 (bounding box check) found node:', node.id(), 'distance:', distance.toFixed(2));
+                        return false; // Break the forEach loop
+                      }
+                    }
+                  });
+                } catch (err) {
+                  console.warn('Error checking node bounding boxes:', err);
+                }
+              }
+              
+              if (nodeUnderTouch) {
+                console.log(`Node found under touch: ${nodeUnderTouch.id()} at distance ${nodeDistance.toFixed(2)}px`);
+                
+                if (nodeUnderTouch.isNode && nodeUnderTouch.isNode()) {
+                  console.log(`Node under touch is a valid node`);
+                  
+                  // If we found a node and it's different from the currently selected node
+                  if (!selectedNode || selectedNode.id() !== nodeUnderTouch.id()) {
+                    console.log(`Highlighting new node: ${nodeUnderTouch.id()}`);
+                    
+                    // Store the current selected node to preserve it during transition
+                    const previousNode = selectedNode;
+                    
+                    // Update selected node before resetting highlighting
+                    selectedNode = nodeUnderTouch;
+                    
+                    // If we already have a selected node, we're in a drag operation
+                    // In this case, we want to highlight the new node without the fade effect
+                    if (previousNode) {
+                      // Apply highlighting directly to the new node without resetting
+                      // This prevents the fade-out effect during dragging
+                      try {
+                        // Make all nodes except the selected one semi-transparent
+                        cy.nodes().forEach(node => {
+                          if (node.id() !== nodeUnderTouch.id()) {
+                            node.style('opacity', 0.2);
+                          } else {
+                            // Make the selected node stand out
+                            node.style('opacity', 1);
+                            node.style('border-width', 3);
+                            node.style('border-color', '#FFA500');
+                          }
+                        });
+                        
+                        // Make connected edges and nodes visible
+                        const connectedEdges = nodeUnderTouch.connectedEdges();
+                        connectedEdges.style('opacity', 1);
+                        
+                        // Make connected nodes visible
+                        const connectedNodes = connectedEdges.connectedNodes();
+                        connectedNodes.style('opacity', 1);
+                        
+                        // Show edge labels for connected edges if there are many nodes
+                        if (cy.nodes().length > 15) {
+                          connectedEdges.forEach(edge => {
+                            const label = edge.data('label');
+                            edge.style('label', label || '');
+                          });
+                        }
+                      } catch (err) {
+                        console.warn('Error applying direct highlighting:', err);
+                        
+                        // Fallback to standard highlighting if direct method fails
+                        resetHighlighting();
+                        highlightNode(nodeUnderTouch);
+                      }
+                    } else {
+                      // If no previous node, use standard highlighting
+                      resetHighlighting();
+                      highlightNode(nodeUnderTouch);
+                    }
+                  }
+                } else {
+                  console.log('Element under touch is not a node');
+                }
+              } else {
+                console.log('No element found under touch - too far from any node');
+                // Don't reset highlighting when no node is found during a drag
+                // This keeps the current node highlighted while dragging in empty space
+              }
+              
+              // Prevent default to avoid scrolling
+              e.originalEvent.preventDefault();
+            } catch (err) {
+              console.warn('Error in touchmove handler:', err);
             }
           });
           
-          // Cancel long press on touch end if timer is still active
-          cy.on('touchend', function() {
+          // Handle touch end
+          cy.on('touchend', function(e) {
+            console.log('touchend triggered');
+            
             if (longPressTimer) {
               clearTimeout(longPressTimer);
               longPressTimer = null;
             }
+            
+            // Keep the current highlighting when touch ends
+            // This allows the user to see what they've selected
           });
           
           // Improved window resize handler to fully recalculate the graph
@@ -3026,15 +3242,16 @@ function fixNodeStyling() {
         'text-wrap': 'wrap',
         'text-max-width': nodeWidth - 24, // Account for padding
         'font-size': 13,
-        'color': '#000000',
+        'color': isRoot ? '#FFFFFF' : '#000000',
         'text-outline-width': 0,
         'text-outline-opacity': 0,
         'width': nodeWidth,
         'height': nodeHeight,
         'shape': 'round-rectangle',
-        'background-color': isRoot ? '#EFF6FF' : '#F3F4F6',
+        'background-color': isRoot ? '#2563EB' : '#F3F4F6',
         'border-color': isRoot ? '#2563EB' : '#94A3B8',
         'border-width': isRoot ? 2 : 1,
+        'font-weight': isRoot ? 'bold' : 'normal',
         'padding': 12, // Consistent padding on all sides
         'text-valign': 'center',
         'text-halign': 'center',
