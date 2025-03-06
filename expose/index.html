@@ -33,7 +33,7 @@ title: Charity graph - multi-root BFS & taxpayer totals
 
 <div id="topbar" class="">
   <div id="explanation">
-    <h1 class="mb-1">Charity graph</h1>
+    <h1 id="pageTitle" class="mb-1">Charity graph</h1>
     <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
     <p id="instructions" class="opacity-80 mb-0 text-[15px]">
       <!-- Will be dynamically set in parseQueryParams() -->
@@ -45,6 +45,13 @@ title: Charity graph - multi-root BFS & taxpayer totals
         document.write(`<div class="mt-1 mb-2"><button class="frameless" onclick="window.location.href='${returnUrl}'">&larr; Back to officer search</button></div>`);
       }
     </script>
+    
+    <!-- Include search metadata functionality -->
+    {% include search-metadata.html 
+      base_title="Charity graph"
+      base_url="https://datarepublican.com/expose/"
+      param_names='["ein", "keyword", "custom_graph"]'
+    %}
     
     <!-- "How it works" toggle is BFS-only -->
     <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works</button>
@@ -75,6 +82,7 @@ title: Charity graph - multi-root BFS & taxpayer totals
       {% include input.html 
         label="Add EIN(s)" 
         id="einInput" 
+        name="ein"
         placeholder="XX-XXXXXXX or 9 digits" 
         buttonLabel="Add EIN" 
         buttonId="addEinBtn" 
@@ -88,6 +96,7 @@ title: Charity graph - multi-root BFS & taxpayer totals
       {% include input.html 
         label="Add keyword" 
         id="keywordInput" 
+        name="keyword"
         placeholder="Keyword or phrase..." 
         buttonLabel="Add" 
         buttonId="addFilterBtn"
@@ -422,6 +431,31 @@ title: Charity graph - multi-root BFS & taxpayer totals
     const params = new URLSearchParams(window.location.search);
     customTitle = params.get('title') || null;
 
+    // Update metadata based on URL parameters
+    const metadataParams = new URLSearchParams();
+    if (params.has('custom_graph') && customTitle) {
+      metadataParams.set('custom_graph', params.get('custom_graph'));
+      metadataParams.set('title', customTitle);
+    } else if (params.has('eins')) {
+      metadataParams.set('eins', params.get('eins'));
+    }
+    if (params.has('keywords')) {
+      metadataParams.set('keywords', params.get('keywords'));
+    }
+    
+    // Update metadata
+    if (metadataParams.toString()) {
+      // Use the production URL for canonical links
+      const baseUrl = window.location.hostname.includes('localhost') ? 
+        "http://localhost:4000/expose/" : 
+        "https://datarepublican.com/expose/";
+      
+      updateSearchMetadata(metadataParams, 
+                          "Charity graph", 
+                          baseUrl, 
+                          "pageTitle");
+    }
+
     const customParam = params.get('custom_graph');
     if (customParam) {
       // We are in custom-graph mode
@@ -541,8 +575,21 @@ const addendum = `
     if (activeKeywords.length > 0) {
       params.set('keywords', activeKeywords.join(','));
     }
-    const newUrl = window.location.pathname + '?' + params.toString();
+    const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
     window.history.replaceState({}, '', newUrl);
+    
+    // Update metadata after URL is updated
+    if (params.toString()) {
+      // Use the production URL for canonical links
+      const baseUrl = window.location.hostname.includes('localhost') ? 
+        "http://localhost:4000/expose/" : 
+        "https://datarepublican.com/expose/";
+      
+      updateSearchMetadata(params, 
+                          "Charity graph", 
+                          baseUrl, 
+                          "pageTitle");
+    }
   }
 
   /**
@@ -2650,4 +2697,8 @@ labelloc="t";\n`;
       };
     }
   }
+
 </script>
+</body>
+</html>
+

@@ -27,6 +27,23 @@
       }
     }
     
+    // Handle EINs and keywords specifically
+    if (params.get('eins')) {
+      const eins = params.get('eins').split(',');
+      if (eins.length > 0) {
+        searchTerms.push('EINs: ' + eins.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'eins=' + encodeURIComponent(params.get('eins'));
+      }
+    }
+    
+    if (params.get('keywords')) {
+      const keywords = params.get('keywords').split(',');
+      if (keywords.length > 0) {
+        searchTerms.push('Keywords: ' + keywords.join(', '));
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + 'keywords=' + encodeURIComponent(params.get('keywords'));
+      }
+    }
+    
     // Update page title and metadata if we have search terms
     if (searchTerms.length > 0) {
       const searchTermsStr = searchTerms.join(', ');
