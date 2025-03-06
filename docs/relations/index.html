@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741281367">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741281367">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741281688">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741281688">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -2270,25 +2270,7 @@ function renderCytoscape(rootSubject, elements) {
           // Center the graph again
           cy.center();
           
-          // Add a window resize handler to maintain proper zoom and centering
-          $(window).off('resize.cytoscape').on('resize.cytoscape', function() {
-            // Debounce the resize event
-            clearTimeout(window.cytoscapeResizeTimer);
-            window.cytoscapeResizeTimer = setTimeout(function() {
-              if (cy) {
-                // Recalculate optimal zoom
-                const newOptimalZoom = calculateOptimalZoom();
-                
-                // Fit and apply new zoom
-                cy.fit(cy.elements(), 30);
-                cy.zoom({
-                  level: newOptimalZoom,
-                  renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
-                });
-                cy.center();
-              }
-            }, 250); // Wait 250ms after resize ends
-          });
+          // Note: Window resize handler moved to the end of the initialization
           
           // Show download button
           $('#downloadBtn').show();
@@ -2372,6 +2354,10 @@ function renderCytoscape(rootSubject, elements) {
           
           // Track the currently selected node for touch devices
           let selectedNode = null;
+          // Track long press timer
+          let longPressTimer = null;
+          // Long press duration in milliseconds
+          const longPressDuration = 500;
           
           // Function to highlight a node and its connections
           function highlightNode(node) {
@@ -2567,6 +2553,12 @@ function renderCytoscape(rootSubject, elements) {
               
               // Reset the selected node
               selectedNode = null;
+              
+              // Clear any pending long press timer
+              if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+              }
             } catch (e) {
               console.warn('Error in reset highlighting:', e);
             }
@@ -2619,6 +2611,106 @@ function renderCytoscape(rootSubject, elements) {
               resetHighlighting();
             }
           });
+          
+          // Add touch start handler for long press detection
+          cy.on('touchstart', 'node', function(e) {
+            try {
+              const node = e.target;
+              
+              // Clear any existing timer
+              if (longPressTimer) {
+                clearTimeout(longPressTimer);
+              }
+              
+              // Set a timer for long press
+              longPressTimer = setTimeout(function() {
+                // Reset any previous selection
+                resetHighlighting();
+                
+                // Highlight the long-pressed node
+                highlightNode(node);
+                
+                // Store the selected node
+                selectedNode = node;
+                
+                // Clear the timer
+                longPressTimer = null;
+              }, longPressDuration);
+              
+              // Prevent default to avoid issues with scrolling
+              e.originalEvent.preventDefault();
+            } catch (err) {
+              console.warn('Error in touchstart handler:', err);
+            }
+          });
+          
+          // Cancel long press on touch move
+          cy.on('touchmove', function() {
+            if (longPressTimer) {
+              clearTimeout(longPressTimer);
+              longPressTimer = null;
+            }
+          });
+          
+          // Cancel long press on touch end if timer is still active
+          cy.on('touchend', function() {
+            if (longPressTimer) {
+              clearTimeout(longPressTimer);
+              longPressTimer = null;
+            }
+          });
+          
+          // Improved window resize handler to fully recalculate the graph
+          $(window).off('resize.cytoscape').on('resize.cytoscape', function() {
+            // Debounce the resize event
+            clearTimeout(window.cytoscapeResizeTimer);
+            window.cytoscapeResizeTimer = setTimeout(function() {
+              if (cy) {
+                console.log("Window resized, recalculating graph layout...");
+                
+                // Get the current root subject
+                const rootSubject = $('#graphTitle').text().trim();
+                
+                // Store current zoom and pan for smoother transition
+                const currentZoom = cy.zoom();
+                const currentPan = cy.pan();
+                
+                // Re-render the graph with the current active categories
+                let activeEdges = globalAllEdges.filter(e => globalActiveCategories.has(e.category));
+                
+                // Check if we need to completely rebuild the graph
+                const viewportWidth = cy.width();
+                const viewportHeight = cy.height();
+                const viewportArea = viewportWidth * viewportHeight;
+                const significantResize = Math.abs(viewportArea - window.lastViewportArea) / window.lastViewportArea > 0.2;
+                
+                if (significantResize || !window.lastViewportArea) {
+                  console.log("Significant resize detected, rebuilding graph layout");
+                  // Store new viewport area
+                  window.lastViewportArea = viewportArea;
+                  
+                  // Completely rebuild the graph
+                  reRenderGraph(rootSubject);
+                } else {
+                  // Just recalculate optimal zoom
+                  const newOptimalZoom = calculateOptimalZoom();
+                  
+                  // Apply new zoom with animation
+                  cy.animate({
+                    zoom: newOptimalZoom,
+                    center: {
+                      eles: cy.elements()
+                    }
+                  }, {
+                    duration: 300
+                  });
+                }
+              }
+            }, 250); // Wait 250ms after resize ends
+          });
+          
+          // Store initial viewport area
+          window.lastViewportArea = cy.width() * cy.height();
         } catch (err) {
           console.error("Error in layout processing:", err);
         }
