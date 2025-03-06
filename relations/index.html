@@ -1499,9 +1499,9 @@ function renderCytoscape(rootSubject, elements) {
             const graphHeight = boundingBox.h;
             
             // Calculate how much we need to scale to fit the graph in the viewport
-            // with more padding (80% of viewport instead of 90%)
-            const widthRatio = (viewportWidth * 0.9) / graphWidth;  // Increased from 0.8 to 0.9
-            const heightRatio = (viewportHeight * 0.9) / graphHeight;  // Increased from 0.8 to 0.9
+            // with padding (75% of viewport)
+            const widthRatio = (viewportWidth * 0.75) / graphWidth;
+            const heightRatio = (viewportHeight * 0.75) / graphHeight;
             
             // Use the smaller ratio to ensure the graph fits in both dimensions
             let optimalZoom = Math.min(widthRatio, heightRatio);
@@ -1513,26 +1513,69 @@ function renderCytoscape(rootSubject, elements) {
             // Check if we're on a mobile device
             const isMobile = window.innerWidth < 768;
             
-            // For very large graphs or graphs with many connections, reduce zoom significantly
-            // But use less aggressive reduction factors to keep graph more zoomed in
-            if (nodeCount > 40 || edgeCount > 80) {
-              optimalZoom *= isMobile ? 0.5 : 0.6;  // Increased from 0.4 to 0.6 (desktop) and 0.5 (mobile)
-            } else if (nodeCount > 30 || edgeCount > 60) {
-              optimalZoom *= isMobile ? 0.6 : 0.7;  // Increased from 0.5 to 0.7 (desktop) and 0.6 (mobile)
-            } else if (nodeCount > 20 || edgeCount > 40) {
-              optimalZoom *= isMobile ? 0.7 : 0.8;  // Increased from 0.6 to 0.8 (desktop) and 0.7 (mobile)
-            } else if (nodeCount > 10 || edgeCount > 20) {
-              optimalZoom *= isMobile ? 0.8 : 0.9;  // Increased from 0.7 to 0.9 (desktop) and 0.8 (mobile)
-            } else {
-              // For very small graphs, still ensure everything fits
-              optimalZoom *= isMobile ? 0.9 : 1.0;  // Increased from 0.8 to 1.0 (desktop) and 0.9 (mobile)
+            // Calculate edge-to-node ratio to detect densely connected graphs
+            const edgeToNodeRatio = nodeCount > 0 ? edgeCount / nodeCount : 0;
+            
+            // Calculate a logarithmic scaling factor for smoother transitions
+            // This creates a more gradual scaling as node count increases
+            const logBase = 10;
+            const logFactor = nodeCount > logBase ? 
+                              (1 - (Math.log(nodeCount) / Math.log(logBase)) * 0.2) : 
+                              1;
+            
+            // Apply additional scaling for graphs with high edge-to-node ratios
+            let densityFactor = 1.0;
+            if (edgeToNodeRatio > 3) {
+                // Very dense graph
+                densityFactor = 0.6;
+            } else if (edgeToNodeRatio > 2) {
+                // Moderately dense graph
+                densityFactor = 0.7;
+            } else if (edgeToNodeRatio > 1.5) {
+                // Slightly dense graph
+                densityFactor = 0.8;
+            } else if (edgeToNodeRatio > 1) {
+                // Slightly dense graph
+                densityFactor = 0.9;
             }
             
-            // Ensure zoom is within reasonable bounds
-            // Increase minimum zoom level to avoid too zoomed out view
-            optimalZoom = Math.max(isMobile ? 0.3 : 0.4, Math.min(optimalZoom, 1.2));  // Changed from 0.2 to 0.4/0.3, max from 1.0 to 1.2
+            // For very large graphs or graphs with many connections, reduce zoom significantly
+            if (nodeCount > 100 || edgeCount > 200) {
+              // Very large graphs need much more aggressive scaling
+              optimalZoom *= isMobile ? 0.25 : 0.3;
+            } else if (nodeCount > 70 || edgeCount > 140) {
+              optimalZoom *= isMobile ? 0.3 : 0.35;
+            } else if (nodeCount > 50 || edgeCount > 100) {
+              optimalZoom *= isMobile ? 0.35 : 0.4;
+            } else if (nodeCount > 40 || edgeCount > 80) {
+              optimalZoom *= isMobile ? 0.4 : 0.45;
+            } else if (nodeCount > 30 || edgeCount > 60) {
+              optimalZoom *= isMobile ? 0.45 : 0.5;
+            } else if (nodeCount > 20 || edgeCount > 40) {
+              optimalZoom *= isMobile ? 0.55 : 0.6;
+            } else if (nodeCount > 10 || edgeCount > 20) {
+              optimalZoom *= isMobile ? 0.65 : 0.75;
+            } else {
+              // For very small graphs, still ensure everything fits
+              optimalZoom *= isMobile ? 0.8 : 0.9;
+            }
             
-            console.log(`Calculated optimal zoom: ${optimalZoom} for ${nodeCount} nodes and ${edgeCount} edges (mobile: ${isMobile})`);
+            // Apply the logarithmic scaling factor for smoother transitions
+            optimalZoom *= logFactor;
+            
+            // Apply the density factor for graphs with many edges
+            optimalZoom *= densityFactor;
+            
+            // Ensure zoom is within reasonable bounds
+            // Adjust minimum zoom level based on node count
+            const minZoom = nodeCount > 50 ? (isMobile ? 0.15 : 0.2) :
+                           nodeCount > 30 ? (isMobile ? 0.2 : 0.25) :
+                           nodeCount > 10 ? (isMobile ? 0.25 : 0.3) :
+                           (isMobile ? 0.3 : 0.35);
+            
+            optimalZoom = Math.max(minZoom, Math.min(optimalZoom, 1.2));
+            
+            console.log(`Calculated optimal zoom: ${optimalZoom} for ${nodeCount} nodes and ${edgeCount} edges (mobile: ${isMobile}), edge-to-node ratio: ${edgeToNodeRatio.toFixed(2)}`);
             
             return optimalZoom;
           }
@@ -1551,6 +1594,53 @@ function renderCytoscape(rootSubject, elements) {
           
           // Center the graph again
           cy.center();
+          
+          // Check if all elements are visible with the current zoom
+          function ensureAllElementsVisible() {
+            // Get the current viewport extents
+            const extent = cy.extent();
+            const viewportWidth = extent.w;
+            const viewportHeight = extent.h;
+            
+            // Get the bounding box of all elements
+            const boundingBox = cy.elements().boundingBox();
+            const graphWidth = boundingBox.w;
+            const graphHeight = boundingBox.h;
+            
+            // Check if graph dimensions exceed viewport dimensions
+            const widthRatio = viewportWidth / graphWidth;
+            const heightRatio = viewportHeight / graphHeight;
+            
+            // If either ratio is less than 1, not all elements are visible
+            if (widthRatio < 1 || heightRatio < 1) {
+              console.log(`Graph doesn't fit in viewport. Width ratio: ${widthRatio.toFixed(2)}, Height ratio: ${heightRatio.toFixed(2)}`);
+              
+              // Calculate a new zoom level with additional safety margin
+              const currentZoom = cy.zoom();
+              const adjustmentFactor = Math.min(widthRatio, heightRatio) * 0.9; // 10% safety margin
+              const newZoom = currentZoom * adjustmentFactor;
+              
+              console.log(`Adjusting zoom from ${currentZoom.toFixed(2)} to ${newZoom.toFixed(2)} to ensure all elements fit`);
+              
+              // Apply the adjusted zoom
+              cy.zoom({
+                level: newZoom,
+                renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+              });
+              
+              // Center the graph again
+              cy.center();
+              
+              return true; // Adjustment was made
+            }
+            
+            return false; // No adjustment needed
+          }
+          
+          // Apply the visibility check after a short delay to ensure rendering is complete
+          setTimeout(() => {
+            ensureAllElementsVisible();
+          }, 100);
           
           // Note: Window resize handler moved to the end of the initialization
           
@@ -1984,7 +2074,13 @@ function renderCytoscape(rootSubject, elements) {
                       eles: cy.elements()
                     }
                   }, {
-                    duration: 300
+                    duration: 300,
+                    complete: function() {
+                      // After animation completes, check if all elements are visible
+                      setTimeout(() => {
+                        ensureAllElementsVisible();
+                      }, 50);
+                    }
                   });
                 }
               }
