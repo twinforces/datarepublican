@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741292026">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741292026">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741292494">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741292494">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -931,7 +931,7 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 <div id="legend"></div>
 
 <!-- A spot to show short summary about the root subject from bullets.csv -->
-<div id="rootSummary" class="mb-4 p-2 md:px-4 md:pt-3 border rounded text-sm bg-white"></div>
+<ul id="rootSummary" class="mb-4 p-2 md:px-4 !pl-8 !pb-4 md:pt-3 border rounded text-sm bg-white list-disc"></ul>
 
 <!-- Where the graph renders -->
 <div id="graph-container" class="border rounded flex items-center justify-center bg-white">
@@ -1358,11 +1358,11 @@ async function renderGraphForSubject(subjectName) {
   let bulletInfo = allBullets.get(subjectName) || {};
   let b1 = bulletInfo.bullet_point1 || "";
   let b2 = bulletInfo.bullet_point2 || "";
-  let summaryHtml = `<p class="mb-2"><strong>${escapeHtml(subjectName)}</strong></p>`;
-  if (b1) summaryHtml += `<p class="mb-2">${escapeHtml(b1)}</p>`;
-  if (b2) summaryHtml += `<p>${escapeHtml(b2)}</p>`;
+  let summaryHtml = ``;
+  if (b1) summaryHtml += `<li class="mb-1">${escapeHtml(b1)}</li>`;
+  if (b2) summaryHtml += `<li>${escapeHtml(b2)}</li>`;
   if (!b1 && !b2) {
-    summaryHtml += `<p class="text-sm text-gray-600">(No extended info available.)</p>`;
+    summaryHtml += `<li class="text-sm text-gray-600 list-none">(No extended info available.)</li>`;
   }
   $('#rootSummary').html(summaryHtml);
 
@@ -1806,12 +1806,16 @@ function renderCytoscape(rootSubject, elements) {
       const centerX = cy.width() / 2;
       const centerY = cy.height() / 2;
       
-      // First position the root node at the exact center
+      // Position the root node higher in the viewport to reduce whitespace at the top
+      // Use 1/3 of the height instead of 1/2 to move it up
+      const rootNodeY = Math.min(centerY * 0.6, centerY - 100);
+      
+      // First position the root node at the horizontal center but higher vertically
       const rootNode = cy.$(`node[id = "${safeRootId}"]`);
       if (rootNode.length > 0) {
         rootNode.position({
           x: centerX,
-          y: centerY
+          y: rootNodeY
         });
         
         // Lock the root node position to prevent it from moving during layout
@@ -2209,21 +2213,18 @@ function renderCytoscape(rootSubject, elements) {
         }
       }
       
-      // After layout completes, ensure the root node is still centered
+      // After layout completes, ensure the root node is still positioned higher in the viewport
       setTimeout(() => {
         try {
-          // Force root node to center again
+          // Force root node to maintain its higher position
           if (rootNode.length > 0) {
             rootNode.unlock();
             rootNode.position({
               x: centerX,
-              y: centerY
+              y: rootNodeY
             });
             rootNode.lock(); // Lock it again
           }
-          
-          // First fit all elements to ensure everything is in view
-          cy.fit();
           
           // Calculate optimal zoom level based on graph dimensions
           function calculateOptimalZoom() {
@@ -2329,11 +2330,15 @@ function renderCytoscape(rootSubject, elements) {
           // Then apply our calculated zoom
           cy.zoom({
             level: optimalZoom,
-            renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+            renderedPosition: { x: cy.width() / 2, y: cy.height() / 3 } // Position viewport higher
           });
           
-          // Center the graph again
-          cy.center();
+          // Instead of centering, pan to position the graph higher in the viewport
+          const extent = cy.extent();
+          cy.pan({
+            x: -extent.x1 + (cy.width() - extent.w) / 2,
+            y: -extent.y1 + (cy.height() - extent.h) / 3 // Use 1/3 instead of 1/2 to move up
+          });
           
           // Check if all elements are visible with the current zoom
           function ensureAllElementsVisible() {
