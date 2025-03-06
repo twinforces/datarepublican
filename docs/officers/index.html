@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741192169">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741192169">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741297889">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741297889">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -745,8 +745,97 @@ $(document).ready(function() {
 <script src="jszip.min.js"></script>
 <script src="papaparse.min.js"></script>
 
-<h1 class="mb-1">Government NGO principal officer search</h1>
+<!-- This h1 will be updated dynamically when a search is performed -->
+<h1 id="pageTitle" class="mb-1">Government NGO principal officer search</h1>
 <p class="text-black/80 mb-0 text-[15px]">Search through nonprofit filings to find organizations and their principal officers. Data includes EINs, organization names, and officer details. Try the <a href="/officers/bulk" class="strong">bulk search</a> to find overlapping nonprofits.</p>
+
+<!-- Include search metadata functionality -->
+
+
+
+
+
+<script>
+  // Function to update page metadata based on search parameters
+  function updateSearchMetadata(params, baseTitle, baseUrl, searchId) {
+    const paramNames = JSON.parse('["nonprofit_kw", "officer_kw"]');
+    let searchTerms = [];
+    let canonicalUrl = baseUrl;
+    
+    // Extract search terms from URL parameters
+    for (const param of paramNames) {
+      const value = params.get(param);
+      if (value) {
+        searchTerms.push(value);
+        canonicalUrl += (canonicalUrl.includes('?') ? '&' : '?') + param + '=' + encodeURIComponent(value);
+      }
+    }
+    
+    // Update page title and metadata if we have search terms
+    if (searchTerms.length > 0) {
+      const searchTermsStr = searchTerms.join(', ');
+      const pageTitle = `Search results for ${searchTermsStr} - ${baseTitle}`;
+      
+      // Update the H1 with search terms
+      const titleElement = document.getElementById(searchId);
+      if (titleElement) {
+        titleElement.textContent = `Search results for "${searchTermsStr}"`;
+      }
+      
+      // Update document title
+      document.title = pageTitle;
+      
+      // Update JSON-LD metadata
+      const metadata = {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": pageTitle,
+        "url": canonicalUrl
+      };
+      
+      // Add or update JSON-LD
+      let jsonLd = document.getElementById('searchMetadata');
+      if (!jsonLd) {
+        jsonLd = document.createElement('script');
+        jsonLd.id = 'searchMetadata';
+        jsonLd.type = 'application/ld+json';
+        document.head.appendChild(jsonLd);
+      }
+      jsonLd.textContent = JSON.stringify(metadata);
+      
+      // Add or update canonical link
+      let canonicalLink = document.querySelector('link[rel="canonical"]');
+      if (!canonicalLink) {
+        canonicalLink = document.createElement('link');
+        canonicalLink.rel = 'canonical';
+        document.head.appendChild(canonicalLink);
+      }
+      canonicalLink.href = canonicalUrl;
+    }
+  }
+  
+  // Run on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    updateSearchMetadata(urlParams, "Government NGO tracking", "https://datarepublican.com/officers/", "pageTitle");
+  });
+  
+  // Helper function to be called after form submissions
+  function updateMetadataAfterSearch(formElement) {
+    if (!formElement) return;
+    
+    const formData = new FormData(formElement);
+    const params = new URLSearchParams();
+    
+    for (const [key, value] of formData.entries()) {
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    
+    updateSearchMetadata(params, "Government NGO tracking", "https://datarepublican.com/officers/", "pageTitle");
+  }
+</script> 
 
 <div class="mb-4">
   <button class="frameless mb-2 text-base" id="howItWorksBtn">How it works</button>
@@ -778,7 +867,7 @@ $(document).ready(function() {
         <label for="nonprofitBox" class="text-sm md:text-[15px] font-bold min-w-[200px]">
           Nonprofit/EIN keywords
         </label>
-        <input type="text" id="nonprofitBox" 
+        <input type="text" id="nonprofitBox" name="nonprofit_kw"
                class="w-full md:w-auto px-2 py-1 rounded text-sm border border-gray-300" 
                placeholder="E.g. 'united way' or '12-3456789'"/>
       </div>
@@ -787,7 +876,7 @@ $(document).ready(function() {
         <label for="officerBox" class="text-sm md:text-[15px] font-bold min-w-[200px]">
           Officer name keywords
         </label>
-        <input type="text" id="officerBox" 
+        <input type="text" id="officerBox" name="officer_kw"
                class="w-full md:w-auto px-2 py-1 rounded text-sm border border-gray-300" 
                placeholder="E.g. 'mary sue'"/>
       </div>
@@ -932,7 +1021,7 @@ $(document).ready(function() {
     const nonprofitInput = $('#nonprofitBox').val().trim();
     const officerInput   = $('#officerBox').val().trim();
 
-    // Update URL
+    // Update URL and metadata
     const newUrl = new URL(window.location);
     if (nonprofitInput) {
       newUrl.searchParams.set('nonprofit_kw', nonprofitInput);
@@ -945,6 +1034,12 @@ $(document).ready(function() {
       newUrl.searchParams.delete('officer_kw');
     }
     window.history.pushState({}, '', newUrl);
+    
+    // Update metadata using our include function
+    updateSearchMetadata(new URLSearchParams(window.location.search), 
+                        "Government NGO tracking", 
+                        "https://datarepublican.com/officers/", 
+                        "pageTitle");
 
     // Tokenize
     const npTokens = tokenizeInput(nonprofitInput);

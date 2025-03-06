@@ -3,7 +3,17 @@ layout: default
 title: Exposing where the money flows
 ---
 
-<h1 class="mt-0 text-2xl mb-6 text-navy max-w-7xl @6xl:mx-auto">Discover how money flows through government grants, charities, and NGOs</h1>
+<h1 id="pageTitle" class="mt-0 text-2xl mb-6 text-navy max-w-7xl @6xl:mx-auto">Discover how money flows through government grants, charities, and NGOs</h1>
+
+<!-- Example of how to include search metadata (commented out for the homepage) -->
+{% comment %}
+{% include search-metadata.html 
+  base_title="Exposing where the money flows"
+  base_url="https://datarepublican.com/"
+  search_id="pageTitle"
+  param_names='["q", "search"]'
+%}
+{% endcomment %}
 
 <div class="grid @4xl:grid-cols-5 gap-4 @4xl:gap-8 max-w-7xl @6xl:mx-auto">
   <div class="@4xl:col-span-3 max-w-2xl">
