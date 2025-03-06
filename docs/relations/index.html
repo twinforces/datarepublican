@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741281153">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741281153">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741281367">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741281367">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -2370,129 +2370,128 @@ function renderCytoscape(rootSubject, elements) {
           cy.userPanningEnabled(true);
           cy.boxSelectionEnabled(false);
           
-          // Add hover interactions for nodes
-          cy.on('mouseover', 'node', function(e) {
+          // Track the currently selected node for touch devices
+          let selectedNode = null;
+          
+          // Function to highlight a node and its connections
+          function highlightNode(node) {
+            if (!node) return;
+            
+            // Safely get connected edges
+            let connectedEdges = [];
             try {
-              const node = e.target;
-              if (!node) return;
-              
-              // Safely get connected edges
-              let connectedEdges = [];
-              try {
-                const tempEdges = node.connectedEdges();
-                if (tempEdges && typeof tempEdges.forEach === 'function') {
-                  connectedEdges = tempEdges;
-                }
-              } catch (err) {
-                console.warn('Error getting connected edges:', err);
-              }
-              
-              // Safely get connected nodes
-              let connectedNodes = [];
-              try {
-                if (connectedEdges && typeof connectedEdges.connectedNodes === 'function') {
-                  const tempNodes = connectedEdges.connectedNodes();
-                  if (tempNodes && typeof tempNodes.forEach === 'function') {
-                    connectedNodes = tempNodes;
-                  }
-                }
-              } catch (err) {
-                console.warn('Error getting connected nodes:', err);
-              }
-              
-              // Safely get difference
-              let difference = [];
-              try {
-                if (connectedNodes && typeof connectedNodes.difference === 'function') {
-                  const tempDiff = connectedNodes.difference(node);
-                  if (tempDiff && typeof tempDiff.forEach === 'function') {
-                    difference = tempDiff;
-                  }
-                }
-              } catch (err) {
-                console.warn('Error calculating node difference:', err);
-              }
-              
-              // Dim all elements safely
-              try {
-                let elementsToFade = [];
-                const allElements = cy.elements();
-                if (allElements && typeof allElements.difference === 'function') {
-                  const tempElements = allElements.difference(node);
-                  if (tempElements && typeof tempElements.forEach === 'function') {
-                    elementsToFade = tempElements;
-                  }
-                }
-                
-                // Apply opacity to each element individually
-                if (elementsToFade.length > 0) {
-                  elementsToFade.forEach(ele => {
-                    if (ele && typeof ele.style === 'function') {
-                      ele.style('opacity', 0.2);
-                    }
-                  });
-                }
-              } catch (err) {
-                console.warn('Error dimming elements:', err);
-              }
-              
-              // Highlight connected elements safely
-              try {
-                if (connectedEdges.length > 0) {
-                  connectedEdges.forEach(edge => {
-                    if (edge && typeof edge.style === 'function') {
-                      edge.style('opacity', 1);
-                    }
-                  });
-                }
-              } catch (err) {
-                console.warn('Error highlighting connected edges:', err);
-              }
-              
-              try {
-                if (difference.length > 0) {
-                  difference.forEach(connNode => {
-                    if (connNode && typeof connNode.style === 'function') {
-                      connNode.style('opacity', 1);
-                    }
-                  });
-                }
-              } catch (err) {
-                console.warn('Error highlighting connected nodes:', err);
-              }
-              
-              // Make the hovered node stand out
-              try {
-                if (typeof node.style === 'function') {
-                  node.style('border-width', 3);
-                  node.style('border-color', '#FFA500');
-                }
-              } catch (err) {
-                console.warn('Error styling hovered node:', err);
-              }
-              
-              // Show edge labels for connected edges if there are many nodes
-              try {
-                if (nodeCount > 15 && connectedEdges.length > 0) {
-                  connectedEdges.forEach(edge => {
-                    if (!edge || typeof edge.data !== 'function' || typeof edge.style !== 'function') return;
-                    try {
-                      const label = edge.data('label');
-                      edge.style('label', label || '');
-                    } catch (labelErr) {
-                      console.warn('Error setting edge label:', labelErr);
-                    }
-                  });
-                }
-              } catch (err) {
-                console.warn('Error showing edge labels:', err);
+              const tempEdges = node.connectedEdges();
+              if (tempEdges && typeof tempEdges.forEach === 'function') {
+                connectedEdges = tempEdges;
               }
             } catch (err) {
-              console.warn('Error in mouseover handler:', err);
+              console.warn('Error getting connected edges:', err);
             }
-          });
+            
+            // Safely get connected nodes
+            let connectedNodes = [];
+            try {
+              if (connectedEdges && typeof connectedEdges.connectedNodes === 'function') {
+                const tempNodes = connectedEdges.connectedNodes();
+                if (tempNodes && typeof tempNodes.forEach === 'function') {
+                  connectedNodes = tempNodes;
+                }
+              }
+            } catch (err) {
+              console.warn('Error getting connected nodes:', err);
+            }
+            
+            // Safely get difference
+            let difference = [];
+            try {
+              if (connectedNodes && typeof connectedNodes.difference === 'function') {
+                const tempDiff = connectedNodes.difference(node);
+                if (tempDiff && typeof tempDiff.forEach === 'function') {
+                  difference = tempDiff;
+                }
+              }
+            } catch (err) {
+              console.warn('Error calculating node difference:', err);
+            }
+            
+            // Dim all elements safely
+            try {
+              let elementsToFade = [];
+              const allElements = cy.elements();
+              if (allElements && typeof allElements.difference === 'function') {
+                const tempElements = allElements.difference(node);
+                if (tempElements && typeof tempElements.forEach === 'function') {
+                  elementsToFade = tempElements;
+                }
+              }
+              
+              // Apply opacity to each element individually
+              if (elementsToFade.length > 0) {
+                elementsToFade.forEach(ele => {
+                  if (ele && typeof ele.style === 'function') {
+                    ele.style('opacity', 0.2);
+                  }
+                });
+              }
+            } catch (err) {
+              console.warn('Error dimming elements:', err);
+            }
+            
+            // Highlight connected elements safely
+            try {
+              if (connectedEdges.length > 0) {
+                connectedEdges.forEach(edge => {
+                  if (edge && typeof edge.style === 'function') {
+                    edge.style('opacity', 1);
+                  }
+                });
+              }
+            } catch (err) {
+              console.warn('Error highlighting connected edges:', err);
+            }
+            
+            try {
+              if (difference.length > 0) {
+                difference.forEach(connNode => {
+                  if (connNode && typeof connNode.style === 'function') {
+                    connNode.style('opacity', 1);
+                  }
+                });
+              }
+            } catch (err) {
+              console.warn('Error highlighting connected nodes:', err);
+            }
+            
+            // Make the selected node stand out
+            try {
+              if (typeof node.style === 'function') {
+                node.style('border-width', 3);
+                node.style('border-color', '#FFA500');
+              }
+            } catch (err) {
+              console.warn('Error styling selected node:', err);
+            }
+            
+            // Show edge labels for connected edges if there are many nodes
+            try {
+              if (nodeCount > 15 && connectedEdges.length > 0) {
+                connectedEdges.forEach(edge => {
+                  if (!edge || typeof edge.data !== 'function' || typeof edge.style !== 'function') return;
+                  try {
+                    const label = edge.data('label');
+                    edge.style('label', label || '');
+                  } catch (labelErr) {
+                    console.warn('Error setting edge label:', labelErr);
+                  }
+                });
+              }
+            } catch (err) {
+              console.warn('Error showing edge labels:', err);
+            }
+          }
           
-          cy.on('mouseout', 'node', function() {
+          // Function to restore all elements to their original state
+          function resetHighlighting() {
             try {
               // Restore all elements to original state - with safer collection handling
               try {
@@ -2565,11 +2564,61 @@ function renderCytoscape(rootSubject, elements) {
               } catch (err) {
                 console.warn('Error hiding edge labels:', err);
               }
+              
+              // Reset the selected node
+              selectedNode = null;
             } catch (e) {
-              console.warn('Error in mouseout handler:', e);
+              console.warn('Error in reset highlighting:', e);
+            }
+          }
+          
+          // Add hover interactions for nodes (desktop)
+          cy.on('mouseover', 'node', function(e) {
+            try {
+              const node = e.target;
+              highlightNode(node);
+            } catch (err) {
+              console.warn('Error in mouseover handler:', err);
             }
           });
           
+          cy.on('mouseout', 'node', function() {
+            resetHighlighting();
+          });
+          
+          // Add touch interactions for nodes (mobile/touch devices)
+          cy.on('tap', 'node', function(e) {
+            try {
+              const node = e.target;
+              
+              // If this node is already selected, do nothing (let the background tap handle it)
+              if (selectedNode && selectedNode.id() === node.id()) {
+                return;
+              }
+              
+              // Reset any previous selection
+              resetHighlighting();
+              
+              // Highlight the tapped node
+              highlightNode(node);
+              
+              // Store the selected node
+              selectedNode = node;
+              
+              // Prevent event propagation to avoid triggering the background tap
+              e.originalEvent.stopPropagation();
+            } catch (err) {
+              console.warn('Error in node tap handler:', err);
+            }
+          });
+          
+          // Add tap handler for background to reset highlighting
+          cy.on('tap', function(e) {
+            // Only handle taps directly on the background (not on nodes)
+            if (e.target === cy) {
+              resetHighlighting();
+            }
+          });
         } catch (err) {
           console.error("Error in layout processing:", err);
         }
