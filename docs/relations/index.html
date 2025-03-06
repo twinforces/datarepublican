@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741281688">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741281688">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741285014">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741285014">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1297,7 +1297,20 @@ function renderSearchResult(subject, desc) {
   `);
 
   $div.css('cursor','pointer').on('click', function() {
-    window.location.href = '?subject=' + encodeURIComponent(subject);
+    // Get the current URL and preserve the search parameter
+    const currentUrl = new URL(window.location);
+    const searchTerm = currentUrl.searchParams.get('search');
+    
+    // Create the new URL with the subject parameter
+    const newUrl = new URL(window.location);
+    newUrl.searchParams.set('subject', subject);
+    
+    // Preserve the search parameter if it exists
+    if (searchTerm) {
+      newUrl.searchParams.set('search', searchTerm);
+    }
+    
+    window.location.href = newUrl.toString();
   });
 
   return $div;
@@ -1326,9 +1339,16 @@ async function renderGraphForSubject(subjectName) {
   // Make sure download button is hidden while loading
   $('#downloadBtn').hide();
 
-  // Set the search param in the URL
+  // Set the search param in the URL while preserving the search parameter
   const newUrl = new URL(window.location);
+  const searchTerm = newUrl.searchParams.get('search');
   newUrl.searchParams.set('subject', subjectName);
+  
+  // Make sure to keep the search parameter if it exists
+  if (searchTerm) {
+    newUrl.searchParams.set('search', searchTerm);
+  }
+  
   window.history.pushState({}, '', newUrl);
 
   // Put subject name in title
