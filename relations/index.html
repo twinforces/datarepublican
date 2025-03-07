@@ -2453,6 +2453,12 @@ function renderCytoscape(rootSubject, elements) {
       );
     }
   }, 50); // Short delay to ensure DOM is ready
+
+  // At the end of renderCytoscape function, after all the event handlers are set up
+  setTimeout(() => {
+    // Trigger a resize event to ensure proper centering
+    $(window).trigger('resize.cytoscape');
+  }, 300); // Give enough time for initial render to complete
 }
 
 // Re-render the graph with filtered edges
