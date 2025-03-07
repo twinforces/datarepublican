@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741363486">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741363486">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741364594">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741364594">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -950,13 +950,7 @@ $(document).ready(function() {
 <style>
 
   .shidden { display: none; }
-  .toggle-btn {
-    background: none;
-    border: none;
-    color: #2563EB;
-    cursor: pointer;
-    padding: 0;
-  }
+
   .loading-spinner {
     vertical-align: middle;
   }
@@ -1101,57 +1095,56 @@ It shows the generated graph and a legend, plus a button to go back to the searc
 -->
 
 <div id="graphMode" class="shidden">
-<button id="backToSearch" class="toggle-btn frameless !mb-2">&larr; Return to search</button>
+<button id="backToSearch" class=" frameless !mb-2">&larr; Return to search</button>
 
 <div id="graphExplanation" class="mb-3">
-  <h1 id="graphTitle" class="mb-1">Relationship Graph</h1>
-  <p class="text-sm mb-2" id="graphInstructions">
-    Below is a visualization of our selected subject's relationships, color-coded by category.  
-    <strong>Click any color</strong> in the legend below to toggle that category on/off. The graph will re-render automatically.  
-    Click "Download PNG" to get an offline copy of the image.
-  </p>
+  <h1 id="graphTitle" class="mb-1">Relationship graph</h1>
+
+  <p class="text-sm mb-0">Hover a node to trace its connections. Zoom with your mouse or trackpad. Click and drag to move it around for better legibility.</p>
 </div>
 
+<strong class="text-sm font-semibold mb-1 inline-block">Categories</strong>
 <!-- Legend for edge categories -->
 <div id="legend"></div>
 
 <!-- A spot to show short summary about the root subject from bullets.csv -->
 <ul id="rootSummary" class="mb-4 p-2 md:px-4 !pl-8 !pb-4 md:pt-3 border rounded text-sm bg-white list-disc"></ul>
 
-<!-- Where the graph renders -->
-<div id="graph-container" class="border rounded flex items-center justify-center bg-white">
-  <div id="cy" style="width: 100%; height: 100%;"></div>
-  <div id="cy-controls" class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
-    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="zoom-in" title="Zoom in">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-      </svg>
-    </button>
-    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="zoom-out" title="Zoom out">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
-      </svg>
-    </button>
-    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="reset-view" title="Reset view">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
-      </svg>
-    </button>
-    <!--
-    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="toggle-labels" title="Toggle edge labels">L</button>
-    <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="toggle-secondary" title="Show only root connections">R</button>
-    -->
+<div class="relative">
+  <div class="absolute top-3 right-3 z-10">
+    <button id="downloadBtn" class="frameless !px-2 !py-1 border !border-solid border-transparent hover:border-gray-200 rounded !bg-white/75 backdrop-blur" style="display: none;">Download PNG</button>
   </div>
-  <div class="cy-tooltip"></div>
-  <div id="loading-indicator">
-    <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
+  <!-- Where the graph renders -->
+  <div id="graph-container" class="border rounded flex items-center justify-center bg-white">
+    <div id="cy" style="width: 100%; height: 100%;"></div>
+    <div id="cy-controls" class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
+      <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="zoom-in" title="Zoom in">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+        </svg>
+      </button>
+      <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="zoom-out" title="Zoom out">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
+        </svg>
+      </button>
+      <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="reset-view" title="Reset view">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
+        </svg>
+      </button>
+      <!--
+      <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="toggle-labels" title="Toggle edge labels">L</button>
+      <button class="p-2 rounded min-w-0 mr-0 bg-black/60 hover:bg-black" id="toggle-secondary" title="Show only root connections">R</button>
+      -->
+    </div>
+    <div class="cy-tooltip"></div>
+    <div id="loading-indicator">
+      <img src="../assets/images/loading.svg" class="loading-spinner" style="width:32px;height:32px" alt="Loading...">
+    </div>
   </div>
 </div>
 
-<!-- Download button -->
-<div class="mt-2 text-right">
-  <button id="downloadBtn" class="toggle-btn" style="display: none;">Download PNG</button>
-</div>
 </div>
 
 

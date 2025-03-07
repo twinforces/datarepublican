@@ -1538,6 +1538,15 @@ body > div#main-content {
 .top-\[calc\(50\%-0\.75rem\)\] {
   top: calc(50% - 0.75rem);
 }
+.top-2 {
+  top: 0.5rem;
+}
+.right-3 {
+  right: 0.75rem;
+}
+.top-3 {
+  top: 0.75rem;
+}
 .z-10 {
   z-index: 10;
 }
@@ -2122,6 +2131,12 @@ body > div#main-content {
 .border-t {
   border-top-width: 1px;
 }
+.border-solid {
+  border-style: solid;
+}
+.\!border-solid {
+  border-style: solid !important;
+}
 .border-dashed {
   border-style: dashed;
 }
@@ -2265,6 +2280,9 @@ body > div#main-content {
 .bg-yellow\/20 {
   background-color: rgb(226 209 52 / 0.2);
 }
+.\!bg-white\/75 {
+  background-color: rgb(255 255 255 / 0.75) !important;
+}
 .bg-gradient-to-b {
   background-image: linear-gradient(to bottom, var(--tw-gradient-stops));
 }
@@ -2342,6 +2360,14 @@ body > div#main-content {
 .py-8 {
   padding-top: 2rem;
   padding-bottom: 2rem;
+}
+.\!px-2 {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+.\!py-1 {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
 }
 .\!pb-4 {
   padding-bottom: 1rem !important;
@@ -2599,6 +2625,11 @@ body > div#main-content {
 .filter {
   filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
 }
+.backdrop-blur {
+  --tw-backdrop-blur: blur(8px);
+  -webkit-backdrop-filter: var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);
+  backdrop-filter: var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);
+}
 .transition {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, -webkit-backdrop-filter;
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
@@ -2819,6 +2850,9 @@ body > div#main-content {
 .empty\:hidden:empty {
   display: none;
 }
+.hover\:border:hover {
+  border-width: 1px;
+}
 .hover\:border-blue:hover {
   --tw-border-opacity: 1;
   border-color: rgb(52 156 226 / var(--tw-border-opacity));
@@ -2832,6 +2866,10 @@ body > div#main-content {
 }
 .hover\:border-white\/75:hover {
   border-color: rgb(255 255 255 / 0.75);
+}
+.hover\:border-gray-200:hover {
+  --tw-border-opacity: 1;
+  border-color: rgb(229 231 235 / var(--tw-border-opacity));
 }
 .hover\:\!bg-green-light:hover {
   --tw-bg-opacity: 1 !important;
