@@ -62,9 +62,9 @@ class BrowseViewModel {
 
   addToShowList(ein) {
     const c = Charity.getCharity(ein);
-    const visible = !this.showList[ein];
-    this.showList[ein] = 1;
-    if (visible) c.show();
+    const visible = c?.isVisible;
+    this.showList[c?.ein] = 1;
+    if (c && !visible) c.show();
   }
 
   removeFromShowList(ein) {
@@ -91,7 +91,7 @@ class BrowseViewModel {
 
   addToHideList(ein) {
     const c = Charity.getCharity(ein);
-    const visible = !c.isVisible();
+    const visible = c.isVisible;
     this.hideList[ein] = 1;
     if (visible) c.hide();
   }
@@ -452,7 +452,7 @@ class BrowseViewModel {
     this.renderData = { nodes: [], links: [] };
     this.matchURL();
     this.renderData.links = Grant.visibleGrants().filter(
-      (g) => !g.isOther && g.isVisible
+      (g) => g && !g.isOther && g.isVisible
     ); // All visible grants
     this.renderData.nodes = Charity.visibleCharities(); // All visible nodes
     /*data.nodes.forEach(node => {
@@ -658,6 +658,11 @@ class Charity {
     this.sourceLinks = []; //work around for sankey issue;
     this.targetLinks = []; //work around for sankey issue;
     Charity.registerCharity(ein, this);
+  }
+
+  get longEIN() {
+    const matches = this.ein.match(/(\d\d)-*(\d\d\d\d\d\d)/);
+    return `${matches[0]}${matches[1]}`;
   }
 
   get canExpandInflows() {
@@ -1158,6 +1163,10 @@ class Charity {
     this.isVisible = true; // to fake out recruseDownHide
     this.recurseDownHide(0, 1);
   }
+  hideUp() {
+    this.grantsIn.forEach((g) => g.filer.eatGrant(g));
+    this.isVisible = false;
+  }
 
   /**
     
@@ -1240,6 +1249,32 @@ class Charity {
     }
     return `${this.name}\n${this.ein}${inFlows}${outFlows}${loopbacks}`;
   }
+  longEIN() {
+    return `${this.ein.slice(0, 2)}-${this.ein.slice(2)}`;
+  }
+  officersLink(ein) {
+    return `/officers/?nonprofit_kw=${this.longEIN()}`;
+  }
+  financialsLink(ein) {
+    return `/nonprofit/assets/?filter=${this.ein}`;
+  }
+
+  nonprofitsLink() {
+    return `/nonprofit/?filter=${this.ein}`;
+  }
+  propublicaLink(message) {
+    return `<a href="https://projects.propublica.org/nonprofits/organizations/${this.ein}/${this.xml_name}/full" 
+           target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">
+          ${message}
+        </a>`;
+  }
+  percentTaxpayer() {
+    // need the govIndirectAmt to calculate this
+    return (
+      ((this.govt_amt + govIndirectAmt) / (this.govt_amt + this.contrib_amt)) *
+      100
+    );
+  }
 }
 class DownstreamOther extends Charity {
   constructor(parent, count = START_REVEAL) {
@@ -1262,7 +1297,7 @@ class DownstreamOther extends Charity {
       filter: this.parent,
       grantee_ein: this.ein,
       grantee: this,
-      amt: this.grantsInTotal,
+      amt: 0,
       isOther: true,
       isOtherDest: this,
     });
@@ -1301,11 +1336,9 @@ class DownstreamOther extends Charity {
     const grantsToEat = this.parent.grants
       .filter((g) => !g.shouldHide() && !g.isOther)
       .slice(-count); // eat the weakest first
-    let startAmount = this.otherGrant.amt;
     grantsToEat.forEach((g) => {
-      startAmount += this.eatGrant(g);
+      this.otherGrant.amt += this.eatGrant(g);
     });
-    this.otherGrant.amt = startAmount;
     this.parent.grants.forEach((g) => (g.isVisible = true)); // remaining should be visible
   }
   // akaw is the sound of a pacman going backwards
@@ -1313,11 +1346,9 @@ class DownstreamOther extends Charity {
     const grantsToPuke = this.grantsIn
       .filter((g) => !g.isOther)
       .slice(0, count); // put the strongest back
-    let startAmount = this.otherGrant.amt;
     grantsToPuke.forEach((g) => {
-      startAmount -= this.pukeGrant(g); // the pacman givith, the pacman takith away
+      this.otherGrant.amt -= this.pukeGrant(g); // the pacman givith, the pacman takith away
     });
-    this.otherGrant.amt = startAmount;
   }
 
   get isVisible() {
@@ -1387,11 +1418,9 @@ class UpstreamOther extends Charity {
     const grantsToEat = this.parent.grantsIn
       .filter((g) => !g.shouldHide() && !g.isOther)
       .slice(-count); // eat the weak and lame
-    let startAmount = this.otherGrant.amt;
     grantsToEat.forEach((g) => {
-      startAmount += this.eatGrant(g);
+      this.otherGrant.amt += this.eatGrant(g);
     });
-    this.otherGrant.amt = startAmount;
     this.parent.grants.forEach((g) => (g.isVisible = true)); // remaining should be visible
   }
   // akaw is the sound of a pacman going backwards
@@ -1399,11 +1428,9 @@ class UpstreamOther extends Charity {
     const grantsToPuke = this.grantsIn
       .filter((g) => !g.isOther)
       .slice(0, count); // return the best
-    let startAmount = this.otherGrant.amt;
     grantsToPuke.forEach((g) => {
-      startAmount -= this.pukeGrant(g); // the pacman givith, the pacman takith away
+      this.otherGrant.amt -= this.pukeGrant(g); // the pacman givith, the pacman takith away
     });
-    this.otherGrant.amt = startAmount;
   }
 
   handleClick(e, count = NEXT_REVEAL) {
@@ -1438,9 +1465,9 @@ class Grant {
 
   static getGrant(id) {
     const g = Grant.grantLookup[id];
-    //        if (!g) {
-    //                console.log(`Couldn't find Grant ${id}`);
-    //        }
+    /*if (!g) {
+      console.log(`Couldn't find Grant ${id}`);
+    }*/
     return g;
   }
 
