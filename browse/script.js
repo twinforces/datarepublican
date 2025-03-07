@@ -807,7 +807,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
     .attr("class", (d) => {
       if (d.isOther) return "node others";
       if (d.willShrink) return "node shrink";
-      if (!d.grants || !d.grants.length) return "node no-grants";
+      if (d.isTerminal) return "node no-grants";
       return "node expand";
     })
     .attr("data-id", (d) => d.id);
@@ -897,7 +897,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
     .attr("text-anchor", (d) =>
       d.x0Original < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .text((d) => d.name)
+    .text((d) => (d.isOther ? "" : d.name))
     .on("click", function (event, d) {
       const selectedNodeId = d.id;
       event.stopPropagation();
@@ -1211,55 +1211,110 @@ function showControlPanel(type, data, element) {
   const panel = document.getElementById("control-panel");
   let content = "";
 
+  function renderButtons(node, withButtons) {
+    if (!withButtons) return "";
+    return `
+    <div class="flex-1 bg-gray-200 p-4">
+      <button onclick="focusNode('${node.ein}')">Focus on This</button>
+      <button ${
+        !node.canExpandInflows ? 'disabled class="bg-gray-100 disabled"' : ""
+      } onclick="expandInflows('${node.ein}')">Expand Inflows</button>
+                    <button ${
+                      !node.canExpandOutflows
+                        ? 'disabled class="bg-gray-100 disabled"'
+                        : ""
+                    } onclick="expandOutflows('${
+      node.ein
+    } ')">Expand Outflows</button>
+    </div>
+    <div class="flex-1 bg-gray-200 p-4" >
+               <button onclick="removeNode('${node.ein}')">Remove Node</button>
+  
+       <button ${
+         !node.canCompressInflows ? "disabled class='disabled'" : ""
+       } onclick="compressInflows('${node.ein}')">Compress Inflows</button>
+        <button ${
+          !node.canCompressOutflows ? "disabled class='disabled'" : ""
+        } onclick="compressOutflows('${node.ein}')">Compress Outflows</button>
+        </div>
+      </div>
+    </div>
+        `;
+  }
+
   function renderNode(node, withButtons = false) {
-    let content = `
-      <h3>${node.name}</h3>
+    let buttons = "";
+    let links = "";
+    let hiddenInflows = "";
+    let hiddenOutflows = "";
+    let inflows = "<p>Inflows: N/A</p>";
+    let outflows = "<p>Outflows: N/A</p>";
+    if (node.hiddenOutflows)
+      hiddenOutflows = `<p><i>$${formatNumber(
+        node.hiddenOutflowsTotal
+      )} hidden (${node.hiddenOutflows} grants)</i></p>`;
+
+    if (node.isGov) {
+      return `
+ <div class="bg-blue-500 text-white flex-col p-4 text-center">
+    <h3>${node.name}</h3>
       <p>EIN: ${node.ein}</p>
-      <p>US Gov: $${formatNumber(node.govt_amt)} visible</p>
+    </div>
+    <div class="flex flex-row gap-4">
+    <div class="flex-1 bg-gray-200 p-4">
+         <p>
+          US Taxpayers: <b>${formatNumber(node.origOut)}</b>
+        </p >
+          <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
+        node.visibleGrants.length
+      } grants)</p>
+      <p><i>$${formatNumber(node.hiddenOutflowsTotal)} hidden (${
+        node.hiddenOutflows
+      } grants)</i></p>
+      </div>
+      ${renderButtons(node, withButtons)}
+      </div>
+        </div>
+
+    </div>`;
+    } else {
+      if (!node.isRoot)
+        if (node.hiddenInflows)
+          hiddenInflows = `<p><i>$${formatNumber(
+            node.hiddenInflowsTotal
+          )} hidden (${node.hiddenInflows} grants)</i></p>`;
+      inflows = `  <p>Inflows: $${formatNumber(
+        node.visibleGrantsInTotal - node.govt_amt
+      )} visible (${node.visibleGrantsIn.length} grants)</p> ${hiddenInflows}`;
+      if (!node.isTerminal)
+        outflows = `
+       <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
+          node.visibleGrants.length
+        } grants)${hiddenOutflows}</p>`;
+      links = ` <p>From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
       <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
       <p><a href="${node.officersLink()}">Show me the Officers</a></p>
            <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
  <p>${node.propublicaLink("Take me to Propublcia")}</p>
-      <p>Inflows: $${formatNumber(
-        node.visibleGrantsInTotal - node.govt_amt
-      )} visible (${node.visibleGrantsIn.length} grants), $${formatNumber(
-      node.hiddenInflowsTotal
-    )} hidden (${node.hiddenInflows} grants)</p>
-      <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
-      node.visibleGrants.length
-    } grants), $${formatNumber(node.hiddenOutflowsTotal)} hidden (${
-      node.hiddenOutflows
-    } grants)</p>
-    `;
-    if (withButtons)
-      content += `    
-        <div class="flex flex-col gap-4">
-   
-    <div class="flex-1 bg-gray-200 p-4">
-      <button onclick="focusNode('${node.ein}')">Tunnell Into Node</button>
-      <button ${
-        !node.canExpandInflows ? 'disabled class="bg-gray-100"' : ""
-      } onclick="expandInflows('${node.ein})">Expand Inflows</button>
-        <button ${
-          !node.canCompressInflows ? "disabled" : ""
-        } onclick="compressInflows('${node.ein}')">Compress Inflows</button>
-     </div>
-    <div class="flex flex-row gap-4">
-      <div class="flex-1 bg-gray-200 p-4">
-               <button onclick="removeNode('${node.ein}')">Remove Node</button>
-                   <button ${
-                     !node.canExpandOutflows
-                       ? 'disabled class="bg-gray-100"'
-                       : ""
-                   } onclick="expandOutflows('${
-        node.ein
-      }')">Expand Outflows</button>
-        <button ${
-          !node.canCompressOutflows ? "disabled" : ""
-        } onclick="compressOutflows('${node.ein}')">Compress Outflows</button>
-      </div>
+   `;
+    }
+
+    let content = `
+    <div class="bg-blue-500 text-white flex-col p-4 text-center">
+    <h3>${node.name}</h3>
+      <p>EIN: ${node.ein}</p>
     </div>
-        `;
+    <div class="flex flex-row gap-4">
+    <div class="flex-1 bg-gray-200 p-4">
+      ${links}
+      ${inflows}
+      ${outflows}
+    </div>
+   ${renderButtons(node, withButtons)}
+        </div>
+
+    </div>
+    `;
     return content;
   }
 
@@ -1298,7 +1353,8 @@ function showControlPanel(type, data, element) {
             <div style="flex flex-col gap-4">
                 <div class="bg-blue-500 text-white p-4 text-center" >
                         <h3>Grant Details</h3>
-                </div>
+                     <p>Amount: $${formatNumber(data.amt)}</p>
+               </div>
                 <div class="flex flex-row gap-4">
                         <div class="flex-1 bg-gray-200 p-4">
                             <h4>From:</h4>
@@ -1321,9 +1377,6 @@ function showControlPanel(type, data, element) {
                             }','inflows')">Compress Source</button>
                         </div>
                 <div>
-                <div class="bg-blue-700 text-white p-4 text-center">
-                    <p>Amount: $${formatNumber(data.amt)}</p>
-                </div>
             </div>
         `;
   } else if (type === "other") {
