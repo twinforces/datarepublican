@@ -1,22 +1,13 @@
 // main.js
 import {
-  graphScaleUp,
-  graphScaleDown,
-  graphScaleReset,
-  GOV_EIN,
   Charity,
   Grant,
-  loadData,
-  scaleValue,
   formatNumber,
+  viewModel,
+  BrowseViewModel,
 } from "./models.js";
 
-// Filter state
-let activeEINs = [];
-let activeKeywords = [];
-
 // BFS / data-ready
-let dataReady = false;
 let panZoomInstance = null;
 
 // Custom graph state
@@ -28,19 +19,12 @@ let simulation = null;
 let selectedSearchIndex = 0;
 
 // Sankey state
-let currentData = { nodes: [], links: [] };
-let nodeMap = Charity.charityLookup;
-let linkMap = Grant.grantLookup;
 let expanded = new Map();
 let compacted = new Map();
-const TOP_N_INITIAL = 3;
-const TOP_N_OUTFLOWS = 5;
 
 // Global references
 let svg = null;
 let zoom = null;
-let topNodes = [];
-let expandedOutflows = new Map();
 
 const NODE_WIDTH = 50;
 const OTHER_WIDTH = 30;
@@ -54,12 +38,12 @@ function updateStatus(message, color = "black") {
 }
 
 $(document).ready(function () {
-  if (dataReady) parseQueryParams();
+  if (viewModel.dataReady) viewModel.parseQueryParams();
 
   updateStatus("Loading Data...");
-  loadData()
+  viewModel
+    .loadData()
     .then(() => {
-      dataReady = true;
       generateGraph();
     })
     .catch((err) => {
@@ -71,19 +55,24 @@ $(document).ready(function () {
   $("#einInput").on("keypress", (e) => {
     if (e.key === "Enter") addEINFromInput();
   });
-  $("#clearEINsBtn").on("click", () => {
-    activeEINs = [];
+  $("#clearEINsBtnShow").on("click", () => {
+    viewModel.clearShowList();
     renderActiveEINs();
     updateQueryParams();
     generateGraph();
   });
-
+  $("#clearEINsBtnHide").on("click", () => {
+    viewModel.clearHideList();
+    renderActiveEINs();
+    updateQueryParams();
+    generateGraph();
+  });
   $("#addFilterBtn").on("click", addKeywordFromInput);
   $("#keywordInput").on("keypress", (e) => {
     if (e.key === "Enter") addKeywordFromInput();
   });
   $("#clearFiltersBtn").on("click", () => {
-    activeKeywords = [];
+    viewModel.clearKeywordList();
     renderActiveKeywords();
     updateQueryParams();
     generateGraph();
@@ -131,7 +120,7 @@ $(document).ready(function () {
   });
 
   $(window).on("resize", function () {
-    if (dataReady) {
+    if (viewModel.dataReady) {
       generateGraph();
     }
   });
@@ -145,12 +134,11 @@ function addEINFromInput() {
     alert("EIN must be 9 digits after removing dashes/spaces or 001.");
     return;
   }
+  const charity = Charity.getCharity(val);
   if (!Charity.getCharity(val)) {
     console.warn("EIN not found in charities.csv (still adding).");
   }
-  if (!activeEINs.includes(val)) {
-    activeEINs.push(val);
-  }
+  viewModel.addToShowList(val);
   $("#einInput").val("");
   renderActiveEINs();
   Charity.placeNode(val);
@@ -158,15 +146,18 @@ function addEINFromInput() {
   generateGraph();
 }
 
-function removeEIN(ein) {
-  removeEINs.push(ein);
+function removeShowEIN(ein) {
+  viewModel.removeFromShowList(ein);
 }
-
+function removeHideEIN(ein) {
+  viewModel.removeFromHideList(ein);
+}
 function renderActiveEINs() {
   const $c = $("#activeEINs");
   $c.empty();
   $("#clearEINsBtn").toggle(activeEINs.length > 0);
 
+  const activeEINs = viewModel.getShowList();
   activeEINs.forEach((ein) => {
     const $tag = $(
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>'
@@ -177,7 +168,7 @@ function renderActiveEINs() {
     ).attr("data-ein", ein);
     $rm.on("click", function () {
       const rem = $(this).attr("data-ein");
-      activeEINs = activeEINs.filter((x) => x !== rem);
+      viewModel.removeFromShowList(rem);
       renderActiveEINs();
       updateQueryParams();
       generateGraph();
@@ -191,7 +182,7 @@ function renderHideEINs() {
   $c.empty();
   $("#clearHideEINsBtn").toggle(hideEINs.length > 0);
 
-  Charity.getHideList().forEach((ein) => {
+  viewModel.getHideList().forEach((ein) => {
     const $tag = $(
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>'
     );
@@ -201,7 +192,7 @@ function renderHideEINs() {
     ).attr("data-nein", ein);
     $rm.on("click", function () {
       const rem = $(this).attr("data-nein");
-      Charity.removeFromHideList(rem);
+      viewModel.removeFromHideList(rem);
       renderHideEINs();
       updateQueryParams();
       generateGraph();
@@ -213,7 +204,7 @@ function renderHideEINs() {
 function addKeywordFromInput() {
   const kw = $("#keywordInput").val().trim();
   if (kw.length > 0) {
-    activeKeywords.push(kw.toLowerCase());
+    viewModel.addToKeywords(kw.toLowerCase());
     $("#keywordInput").val("");
     renderActiveKeywords();
     updateQueryParams();
@@ -224,9 +215,9 @@ function addKeywordFromInput() {
 function renderActiveKeywords() {
   const $c = $("#activeFilters");
   $c.empty();
-  $("#clearFiltersBtn").toggle(activeKeywords.length > 0);
+  $("#clearFiltersBtn").toggle(viewModel.getKeywordList().length > 0);
 
-  activeKeywords.forEach((kw) => {
+  viewModel.getKeywordList().forEach((kw) => {
     const $tag = $(
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>'
     );
@@ -236,7 +227,7 @@ function renderActiveKeywords() {
     ).attr("data-kw", kw);
     $rm.on("click", function () {
       const rem = $(this).attr("data-kw");
-      activeKeywords = activeKeywords.filter((x) => x !== rem);
+      viewModel.removeFromKeywords(rem);
       renderActiveKeywords();
       updateQueryParams();
       generateGraph();
@@ -265,31 +256,14 @@ function downloadSVG() {
   URL.revokeObjectURL(url);
 }
 
-function parseQueryParams() {
-  const params = new URLSearchParams(window.location.search);
-  customTitle = params.get("title") || null;
-
-  const customParam = params.get("custom_graph");
-  activeEINs = params.getAll("ein");
-  Charity.setHideList(params.getAll("nein"));
-  activeKeywords = params.getAll("keywords");
-
-  $(".bfs-only").show();
-  $("#instructions").text(
-    "Use the search and keywords to filter charities, then BFS expansion is performed automatically."
-  );
-
-  Charity.matchURL(params);
-}
-
 function updateQueryParams() {
   if (!customGraphEdges) {
     return;
   }
-  const params = Charity.computeURLParams(activeKeywords);
+  const params = viewModel.computeURLParams(activeKeywords);
   const newUrl = window.location.pathname + "?" + params.toString();
   window.history.replaceState({}, "", newUrl);
-  if (dataReady) parseQueryParams();
+  if (viewModel.dataReady) viewModel.parseQueryParams();
 }
 
 const sortOffset = +0.001;
@@ -331,7 +305,7 @@ function compareLinks(a, b) {
 
 function generateGraph() {
   console.log("1. Starting graph generation");
-  if (!dataReady) {
+  if (!viewModel.dataReady) {
     alert("Data not loaded yet. Please wait.");
     return;
   }
@@ -377,18 +351,9 @@ function generateGraph() {
     .nodeSort(compareCharities)
     .size([width - 100, height - 100]);
 
-  parseQueryParams();
-  if (!customGraphEdges && activeEINs.length === 0) {
-    const usGov = Charity.getCharity(GOV_EIN);
-    updateStatus("placing US Government");
-    usGov.place();
-    updateStatus(`USG placed adding top ${TOP_N_INITIAL} roots`);
-    Charity.getRootCharities()
-      .slice(0, TOP_N_INITIAL)
-      .forEach((c) => {
-        c.place();
-      });
-    customGraphEdges = Charity.visibleCharities();
+  viewModel.parseQueryParams();
+  if (!viewModel.matchURL()) {
+    viewModel.loadDefaultData();
   }
 
   renderFocusedSankey(
@@ -397,7 +362,9 @@ function generateGraph() {
     svg,
     width,
     height,
-    activeEINs.length ? activeEINs : [GOV_EIN]
+    viewModel.getShowList().length
+      ? viewModel.getShowList()
+      : [viewModel.GOV_EIN]
   );
 
   document.getElementById("zoomIn").onclick = () =>
@@ -461,16 +428,16 @@ function generateGraph() {
 }
 
 function doScaleUp() {
-  graphScaleUp();
-  generateGraph();
+  viewModel.graphScaleUp();
+  viewModel.generateGraph();
 }
 function doScaleDown() {
-  graphScaleDown();
-  generateGraph();
+  viewModel.graphScaleDown();
+  viewModel.generateGraph();
 }
 function doScaleReset() {
-  graphScaleReset();
-  generateGraph();
+  viewModel.graphScaleReset();
+  viewModel.generateGraph();
 }
 
 function generateUniqueId(prefix = "gradient") {
@@ -668,9 +635,8 @@ function calculateRegularPosition(node, scale, height) {
   let scaleFactor = 100; // placeholder for 0,0
   const sankeyHeight = node.y1 - node.y0;
   if (node.grantsInLogTotal > node.grantsLogTotal)
-    scaleFactor =
-      sankeyHeight /
-      node.grantsInLogTotal; // we know its greater so must be not zero
+    scaleFactor = sankeyHeight / node.grantsInLogTotal;
+  // we know its greater so must be not zero
   else scaleFactor = sankeyHeight / node.grantsLogTotal;
   node.outflowHeight = Math.min(
     sankeyHeight,
@@ -742,7 +708,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
   if (nodeIds) nodeIds.forEach((nid) => Charity.placeNode(nid));
 
   // Brute-force build currentData from visible nodes and grants
-  currentData = Charity.buildSankeyData();
+  let currentData = viewModel.buildSankeyData();
 
   const graph = sankey(currentData);
 
@@ -965,7 +931,7 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
   notOtherElements.append().style("cursor", "grab");
   terminalElements.append().style("cursor", "zoom-out");
   rootElemenents.append().style("cursor", "zoom-in");
-  Charity.cleanAfterRender(currentData); // restore grants to their original values
+  viewModel.cleanAfterRender(currentData); // restore grants to their original values
   $("#downloadBtn").show();
 }
 
@@ -1254,45 +1220,45 @@ function showControlPanel(type, data, element) {
   const panel = document.getElementById("control-panel");
   let content = "";
 
-  function renderNode(data, withButtons = false) {
+  function renderNode(node, withButtons = false) {
     let content = `
-      <h3>${data.name}</h3>
-      <p>EIN: ${data.ein}</p>
-      <p>US Gov: $${formatNumber(data.govt_amt)} visible</p>
+      <h3>${node.name}</h3>
+      <p>EIN: ${node.ein}</p>
+      <p>US Gov: $${formatNumber(node.govt_amt)} visible</p>
       <p>Inflows: $${formatNumber(
-        data.visibleGrantsInTotal - d.govt_amt
-      )} visible (${data.visibleGrantsIn.length} grants), $${formatNumber(
-      data.hiddenInflowsTotal
-    )} hidden (${data.hiddenInflows} grants)</p>
-      <p>Outflows: $${formatNumber(data.visibleGrantsTotal)} visible (${
-      data.visibleGrants.length
-    } grants), $${formatNumber(data.hiddenOutflowsTotal)} hidden (${
-      data.hiddenOutflows
+        node.visibleGrantsInTotal - node.govt_amt
+      )} visible (${node.visibleGrantsIn.length} grants), $${formatNumber(
+      node.hiddenInflowsTotal
+    )} hidden (${node.hiddenInflows} grants)</p>
+      <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
+      node.visibleGrants.length
+    } grants), $${formatNumber(node.hiddenOutflowsTotal)} hidden (${
+      node.hiddenOutflows
     } grants)</p>
     `;
     if (withButtons)
       content += `    
         <div class="flex flex-col gap-4">
            <div class="bg-gray-200 text-white p-4 text-center">
-               <button onclick="removeNode('${data.ein}')">Remove Node</button>
+               <button onclick="removeNode('${node.ein}')">Remove Node</button>
            </div>
     <div class="flex flex-row gap-4">
     <div class="flex-1 bg-gray-200 p-4">
       <button ${
-        !data.canExpandInflows ? 'disabled class="bg-gray-100"' : ""
-      } onclick="expandInflows('${data.ein})">Expand Inflows</button>
+        !node.canExpandInflows ? 'disabled class="bg-gray-100"' : ""
+      } onclick="expandInflows('${node.ein})">Expand Inflows</button>
         <button ${
-          !data.canCompressInflows ? "disabled" : ""
-        } onclick="compressInflows('${data.ein}')">Compress Inflows</button>
+          !node.canCompressInflows ? "disabled" : ""
+        } onclick="compressInflows('${node.ein}')">Compress Inflows</button>
      </div>
     <div class="flex flex-row gap-4">
       <div class="flex-1 bg-gray-200 p-4">
          <button ${
-           !data.canExpandOutflows ? 'disabled class="bg-gray-100"' : ""
-         } onclick="expandOutflows('${data.ein}')">Expand Outflows</button>
+           !node.canExpandOutflows ? 'disabled class="bg-gray-100"' : ""
+         } onclick="expandOutflows('${node.ein}')">Expand Outflows</button>
         <button ${
-          !data.canCompressOutflows ? "disabled" : ""
-        } onclick="compressOutflows('${data.ein}')">Compress Outflows</button>
+          !node.canCompressOutflows ? "disabled" : ""
+        } onclick="compressOutflows('${node.ein}')">Compress Outflows</button>
       </div>
     </div>
         `;
