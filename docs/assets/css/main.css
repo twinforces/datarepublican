@@ -123,6 +123,14 @@
     @apply border border-gray-300 p-1 rounded-sm;
   }
 
+  .prose {
+    li {
+      p {
+       @apply !my-0; 
+      }
+    }
+  }
+
   /* Menu collapse/expand styles */
   header#site-header {
     @apply md:fixed flex flex-col bg-navy md:overflow-auto md:mx-auto p-2 md:p-0 text-white left-4 top-4 transition-all duration-300 md:rounded-lg md:w-[300px] max-h-[calc(100vh-2rem)] bottom-4;
