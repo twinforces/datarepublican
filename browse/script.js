@@ -625,6 +625,9 @@ function calculateOtherPosition(node, scale, height) {
   if (node.isRight) {
     node.x0 = node.parent.x1 - OTHER_WIDTH;
     node.x1 = node.parent.x1;
+  } else if (node.parent.isTerminal) {
+    node.x0 = node.parent.x0 - node.parent.inflowHeight / 2; // radius of octogon
+    node.x1 = node.parent.x0 + OTHER_WIDTH;
   } else {
     node.x0 = node.parent.x0;
     node.x1 = node.parent.x0 + OTHER_WIDTH;
@@ -809,65 +812,52 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
     })
     .attr("data-id", (d) => d.id);
 
-  const otherElements = nodeElements.filter((node) => node.isOther);
-  const notOtherElements = nodeElements.filter((node) => !node.isOther);
-  const rootElemenents = notOtherElements.filter((node) => node.isRoot);
-  const terminalElements = notOtherElements.filter((node) => node.isTerminal);
-
-  otherElements
-    .append("path")
-    .attr("d", generatePlusPath)
-    .attr("fill", "#ccc")
-    .attr("stroke", "#000");
-  notOtherElements
-    .append("path")
-    .attr("d", generateTrapezoidPath)
-    .attr("fill", (d) => colorScale(d.id))
-    .attr("stroke", "#000");
-  terminalElements.append("path").attr("d", generateOctagonPath);
-
-  /*nodeElements.each(function(d) {
-        const sel = d3.select(this);
-        if (d.isOther === true) {
-            sel.append("path")
-                .attr("d", generatePlusPath)
-                .attr("fill", "#ccc")
-                .attr("stroke", "#000");
-        } else if (!d.isTerminal) { // terminal nodes
-            sel.append("path")
-                .attr("d", generateOctagonPath)
-                .attr("fill", d => colorScale(d.id))
-                .attr("stroke", "#000");
-        } else {  // typical, grants in, grants out
-            sel.append("path")
-                .attr("d", generateTrapezoidPath)
-                .attr("fill", d => colorScale(d.id))
-                .attr("stroke", "#000");
-        }
-    });*/
+  nodeElements.each(function (d) {
+    const sel = d3.select(this);
+    if (d.isOther) {
+      sel
+        .append("path")
+        .attr("d", generatePlusPath)
+        .attr("fill", "#ccc")
+        .attr("stroke", "#000")
+        .style("cursor", "grab");
+    } else if (d.isTerminal) {
+      // terminal nodes
+      sel
+        .append("path")
+        .attr("d", generateOctagonPath)
+        .attr("fill", (d) => colorScale(d.id))
+        .style("cursor", "zoom-out")
+        .attr("stroke", "#000")
+        .append("title")
+        .text((d) => d.toolTipText());
+    } else {
+      // typical, grants in, grants out
+      sel
+        .append("path")
+        .attr("d", generateTrapezoidPath)
+        .attr("fill", (d) => colorScale(d.id))
+        .style("cursor", "grab")
+        .attr("stroke", "#000")
+        .append("title")
+        .text((d) => d.toolTipText());
+    }
+  });
 
   function nodeClick(event, d) {
     event.stopPropagation();
-    if (d.isOther) showControlPanel("other", d, this);
-    //            d.handleClick(event);
-    else showControlPanel("node", d, this);
-    refresh();
-  }
-  function otherClick(event, d) {
-    event.stopPropagation();
-    if (d.isOther) showControlPanel("other", d, this);
-    //            d.handleClick(event);
+    if (d.isOther) d.handleClick(event);
     else showControlPanel("node", d, this);
     refresh();
   }
 
   function terminalDoubleClick(event, d) {
     d.isVisible = false;
-    d.hide();
+    d.hideUp();
     Charity.addToHideList(d.ein);
-    refresh();
   }
   function nodeDoubleClick(event, d) {
+    if (d.isTerminal) terminalDoubleClick(event, d);
     if (!event.shiftKey) {
       expandInflows(d.ein);
       expandOutflows(d.ein);
@@ -891,8 +881,6 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
 
   nodeElements.on("click", nodeClick);
   nodeElements.on("dblclick", nodeDoubleClick);
-
-  notOtherElements.append("title").text((d) => d.toolTipText());
 
   masterGroup
     .append("g")
@@ -927,10 +915,6 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
       }
     });
 
-  otherElements.append().style("cursor", "zoom-in");
-  notOtherElements.append().style("cursor", "grab");
-  terminalElements.append().style("cursor", "zoom-out");
-  rootElemenents.append().style("cursor", "zoom-in");
   viewModel.cleanAfterRender(currentData); // restore grants to their original values
   $("#downloadBtn").show();
 }
@@ -1186,6 +1170,13 @@ window.compressInflows = function compressInflows(ein) {
   closePanel(); // Close the control panel
 };
 
+window.focusNode = function focusNode(ein) {
+  const params = new URLSearchParams();
+  params.append("ein", ein);
+  const newUrl = window.location.pathname + "?" + params.toString();
+  window.history.href = newUrl;
+};
+
 window.compressOutflows = function compressOutflows(ein) {
   const charity = Charity.getCharity(ein);
   if (charity) {
@@ -1225,6 +1216,10 @@ function showControlPanel(type, data, element) {
       <h3>${node.name}</h3>
       <p>EIN: ${node.ein}</p>
       <p>US Gov: $${formatNumber(node.govt_amt)} visible</p>
+      <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
+      <p><a href="${node.officersLink()}">Show me the Officers</a></p>
+           <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
+ <p>${node.propublicaLink("Take me to Propublcia")}</p>
       <p>Inflows: $${formatNumber(
         node.visibleGrantsInTotal - node.govt_amt
       )} visible (${node.visibleGrantsIn.length} grants), $${formatNumber(
@@ -1239,11 +1234,9 @@ function showControlPanel(type, data, element) {
     if (withButtons)
       content += `    
         <div class="flex flex-col gap-4">
-           <div class="bg-gray-200 text-white p-4 text-center">
-               <button onclick="removeNode('${node.ein}')">Remove Node</button>
-           </div>
-    <div class="flex flex-row gap-4">
+   
     <div class="flex-1 bg-gray-200 p-4">
+      <button onclick="focusNode('${node.ein}')">Tunnell Into Node</button>
       <button ${
         !node.canExpandInflows ? 'disabled class="bg-gray-100"' : ""
       } onclick="expandInflows('${node.ein})">Expand Inflows</button>
@@ -1253,9 +1246,14 @@ function showControlPanel(type, data, element) {
      </div>
     <div class="flex flex-row gap-4">
       <div class="flex-1 bg-gray-200 p-4">
-         <button ${
-           !node.canExpandOutflows ? 'disabled class="bg-gray-100"' : ""
-         } onclick="expandOutflows('${node.ein}')">Expand Outflows</button>
+               <button onclick="removeNode('${node.ein}')">Remove Node</button>
+                   <button ${
+                     !node.canExpandOutflows
+                       ? 'disabled class="bg-gray-100"'
+                       : ""
+                   } onclick="expandOutflows('${
+        node.ein
+      }')">Expand Outflows</button>
         <button ${
           !node.canCompressOutflows ? "disabled" : ""
         } onclick="compressOutflows('${node.ein}')">Compress Outflows</button>

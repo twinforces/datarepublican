@@ -132,11 +132,11 @@ title: Charity graph - multi-root BFS & taxpayer totals
      <div class="relative flex flex-col gap-2 max-w-lg">
       {% include input.html 
         label="Add EIN(s)" 
-        id="einInput" 
+        id="einShowInput" 
         placeholder="XX-XXXXXXX or 9 digits" 
         buttonLabel="Add EIN" 
         buttonId="addEinBtn" 
-        actions="<button id='clearEINsBtn' class='frameless'>Clear EINs</button>"
+        actions="<button id='clearEINsBtnShow' class='frameless'>Clear EINs</button>"
       %}
 
       <div id="activeEINs"></div>
@@ -144,11 +144,11 @@ title: Charity graph - multi-root BFS & taxpayer totals
     <div class="relative flex flex-col gap-2 max-w-lg">
       {% include input.html 
         label="Remove EIN(s)" 
-        id="einInput" 
+        id="einHIdeInput" 
         placeholder="XX-XXXXXXX or 9 digits" 
         buttonLabel="Remove EIN" 
         buttonId="hideEinBtn" 
-        actions="<button id='clearHideEINsBtn' class='frameless'>Clear EINs</button>"
+        actions="<button id='clearEINsBtnHide' class='frameless'>Clear EINs</button>"
       %}
 
       <div id="hideEINs"></div>
