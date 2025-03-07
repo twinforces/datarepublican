@@ -4,8 +4,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1741300894">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1741300894">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1741301418">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1741301418">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -724,8 +726,21 @@ $(document).ready(function() {
 
 
 
-  <div class="md:ml-[275px] flex-1">
-    <main class="@container p-4 xl:p-6 min-h-[calc(100vh-200px)] max-w-4xl prose prose-lg">
+  <div id="main-content" class="flex-1 transition-all duration-300">
+    <script>
+      // Set initial margin based on localStorage to prevent flash of content
+      (function() {
+        var mainContent = document.getElementById('main-content');
+        var isCollapsed = localStorage.getItem('menuCollapsed') === 'true';
+        
+        if (isCollapsed) {
+          mainContent.classList.add('menu-collapsed');
+        } else {
+          mainContent.classList.add('menu-expanded');
+        }
+      })();
+    </script>
+    <main class="@container p-4 lg:px-6 min-h-[calc(100vh-200px)] max-w-5xl prose">
       <p><em>Please take a moment to read my pastor’s essay.</em></p>
 
 <h1 id="the-historical-case-for-christianity">The Historical Case for Christianity</h1>
@@ -1094,7 +1109,7 @@ $(document).ready(function() {
   </div>
 </div>
 
-<footer class="border-t border-gray-200 mt-4 py-4 flex justify-center">
+<footer class="border-t border-gray-200 mt-4 py-4 flex flex-col items-center justify-center gap-6 mb-6">
   <div class="flex items-center text-black/75 gap-2">
     <span class="text-xs">Hosted by</span>
     
@@ -1129,6 +1144,8 @@ $(document).ready(function() {
       </svg>
       </a>
     </div>
+
+    <a href="/policies" class="text-navy text-xs opacity-60 hover:opacity-80 font-normal">Website policies</a>
   </footer>
   </div>
 </body>
