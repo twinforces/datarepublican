@@ -77,9 +77,9 @@ class BrowseViewModel {
     return Object.keys(this.showList).sort();
   }
   setShowList(list) {
-    Charity.showList = {};
-    list.forEach((ein) => Charity.addToShowList(ein));
-    return Charity.getShowList();
+    this.showList = {};
+    list.forEach((ein) => this.addToShowList(ein));
+    return this.getShowList();
   }
 
   clearShowList() {
@@ -91,7 +91,7 @@ class BrowseViewModel {
 
   addToHideList(ein) {
     const c = Charity.getCharity(ein);
-    const visible = !Charity.hideList[ein];
+    const visible = !c.isVisible();
     this.hideList[ein] = 1;
     if (visible) c.hide();
   }
@@ -101,13 +101,15 @@ class BrowseViewModel {
     delete Charity.hideList[ein];
     if (visible) Charity.getCharity(ein).show();
   }
-
+  shouldHide(ein) {
+    return this.hideList[ein];
+  }
   getHideList() {
     return Object.keys(Charity.hideList).sort();
   }
   setHideList(list) {
-    Charity.hideList = {};
-    list.forEach((ein) => Charity.addToHideList(ein));
+    this.hideList = {};
+    list.forEach((ein) => this.addToHideList(ein));
     return this.getHideList();
   }
 
@@ -370,6 +372,9 @@ class BrowseViewModel {
   getKeywordList() {
     return Object.keys(this.keywords).sort();
   }
+  setKeywordList(list) {
+    Object.fromEntries(list.map((key) => [key, true]));
+  }
 
   matchKeys() {
     return Object.values(Charity.charityLookup).filter((c) =>
@@ -400,10 +405,10 @@ class BrowseViewModel {
     return params;
   }
   parseQueryParams(params = new URLSearchParams(window.location.search)) {
-    const URLList = params.getAll("ein");
-    const keywords = params.getAll("keywords");
+    this.setShowList(params.getAll("ein"));
     this.setHideList(params.getAll("nein"));
     this.setBreadCrumbs(params.getAll("breadCrumbs"));
+    this.setKeywordList(params.getAll("keywords"));
   }
 
   processBreadCrumbs() {
@@ -413,6 +418,7 @@ class BrowseViewModel {
   }
   /* given a URL and a search list, which nodes are visible */
   matchURL(params = new URLSearchParams(window.location.search)) {
+    this.parseQueryParams(params);
     Object.values(Charity.charityLookup).forEach((c) => (c.isVisible = false)); //start with everything hidden
     this.getShowList().forEach((ein) => {
       const id = ein.split(":")[0];
