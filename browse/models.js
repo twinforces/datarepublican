@@ -130,7 +130,10 @@ class BrowseViewModel {
 
   getShowList() {
     return Object.entries(this.showList)
-      .map(([key, value]) => `${key}:${value[0]}:${value[1]}`)
+      .map(
+        ([key, value]) =>
+          `${key}:${value[0] || START_REVEAL}:${value[1] || START_REVEAL}`
+      )
       .sort();
   }
 
@@ -280,8 +283,8 @@ class BrowseViewModel {
     this.getShowList().forEach((ein) => {
       const parts = ein.split(":");
       const id = parts[0];
-      const ups = parts[1];
-      const downs = parts[2];
+      const ups = parts[1] || START_REVEAL;
+      const downs = parts[2] || START_REVEAL;
       const charity = Charity.getCharity(id);
       if (charity && !this.shouldHide(id) && !charity.desiredVisible) {
         charity.place(ups, downs);
@@ -297,7 +300,7 @@ class BrowseViewModel {
       if (c) c.desiredVisible = false;
     });
     if (this.getKeywordList().length) {
-      Charity.invisibleCharities().forEach((c) => {
+      Charity.invisibleCharities.forEach((c) => {
         if (
           !this.shouldHide(c.id) &&
           c.searchMatch(Object.keys(this.keywords)) &&
@@ -641,6 +644,7 @@ class BrowseViewModel {
      */
 
     if (rootCharity) {
+      // incremental case
       if (inflowsOnly) {
         for (const grant of rootCharity.invisibleGrantsIn.slice(
           0,
@@ -664,9 +668,10 @@ class BrowseViewModel {
         }
       }
     } else {
+      // brute force whole data model case
       const seeds = Charity.desiredCharities; //handy accessor
       for (const charity of seeds) {
-        for (const grant of charity.grants) {
+        for (const grant of charity.looseVisibleGrants) {
           if (
             (grant.desiredVisible || charity.desiredVisible) &&
             !this.shouldHide(grant.grantee.ein)
@@ -678,7 +683,7 @@ class BrowseViewModel {
             }
           }
         }
-        for (const grant of charity.grantsIn) {
+        for (const grant of charity.looseVisibleGrantsIn) {
           if (
             (grant.desiredVisible || charity.desiredVisible) &&
             !this.shouldHide(grant.filer.ein)
@@ -701,22 +706,24 @@ class BrowseViewModel {
    * @returns
    */
   buildSankeyData() {
+    let maxSeeds = MAX_NODES;
     this.renderData = { nodes: [], links: [] };
     //this.computeImpliedVisibility();
     this.renderData.links = Grant.visibleGrants;
     this.renderData.nodes = Charity.visibleCharities;
-    if (this.renderData.nodes.length > MAX_NODES) {
-      updateStatus("Too Many Nodes, reducing");
-      Charity.visibleCharities
+    while (this.renderData.nodes.length > MAX_NODES && maxSeeds > 5) {
+      updateStatus(`Too Many Nodes, reducing to ${maxSeeds} seeds`);
+      Charity.visibleCharities // reverse sort so largest flows larger get kept
         .sort(
           (a, b) =>
-            b.grantsTotal + b.grantsInTotal - (a.grantsTotal + a.grantsInTotal)
+            b.grantsTotal + b.grantsInTotal - (a.grantsTotal + b.grantsInTotal)
         )
-        .slice(MAX_NODES)
-        .forEach((c) => (c.desiredVisible = false));
+        .slice(maxSeeds)
+        .forEach((c) => c.clearVisibility());
       this.computeImpliedVisibility(null, true, true);
       this.renderData.nodes = Charity.visibleCharities;
       this.renderData.links = Grant.visibleGrants;
+      maxSeeds /= 2; // try with half as much next time.
     }
     console.log(
       `Sankey Data - Nodes: ${this.renderData.nodes.length}, Links: ${this.renderData.links.length}`
@@ -933,6 +940,23 @@ class Charity {
     return this.impliedVisible > 0 || this.desiredVisible;
   }
 
+  /**
+   * We use this when we're trying to pare down a graph
+   */
+
+  clearVisibility() {
+    this.desiredVisible = false;
+    this.impliedVisible = false;
+    this.grantsIn.forEach((g) => {
+      g.impliedVisible = false;
+      g.desiredVisible = false;
+    });
+    this.grants.forEach((g) => {
+      g.impliedVisible = false;
+      g.desiredVisible = false;
+    });
+  }
+
   get desiredVisible() {
     return this._desiredVisible;
   }
@@ -1099,6 +1123,30 @@ class Charity {
    * A grant can only consider itself visible if both its nodes are
    * visible.
    */
+
+  /**
+   * Grants only consider themselves visible if both ends are visible, but
+   * when propogating visibility, we just need to know if the grants
+   * would like to be visible.
+   */
+  get looseVisibleGrants() {
+    if (!this.isOrganized) this.organize();
+    const cacheKey = `looseVisibleGrants`;
+    if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
+    return (this._valueCache[cacheKey] = this.grants.filter(
+      (g) => g.isLooseVisible
+    ));
+  }
+
+  get looseVisibleGrantsIn() {
+    if (!this.isOrganized) this.organize();
+    const cacheKey = `looseVisibleGrantsIn`;
+    if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
+    return (this._valueCache[cacheKey] = this.grantsIn.filter(
+      (g) => g.isLooseVisible
+    ));
+  }
+
   get visibleGrants() {
     if (!this.isOrganized) this.organize();
     const cacheKey = `visibleGrants`;
