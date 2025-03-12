@@ -129,12 +129,13 @@ class BrowseViewModel {
   }
 
   getShowList() {
-    return Object.entries(this.showList)
+    const result = Object.entries(this.showList)
+      .sort((a, b) => a[0] - b[0]) // sort by key
       .map(
         ([key, value]) =>
           `${key}:${value[0] || START_REVEAL}:${value[1] || START_REVEAL}`
-      )
-      .sort();
+      );
+    return result;
   }
 
   setShowList(list) {
@@ -241,6 +242,7 @@ class BrowseViewModel {
     Object.values(visibleMap).forEach((e) => params.append("ein", e));
     this.getHideList().forEach((e) => params.append("nein", e));
     this.getKeywordList().forEach((k) => params.append("keywords", k));
+    params.append("scale", this.POWER_LAW);
     return params;
   }
 
@@ -251,6 +253,8 @@ class BrowseViewModel {
     this.setHideList(params.getAll("nein"));
     this.setBreadCrumbs(params.getAll("breadCrumbs"));
     this.setKeywordList(params.getAll("keywords"));
+    if (params.get("scale") && parseInt(params.get("scale"), 10))
+      this.POWER_LAW = parseInt(params.get("scale", 10));
   }
 
   /** Place holder for when we actually parse the breadcrumb data, for
@@ -700,6 +704,35 @@ class BrowseViewModel {
   }
 
   /**
+   * Make sure the sankey data is clean
+   */
+  buildCleanSankeyData(maxallowed = MAX_NODES) {
+    function filterHiddenGrant(grant) {
+      if (viewModel.shouldHide(grant.filer.ein)) return true;
+      if (viewModel.shouldHide(grant.grantee.ein)) return true;
+      return false;
+    }
+    let maxSeeds = maxallowed;
+    this.renderData.links = Grant.visibleGrants.filter(
+      (g) => !filterHiddenGrant(g)
+    );
+    this.renderData.nodes = Charity.visibleCharities.filter(
+      (node) => !this.shouldHide(node.ein)
+    );
+    const nodeSet = new Set();
+    const missingSet = new Set();
+    this.renderData.nodes.forEach((node) => nodeSet.add(node.ein));
+    this.renderData.links.forEach((grant) => {
+      if (!nodeSet.has(grant.filer.ein)) missingSet.add(grant.filer.ein);
+      if (!nodeSet.has(grant.grantee.ein)) missingSet.add(grant.grantee.ein);
+    });
+    // add missing nodes
+    for (const ein of missingSet) {
+      console.log(`bCSD: adding missing node ${ein}`);
+      this.renderData.nodes.push(Charity.getCharity(ein));
+    }
+  }
+  /**
    * Build the data we need for the Sankey. The model is close enough to what it needs that we
    * can draw direclty from the data, though we do have to undo the fact that the sankey code
    * replaces source as EIN with source as object.
@@ -709,9 +742,8 @@ class BrowseViewModel {
     let maxSeeds = MAX_NODES;
     this.renderData = { nodes: [], links: [] };
     //this.computeImpliedVisibility();
-    this.renderData.links = Grant.visibleGrants;
-    this.renderData.nodes = Charity.visibleCharities;
-    while (this.renderData.nodes.length > MAX_NODES && maxSeeds > 5) {
+    this.buildCleanSankeyData();
+    /*while (this.renderData.nodes.length > MAX_NODES && maxSeeds > 5) {
       updateStatus(`Too Many Nodes, reducing to ${maxSeeds} seeds`);
       Charity.visibleCharities // reverse sort so largest flows larger get kept
         .sort(
@@ -723,8 +755,9 @@ class BrowseViewModel {
       this.computeImpliedVisibility(null, true, true);
       this.renderData.nodes = Charity.visibleCharities;
       this.renderData.links = Grant.visibleGrants;
+      this.buildCleanSankeyData(maxSeeds);
       maxSeeds /= 2; // try with half as much next time.
-    }
+    }*/
     console.log(
       `Sankey Data - Nodes: ${this.renderData.nodes.length}, Links: ${this.renderData.links.length}`
     );
@@ -1372,13 +1405,8 @@ class Charity {
     viewModel.addToBreadCrumbs(`Hide|${this.id}`);
     viewModel.addToHideList(this.id);
     this.desiredVisible = false;
-    this.recurseUpHide(0, 1);
-    this.recurseDownHide(0, 1);
-  }
-
-  hideUp() {
-    this.grantsIn.forEach((g) => g.filer.removeGrant(g));
-    this.desiredVisible = false;
+    this.grantsIn.forEach((g) => this.clearVisibility());
+    this.grants.forEach((g) => this.clearVisibility());
   }
 
   /**
@@ -1451,7 +1479,7 @@ class Charity {
 
   /** links to elsewhere in the site */
   officersLink() {
-    return `/officers/?nonprofit_kw=${this.longEIN}`;
+    return `/officers/?nonprofit_kw=${this.ein}`;
   }
 
   financialsLink() {
