@@ -107,7 +107,7 @@ $(document).ready(function () {
 });
 
 function addEINFromInput() {
-  let val = $("#einInput").val().trim().replace(/[-\s]/g, "");
+  let val = $("#einShowInput").val().trim().replace(/[-\s]/g, "");
   if (!/^\d{9}$/.test(val) && val !== "001") {
     alert("EIN must be 9 digits after removing dashes/spaces or 001.");
     return;
@@ -115,7 +115,7 @@ function addEINFromInput() {
   const charity = Charity.getCharity(val);
   if (!charity) console.warn("EIN not found in charities.csv (still adding).");
   viewModel.addToShowList(val);
-  $("#einInput").val("");
+  $("#einShowInput").val("");
   renderActiveEINs();
   Charity.placeNode(val);
   updateQueryParams();
@@ -367,7 +367,9 @@ function generateGraph() {
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
   }, 1000);
-
+  renderActiveEINs();
+  renderActiveKeywords();
+  renderHideEINs();
   $("#loading").hide();
 }
 
@@ -376,7 +378,12 @@ function bindEvents(g) {
     .on("click", (event, d) => {
       console.log("Node clicked:", d.id);
       event.stopPropagation();
-      viewModel.clickNode(event, d, refresh);
+      if (event.shiftKey) {
+        d.hide();
+        Charity.addToHideList(d.ein);
+        refresh();
+      } else if (event.metaKey) showControlPanel("node", d, this);
+      else viewModel.clickNode(event, d, refresh);
     })
     .on("dblclick", (event, d) => {
       console.log("Node double-clicked:", d.id);
@@ -760,7 +767,40 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
+    .on("click", (event, d) => {
+      console.log("Node clicked:", d.id);
+      event.stopPropagation();
+      viewModel.clickNode(event, d, refresh);
+    })
+    .on("dblClick", (event, d) => {
+      console.log("Node clicked:", d.id);
+      event.stopPropagation();
+      viewModel.doubleClickNode(event, d, refresh);
+    })
     .text((d) => d.name);
+
+  /*masterGroup
+    .append("g")
+    .selectAll("text")
+    .data(graph.links)
+    .join("text")
+    .attr("x", (d) => {
+      return (d.source.x1 + d.target.x0) / 2;
+    })
+    .attr("y", (d) => (d.y0 + d.y1) / 2)
+    .attr("dy", "0.35em")
+    .attr("text-anchor", "center")
+    .on("click", (event, d) => {
+      console.log("Node clicked:", d.id);
+      event.stopPropagation();
+      viewModel.clickNode(event, d, refresh);
+    })
+    .on("dblClick", (event, d) => {
+      console.log("Node clicked:", d.id);
+      event.stopPropagation();
+      viewModel.doubleClickLink(event, d, refresh);
+    })
+    .text((d) => formatNumber(d.amt));*/
 
   viewModel.cleanAfterRender();
   $("#downloadBtn").show();
