@@ -85,10 +85,11 @@ class BrowseViewModel {
     this.renderData = null;
     this.dataReady = false;
     viewModel = this;
-    Object.values(Charity.charityLookup).forEach((c) => {
-      c.desiredVisible = false;
-      c.impliedVisible = 0;
-    });
+    this.resetAll();
+  }
+
+  /**Called when we focus on just one node*/
+  resetAll() {
     Object.values(Grant.grantLookup).forEach((g) => {
       g.desiredVisible = false;
       g.impliedVisible = 0;
