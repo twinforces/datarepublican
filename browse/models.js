@@ -122,7 +122,7 @@ class BrowseViewModel {
   }
 
   removeFromShowList(ein) {
-    id = ein.split(":")[0];
+    const id = ein.split(":")[0];
     delete this.showList[id];
     const c = Charity.getCharity(id);
     if (c) c.desiredVisible = false;
@@ -732,6 +732,7 @@ class BrowseViewModel {
       this.renderData.nodes.push(Charity.getCharity(ein));
     }
   }
+
   /**
    * Build the data we need for the Sankey. The model is close enough to what it needs that we
    * can draw direclty from the data, though we do have to undo the fact that the sankey code
@@ -742,7 +743,7 @@ class BrowseViewModel {
     let maxSeeds = MAX_NODES;
     this.renderData = { nodes: [], links: [] };
     //this.computeImpliedVisibility();
-    this.buildCleanSankeyData();
+    this.buildCleanSankeyData(maxSeeds);
     /*while (this.renderData.nodes.length > MAX_NODES && maxSeeds > 5) {
       updateStatus(`Too Many Nodes, reducing to ${maxSeeds} seeds`);
       Charity.visibleCharities // reverse sort so largest flows larger get kept
