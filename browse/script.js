@@ -1331,6 +1331,8 @@ window.focusNode = function (ein) {
   params.append("ein", ein);
   const newUrl = window.location.pathname + "?" + params.toString();
   window.history.replaceState({}, "", newUrl);
+  viewModel.parseQueryParams();
+  viewModel.resetAll();
   generateGraph();
   closePanel();
 };
