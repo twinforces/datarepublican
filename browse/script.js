@@ -239,140 +239,6 @@ function compareCharities(a, b) {
 function compareLinks(a, b) {
   return b.value - a.value;
 }
-function generateGraph() {
-  if (!viewModel.dataReady) {
-    alert("Data not loaded yet. Please wait.");
-    return;
-  }
-
-  $("#loading").show();
-  $("#graph-container svg").remove();
-
-  const container = document.getElementById("graph-container");
-  const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.7;
-
-  svg = d3
-    .select("#graph-container")
-    .append("svg")
-    .attr("id", "graph")
-    .attr("width", "100%")
-    .attr("height", "100%")
-    .style("display", "block")
-    .style("background", "#fff");
-
-  zoom = d3
-    .zoom()
-    .scaleExtent([0.1, 4])
-    .filter((event) => !event.button && event.type !== "dblclick")
-    .on("zoom", (event) => {
-      svg.select("g").attr("transform", event.transform); // Update to select g dynamically
-    });
-
-  svg.call(zoom);
-
-  let g = svg.append("g").attr("transform", "translate(50, 50)");
-
-  const sankey = d3
-    .sankey()
-    .nodeId((d) => d.id)
-    .nodeWidth(NODE_WIDTH)
-    .nodePadding(NODE_PADDING)
-    .linkSort(compareLinks)
-    .nodeAlign(d3.sankeyCenter)
-    .nodeSort(compareCharities)
-    .size([width - 100, height - 100]);
-
-  viewModel.parseQueryParams();
-  if (!viewModel.matchURL()) viewModel.loadDefaultData();
-
-  viewModel.previousData = renderFocusedSankey(
-    g,
-    sankey,
-    svg,
-    width,
-    height,
-    viewModel.getShowList().length
-      ? viewModel.getShowList()
-      : [viewModel.GOV_EIN],
-    viewModel.previousData
-  );
-
-  // Re-select g after rendering since it’s recreated in renderFocusedSankey
-  g = svg.select("g");
-  //bindEvents(g);
-
-  // Update zoom controls to use the reselected g
-  document.getElementById("zoomIn").onclick = () =>
-    svg.transition().duration(300).call(zoom.scaleBy, 1.3);
-  document.getElementById("zoomOut").onclick = () =>
-    svg.transition().duration(300).call(zoom.scaleBy, 0.7);
-  document.getElementById("zoomFit").onclick = () => {
-    const bounds = g.node().getBBox();
-    if (
-      !isFinite(bounds.width) ||
-      bounds.width <= 0 ||
-      !isFinite(bounds.height) ||
-      bounds.height <= 0
-    )
-      return;
-    const dx = bounds.x;
-    const dy = bounds.y;
-    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
-    svg
-      .transition()
-      .duration(750)
-      .call(
-        zoom.transform,
-        d3.zoomIdentity
-          .translate(width / 2, height / 2)
-          .scale(scale)
-          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
-      );
-  };
-  document.getElementById("scaleUp").onclick = () => {
-    viewModel.graphScaleUp();
-    generateGraph();
-  };
-  document.getElementById("scaleDown").onclick = () => {
-    viewModel.graphScaleDown();
-    generateGraph();
-  };
-  document.getElementById("scaleReset").onclick = () => {
-    viewModel.graphScaleReset();
-    generateGraph();
-  };
-
-  setTimeout(() => {
-    const bounds = g.node().getBBox();
-    if (
-      !isFinite(bounds.width) ||
-      bounds.width <= 0 ||
-      !isFinite(bounds.height) ||
-      bounds.height <= 0
-    ) {
-      console.error("Invalid bounds for zoom:", bounds);
-      return;
-    }
-    const dx = bounds.x;
-    const dy = bounds.y;
-    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
-    svg
-      .transition()
-      .duration(750)
-      .call(
-        zoom.transform,
-        d3.zoomIdentity
-          .translate(width / 2, height / 2)
-          .scale(scale)
-          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
-      );
-  }, 1000);
-  renderActiveEINs();
-  renderActiveKeywords();
-  renderHideEINs();
-  $("#loading").hide();
-}
 
 function generateUniqueId(prefix = "gradient", link) {
   return `${prefix}-${link.filer.id}~${link.grantee.id}`;
@@ -652,10 +518,157 @@ function bindEvents(g) {
   });
 }
 
+// [Previous imports and functions unchanged...]
+
+function generateGraph() {
+  if (!viewModel.dataReady) {
+    alert("Data not loaded yet. Please wait.");
+    return;
+  }
+
+  $("#loading").show();
+  $("#graph-container svg").remove();
+
+  const container = document.getElementById("graph-container");
+  const width = container.offsetWidth;
+  const height = container.offsetHeight || window.innerHeight * 0.7;
+
+  svg = d3
+    .select("#graph-container")
+    .append("svg")
+    .attr("id", "graph")
+    .attr("width", "100%")
+    .attr("height", "100%")
+    .style("display", "block")
+    .style("background", "#fff");
+
+  zoom = d3
+    .zoom()
+    .extent([
+      [0, 0],
+      [width, height],
+    ]) // Match renderFocusedSankey extent
+    .scaleExtent([0.1, 4]) // Match original range
+    .filter(
+      (event) =>
+        event.type === "wheel" ||
+        (event.type === "mousedown" && event.button === 0)
+    ) // Match renderFocusedSankey filter
+    .on("zoom", (event) => {
+      svg.select("g.main").attr("transform", event.transform); // Target g.main
+    });
+
+  svg.call(zoom);
+
+  let g = svg
+    .append("g")
+    .attr("class", "main")
+    .attr("transform", "translate(50, 50)");
+
+  const sankey = d3
+    .sankey()
+    .nodeId((d) => d.id)
+    .nodeWidth(NODE_WIDTH)
+    .nodePadding(NODE_PADDING)
+    .linkSort(compareLinks)
+    .nodeAlign(d3.sankeyCenter)
+    .nodeSort(compareCharities)
+    .size([width - 100, height - 100]);
+
+  viewModel.parseQueryParams();
+  if (!viewModel.matchURL()) viewModel.loadDefaultData();
+
+  viewModel.previousData = renderFocusedSankey(
+    g,
+    sankey,
+    svg, // Use global svg instead of svgRef
+    width,
+    height,
+    viewModel.getShowList().length
+      ? viewModel.getShowList()
+      : [viewModel.GOV_EIN],
+    viewModel.previousData
+  );
+
+  // Button handlers using global zoom
+  document.getElementById("zoomIn").onclick = () =>
+    svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+  document.getElementById("zoomOut").onclick = () =>
+    svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+  document.getElementById("zoomFit").onclick = () => {
+    const g = svg.select("g.main"); // Select g.main dynamically
+    const bounds = g.node().getBBox();
+    if (
+      !isFinite(bounds.width) ||
+      bounds.width <= 0 ||
+      !isFinite(bounds.height) ||
+      bounds.height <= 0
+    )
+      return;
+    const dx = bounds.x;
+    const dy = bounds.y;
+    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+    svg
+      .transition()
+      .duration(750)
+      .call(
+        zoom.transform,
+        d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+      );
+  };
+  document.getElementById("scaleUp").onclick = () => {
+    viewModel.graphScaleUp();
+    generateGraph();
+  };
+  document.getElementById("scaleDown").onclick = () => {
+    viewModel.graphScaleDown();
+    generateGraph();
+  };
+  document.getElementById("scaleReset").onclick = () => {
+    viewModel.graphScaleReset();
+    generateGraph();
+  };
+
+  setTimeout(() => {
+    const g = svg.select("g.main");
+    const bounds = g.node().getBBox();
+    if (
+      !isFinite(bounds.width) ||
+      bounds.width <= 0 ||
+      !isFinite(bounds.height) ||
+      bounds.height <= 0
+    ) {
+      console.error("Invalid bounds for zoom:", bounds);
+      return;
+    }
+    const dx = bounds.x;
+    const dy = bounds.y;
+    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+    svg
+      .transition()
+      .duration(750)
+      .call(
+        zoom.transform,
+        d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+      );
+  }, 1000);
+
+  renderActiveEINs();
+  renderActiveKeywords();
+  renderHideEINs();
+  $("#loading").hide();
+}
+
 function renderFocusedSankey(
   g,
   sankey,
-  svgRef,
+  svg,
   width,
   height,
   nodeIds,
@@ -677,10 +690,10 @@ function renderFocusedSankey(
   normalizeStrokeWidths(graph);
 
   if (!previousData) {
-    svgRef.selectAll("*").remove();
+    svg.selectAll("*").remove();
   }
 
-  const defs = svgRef.selectAll("defs").data([0]).join("defs");
+  const defs = svg.selectAll("defs").data([0]).join("defs");
   graph.links.forEach((link) => {
     link.gradientId = link.gradientId || generateUniqueId("gradient", link);
   });
@@ -722,31 +735,14 @@ function renderFocusedSankey(
     .attr("offset", (d) => d.offset)
     .attr("stop-color", (d) => d.color);
 
-  g = svgRef
+  g = svg
     .selectAll("g.main")
     .data([0])
     .join("g")
     .attr("class", "main")
     .attr("transform", `translate(50, 50) scale(${scale})`);
 
-  // Zoom with simplified filter to pass clicks
-  svgRef.call(
-    d3
-      .zoom()
-      .extent([
-        [0, 0],
-        [width, height],
-      ])
-      .scaleExtent([0.1, 8])
-      .filter(
-        (event) =>
-          event.type === "wheel" ||
-          (event.type === "mousedown" && event.button === 0)
-      ) // Only wheel or drag
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-      })
-  );
+  // No local zoom definition here—rely on global zoom from generateGraph
 
   const masterGroup = g
     .selectAll(".graph-group")
@@ -996,7 +992,6 @@ function renderFocusedSankey(
     .style("font-size", `${12 * scale}px`)
     .text((d) => d.name);
 
-  // Rebind events after rendering to catch all elements
   bindEvents(g);
 
   viewModel.cleanAfterRender();
@@ -1004,6 +999,8 @@ function renderFocusedSankey(
 
   return currentData;
 }
+
+// [Rest of the file unchanged...]
 function handleSearch(e) {
   const value = e.target.value.toLowerCase();
   const searchResults = document.getElementById("searchResults");
