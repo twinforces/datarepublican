@@ -286,7 +286,7 @@ function generateGraph() {
   viewModel.parseQueryParams();
   if (!viewModel.matchURL()) viewModel.loadDefaultData();
 
-  renderFocusedSankey(
+  viewModel.previousData = renderFocusedSankey(
     g,
     sankey,
     svg,
@@ -294,12 +294,13 @@ function generateGraph() {
     height,
     viewModel.getShowList().length
       ? viewModel.getShowList()
-      : [viewModel.GOV_EIN]
+      : [viewModel.GOV_EIN],
+    viewModel.previousData
   );
 
   // Re-select g after rendering since it’s recreated in renderFocusedSankey
   g = svg.select("g");
-  bindEvents(g);
+  //bindEvents(g);
 
   // Update zoom controls to use the reselected g
   document.getElementById("zoomIn").onclick = () =>
@@ -373,54 +374,8 @@ function generateGraph() {
   $("#loading").hide();
 }
 
-function bindEvents(g) {
-  g.selectAll(".node")
-    .on("click", (event, d) => {
-      console.log("Node clicked:", d.id);
-      event.stopPropagation();
-      if (event.shiftKey) {
-        d.hide();
-        Charity.addToHideList(d.ein);
-        refresh();
-      } else if (event.metaKey) showControlPanel("node", d, this);
-      else viewModel.clickNode(event, d, refresh);
-    })
-    .on("dblclick", (event, d) => {
-      console.log("Node double-clicked:", d.id);
-      event.stopPropagation();
-      if (d.isTerminal && !event.shiftKey) {
-        d.hideUp();
-        Charity.addToHideList(d.ein);
-      } else {
-        viewModel.doubleClickNode(event, d);
-      }
-      refresh();
-    });
-  g.selectAll(".link")
-    .on("click", (event, d) => {
-      console.log("Link clicked:", d.id);
-      event.stopPropagation();
-      showControlPanel("link", d, this);
-    })
-    .on("dblclick", (event, d) => {
-      console.log("Link double-clicked:", d.id);
-      viewModel.doubleClickGrant(event, d);
-      refresh();
-    });
-  g.selectAll(".hat-up").on("click", (event, d) => {
-    console.log("Hat left clicked:", d.id);
-    event.stopPropagation();
-    viewModel.handleUpClick(event, d, refresh);
-  });
-  g.selectAll(".hat-down").on("click", (event, d) => {
-    console.log("Hat right clicked:", d.id);
-    event.stopPropagation();
-    viewModel.handleDownClick(event, d, refresh);
-  });
-}
-
-function generateUniqueId(prefix = "gradient") {
-  return `${prefix}-${Math.random().toString(36).substr(2, 9)}`;
+function generateUniqueId(prefix = "gradient", link) {
+  return `${prefix}-${link.filer.id}~${link.grantee.id}`;
 }
 
 function calculateScale(graph, width, height) {
@@ -611,31 +566,135 @@ function normalizeStrokeWidths(sankey) {
     }
   });
 }
+function savePreviousState(data) {
+  data.nodes.forEach((node) => {
+    if (node.hasOwnProperty("x0")) {
+      node.previousX0 = node.x0;
+      node.previousY0 = node.y0;
+      node.previousX1 = node.x1;
+      node.previousY1 = node.y1;
+      node.hasLeftHat =
+        node.canExpandInflows && node.invisibleGrantsIn.length > 0;
+      node.hasRightHat =
+        !node.isTerminal &&
+        node.canExpandOutflows &&
+        node.invisibleGrants.length > 0;
+    }
+  });
+  data.links.forEach((link) => {
+    if (link.hasOwnProperty("width")) {
+      link.previousWidth = link.width;
+      link.previousSource = {
+        x0: link.source.x0,
+        y0: link.source.y0,
+        x1: link.source.x1,
+        y1: link.source.y1,
+      };
+      link.previousTarget = {
+        x0: link.target.x0,
+        y0: link.target.y0,
+        x1: link.target.x1,
+        y1: link.target.y1,
+      };
+    }
+  });
+}
 
-function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
+function bindEvents(g) {
+  g.selectAll(".node")
+    .on("click", (event, d) => {
+      console.log("Node clicked:", d.id);
+      event.stopPropagation();
+      if (event.shiftKey) {
+        d.hide();
+        Charity.addToHideList(d.ein);
+        refresh();
+      } else if (event.metaKey) {
+        showControlPanel("node", d, this);
+      } else {
+        viewModel.clickNode(event, d, refresh);
+      }
+    })
+    .on("dblclick", (event, d) => {
+      console.log("Node double-clicked:", d.id);
+      event.stopPropagation();
+      if (d.isTerminal && !event.shiftKey) {
+        d.hideUp();
+        Charity.addToHideList(d.ein);
+        refresh();
+      } else {
+        viewModel.doubleClickNode(event, d, refresh);
+      }
+    });
+
+  g.selectAll(".link")
+    .on("click", (event, d) => {
+      console.log("Link clicked:", d.id);
+      event.stopPropagation();
+      showControlPanel("link", d, this);
+    })
+    .on("dblclick", (event, d) => {
+      console.log("Link double-clicked:", d.id);
+      event.stopPropagation();
+      viewModel.doubleClickGrant(event, d, refresh);
+    });
+
+  g.selectAll(".hat-up").on("click", (event, d) => {
+    console.log("Hat left clicked:", d.id);
+    event.stopPropagation();
+    viewModel.handleUpClick(event, d, refresh);
+  });
+
+  g.selectAll(".hat-down").on("click", (event, d) => {
+    console.log("Hat right clicked:", d.id);
+    event.stopPropagation();
+    viewModel.handleDownClick(event, d, refresh);
+  });
+}
+
+function renderFocusedSankey(
+  g,
+  sankey,
+  svgRef,
+  width,
+  height,
+  nodeIds,
+  previousData
+) {
   $("#downloadBtn").hide();
-  //if (nodeIds) nodeIds.forEach((nid) => Charity.placeNode(nid));
 
   let currentData = viewModel.buildSankeyData();
+  savePreviousState(currentData);
+
+  const sankeyWidth = width - 100;
+  const sankeyHeight = height - 100;
+  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(10);
+
   const graph = sankey(currentData);
 
   const scale = calculateScale(graph, width, height);
   calculateNodePositions(graph.nodes, scale, height);
   normalizeStrokeWidths(graph);
 
-  // Clear the SVG
-  svgRef.selectAll("*").remove();
+  if (!previousData) {
+    svgRef.selectAll("*").remove();
+  }
 
-  // Append defs for gradients
-  const defs = svgRef.append("defs");
-  graph.links.forEach(
-    (link) => (link.gradientId = generateUniqueId("gradient"))
-  );
+  const defs = svgRef.selectAll("defs").data([0]).join("defs");
+  graph.links.forEach((link) => {
+    link.gradientId = link.gradientId || generateUniqueId("gradient", link);
+  });
+
   const gradients = defs
     .selectAll("linearGradient.dynamic")
-    .data(graph.links)
+    .data(graph.links, (d) => d.gradientId);
+
+  gradients.exit().remove();
+
+  const gradientEnter = gradients
     .enter()
     .append("linearGradient")
+    .attr("class", "dynamic")
     .attr("id", (d) => d.gradientId)
     .attr("gradientUnits", "objectBoundingBox")
     .attr("x1", "0")
@@ -643,169 +702,308 @@ function renderFocusedSankey(g, sankey, svgRef, width, height, nodeIds) {
     .attr("x2", "1")
     .attr("y2", "0.5");
 
-  gradients
+  gradientEnter
     .append("stop")
     .attr("offset", "0%")
     .attr("stop-color", (d) => colorScale(d.source.id));
-  gradients
+  gradientEnter
     .append("stop")
     .attr("offset", "100%")
     .attr("stop-color", (d) => colorScale(d.target.id));
 
-  // Re-append the group element g
-  g = svgRef.append("g").attr("transform", "translate(50, 50)");
+  gradients
+    .merge(gradientEnter)
+    .selectAll("stop")
+    .data((d) => [
+      { offset: "0%", color: colorScale(d.source.id) },
+      { offset: "100%", color: colorScale(d.target.id) },
+    ])
+    .join("stop")
+    .attr("offset", (d) => d.offset)
+    .attr("stop-color", (d) => d.color);
 
-  // Append masterGroup to g
+  g = svgRef
+    .selectAll("g.main")
+    .data([0])
+    .join("g")
+    .attr("class", "main")
+    .attr("transform", `translate(50, 50) scale(${scale})`);
+
+  // Zoom with simplified filter to pass clicks
+  svgRef.call(
+    d3
+      .zoom()
+      .extent([
+        [0, 0],
+        [width, height],
+      ])
+      .scaleExtent([0.1, 8])
+      .filter(
+        (event) =>
+          event.type === "wheel" ||
+          (event.type === "mousedown" && event.button === 0)
+      ) // Only wheel or drag
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      })
+  );
+
   const masterGroup = g
-    .append("g")
-    .attr("class", "graph-group")
-    .attr("transform", `scale(${scale})`);
+    .selectAll(".graph-group")
+    .data([0])
+    .join("g")
+    .attr("class", "graph-group");
 
-  // Links
-  const link = masterGroup
-    .append("g")
+  const linkGroup = masterGroup
+    .selectAll("g.links")
+    .data([0])
+    .join("g")
+    .attr("class", "links")
     .attr("fill", "none")
     .attr("stroke-opacity", 1)
-    .style("mix-blend-mode", "multiply")
+    .style("mix-blend-mode", "multiply");
+
+  const link = linkGroup
     .selectAll(".link")
-    .data(graph.links)
-    .join("path")
+    .data(graph.links, (d) => `${d.source.id}-${d.target.id}`);
+
+  link.exit().transition().duration(1200).attr("stroke-width", 0).remove();
+
+  const linkEnter = link
+    .enter()
+    .append("path")
+    .attr("class", "link")
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => {
-      console.log("Link visibility:", d.id, d.isVisible);
-      return d.isVisible ? `url(#${d.gradientId})` : "#d3d3d3";
-    })
+    .attr("stroke", (d) => (d.isVisible ? `url(#${d.gradientId})` : "#d3d3d3"))
     .style("stroke-opacity", "0.3")
-    .attr("stroke-width", (d) => d.width);
+    .attr("stroke-width", 0);
 
   link
+    .merge(linkEnter)
+    .transition()
+    .duration(1200)
+    .attr("d", sankeyLinkHorizontalTrapezoid())
+    .attr("stroke", (d) => (d.isVisible ? `url(#${d.gradientId})` : "#d3d3d3"))
+    .attr("stroke-width", (d) => d.width || 1);
+
+  linkEnter
     .append("title")
     .text(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
-  // Nodes
-  const nodeGroup = masterGroup.append("g").attr("class", "nodes");
+  const nodeGroup = masterGroup
+    .selectAll("g.nodes")
+    .data([0])
+    .join("g")
+    .attr("class", "nodes");
+
   const nodeElements = nodeGroup
-    .selectAll("g")
-    .data(graph.nodes)
-    .join("g")
-    .attr("class", (d) => (d.isTerminal ? "node no-grants" : "node expand"))
-    .attr("data-id", (d) => d.id);
+    .selectAll("g.node")
+    .data(graph.nodes, (d) => d.id);
 
-  nodeElements.each(function (d) {
-    const sel = d3.select(this);
-    if (d.isTerminal) {
-      sel
-        .append("path")
-        .attr("d", generateOctagonPath)
-        .attr("fill", (d) => colorScale(d.id))
-        .style("cursor", "zoom-out")
-        .attr("stroke", "#000")
-        .append("title")
-        .text((d) => d.toolTipText());
-    } else {
-      sel
-        .append("path")
-        .attr("d", generateTrapezoidPath)
-        .attr("fill", (d) => colorScale(d.id))
-        .style("cursor", "grab")
-        .attr("stroke", "#000")
-        .append("title")
-        .text((d) => d.toolTipText());
-    }
-  });
+  nodeElements
+    .exit()
+    .transition()
+    .duration(1000)
+    .attr("transform", "scale(0)")
+    .remove();
 
-  // Hats
-  const hatGroup = masterGroup.append("g").attr("class", "expand-hats");
-  const hats = hatGroup
-    .selectAll("g")
-    .data(
-      graph.nodes.filter(
-        (d) =>
-          (d.canExpandInflows && d.invisibleGrantsIn.length > 0) ||
-          (!d.isTerminal && d.canExpandOutflows && d.invisibleGrants.length > 0)
-      )
-    )
-    .join("g")
-    .attr("class", "hat");
-
-  hats.each(function (d) {
-    const sel = d3.select(this);
-    if (d.canExpandInflows && d.invisibleGrantsIn.length > 0) {
-      sel
-        .append("path")
-        .attr(
-          "d",
-          generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
-        )
-        .attr("fill", "#ccc")
-        .attr("stroke", "#000")
-        .attr("class", "hat-up")
-        .style("cursor", "pointer");
-    }
-    if (!d.isTerminal && d.canExpandOutflows && d.invisibleGrants.length > 0) {
-      sel
-        .append("path")
-        .attr("d", generatePlusPath({ ...d, isRight: true }))
-        .attr("fill", "#ccc")
-        .attr("stroke", "#000")
-        .attr("class", "hat-down")
-        .style("cursor", "pointer");
-    }
-  });
-
-  // Text
-  masterGroup
+  const nodeEnter = nodeElements
+    .enter()
     .append("g")
-    .selectAll("text")
-    .data(graph.nodes)
-    .join("text")
-    .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
-    .attr("y", (d) => (d.y0 + d.y1) / 2)
+    .attr("class", (d) => (d.isTerminal ? "node no-grants" : "node expand"))
+    .attr("data-id", (d) => d.id)
+    .style("opacity", 0);
+
+  nodeEnter.each(function (d) {
+    const sel = d3.select(this);
+    sel
+      .append("path")
+      .attr("stroke", "#000")
+      .attr(
+        "d",
+        d.isTerminal
+          ? generateOctagonPath({
+              ...d,
+              x0: d.previousX0 || d.x0,
+              y0: d.previousY0 || d.y0,
+              x1: d.previousX1 || d.x1,
+              y1: d.previousY1 || d.y1,
+            })
+          : generateTrapezoidPath({
+              ...d,
+              x0: d.previousX0 || d.x0,
+              y0: d.previousY0 || d.y0,
+              x1: d.previousX1 || d.x1,
+              y1: d.previousY1 || d.y1,
+            })
+      )
+      .attr("fill", colorScale(d.id))
+      .style("cursor", d.isTerminal ? "zoom-out" : "grab")
+      .append("title")
+      .text((d) => d.toolTipText());
+  });
+
+  nodeEnter.transition().duration(500).style("opacity", 1);
+
+  nodeElements
+    .merge(nodeEnter)
+    .filter((d) => d.previousX0 !== undefined)
+    .select("path")
+    .transition()
+    .duration(1000)
+    .attr("d", (d) =>
+      d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d)
+    );
+
+  const hatGroup = masterGroup
+    .selectAll("g.expand-hats")
+    .data([0])
+    .join("g")
+    .attr("class", "expand-hats");
+
+  const leftHats = hatGroup.selectAll("g.hat-left").data(
+    graph.nodes.filter(
+      (d) => d.canExpandInflows && d.invisibleGrantsIn.length > 0
+    ),
+    (d) => `${d.id}-left`
+  );
+
+  leftHats
+    .exit()
+    .filter((d) => d.hasLeftHat)
+    .transition()
+    .duration(1500)
+    .style("opacity", 0)
+    .remove();
+
+  const leftHatEnter = leftHats
+    .enter()
+    .append("g")
+    .attr("class", "hat-left")
+    .style("opacity", (d) => (d.hasLeftHat ? 1 : 0));
+
+  leftHatEnter
+    .append("path")
+    .attr("d", (d) =>
+      generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+    )
+    .attr("fill", "#ccc")
+    .attr("stroke", "#000")
+    .attr("class", "hat-up")
+    .style("cursor", "pointer");
+
+  leftHats
+    .merge(leftHatEnter)
+    .transition()
+    .duration(1500)
+    .style("opacity", (d) =>
+      d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
+        ? 1
+        : d.hasLeftHat &&
+          !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+        ? 0
+        : 1
+    )
+    .select("path")
+    .attr("d", (d) =>
+      generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+    );
+
+  const rightHats = hatGroup.selectAll("g.hat-right").data(
+    graph.nodes.filter(
+      (d) =>
+        !d.isTerminal && d.canExpandOutflows && d.invisibleGrants.length > 0
+    ),
+    (d) => `${d.id}-right`
+  );
+
+  rightHats
+    .exit()
+    .filter((d) => d.hasRightHat)
+    .transition()
+    .duration(1500)
+    .style("opacity", 0)
+    .remove();
+
+  const rightHatEnter = rightHats
+    .enter()
+    .append("g")
+    .attr("class", "hat-right")
+    .style("opacity", (d) => (d.hasRightHat ? 1 : 0));
+
+  rightHatEnter
+    .append("path")
+    .attr("d", (d) => generatePlusPath({ ...d, isRight: true }))
+    .attr("fill", "#ccc")
+    .attr("stroke", "#000")
+    .attr("class", "hat-down")
+    .style("cursor", "pointer");
+
+  rightHats
+    .merge(rightHatEnter)
+    .transition()
+    .duration(1500)
+    .style("opacity", (d) =>
+      !d.isTerminal &&
+      d.canExpandOutflows &&
+      d.invisibleGrants.length > 0 &&
+      !d.hasRightHat
+        ? 1
+        : d.hasRightHat &&
+          !(
+            !d.isTerminal &&
+            d.canExpandOutflows &&
+            d.invisibleGrants.length > 0
+          )
+        ? 0
+        : 1
+    )
+    .select("path")
+    .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+
+  const textGroup = masterGroup
+    .selectAll("g.text")
+    .data([0])
+    .join("g")
+    .attr("class", "text");
+
+  const text = textGroup.selectAll("text").data(graph.nodes, (d) => d.id);
+
+  text.exit().remove();
+
+  const textEnter = text
+    .enter()
+    .append("text")
     .attr("dy", "0.35em")
+    .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
+    .attr("y", (d) => ((d.previousY0 || d.y0) + (d.previousY1 || d.y1)) / 2)
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .on("click", (event, d) => {
-      console.log("Node clicked:", d.id);
-      event.stopPropagation();
-      viewModel.clickNode(event, d, refresh);
-    })
-    .on("dblClick", (event, d) => {
-      console.log("Node clicked:", d.id);
-      event.stopPropagation();
-      viewModel.doubleClickNode(event, d, refresh);
-    })
+    .style("font-size", `${12 * scale}px`);
+
+  text
+    .merge(textEnter)
+    .transition()
+    .duration(1500)
+    .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
+    .attr("y", (d) => (d.y0 + d.y1) / 2)
+    .attr("text-anchor", (d) =>
+      d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+    )
+    .style("font-size", `${12 * scale}px`)
     .text((d) => d.name);
 
-  /*masterGroup
-    .append("g")
-    .selectAll("text")
-    .data(graph.links)
-    .join("text")
-    .attr("x", (d) => {
-      return (d.source.x1 + d.target.x0) / 2;
-    })
-    .attr("y", (d) => (d.y0 + d.y1) / 2)
-    .attr("dy", "0.35em")
-    .attr("text-anchor", "center")
-    .on("click", (event, d) => {
-      console.log("Node clicked:", d.id);
-      event.stopPropagation();
-      viewModel.clickNode(event, d, refresh);
-    })
-    .on("dblClick", (event, d) => {
-      console.log("Node clicked:", d.id);
-      event.stopPropagation();
-      viewModel.doubleClickLink(event, d, refresh);
-    })
-    .text((d) => formatNumber(d.amt));*/
+  // Rebind events after rendering to catch all elements
+  bindEvents(g);
 
   viewModel.cleanAfterRender();
   $("#downloadBtn").show();
-}
 
+  return currentData;
+}
 function handleSearch(e) {
   const value = e.target.value.toLowerCase();
   const searchResults = document.getElementById("searchResults");
