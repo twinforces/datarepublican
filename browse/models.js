@@ -849,7 +849,11 @@ class BrowseViewModel {
     updateStatus("placing US Government");
     usGov.desiredVisible = true;
     usGov.expandOutflows(TOP_N_INITIAL);
-    updateStatus(`USG placed adding top ${TOP_N_INITIAL} roots`);
+    updateStatus(
+      `USG placed adding top ${TOP_N_INITIAL} roots`,
+      "green",
+      false
+    );
     this.getRootCharities()
       .slice(0, TOP_N_INITIAL)
       .forEach((c) => {

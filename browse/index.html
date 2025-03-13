@@ -117,18 +117,28 @@ title: Charity graph - multi-root BFS & taxpayer totals
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
+        <p>Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
+          what's going on directly.
+        </p>
         <ol class="!list-decimal space-y-1 text-sm pl-4">
-        <li>We show NGOs and the money that flows between them.</li>
-        <li>Octogons (aka stop sign) are NGOs that don't have any outflows to other NGOs.</li>
-        <li>Gray "plus" circles roll up grants to keep the graph from being overwhelming, click to see 3 more.</li>
-       <li> Jump Start <a href="/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761">NED Hydra!</a></a>
+        <li>We show NGOs and the money that flows between them. Money comes in from the left, 
+          goes out to the right. The NGOs are drawn with trapezoids so the left side is proporitional to the incoming grants
+        while the right side is proporitional to the grants going out to other NGOs.</li>
+        <li>US Government is treated as the ultimate donor. Default shows the 5 largest "root" donors.</li>
+        <li>Money flows are scaled so large flows don't dwarf small ones, you can adjust scaling up or down.</li>
+        <li>Octogons (aka stop sign) are NGOs that don't have any outflows to other NGOs, presumably spend it all.</li>
+        <li>Gray "plus" circles roll up grants to keep the graph from being overwhelming. Click the pimples to see 3 more from that side, or click the NGO to see 3 more from both sides.</li>
+        <li>Command/Windows click on a node to bring up a control panel with more controls and cross links.</li>
+        <li>In the control panel, Focus will remove all the other NGOs, Remove will remove just that NGO.</li>
+        <li>Choose any of the starting points below and click away.</li>
+        <li> Jump Start <a href="/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761">NED Hydra!</a></a>
        <li> Jump Start <a href="/browse/?ein=001">Root of all Evil!</a></li>
        <li> Jump Start <a href="/browse/?ein=110303001&ein=223195349">Fidelity Aid</a></li>
        <li> Jump Start <a href="/browse/?ein=800835023">Turning Point</a></li>
        <li> Jump Start <a href="/browse/?ein=831567380">Bill Kriston's NGO</a></li>
        <li> Jump Start <a href="/browse/?ein=943240841">AIDS VACCINE ADVOCACY COALITION INC.</a></li>
        <li> Jump Start <a href="/browse/?ein=311726494">Folks who paid for COVID for Fauci.</a></li>
-        <li> Jump Start <a href="/browse/?ein=132621497&ein=221643997">2 Planned Parenthoods with the most taxpayer Funding</a></li>
+        <li> Jump Start <a href="/browse/?ein=132621497&ein=221643997">2 Planned Parenthoods with the most taxpayer Funding (Searching for PP brings up an overwhelming number of nodes.)</a></li>
         <li>Jump Start <a href="/browse/?ein=520794300&ein=521194741">AARP and fellow traveler</a></li>
        </ol>
       </div>

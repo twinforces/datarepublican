@@ -129,7 +129,7 @@ function renderActiveEINs() {
 
   viewModel.getShowList().forEach((ein) => {
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>'
+      '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green rounded-md px-2 py-1 text-xs"></div>'
     );
     const $text = $("<span></span>").text(ein.slice(0, 2) + "-" + ein.slice(2));
     const $rm = $(
@@ -153,7 +153,7 @@ function renderHideEINs() {
 
   viewModel.getHideList().forEach((ein) => {
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>'
+      '<div class="filter-tag flex items-center gap-0.5 rounded border border-red bg-red/10 text-red rounded-md px-2 py-1 text-xs"></div>'
     );
     const $text = $("<span></span>").text(ein.slice(0, 2) + "-" + ein.slice(2));
     const $rm = $(
@@ -1134,19 +1134,19 @@ function showControlPanel(type, data, element) {
         <button onclick="focusNode('${node.ein}')">Focus on This</button>
         <button ${
           !node.canExpandInflows ? 'disabled class="bg-gray-100 disabled"' : ""
-        } onclick="expandInflows('${node.ein}')">Expand Inflows</button>
+        } onclick="expandInflows('${node.ein}')">Show 3 Inflows</button>
         <button ${
           !node.canExpandOutflows ? 'disabled class="bg-gray-100 disabled"' : ""
-        } onclick="expandOutflows('${node.ein}')">Expand Outflows</button>
+        } onclick="expandOutflows('${node.ein}')">Expand 3 Outflows</button>
       </div>
       <div class="flex-1 bg-gray-200 p-4">
-        <button onclick="removeNode('${node.ein}')">Remove Node</button>
+        <button onclick="removeNode('${node.ein}')">Remove This</button>
         <button ${
           !node.canCompressInflows ? "disabled class='disabled'" : ""
-        } onclick="compressInflows('${node.ein}')">Compress Inflows</button>
+        } onclick="compressInflows('${node.ein}')">Hide 3 Inflows</button>
         <button ${
           !node.canCompressOutflows ? "disabled class='disabled'" : ""
-        } onclick="compressOutflows('${node.ein}')">Compress Outflows</button>
+        } onclick="compressOutflows('${node.ein}')">Hide 3 Outflows</button>
       </div>
     `;
   }
