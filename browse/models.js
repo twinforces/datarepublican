@@ -1127,6 +1127,15 @@ class Charity {
     ));
   }
 
+  get visibleGrantsInTotal() {
+    const cacheKey = `visibleGrantsInTotal`;
+    if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
+    return (this._valueCache[cacheKey] = this.visibleGrantsIn.reduce(
+      (total, g) => total + g.amt,
+      0
+    ));
+  }
+
   get invisibleGrantsTotal() {
     const cacheKey = `invisibleGrantsTotal`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
@@ -1494,6 +1503,20 @@ class Charity {
 
   propublicaLink(message) {
     return `<a href="https://projects.propublica.org/nonprofits/organizations/${this.ein}/${this.xml_name}/full" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+  }
+  googleLink(message) {
+    const params = new URLSearchParams();
+    params.set("q", `${this.longEIN} ${this.name}`);
+    return `<a href="https://google.com/search?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap"}>${message}</a>`;
+  }
+
+  grokLink(message) {
+    const params = new URLSearchParams();
+    params.set(
+      "q",
+      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit?`
+    );
+    return `<a href="https://grok.com/search?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
 }
 

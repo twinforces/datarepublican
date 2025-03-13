@@ -1175,7 +1175,7 @@ function showControlPanel(type, data, element) {
         </div>
         <div class="flex flex-row gap-4">
           <div class="flex-1 bg-gray-200 p-4">
-            <p>US Taxpayers: <b>${formatNumber(node.origOut)}</b></p>
+            <p>US Taxpayers: <b>$4.6T</b></p>
             <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
         node.visibleGrants.length
       } grants)</p>
@@ -1201,6 +1201,8 @@ function showControlPanel(type, data, element) {
         <p><a href="${node.officersLink()}">Show me the Officers</a></p>
         <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
         <p>${node.propublicaLink("Take me to Propublica")}</p>
+        <p>${node.googleLink("Google")}</p>
+        <!--<p>${node.grokLink("Grok")}</p>-->
       `;
     }
 
