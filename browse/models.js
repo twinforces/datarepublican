@@ -866,7 +866,7 @@ class BrowseViewModel {
       false
     );
     this.getRootCharities()
-      .slice(0, TOP_N_INITIAL)
+      .slice(1, TOP_N_INITIAL) // skip USG, already placed.
       .forEach((c) => {
         c.desiredVisible = true;
         c.expandOutflows(START_REVEAL);
