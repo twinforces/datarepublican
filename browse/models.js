@@ -228,6 +228,17 @@ class BrowseViewModel {
     );
   }
 
+  /**
+   * After we expand or compress, we have to reset the EIN in the show list.
+   *
+   */
+  resetEIN(ein) {
+    const c = Charity.getCharity(ein);
+    if (c) {
+      this.addToShowList(c.URLPiece());
+    }
+  }
+
   /** Given a model in a given state, calculate the minimum URL necessary to replicate that
    * state. Since visibility can be direct (called desired in the model) or implied, we
    * only need to include the desired charities, not the implied.
@@ -985,7 +996,7 @@ class Charity {
 
   clearVisibility() {
     this.desiredVisible = false;
-    this.impliedVisible = false;
+    this.impliedVisible = 0;
     this.grantsIn.forEach((g) => {
       g.impliedVisible = false;
       g.desiredVisible = false;
@@ -1366,20 +1377,31 @@ class Charity {
    * @param {*} count
    */
   expandInflows(count = NEXT_REVEAL) {
+    if (!count || count == "0") return;
     const grantsToReveal = this.invisibleGrantsIn.slice(0, count); // count largest
     grantsToReveal.forEach((grant) => {
       grant.impliedVisible++; // propogates both directions
     });
+    viewModel.resetEIN(this.ein);
+
     this.isOrganized = false;
   }
 
   /** make some of the upstream grands invisible */
-  // TODO: If the grant is affecting the connected nodes,
   // do we need a reference count instead of a simple flag?
   compressInflows(count = NEXT_REVEAL) {
-    const grantsToHide = this.visibleGrantsIn.slice(-count); // count smallest
-    grantsToHide.forEach((grant) => (grant.impliedVisible = false));
-    this.isOrganized = false;
+    /*const grantsToHide = this.visibleGrantsIn.slice(-count); // count smallest
+    grantsToHide.forEach((grant) => {
+      grant.clearVisibility();
+    });
+    viewModel.resetEIN(this.ein);
+
+    this.isOrganized = false;*/
+    let newCount = this.visibleGrantsIn.length - count;
+    if (newCount < 0) newCount = 0;
+    viewModel.addToShowList(
+      `${this.ein}:${newCount}:${this.visibleGrants.length}}`
+    ); // match URL will do this for us.
   }
 
   /**
@@ -1387,6 +1409,7 @@ class Charity {
    * @param {*} count
    */
   expandOutflows(count = NEXT_REVEAL) {
+    if (!count || count == "0") return;
     const grantsToReveal = this.invisibleGrants.slice(0, count);
     console.log(
       `Expanding ${grantsToReveal.length} outflows for ${this.id} (total invisible: ${this.invisibleGrants.length})`
@@ -1397,13 +1420,21 @@ class Charity {
         `  Grant ${grant.id} set visible, grantee ${grant.grantee.id} set visible`
       );
     });
+    viewModel.resetEIN(this.ein);
     this.isOrganized = false;
   }
 
   compressOutflows(count = NEXT_REVEAL) {
-    const grantsToHide = this.visibleGrants.slice(-count);
-    grantsToHide.forEach((grant) => (grant.impliedVisible = false));
-    this.isOrganized = false;
+    /*const grantsToHide = this.visibleGrants.slice(-count);
+    grantsToHide.forEach((grant) => {
+      grant.clearVisibility();
+    });
+    this.isOrganized = false;*/
+    let newCount = this.visibleGrants.length - count;
+    if (newCount < 0) newCount = 0;
+    viewModel.addToShowList(
+      `${this.ein}:${this.visibleGrantsIn.length}:${newCount}`
+    ); // match URL will do this for us.
   }
 
   /**
@@ -1639,7 +1670,9 @@ class Grant {
 
   /** see Charity for the split visibility explanation */
   get isVisible() {
-    return this.filer.isVisible && this.grantee.isVisible;
+    return (
+      this.isLooseVisible && this.filer.isVisible && this.grantee.isVisible
+    );
   }
 
   /** see Charity for the split visibility explanation
@@ -1684,9 +1717,17 @@ class Grant {
   }
 
   set impliedVisible(value) {
-    this._impliedVisible = value;
-    this.filer.impliedVisible = value;
-    this.grantee.impliedVisible = value;
+    if (this._impliedVisible != value) {
+      this._impliedVisible = value;
+      if (!value) {
+        this.filer.impliedVisible--;
+        this.grantee.impliedVisible--;
+      } else {
+        this.filer.impliedVisible++;
+        this.grantee.impliedVisible++;
+      }
+      this.disorganize();
+    }
   }
 
   /** this is mostly informative, as the Charity class moves them to the loopbacks */
@@ -1737,6 +1778,12 @@ class Grant {
 
   get relativeAmount() {
     return this.amt / (this.grantee.grantsTotal + 1);
+  }
+
+  clearVisibility() {
+    this.impliedVisible = false;
+    this.desiredVisible = false;
+    this.disorganize();
   }
 
   /** probably aspirational but if either is charity is hidden so are we */
