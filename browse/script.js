@@ -378,6 +378,7 @@ function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
 
 function calculateRegularPosition(node, scale, height) {
   let scaleFactor = 100;
+  // note, this are using only the visible grants.
   const sankeyHeight = node.y1 - node.y0;
   if (node.grantsInLogTotal > node.grantsLogTotal)
     scaleFactor = sankeyHeight / node.grantsInLogTotal;
