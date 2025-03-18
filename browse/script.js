@@ -621,15 +621,15 @@ function generateGraph() {
   };
   document.getElementById("scaleUp").onclick = () => {
     viewModel.graphScaleUp();
-    generateGraph();
+    refresh();
   };
   document.getElementById("scaleDown").onclick = () => {
     viewModel.graphScaleDown();
-    generateGraph();
+    refresh();
   };
   document.getElementById("scaleReset").onclick = () => {
     viewModel.graphScaleReset();
-    generateGraph();
+    refresh();
   };
 
   setTimeout(() => {
