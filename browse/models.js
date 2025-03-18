@@ -1,4 +1,4 @@
-let POWER_LAW = 3;
+const POWER_LAW_RESET = 3;
 const TOP_N_INITIAL = 5;
 const START_REVEAL = 5;
 const MIN_REVEAL = 2;
@@ -26,7 +26,7 @@ let GOV_NODE = null;
  * @returns 
  */
 function scaleValue(amt) {
-  return Math.pow(amt, 1 / POWER_LAW);
+  return Math.pow(amt, 1 / viewModel.POWER_LAW);
 }
 
 /**
@@ -56,9 +56,8 @@ let viewModel = null;
  * I've tried MVC, didn't work. MVVM does.
  */
 class BrowseViewModel {
-  constructor({ POWER_LAW = 3, GOV_EIN = "001" } = {}) {
+  constructor({ POWER_LAW = POWER_LAW_RESET, GOV_EIN = "001" } = {}) {
     this.POWER_LAW = POWER_LAW; /** Users can change the scaling on the fly */
-    this.POWER_LAW_RESET = this.POWER_LAW; //** but we start at 1/3 */
     this.GOV_EIN =
       GOV_EIN; /** Had to pick something, it was this or 0000000001  */
     this.GOV_NODE = null; /** keep this around for debugging */
@@ -97,17 +96,30 @@ class BrowseViewModel {
   }
 
   /** methods for manipulating the scaling */
+
+  setGraphScale(scale) {
+    if (scale != this.POWER_LAW) {
+      this.POWER_LAW = scale;
+      Charity.disorganzeAll();
+    }
+  }
   graphScaleDown() {
     this.POWER_LAW++;
+    this.computeURLParams(); // update URL
+    Charity.disorganzeAll();
   }
 
   graphScaleUp() {
     this.POWER_LAW--;
     if (this.POWER_LAW < 1) this.POWER_LAW = 1;
+    this.computeURLParams(); // update URL
+    Charity.disorganzeAll();
   }
 
   graphScaleReset() {
     this.POWER_LAW = this.POWER_LAW_RESET;
+    this.computeURLParams(); // update URL
+    Charity.disorganzeAll();
   }
 
   /** methods for manipulating the Show List */
@@ -265,8 +277,8 @@ class BrowseViewModel {
     this.setHideList(params.getAll("nein"));
     this.setBreadCrumbs(params.getAll("breadCrumbs"));
     this.setKeywordList(params.getAll("keywords"));
-    if (params.get("scale") && parseInt(params.get("scale"), 10))
-      this.POWER_LAW = parseInt(params.get("scale", 10));
+    const scale = parseInt(params.get("scale") || "0", 10);
+    if (scale) this.setGraphScale(scale);
   }
 
   /** Place holder for when we actually parse the breadcrumb data, for
@@ -925,6 +937,15 @@ class Charity {
   }
 
   /**
+   * Clear all caches
+   */
+  static disorganzeAll() {
+    Object.values(Charity.charityLookup).forEach(
+      (c) => (c.isOrganized = false)
+    );
+  }
+
+  /**
    * Factory for building one from a data file row.
    * @param {} row
    * @returns
@@ -1080,20 +1101,20 @@ class Charity {
    * updated.
    */
   get logGrantsTotal() {
-    const cacheKey = `logGrantTotal-${POWER_LAW}`;
+    const cacheKey = `logGrantTotal-${viewModel.viewModel.POWER_LAW}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     return (this._valueCache[cacheKey] = scaleValue(this.grantsTotal));
   }
 
   get logGrantsInTotal() {
-    const cacheKey = `logGrantsInTotal-${POWER_LAW}`;
+    const cacheKey = `logGrantsInTotal-${viewModel.POWER_LAW}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     return (this._valueCache[cacheKey] = scaleValue(this.grantsInTotal));
   }
 
   get grantsLogTotal() {
     //const vgrants = this.visibleGrants; // use all grants for scaling now
-    const cacheKey = `grantsLogTotal-${POWER_LAW}-${this.grants.length}`;
+    const cacheKey = `grantsLogTotal-${viewModel.POWER_LAW}-${this.grants.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     if (this.grants.length)
       return (this._valueCache[cacheKey] = this.grants.reduce(
@@ -1105,7 +1126,7 @@ class Charity {
 
   get grantsInLogTotal() {
     //const vgrants = this.visibleGrantsIn; // use all grants for scaling
-    const cacheKey = `grantsInLogTotal-${POWER_LAW}-$grantsIn.length}`;
+    const cacheKey = `grantsInLogTotal-${viewModel.POWER_LAW}-$grantsIn.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     if (this.grantsIn.length)
       return (this._valueCache[cacheKey] = this.grantsIn.reduce(
