@@ -117,7 +117,7 @@ class BrowseViewModel {
   }
 
   graphScaleReset() {
-    this.POWER_LAW = this.POWER_LAW_RESET;
+    this.POWER_LAW = POWER_LAW_RESET;
     this.computeURLParams(); // update URL
     Charity.disorganzeAll();
   }
@@ -1098,26 +1098,26 @@ class Charity {
    * the summed values they have. The only thing tricky is that
    * scaled values are stored with the POWER_LAW they were calculated under
    * so that if the POWER_LAW changes, the values will be automatically
-   * updated.
+   * updated. Also stored based on the number of visible grants for a similar reason.
    */
   get logGrantsTotal() {
-    const cacheKey = `logGrantTotal-${viewModel.viewModel.POWER_LAW}`;
+    const cacheKey = `logGrantTotal-${viewModel.viewModel.POWER_LAW}-${this.grants.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     return (this._valueCache[cacheKey] = scaleValue(this.grantsTotal));
   }
 
   get logGrantsInTotal() {
-    const cacheKey = `logGrantsInTotal-${viewModel.POWER_LAW}`;
+    const cacheKey = `logGrantsInTotal-${viewModel.POWER_LAW}-${this.grantsIn.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     return (this._valueCache[cacheKey] = scaleValue(this.grantsInTotal));
   }
 
   get grantsLogTotal() {
-    //const vgrants = this.visibleGrants; // use all grants for scaling now
-    const cacheKey = `grantsLogTotal-${viewModel.POWER_LAW}-${this.grants.length}`;
+    const vgrants = this.visibleGrants; // use all grants for scaling now
+    const cacheKey = `grantsLogTotal-${viewModel.POWER_LAW}-${vgrants.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
-    if (this.grants.length)
-      return (this._valueCache[cacheKey] = this.grants.reduce(
+    if (vgrants.length)
+      return (this._valueCache[cacheKey] = vgrants.reduce(
         (total, g) => total + g.value,
         0
       ));
@@ -1125,11 +1125,11 @@ class Charity {
   }
 
   get grantsInLogTotal() {
-    //const vgrants = this.visibleGrantsIn; // use all grants for scaling
-    const cacheKey = `grantsInLogTotal-${viewModel.POWER_LAW}-$grantsIn.length}`;
+    const vgrants = this.visibleGrantsIn; // use all grants for scaling
+    const cacheKey = `grantsInLogTotal-${viewModel.POWER_LAW}-${vgrants.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
-    if (this.grantsIn.length)
-      return (this._valueCache[cacheKey] = this.grantsIn.reduce(
+    if (vgrants.length)
+      return (this._valueCache[cacheKey] = vgrants.reduce(
         (total, g) => total + g.value,
         0
       ));
