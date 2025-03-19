@@ -681,6 +681,10 @@ function renderFocusedSankey(
   nodeIds,
   previousData
 ) {
+  const ANIM_NODE = 500;
+  const ANIM_LINK = 1200;
+  const ANIM_HAT = 1500;
+  const ANIM_TEXT = 1500;
   $("#downloadBtn").hide();
 
   let currentData = viewModel.buildSankeyData();
@@ -770,23 +774,23 @@ function renderFocusedSankey(
     .selectAll(".link")
     .data(graph.links, (d) => `${d.source.id}-${d.target.id}`);
 
-  link.exit().transition().duration(1200).attr("stroke-width", 0).remove();
+  link.exit().transition().duration(ANIM_LINK).attr("stroke-width", 0).remove();
 
   const linkEnter = link
     .enter()
     .append("path")
     .attr("class", "link")
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => (d.isVisible ? `url(#${d.gradientId})` : "#d3d3d3"))
+    .attr("stroke", (d) => colorScale(d.source.id))
     .style("stroke-opacity", "0.3")
     .attr("stroke-width", 0);
 
   link
     .merge(linkEnter)
     .transition()
-    .duration(1200)
+    .duration(ANIM_LINK)
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => (d.isVisible ? `url(#${d.gradientId})` : "#d3d3d3"))
+    .attr("stroke", (d) => colorScale(d.source.id))
     .attr("stroke-width", (d) => d.width || 1);
 
   linkEnter
@@ -808,7 +812,7 @@ function renderFocusedSankey(
   nodeElements
     .exit()
     .transition()
-    .duration(1000)
+    .duration(ANIM_NODE)
     .attr("transform", "scale(0)")
     .remove();
 
@@ -848,14 +852,14 @@ function renderFocusedSankey(
       .text((d) => d.toolTipText());
   });
 
-  nodeEnter.transition().duration(500).style("opacity", 1);
+  nodeEnter.transition().duration(ANIM_NODE).style("opacity", 1);
 
   nodeElements
     .merge(nodeEnter)
     .filter((d) => d.previousX0 !== undefined)
     .select("path")
     .transition()
-    .duration(1000)
+    .duration(ANIM_NODE)
     .attr("d", (d) =>
       d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d)
     );
@@ -877,7 +881,7 @@ function renderFocusedSankey(
     .exit()
     .filter((d) => d.hasLeftHat)
     .transition()
-    .duration(1500)
+    .duration(ANIM_HAT)
     .style("opacity", 0)
     .remove();
 
@@ -900,7 +904,7 @@ function renderFocusedSankey(
   leftHats
     .merge(leftHatEnter)
     .transition()
-    .duration(1500)
+    .duration(ANIM_HAT)
     .style("opacity", (d) =>
       d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
         ? 1
@@ -926,7 +930,7 @@ function renderFocusedSankey(
     .exit()
     .filter((d) => d.hasRightHat)
     .transition()
-    .duration(1500)
+    .duration(ANIM_HAT)
     .style("opacity", 0)
     .remove();
 
@@ -947,7 +951,7 @@ function renderFocusedSankey(
   rightHats
     .merge(rightHatEnter)
     .transition()
-    .duration(1500)
+    .duration(ANIM_HAT)
     .style("opacity", (d) =>
       !d.isTerminal &&
       d.canExpandOutflows &&
@@ -990,7 +994,7 @@ function renderFocusedSankey(
   text
     .merge(textEnter)
     .transition()
-    .duration(1500)
+    .duration(ANIM_TEXT)
     .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
     .attr("y", (d) => (d.y0 + d.y1) / 2)
     .attr("text-anchor", (d) =>
