@@ -639,7 +639,7 @@ function generateGraph() {
     refresh();
   };
 
-  setTimeout(() => {
+  /*setTimeout(() => {
     const g = svg.select("g.main");
     const bounds = g.node().getBBox();
     if (
@@ -664,7 +664,7 @@ function generateGraph() {
           .scale(scale)
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
-  }, 1000);
+  }, 1000);*/
 
   renderActiveEINs();
   renderActiveKeywords();
