@@ -8,9 +8,14 @@ title: Exposing where the money flows
 </h1>
 
 <!-- Example of how to include search metadata (commented out for the homepage) -->
-{% comment %} {% include search-metadata.html base_title="Exposing where the
-money flows" base_url="https://datarepublican.com/" search_id="pageTitle"
-param_names='["q", "search"]' %} {% endcomment %}
+{% comment %} 
+{% include search-metadata.html 
+   base_title="Exposing where the money flows" 
+   base_url="https://datarepublican.com/" 
+   search_id="pageTitle"
+   param_names='["q", "search"]' 
+%} 
+{% endcomment %}
 
 <div class="grid @4xl:grid-cols-5 gap-4 @4xl:gap-8 max-w-7xl @6xl:mx-auto">
   <div class="@4xl:col-span-3 max-w-2xl">
@@ -45,11 +50,16 @@ param_names='["q", "search"]' %} {% endcomment %}
     </div>
   </div>
   <div class="grid gap-4 @xl:grid-cols-2 @4xl:grid-cols-1 @4xl:col-span-2">
-    {% include quote.html text="Worth following @DataRepublican." author="Elon
-    Musk" link="https://x.com/elonmusk/status/1884490061195989176" %} {% include
-    quote.html text="Love your insights! You're a must follow on this platform."
-    author="Charlie Kirk"
-    link="https://x.com/charliekirk11/status/1878821674436714737" %}
+    {% include quote.html 
+       text="Worth following @DataRepublican." 
+       author="Elon Musk" 
+       link="https://x.com/elonmusk/status/1884490061195989176" 
+    %} 
+    {% include quote.html 
+       text="Love your insights! You're a must follow on this platform."
+       author="Charlie Kirk"
+       link="https://x.com/charliekirk11/status/1878821674436714737" 
+    %}
   </div>
 </div>
 
@@ -58,70 +68,118 @@ param_names='["q", "search"]' %} {% endcomment %}
 >
   <div class="text-xl font-bold m-0 @6xl:col-span-2">Explore the tools</div>
   {% include product-category.html title="Charity funding &amp; financials" %}
-  {% include product.html image="/assets/images/products/charity-graph.png"
-  title="Charity graph" description="Visualize how the money flows" content="
-  <p>
-    Explore financial connections among charitable organizations, focusing on
-    taxpayer funds received.
-  </p>
-  <p>
-    This tool allows users to trace funding flows, offering insights into how
-    taxpayer money is allocated within the charitable sector.
-  </p>
-  " url="/expose" %} {% include product.html
-  image="/assets/images/products/charity-funding.png" title="Charity funding"
-  description="Discover the percentage of taxpayer funds used" content="
-  <p>
-    Explore detailed financial information on 501(c)(3) charitable
-    organizations, including the extent of taxpayer funding they receive.
-  </p>
-  " url="/nonprofit" %} {% include product.html
-  image="/assets/images/products/charity-browse.png" title="Charity Flows"
-  description="Browse the money flows visually" content="
-  <p>Similar to the Charity Graph, but built for browsing.</p>
-  <p>
-    This tool allows users to visualize funding flows. The US Govt. is shown as
-    the ultimate NGO. Follow the money!
-  </p>
-  " url="/browse" new="true" %} {% include product.html
-  image="/assets/images/products/nonprofit-financials.png" title="Nonprofit
-  financials" description="Analyze assets & expenses" content="
-  <p>
-    Browse nonprofit financials and see how organizations allocate their funds.
-  </p>
-  " url="/nonprofit/assets" %} {% include product-category.html title="People,
-  officers, &amp; salaries" %} {% include product.html
-  image="/assets/images/products/officer-search.png" title="Principal officer
-  search" description="Search NGOs for officers and salaries" content="
-  <p>Identify relationships between nonprofits and their officers.</p>
-  " url="/officers" %} {% include product.html
-  image="/assets/images/products/bulk-officer-search.png" title="Bulk NGO
-  officer search" description="Search and cross-reference names" content="
-  <p>
-    This tool is useful for cross-referencing names across multiple nonprofits,
-    helping identify affiliations between organizations and their members.
-  </p>
-  " url="/officers/bulk" %} {% include product.html
-  image="/assets/images/products/relations.png" title="People relations"
-  description="Explore connections between people" content="
-  <p>Browse a relationship graph between people and known associates.</p>
-  " url="/relations" %} {% include product-category.html title="Political
-  campaign &amp; grant funding" %} {% include product.html
-  image="/assets/images/products/donations.png" title="Small dollar donations"
-  description="ActBlue & WinRed donations" content="
-  <p>
-    By highlighting donors with a high volume of small contributions, this tool
-    aims to identify patterns that may indicate potential donation fraud,
-    thereby promoting accountability in campaign financing.
-  </p>
-  " url="/donations2024" %} {% include product.html
-  image="/assets/images/products/award-search.png" title="Federal grant search"
-  description="Map funds to connected orgs" content="
-  <p>
-    Identify patterns, potential inefficiencies, or misuse of funds in grants
-    funded by the federal government and cross-reference with taxpayer funding.
-  </p>
-  " url="/award_search" %}
+  
+  {% include product.html 
+     image="/assets/images/products/charity-graph.png"
+     title="Charity graph" 
+     description="Visualize how the money flows" 
+     content="
+          <p>
+            Explore financial connections among charitable organizations, focusing on
+            taxpayer funds received.
+          </p>
+          <p>
+            This tool allows users to trace funding flows, offering insights into how
+            taxpayer money is allocated within the charitable sector.
+          </p>
+     " 
+     url="/expose" 
+  %} 
+  {% include product.html
+     image="/assets/images/products/charity-browse.png" 
+     title="Charity Explorer"
+     description="Browse the money flows visually" 
+     content="
+          <p>Similar to the Charity Graph, but focused for exploring.</p>
+          <p>
+            This tool allows users to visualize funding flows. The US Govt. is shown as
+            the ultimate NGO. Follow the money!
+          </p>
+     " 
+     url="/browse" 
+     new="true" 
+  %} 
+  {% include product.html
+     image="/assets/images/products/charity-funding.png" 
+     title="Charity funding"
+     description="Discover the percentage of taxpayer funds used" 
+     content="
+          <p>
+            Explore detailed financial information on 501(c)(3) charitable
+            organizations, including the extent of taxpayer funding they receive.
+          </p>
+     " 
+     url="/nonprofit" 
+  %} 
+  {% include product.html
+     image="/assets/images/products/nonprofit-financials.png" 
+     title="Nonprofit financials" description="Analyze assets & expenses" 
+     content="
+          <p>
+            Browse nonprofit financials and see how organizations allocate their funds.
+          </p>
+     " 
+     url="/nonprofit/assets" 
+  %} 
+  {% include product-category.html 
+        title="People, officers, &amp; salaries" 
+  %} 
+  {% include product.html
+        image="/assets/images/products/officer-search.png" 
+        title="Principal officer search" 
+        description="Search NGOs for officers and salaries" 
+        content="
+          <p>Identify relationships between nonprofits and their officers.</p>
+        " 
+        url="/officers" 
+  %} 
+  {% include product.html
+        image="/assets/images/products/bulk-officer-search.png" 
+        title="Bulk NGO officer search" 
+        description="Search and cross-reference names" 
+        content="
+          <p>
+            This tool is useful for cross-referencing names across multiple nonprofits,
+            helping identify affiliations between organizations and their members.
+          </p>
+        " 
+        url="/officers/bulk" 
+  %} 
+  {% include product.html
+      image="/assets/images/products/relations.png"
+      title="People relations"
+      description="Explore connections between people" 
+      content="<p>Browse a relationship graph between people and known associates.</p>"
+      url="/relations" 
+  %} 
+  {% include product-category.html 
+     title="Political campaign &amp; grant funding" 
+  %} 
+  {% include product.html
+     image="/assets/images/products/donations.png" 
+     title="Small dollar donations"
+     description="ActBlue & WinRed donations" 
+     content="
+          <p>
+            By highlighting donors with a high volume of small contributions, this tool
+            aims to identify patterns that may indicate potential donation fraud,
+            thereby promoting accountability in campaign financing.
+          </p>
+  " 
+  url="/donations2024"
+  %} 
+  {% include product.html
+     image="/assets/images/products/award-search.png"
+     title="Federal grant search"
+     description="Map funds to connected orgs" 
+     content="
+          <p>
+            Identify patterns, potential inefficiencies, or misuse of funds in grants
+            funded by the federal government and cross-reference with taxpayer funding.
+          </p>
+    " 
+    url="/award_search" 
+    %}
 </div>
 
 <div class="max-w-7xl @6xl:mx-auto @container">
@@ -139,14 +197,14 @@ param_names='["q", "search"]' %} {% endcomment %}
       <p lang="en" dir="ltr">
         This may be one of the most Important accounts to follow this year. You
         will need data to combat the false narratives they will be pushing.
-        <a href="https://twitter.com/DataRepublican?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/DataRepublican?ref_src=twsrc%5Etfw"
           >@DataRepublican</a
         >
         <a href="https://t.co/VuVGuSnG7r">https://t.co/VuVGuSnG7r</a>
       </p>
       &mdash; Shawn Hendrix (@TheShawnHendrix)
       <a
-        href="https://twitter.com/TheShawnHendrix/status/1886168023100219576?ref_src=twsrc%5Etfw"
+        href="https://x.com/TheShawnHendrix/status/1886168023100219576?ref_src=twsrc%5Etfw"
         >February 2, 2025</a
       >
     </blockquote>
@@ -154,20 +212,20 @@ param_names='["q", "search"]' %} {% endcomment %}
     <blockquote class="twitter-tweet break-inside-avoid">
       <p lang="en" dir="ltr">
         Spoke with
-        <a href="https://twitter.com/charliekirk11?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/charliekirk11?ref_src=twsrc%5Etfw"
           >@charliekirk11</a
         >
         today about the rampant waste, stupidity, and outright malice of the
         funding schemes USAID deploys to spread International Wokism.<br /><br />Shout
         out to
-        <a href="https://twitter.com/DataRepublican?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/DataRepublican?ref_src=twsrc%5Etfw"
           >@DataRepublican</a
         >
-        <a href="https://t.co/s24uCXBkcC">pic.twitter.com/s24uCXBkcC</a>
+        <a href="https://t.co/s24uCXBkcC">pic.x.com/s24uCXBkcC</a>
       </p>
       &mdash; Lomez (@L0m3z)
       <a
-        href="https://twitter.com/L0m3z/status/1886850188096233505?ref_src=twsrc%5Etfw"
+        href="https://x.com/L0m3z/status/1886850188096233505?ref_src=twsrc%5Etfw"
         >February 4, 2025</a
       >
     </blockquote>
@@ -179,7 +237,7 @@ param_names='["q", "search"]' %} {% endcomment %}
       <p lang="en" dir="ltr">You're my new favorite X account.</p>
       &mdash; Tim Young (@TimRunsHisMouth)
       <a
-        href="https://twitter.com/TimRunsHisMouth/status/1886823330000388553?ref_src=twsrc%5Etfw"
+        href="https://x.com/TimRunsHisMouth/status/1886823330000388553?ref_src=twsrc%5Etfw"
         >February 4, 2025</a
       >
     </blockquote>
@@ -194,7 +252,7 @@ param_names='["q", "search"]' %} {% endcomment %}
       </p>
       &mdash; James Woods (@RealJamesWoods)
       <a
-        href="https://twitter.com/RealJamesWoods/status/1887230612190511599?ref_src=twsrc%5Etfw"
+        href="https://x.com/RealJamesWoods/status/1887230612190511599?ref_src=twsrc%5Etfw"
         >February 5, 2025</a
       >
     </blockquote>
@@ -202,30 +260,30 @@ param_names='["q", "search"]' %} {% endcomment %}
     <blockquote class="twitter-tweet break-inside-avoid">
       <p lang="en" dir="ltr">
         If you don't follow
-        <a href="https://twitter.com/DataRepublican?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/DataRepublican?ref_src=twsrc%5Etfw"
           >@DataRepublican</a
         >
         you should. <br /><br />Simply genius. <br /><br />And, oh yeah,
-        <a href="https://twitter.com/BillKristol?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/BillKristol?ref_src=twsrc%5Etfw"
           >@BillKristol</a
         >
         go away. You're yesterday's news, and you're busted.
-        <a href="https://twitter.com/Kash?ref_src=twsrc%5Etfw">@kash</a
-        ><a href="https://twitter.com/marcorubio?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/Kash?ref_src=twsrc%5Etfw">@kash</a
+        ><a href="https://x.com/marcorubio?ref_src=twsrc%5Etfw"
           >@marcorubio</a
         >
-        <a href="https://twitter.com/PamBondi?ref_src=twsrc%5Etfw">@PamBondi</a>
-        <a href="https://twitter.com/realDonaldTrump?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/PamBondi?ref_src=twsrc%5Etfw">@PamBondi</a>
+        <a href="https://x.com/realDonaldTrump?ref_src=twsrc%5Etfw"
           >@realDonaldTrump</a
         >
-        <a href="https://twitter.com/EagleEdMartin?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/EagleEdMartin?ref_src=twsrc%5Etfw"
           >@EagleEdMartin</a
         >
         <a href="https://t.co/s2vBZA5l49">https://t.co/s2vBZA5l49</a>
       </p>
       &mdash; General Mike Flynn (@GenFlynn)
       <a
-        href="https://twitter.com/GenFlynn/status/1886386439484531057?ref_src=twsrc%5Etfw"
+        href="https://x.com/GenFlynn/status/1886386439484531057?ref_src=twsrc%5Etfw"
         >February 3, 2025</a
       >
     </blockquote>
@@ -240,7 +298,7 @@ param_names='["q", "search"]' %} {% endcomment %}
       </p>
       &mdash; Lomez (@L0m3z)
       <a
-        href="https://twitter.com/L0m3z/status/1886426214229061782?ref_src=twsrc%5Etfw"
+        href="https://x.com/L0m3z/status/1886426214229061782?ref_src=twsrc%5Etfw"
         >February 3, 2025</a
       >
     </blockquote>
@@ -252,14 +310,14 @@ param_names='["q", "search"]' %} {% endcomment %}
       </p>
       &mdash; Kurt Schlichter (@KurtSchlichter)
       <a
-        href="https://twitter.com/KurtSchlichter/status/1886886183873208438?ref_src=twsrc%5Etfw"
+        href="https://x.com/KurtSchlichter/status/1886886183873208438?ref_src=twsrc%5Etfw"
         >February 4, 2025</a
       >
     </blockquote>
 
     <blockquote class="twitter-tweet break-inside-avoid">
       <p lang="en" dir="ltr">
-        <a href="https://twitter.com/DataRepublican?ref_src=twsrc%5Etfw"
+        <a href="https://x.com/DataRepublican?ref_src=twsrc%5Etfw"
           >@DataRepublican</a
         >
         You were and are amazing. In the lead up to the election, I referenced
@@ -269,7 +327,7 @@ param_names='["q", "search"]' %} {% endcomment %}
       </p>
       &mdash; Dr. Steve Turley (@DrTurleyTalks)
       <a
-        href="https://twitter.com/DrTurleyTalks/status/1871766121747300428?ref_src=twsrc%5Etfw"
+        href="https://x.com/DrTurleyTalks/status/1871766121747300428?ref_src=twsrc%5Etfw"
         >December 25, 2024</a
       >
     </blockquote>
