@@ -32,7 +32,17 @@ exclude:
   - package.json
   - package-lock.json
   - postcss.config.js
-  - tailwind.config.js
+  - tailwind.config.js   
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
+
 
 plugins:
   - jekyll-seo-tag
