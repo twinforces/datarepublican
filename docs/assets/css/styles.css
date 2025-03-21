@@ -1279,6 +1279,9 @@ body > div#main-content {
 .visible {
   visibility: visible;
 }
+.invisible {
+  visibility: hidden;
+}
 .collapse {
   visibility: collapse;
 }
@@ -1320,6 +1323,9 @@ body > div#main-content {
 }
 .right-0 {
   right: 0px;
+}
+.right-16 {
+  right: 4rem;
 }
 .right-2 {
   right: 0.5rem;
@@ -1694,6 +1700,9 @@ body > div#main-content {
 .shrink-0 {
   flex-shrink: 0;
 }
+.grow {
+  flex-grow: 1;
+}
 .border-collapse {
   border-collapse: collapse;
 }
@@ -1779,6 +1788,9 @@ body > div#main-content {
 }
 .grid-cols-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.flex-row {
+  flex-direction: row;
 }
 .flex-row-reverse {
   flex-direction: row-reverse;
@@ -2028,6 +2040,10 @@ body > div#main-content {
 }
 .bg-black\/60 {
   background-color: rgb(0 0 0 / 0.6);
+}
+.bg-blue-500 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(52 156 226 / var(--tw-bg-opacity));
 }
 .bg-blue\/10 {
   background-color: rgb(52 156 226 / 0.1);
