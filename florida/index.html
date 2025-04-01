@@ -434,8 +434,7 @@ redirect_from: /florida/has
 	}
 
 	$(document).ready(function () {
-		$.getJSON('../json/florida.json', function (data) {		
-		//$.getJSON('https://raw.githubusercontent.com/DataRepublican/datarepublican/master/json/florida.json', function (data) {
+		$.getJSON('https://raw.githubusercontent.com/DataRepublican/datarepublican/master/json/florida.json', function (data) {
 			liveData = data;
 			// Format the timestamp to be more human-readable
 			const timestamp = liveData['TIMESTAMP'].replace(' EST', '');
