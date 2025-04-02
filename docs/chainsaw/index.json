@@ -1,0 +1,42 @@
+{
+  "Department of Health and Human Services-806": {
+    "total_spending": 20978768380857.68,
+    "sub_agencies": {}
+  },
+  "Social Security Administration-539": {
+    "total_spending": 17525884112455.31,
+    "sub_agencies": {}
+  },
+  "Department of Defense-1173": {
+    "total_spending": 6424388350105.25,
+    "sub_agencies": {}
+  },
+  "Department of Homeland Security-766": {
+    "total_spending": 5231811567292.79,
+    "sub_agencies": {}
+  },
+  "Department of Veterans Affairs-561": {
+    "total_spending": 2838115382986.45,
+    "sub_agencies": {}
+  },
+  "Department of Agriculture-95": {
+    "total_spending": 2079993594401.38,
+    "sub_agencies": {}
+  },
+  "Department of Education-1068": {
+    "total_spending": 1706402810201.08,
+    "sub_agencies": {}
+  },
+  "Department of Transportation-731": {
+    "total_spending": 1437325308424.58,
+    "sub_agencies": {}
+  },
+  "Small Business Administration-803": {
+    "total_spending": 949892231564.99,
+    "sub_agencies": {}
+  },
+  "Department of Housing and Urban Development-882": {
+    "total_spending": 822750765348.68,
+    "sub_agencies": {}
+  }
+}
