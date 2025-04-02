@@ -1353,9 +1353,7 @@ const extraStyle = `
   .node.no-grants { cursor: zoom-out; }
   .link { stroke-opacity: 0.5; }
   .hat-up, .hat-down { cursor: pointer; }
-  #graph { background: #fff !important; }
   text { fill: #000; }
-  svg { background: #fff !important; }
   .selected { stroke: #ff0; stroke-width: 2px; }
 `;
 d3.select("head").append("style").text(extraStyle);
