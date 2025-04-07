@@ -334,7 +334,7 @@ class BrowseViewModel {
           c.searchMatch(Object.keys(this.keywords)) &&
           !c.desiredVisible
         ) {
-          c.place();
+          c.place(1, 1); // only do 1 each direction for keyword placements to avoid explosions.
         }
       });
     }
