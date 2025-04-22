@@ -96,7 +96,7 @@ title: Charity Flow - Sankey Chart of NGOs and their Flows
 
 <div id="topbar" class="">
   <div id="explanation">
-    <h1 id="pageTitle" class="mb-1">Charity Flow</h1>
+    <h1 id="pageTitle" class="mb-1">Charity explorer</h1>
     <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
     <p id="instructions" class="opacity-80 mb-0 text-[15px]">
       <!-- Will be dynamically set in parseQueryParams() -->
@@ -114,7 +114,7 @@ title: Charity Flow - Sankey Chart of NGOs and their Flows
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
-        <p>Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
+        <p class="text-sm">Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
           what's going on directly.
         </p>
         <ol class="!list-decimal space-y-1 text-sm pl-4">
@@ -160,12 +160,11 @@ title: Charity Flow - Sankey Chart of NGOs and their Flows
 
     <div class="relative flex flex-col gap-2 max-w-lg">
       {% include input.html 
-        label="Add keyword" 
+        label="Bulk add orgs by keyword" 
         id="keywordInput" 
         placeholder="Keyword or phrase..." 
         buttonLabel="Add" 
         buttonId="addFilterBtn"
-        actions="<button id='clearFiltersBtn' class='frameless'>Clear keywords</button>"
       %}
 
       <div id="activeFilters"></div>
