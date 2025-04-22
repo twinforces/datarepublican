@@ -11,7 +11,7 @@ let zoom = null;
 
 const NODE_WIDTH = 50;
 const OTHER_WIDTH = 30;
-const NODE_PADDING = 10;
+const NODE_PADDING = 25;
 const MIN_LINK_HEIGHT = 5;
 
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
@@ -689,7 +689,7 @@ function renderFocusedSankey(
 
   const sankeyWidth = width - 100;
   const sankeyHeight = height - 100;
-  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(10);
+  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(25);
 
   const graph = sankey(currentData);
 
