@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1743994090">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1743994090">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1745328525">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1745328525">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -37,9 +37,9 @@ $(document).ready(function() {
 </script>
 
   <!-- Begin Jekyll SEO tag v2.8.0 -->
-<title>Charity Flow - Sankey Chart of NGOs and their Flows | DataRepublican</title>
-<meta name="generator" content="Jekyll v3.10.0" />
-<meta property="og:title" content="Charity Flow - Sankey Chart of NGOs and their Flows" />
+<title>Charity explorer - Sankey chart of NGOs and their flows | DataRepublican</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Charity explorer - Sankey chart of NGOs and their flows" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
 <meta property="og:description" content="Tracking where the money goes" />
@@ -50,9 +50,9 @@ $(document).ready(function() {
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta property="twitter:image" content="https://datarepublican.com/assets/images/og.png" />
-<meta property="twitter:title" content="Charity Flow - Sankey Chart of NGOs and their Flows" />
+<meta property="twitter:title" content="Charity explorer - Sankey chart of NGOs and their flows" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"Charity Flow - Sankey Chart of NGOs and their Flows","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/browse/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"Charity explorer - Sankey chart of NGOs and their flows","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/browse/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
@@ -205,7 +205,7 @@ $(document).ready(function() {
 >
   
   <strong class="md:text-sm">
-    Charity Explorer
+    Charity explorer
     
       <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">New</span>
     
@@ -936,7 +936,7 @@ $(document).ready(function() {
 
 <div id="topbar" class="">
   <div id="explanation">
-    <h1 id="pageTitle" class="mb-1">Charity Flow</h1>
+    <h1 id="pageTitle" class="mb-1">Charity explorer</h1>
     <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
     <p id="instructions" class="opacity-80 mb-0 text-[15px]">
       <!-- Will be dynamically set in parseQueryParams() -->
@@ -954,7 +954,7 @@ $(document).ready(function() {
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
-        <p>Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
+        <p class="text-sm">Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
           what's going on directly.
         </p>
         <ol class="!list-decimal space-y-1 text-sm pl-4">
@@ -990,7 +990,7 @@ $(document).ready(function() {
   <div class="">
     <label class="text-sm font-semibold" for="einShowInput">Add EIN(s)</label>
     
-    <span class="inline-block ml-1"><button id='clearEINsBtnShow' class='frameless'>Clear EINs</button></span>
+    <span class="inline-block ml-1"><button id='clearEINsBtnShow' class='frameless'>Reset</button></span>
     
   </div>
   <div class="flex items-center gap-1.5">
@@ -1002,30 +1002,11 @@ $(document).ready(function() {
 
       <div id="activeEINs"></div>
     </div>
-    <div class="relative flex flex-col gap-2 max-w-lg">
-      <div class="inline-flex flex-col gap-1">
-  <div class="">
-    <label class="text-sm font-semibold" for="einHideInput">Remove EIN(s)</label>
-    
-    <span class="inline-block ml-1"><button id='clearEINsBtnHide' class='frameless'>Clear EINs</button></span>
-    
-  </div>
-  <div class="flex items-center gap-1.5">
-    <input type="text" id="einHideInput" placeholder="XX-XXXXXXX or 9 digits" class="px-2 py-2 md:py-1 rounded text-sm border border-gray-300 flex-1 md:flex-none" />
-    <button id="hideEinBtn" class="whitespace-nowrap">Remove EIN</button>
-  </div>
-</div>
-
-
-      <div id="hideEINs"></div>
-    </div>
 
     <div class="relative flex flex-col gap-2 max-w-lg">
       <div class="inline-flex flex-col gap-1">
   <div class="">
-    <label class="text-sm font-semibold" for="keywordInput">Add keyword</label>
-    
-    <span class="inline-block ml-1"><button id='clearFiltersBtn' class='frameless'>Clear keywords</button></span>
+    <label class="text-sm font-semibold" for="keywordInput">Bulk add orgs by keyword</label>
     
   </div>
   <div class="flex items-center gap-1.5">
@@ -1072,7 +1053,7 @@ $(document).ready(function() {
 <div class="relative flex-1 -mx-4 md:mx-0 min-h-[75vh]">
 
   <!-- Search -->
-  <div class="absolute top-4 left-4 md:left-[initial] right-4 z-10">
+  <div class="hidden absolute top-4 left-4 md:left-[initial] right-4 z-10">
     <div class="relative">
       <input 
         type="text" 
@@ -1100,17 +1081,17 @@ $(document).ready(function() {
 <!-- Zoom Controls -->
 <div class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
   <button id="zoomIn" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
-    <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
+    <svg class="w-5 h-5" fill="none" stroke="white" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
     </svg>
   </button>
   <button id="zoomOut" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
-    <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
+    <svg class="w-5 h-5" fill="none" stroke="white" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
     </svg>
   </button>
   <button id="zoomFit" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
-    <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
+    <svg class="w-5 h-5" fill="none" stroke="white" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
     </svg>
   </button>
