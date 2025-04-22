@@ -328,14 +328,19 @@ class BrowseViewModel {
       if (c) c.desiredVisible = false;
     });
     if (this.getKeywordList().length) {
-      Charity.invisibleCharities.forEach((c) => {
-        if (
-          !this.shouldHide(c.id) &&
-          c.searchMatch(Object.keys(this.keywords)) &&
-          !c.desiredVisible
-        ) {
-          c.place();
-        }
+      const matches = Charity.invisibleCharities.filter((c) =>
+        !this.shouldHide(c.id) &&
+        c.searchMatch(Object.keys(this.keywords)) &&
+        !c.desiredVisible
+      );
+      
+      const limitedMatches = matches.slice(0, 5);
+      if (matches.length > 5) {
+        updateStatus(`<span>Note: Graph limited to first 5 of ${matches.length} matching results</span>`, "black", false);
+      }
+      
+      limitedMatches.forEach(c => {
+        c.place();
       });
     }
     this.computeImpliedVisibility(null, true, true);
@@ -1045,9 +1050,26 @@ class Charity {
   }
 
   set impliedVisible(value) {
-    if (this._impliedVisible !== value) {
+    if (this._impliedVisible != value) {
       this._impliedVisible = value;
-      this.isOrganized = false;
+      if (!value) {
+        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+          this.filer.impliedVisible--;
+        }
+        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+          this.grantee.impliedVisible--;
+        }
+      } else {
+        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+          this.filer.impliedVisible++;
+        }
+        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+          this.grantee.impliedVisible++;
+        }
+      }
+      // Propagate organization state changes to connected charities
+      if (this.filer) this.filer.isOrganized = false;
+      if (this.grantee) this.grantee.isOrganized = false;
     }
   }
 
@@ -1101,7 +1123,7 @@ class Charity {
    * updated. Also stored based on the number of visible grants for a similar reason.
    */
   get logGrantsTotal() {
-    const cacheKey = `logGrantTotal-${viewModel.viewModel.POWER_LAW}-${this.grants.length}`;
+    const cacheKey = `logGrantTotal-${viewModel.POWER_LAW}-${this.grants.length}`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     return (this._valueCache[cacheKey] = scaleValue(this.grantsTotal));
   }
@@ -1709,12 +1731,23 @@ class Grant {
    */
   set isVisible(value) {
     if (value) {
-      this.filer.impledVisible++;
-      this.grantee.impliedVisible++;
+      if (this.filer && typeof this.filer.impliedVisible === 'number') {
+        this.filer.impliedVisible++;
+      }
+      if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+        this.grantee.impliedVisible++;
+      }
     } else {
-      this.filer.impledVisible--;
-      this.grantee.impliedVisible--;
+      if (this.filer && typeof this.filer.impliedVisible === 'number') {
+        this.filer.impliedVisible--;
+      }
+      if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+        this.grantee.impliedVisible--;
+      }
     }
+    // Propagate organization state changes to connected charities
+    if (this.filer) this.filer.isOrganized = false;
+    if (this.grantee) this.grantee.isOrganized = false;
   }
 
   /**
@@ -1741,13 +1774,23 @@ class Grant {
     if (this._impliedVisible != value) {
       this._impliedVisible = value;
       if (!value) {
-        this.filer.impliedVisible--;
-        this.grantee.impliedVisible--;
+        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+          this.filer.impliedVisible--;
+        }
+        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+          this.grantee.impliedVisible--;
+        }
       } else {
-        this.filer.impliedVisible++;
-        this.grantee.impliedVisible++;
+        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+          this.filer.impliedVisible++;
+        }
+        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+          this.grantee.impliedVisible++;
+        }
       }
-      this.disorganize();
+      // Propagate organization state changes to connected charities
+      if (this.filer) this.filer.isOrganized = false;
+      if (this.grantee) this.grantee.isOrganized = false;
     }
   }
 

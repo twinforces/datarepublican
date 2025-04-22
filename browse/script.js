@@ -39,10 +39,7 @@ $(document).ready(function () {
     if (e.key === "Enter") addEINFromInput();
   });
   $("#clearEINsBtnShow").on("click", () => {
-    viewModel.clearShowList();
-    renderActiveEINs();
-    updateQueryParams();
-    generateGraph();
+    window.location.href = "/browse/";
   });
   $("#clearEINsBtnHide").on("click", () => {
     viewModel.clearHideList();
