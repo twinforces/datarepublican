@@ -130,10 +130,10 @@ function renderActiveEINs() {
   viewModel.getShowList().forEach((ein) => {
     const name = Charity.getCharity(ein)?.name || "???";
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green rounded-md px-2 py-1 text-xs"></div>'
+      '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>'
     );
-    const $text = $(`<span title="${name}"></span>`).text(
-      ein.slice(0, 2) + "-" + ein.slice(2)
+    const $text = $(`<span title="EIN: ${ein.split(':')[0].slice(0, 2)}-${ein.split(':')[0].slice(2)}"></span>`).text(
+      name
     );
     const $rm = $(
       '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l-2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
@@ -159,8 +159,8 @@ function renderHideEINs() {
     const $tag = $(
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-red bg-red/10 text-red rounded-md px-2 py-1 text-xs"></div>'
     );
-    const $text = $(`<span title="${name}"></span>`).text(
-      ein.slice(0, 2) + "-" + ein.slice(2)
+    const $text = $(`<span title="EIN: ${ein.split(':')[0].slice(0, 2)}-${ein.split(':')[0].slice(2)}"></span>`).text(
+      name
     );
     const $rm = $(
       '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l-2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
