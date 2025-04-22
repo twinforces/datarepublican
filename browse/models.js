@@ -302,7 +302,7 @@ class BrowseViewModel {
    */
   matchURL(params = new URLSearchParams(window.location.search)) {
     this.parseQueryParams(params);
-    updateStatus("matching URL", "green", false);
+    updateStatus("", "green", false);
     console.log("ShowList before processing:", this.getShowList());
     Object.values(Charity.charityLookup).forEach((c) => {
       c.desiredVisible = false;
@@ -397,7 +397,7 @@ class BrowseViewModel {
         }
       });
       updateStatus(
-        `<span>Gov processing</span><span class="text-sm opacity-60">${Math.round(
+        `<span>Gov processing</span><span class="text-[13px] opacity-60">${Math.round(
           (govGrants / govCount) * 100
         )}% ${Math.round(
           (govTotal / totalGrants) * 100
@@ -411,7 +411,7 @@ class BrowseViewModel {
     }
 
     updateStatus(
-      `<span>Gov charity complete</span><span class="text-sm opacity-60">${
+      `<span>Gov charity complete</span><span class="text-[13px] opacity-60">${
         govChar.grants.length
       } generated, ${formatNumber(govTotal)}</span>`
     );
@@ -440,7 +440,7 @@ class BrowseViewModel {
     const charitiesTotal = Object.values(Charity.charityLookup).length;
     let charitiesProcessed = 0;
 
-    updateStatus("Marking circular grants (A->B->A)");
+    updateStatus("<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>");
     await new Promise((resolve) => setTimeout(resolve, 0));
     for (let charity of Object.values(Charity.charityLookup)) {
       const obviousCircles = charity.simpleCircular();
@@ -463,7 +463,7 @@ class BrowseViewModel {
     console.log(`${obviousCirclesCount} obvious circular grants found`);
     updateStatus(`${obviousCirclesCount} obvious circular grants found`);
 
-    updateStatus("Finding deeper loopback grants (A->B->C->A)");
+    updateStatus("<span>Finding deeper loopback grants</span><span class='text-[13px] opacity-60'>(A->B->C->A)</span>");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const totalGrants = Object.values(Charity.charityLookup).reduce(
@@ -505,7 +505,7 @@ class BrowseViewModel {
         }
         if (stack.length > 0) {
           updateStatus(
-            `<span>Circular processing</span><span class="text-sm opacity-60">${Math.round(
+            `<span>Circular processing</span><span class="text-[13px] opacity-60">${Math.round(
               (processedGrants / totalGrants) * 100
             )}% complete</span>`
           );
@@ -526,7 +526,7 @@ class BrowseViewModel {
     });
 
     updateStatus(
-      `<span>$${formatNumber(badTotal)} of loopbacks removed</span><span class="text-sm opacity-60">${
+      `<span>$${formatNumber(badTotal)} of loopbacks removed</span><span class="text-[13px] opacity-60">${
         cycleGrants.size
       } in ${charitiesWithBadGrants} charities</span>`
     );
