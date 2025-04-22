@@ -355,7 +355,7 @@ class BrowseViewModel {
    * @returns
    */
   async buildGovCharity() {
-    updateStatus(`...Building US Govt from ${Charity.getCharityCount}...`);
+    updateStatus(`Building US Govt from ${Charity.getCharityCount}`);
     const gov_ein = this.GOV_EIN;
     const gov_proto = {
       ein: gov_ein,
@@ -392,13 +392,13 @@ class BrowseViewModel {
         }
       });
       updateStatus(
-        `Gov Processing: ${Math.round(
+        `<span>Gov processing</span><span class="text-sm opacity-60">${Math.round(
           (govGrants / govCount) * 100
-        )}% $${Math.round(
+        )}% ${Math.round(
           (govTotal / totalGrants) * 100
         )}% ${govGrants}/${govCount} ${formatNumber(govTotal)}/${formatNumber(
           totalGrants
-        )} complete`
+        )} complete</span>`
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
       chunk = processList.slice(0, CHUNK_SIZE);
@@ -406,9 +406,9 @@ class BrowseViewModel {
     }
 
     updateStatus(
-      `...Gov Charity complete, ${
+      `<span>Gov charity complete</span><span class="text-sm opacity-60">${
         govChar.grants.length
-      } generated, ${formatNumber(govTotal)}`
+      } generated, ${formatNumber(govTotal)}</span>`
     );
     govChar.isGov = true;
     console.log(`${govGrants} Implied Government Grants Generated`);
@@ -435,7 +435,7 @@ class BrowseViewModel {
     const charitiesTotal = Object.values(Charity.charityLookup).length;
     let charitiesProcessed = 0;
 
-    updateStatus("Marking Circular Grants, step 1, A->B->A");
+    updateStatus("Marking circular grants (A->B->A)");
     await new Promise((resolve) => setTimeout(resolve, 0));
     for (let charity of Object.values(Charity.charityLookup)) {
       const obviousCircles = charity.simpleCircular();
@@ -458,7 +458,7 @@ class BrowseViewModel {
     console.log(`${obviousCirclesCount} obvious circular grants found`);
     updateStatus(`${obviousCirclesCount} obvious circular grants found`);
 
-    updateStatus("...Finding Deeper Loopback Grants... A->B->C->A");
+    updateStatus("Finding deeper loopback grants (A->B->C->A)");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const totalGrants = Object.values(Charity.charityLookup).reduce(
@@ -500,9 +500,9 @@ class BrowseViewModel {
         }
         if (stack.length > 0) {
           updateStatus(
-            `Circular Processing: ${Math.round(
+            `<span>Circular processing</span><span class="text-sm opacity-60">${Math.round(
               (processedGrants / totalGrants) * 100
-            )}% complete`
+            )}% complete</span>`
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
@@ -521,9 +521,9 @@ class BrowseViewModel {
     });
 
     updateStatus(
-      `$${formatNumber(badTotal)} of loopbacks removed, ${
+      `<span>$${formatNumber(badTotal)} of loopbacks removed</span><span class="text-sm opacity-60">${
         cycleGrants.size
-      } in ${charitiesWithBadGrants} charities`
+      } in ${charitiesWithBadGrants} charities</span>`
     );
     console.log(`${charitiesWithBadGrants} charities had circular grants`);
     console.log(`${cycleGrants.size} circular grants`);
@@ -796,7 +796,7 @@ class BrowseViewModel {
    * @returns
    */
   async loadData() {
-    updateStatus("...Loading Data...");
+    updateStatus("Loading data...");
     this.dataReady = false;
     const charitiesZipBuf = await fetch("../expose/charities.csv.zip").then(
       (r) => r.arrayBuffer()
@@ -807,7 +807,7 @@ class BrowseViewModel {
       .async("string");
 
     await new Promise((resolve, reject) => {
-      updateStatus("...Parsing Charities...");
+      updateStatus("Parsing charities");
       Papa.parse(charitiesCsvString, {
         header: true,
         skipEmptyLines: true,
@@ -837,7 +837,7 @@ class BrowseViewModel {
     let totalGrantsRows = 0;
 
     await new Promise((resolve, reject) => {
-      updateStatus("...Parsing Grants...");
+      updateStatus("Parsing grants");
       Papa.parse(grantsCsvString, {
         header: true,
         skipEmptyLines: true,
@@ -854,12 +854,12 @@ class BrowseViewModel {
       });
     });
 
-    updateStatus("Grants Loaded, marking loopbacks");
+    updateStatus("Marking loopbacks");
     await this.findCircularGrants();
     console.log(`Total Grants Rows ${totalGrantsRows}`);
     console.log(`Total Grants Loaded ${totalGrantsCount}`);
     console.log(`Grants Net ${Object.keys(Grant.grantLookup).length}`);
-    updateStatus("USG & NGOs & Grants Loaded", "black", false);
+    updateStatus("USG & NGOs & grants loaded", "black", false);
     this.dataReady = true;
     return { totalGrantsCount };
   }
@@ -1877,13 +1877,13 @@ class Grant {
  * @param {*} loading
  */
 function updateStatus(message, color = "black", loading = true) {
-  $("#status").html(`<span class="flex items-center text-sm">
+  $("#status").html(`<span class="flex flex-col items-end text-sm">
     ${
       loading
-        ? '<img src="/assets/images/loading.svg" class="size-6" alt="Loading...">'
+        ? ''
         : ""
     }
-    ${message}.</span>`);
+    ${message}</span>`);
 }
 
 viewModel = new BrowseViewModel();
