@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1743994090">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1743994090">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1745468057">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1745468057">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -37,9 +37,9 @@ $(document).ready(function() {
 </script>
 
   <!-- Begin Jekyll SEO tag v2.8.0 -->
-<title>Charity Flow - Sankey Chart of NGOs and their Flows | DataRepublican</title>
+<title>Charity explorer - Sankey chart of NGOs and their flows | DataRepublican</title>
 <meta name="generator" content="Jekyll v3.10.0" />
-<meta property="og:title" content="Charity Flow - Sankey Chart of NGOs and their Flows" />
+<meta property="og:title" content="Charity explorer - Sankey chart of NGOs and their flows" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
 <meta property="og:description" content="Tracking where the money goes" />
@@ -50,9 +50,9 @@ $(document).ready(function() {
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta property="twitter:image" content="https://datarepublican.com/assets/images/og.png" />
-<meta property="twitter:title" content="Charity Flow - Sankey Chart of NGOs and their Flows" />
+<meta property="twitter:title" content="Charity explorer - Sankey chart of NGOs and their flows" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"Charity Flow - Sankey Chart of NGOs and their Flows","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/browse/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","description":"Tracking where the money goes","headline":"Charity explorer - Sankey chart of NGOs and their flows","image":"https://datarepublican.com/assets/images/og.png","url":"https://datarepublican.com/browse/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
@@ -205,7 +205,7 @@ $(document).ready(function() {
 >
   
   <strong class="md:text-sm">
-    Charity Explorer
+    Charity explorer
     
       <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">New</span>
     
@@ -936,7 +936,7 @@ $(document).ready(function() {
 
 <div id="topbar" class="">
   <div id="explanation">
-    <h1 id="pageTitle" class="mb-1">Charity Flow</h1>
+    <h1 id="pageTitle" class="mb-1">Charity explorer</h1>
     <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
     <p id="instructions" class="opacity-80 mb-0 text-[15px]">
       <!-- Will be dynamically set in parseQueryParams() -->
@@ -954,7 +954,7 @@ $(document).ready(function() {
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
-        <p>Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
+        <p class="text-sm">Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
           what's going on directly.
         </p>
         <ol class="!list-decimal space-y-1 text-sm pl-4">
@@ -990,7 +990,7 @@ $(document).ready(function() {
   <div class="">
     <label class="text-sm font-semibold" for="einShowInput">Add EIN(s)</label>
     
-    <span class="inline-block ml-1"><button id='clearEINsBtnShow' class='frameless'>Clear EINs</button></span>
+    <span class="inline-block ml-1"><button id='clearEINsBtnShow' class='frameless'>Reset</button></span>
     
   </div>
   <div class="flex items-center gap-1.5">
@@ -1007,7 +1007,7 @@ $(document).ready(function() {
   <div class="">
     <label class="text-sm font-semibold" for="einHideInput">Remove EIN(s)</label>
     
-    <span class="inline-block ml-1"><button id='clearEINsBtnHide' class='frameless'>Clear EINs</button></span>
+    <span class="inline-block ml-1"><button id='clearEINsBtnHide' class='frameless'>Add Back EINs</button></span>
     
   </div>
   <div class="flex items-center gap-1.5">
@@ -1019,13 +1019,10 @@ $(document).ready(function() {
 
       <div id="hideEINs"></div>
     </div>
-
     <div class="relative flex flex-col gap-2 max-w-lg">
       <div class="inline-flex flex-col gap-1">
   <div class="">
-    <label class="text-sm font-semibold" for="keywordInput">Add keyword</label>
-    
-    <span class="inline-block ml-1"><button id='clearFiltersBtn' class='frameless'>Clear keywords</button></span>
+    <label class="text-sm font-semibold" for="keywordInput">Bulk add orgs by keyword</label>
     
   </div>
   <div class="flex items-center gap-1.5">
@@ -1072,7 +1069,7 @@ $(document).ready(function() {
 <div class="relative flex-1 -mx-4 md:mx-0 min-h-[75vh]">
 
   <!-- Search -->
-  <div class="absolute top-4 left-4 md:left-[initial] right-4 z-10">
+  <div class="hidden absolute top-4 left-4 md:left-[initial] right-4 z-10">
     <div class="relative">
       <input 
         type="text" 
@@ -1100,17 +1097,17 @@ $(document).ready(function() {
 <!-- Zoom Controls -->
 <div class="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
   <button id="zoomIn" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
-    <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
+    <svg class="w-5 h-5" fill="none" stroke="white" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
     </svg>
   </button>
   <button id="zoomOut" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
-    <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
+    <svg class="w-5 h-5" fill="none" stroke="white" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
     </svg>
   </button>
   <button id="zoomFit" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
-    <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
+    <svg class="w-5 h-5" fill="none" stroke="white" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
     </svg>
   </button>
@@ -1141,7 +1138,7 @@ $(document).ready(function() {
       L9.91,20.34 L9.05,20.18 L8.2,19.95 L7.37,19.62 L6.57,19.2
       L5.81,18.7 L5.09,18.12 L4.43,17.46 L3.83,16.73 L3.3,15.94
       L2.85,15.08 L2.48,14.18 L2.21,13.23 L2.03,12.25"
-      stroke="black" stroke-width=".75" fill="none" />
+      stroke="white" stroke-width=".75" fill="none" />
   </button>
   <button id="scaleDown" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
     <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
@@ -1207,7 +1204,7 @@ $(document).ready(function() {
          L9.71,2.86 L10.63,2.65 L11.57,2.52 L12.52,2.5 L13.47,2.56
          L14.42,2.73 L15.34,2.99 L16.24,3.34 L17.1,3.78 L17.91,4.3
          L18.67,4.91 L19.37,5.59 L20.0,6.34 L20.56,7.15 L21.03,8.01
-         L21.41,8.92 L21.7,9.87 L21.9,10.85 L21.99,11.84" stroke="black"
+         L21.41,8.92 L21.7,9.87 L21.9,10.85 L21.99,11.84" stroke="white"
          stroke-width=".75" fill="none" />    
     </svg>
   </svg>
@@ -1257,7 +1254,7 @@ $(document).ready(function() {
       L13.12,2.84 L14.04,2.94 L14.95,3.14 L15.84,3.43 L16.7,3.81
       L17.53,4.28 L18.31,4.83 L19.03,5.46 L19.69,6.16 L20.28,6.93
       L20.79,7.76 L21.22,8.64 L21.56,9.56 L21.81,10.52
-      L21.96,11.51" stroke="black" stroke-width=".75" fill="none"
+      L21.96,11.51" stroke="white" stroke-width=".75" fill="none"
       />
     </svg>
   </button>
