@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1745328525">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1745328525">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1745468057">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1745468057">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -38,7 +38,7 @@ $(document).ready(function() {
 
   <!-- Begin Jekyll SEO tag v2.8.0 -->
 <title>Charity explorer - Sankey chart of NGOs and their flows | DataRepublican</title>
-<meta name="generator" content="Jekyll v3.9.5" />
+<meta name="generator" content="Jekyll v3.10.0" />
 <meta property="og:title" content="Charity explorer - Sankey chart of NGOs and their flows" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Tracking where the money goes" />
@@ -1002,7 +1002,23 @@ $(document).ready(function() {
 
       <div id="activeEINs"></div>
     </div>
+    <div class="relative flex flex-col gap-2 max-w-lg">
+      <div class="inline-flex flex-col gap-1">
+  <div class="">
+    <label class="text-sm font-semibold" for="einHideInput">Remove EIN(s)</label>
+    
+    <span class="inline-block ml-1"><button id='clearEINsBtnHide' class='frameless'>Add Back EINs</button></span>
+    
+  </div>
+  <div class="flex items-center gap-1.5">
+    <input type="text" id="einHideInput" placeholder="XX-XXXXXXX or 9 digits" class="px-2 py-2 md:py-1 rounded text-sm border border-gray-300 flex-1 md:flex-none" />
+    <button id="hideEinBtn" class="whitespace-nowrap">Remove EIN</button>
+  </div>
+</div>
 
+
+      <div id="hideEINs"></div>
+    </div>
     <div class="relative flex flex-col gap-2 max-w-lg">
       <div class="inline-flex flex-col gap-1">
   <div class="">
@@ -1122,7 +1138,7 @@ $(document).ready(function() {
       L9.91,20.34 L9.05,20.18 L8.2,19.95 L7.37,19.62 L6.57,19.2
       L5.81,18.7 L5.09,18.12 L4.43,17.46 L3.83,16.73 L3.3,15.94
       L2.85,15.08 L2.48,14.18 L2.21,13.23 L2.03,12.25"
-      stroke="black" stroke-width=".75" fill="none" />
+      stroke="white" stroke-width=".75" fill="none" />
   </button>
   <button id="scaleDown" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
     <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
@@ -1188,7 +1204,7 @@ $(document).ready(function() {
          L9.71,2.86 L10.63,2.65 L11.57,2.52 L12.52,2.5 L13.47,2.56
          L14.42,2.73 L15.34,2.99 L16.24,3.34 L17.1,3.78 L17.91,4.3
          L18.67,4.91 L19.37,5.59 L20.0,6.34 L20.56,7.15 L21.03,8.01
-         L21.41,8.92 L21.7,9.87 L21.9,10.85 L21.99,11.84" stroke="black"
+         L21.41,8.92 L21.7,9.87 L21.9,10.85 L21.99,11.84" stroke="white"
          stroke-width=".75" fill="none" />    
     </svg>
   </svg>
@@ -1238,7 +1254,7 @@ $(document).ready(function() {
       L13.12,2.84 L14.04,2.94 L14.95,3.14 L15.84,3.43 L16.7,3.81
       L17.53,4.28 L18.31,4.83 L19.03,5.46 L19.69,6.16 L20.28,6.93
       L20.79,7.76 L21.22,8.64 L21.56,9.56 L21.81,10.52
-      L21.96,11.51" stroke="black" stroke-width=".75" fill="none"
+      L21.96,11.51" stroke="white" stroke-width=".75" fill="none"
       />
     </svg>
   </button>
