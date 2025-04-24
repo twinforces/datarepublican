@@ -157,7 +157,18 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 
       <div id="activeEINs"></div>
     </div>
+    <div class="relative flex flex-col gap-2 max-w-lg">
+      {% include input.html 
+        label="Remove EIN(s)" 
+        id="einHideInput" 
+        placeholder="XX-XXXXXXX or 9 digits" 
+        buttonLabel="Remove EIN" 
+        buttonId="hideEinBtn" 
+        actions="<button id='clearEINsBtnHide' class='frameless'>Add Back EINs</button>"
+      %}
 
+      <div id="hideEINs"></div>
+    </div>
     <div class="relative flex flex-col gap-2 max-w-lg">
       {% include input.html 
         label="Bulk add orgs by keyword" 
