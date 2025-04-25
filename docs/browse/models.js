@@ -340,7 +340,7 @@ class BrowseViewModel {
       }
       
       limitedMatches.forEach(c => {
-        c.place();
+        c.place(1,1); // avoid sankey explosion
       });
     }
     this.computeImpliedVisibility(null, true, true);
