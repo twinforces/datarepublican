@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1745620772">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1745620772">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1746161772">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1746161772">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -966,35 +966,42 @@ $(document).ready(function() {
     </script>
     
     <!-- "How it works" toggle is BFS-only -->
-    <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works</button>
+    <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works (and Why)</button>
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
-        <p class="text-sm">Unlike the other tool, this tool is designed for browsing. It's not perfect, but it lets you see
+        <p class="text-sm">Unlike the <a href="/expose">other tool</a>, this tool is designed for browsing. It's not perfect, but it lets you see
           what's going on directly.
         </p>
-        <ol class="!list-decimal space-y-1 text-sm pl-4">
+       <h3 class="mt-0">Why you should use it</h3>
+        <p class="text-sm">There are 140,000 charities this site is tracking with 600,000 grants. If 5% of them are corrupt, that's still 7,000
+          to research. We need to get a little barn raising here if we're going to reclaim our country, only you know the suspect charities in your area.
+          So you can start at any charity you can find, and then explore where are they getting their money, and who
+          are they giving their money to? If you know the EIN, start there. If you don't you can try the keyword search.
+          Find a suspicious set? Post the URL to X under #DRBadNGOs. 
+        </p>
+        <ul class="!list-decimal space-y-1 text-sm pl-4">
         <li>We show NGOs and the money that flows between them. Money comes in from the left, 
           goes out to the right. The NGOs are drawn with trapezoids so the left side is proporitional to the incoming grants
-        while the right side is proporitional to the grants going out to other NGOs.</li>
+        while the right side is proportional to the grants going out to other NGOs, think of them like funnels.</li>
         <li>US Government is treated as the ultimate donor. Default shows the 5 largest "root" donors.</li>
-        <li>Money flows are scaled so large flows don't dwarf small ones, you can adjust scaling up or down.</li>
+        <li>Money flows are scaled so large flows don't dwarf small ones, you can adjust scaling up or down with the buttons to the left of the zoom controls.</li>
         <li>Octogons (aka stop sign) are NGOs that don't have any outflows to other NGOs, presumably spend it all.</li>
         <li>Gray "plus" circles roll up grants to keep the graph from being overwhelming. Click the pimples to see 3 more from that side, or click the NGO to see 3 more from both sides.</li>
         <li>Command/Windows click on a node to bring up a control panel with more controls and cross links.</li>
         <li>In the control panel, Focus will remove all the other NGOs, Remove will remove just that NGO.</li>
         <li>Choose any of the starting points below and click away.</li>
-        <li>Default: <a href ="/browse/">USG and the next four largest <i>roots</i>.</a></li>
-        <li> Jump Start <a href="/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761">NED Hydra!</a></a>
-       <li> Jump Start <a href="/browse/?ein=001">Root of all Evil!</a></li>
-       <li> Jump Start <a href="/browse/?ein=110303001&ein=223195349">Fidelity Aid</a> <a href="https://x.com/i/grok/share/4XyDQBB2Hn4araFIFR87wPZa5">why</a></li>
-       <li> Jump Start <a href="/browse/?ein=800835023">Turning Point</a></li>
-       <li> Jump Start <a href="/browse/?ein=831567380">Bill Kriston's NGO</a></li>
-       <li> Jump Start <a href="/browse/?ein=943240841">AIDS VACCINE ADVOCACY COALITION INC.</a></li>
-       <li> Jump Start <a href="/browse/?ein=311726494">Folks who paid for COVID for Fauci.</a></li>
-        <li> Jump Start <a href="/browse/?ein=132621497&ein=221643997">2 Planned Parenthoods with the most taxpayer Funding (Searching for PP brings up an overwhelming number of nodes.)</a></li>
-        <li>Jump Start <a href="/browse/?ein=520794300&ein=521194741">AARP and fellow traveler</a></li>
-       </ol>
+        <li>Default: <a href ="/browse/">USG and the next four largest <i>NGOs that don't have any inflows</i>.</a> The chart will reset to this if there are no nodes to show.</li>
+        <li> <B>Preset</B> <a href="/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761">NED Hydra!</a></a>
+       <li> <B>Preset</B> <a href="/browse/?ein=001">Root of all Evil!</a></li>
+       <li> <B>Preset</B> <a href="/browse/?ein=110303001&ein=223195349">Fidelity Aid</a> <a href="https://x.com/i/grok/share/4XyDQBB2Hn4araFIFR87wPZa5">why</a></li>
+       <li> <B>Preset</B> <a href="/browse/?ein=800835023">Turning Point</a></li>
+       <li> <B>Preset</B> <a href="/browse/?ein=831567380">Bill Kriston's NGO</a></li>
+       <li> <B>Preset</B> <a href="/browse/?ein=943240841">AIDS VACCINE ADVOCACY COALITION INC.</a></li>
+       <li> <B>Preset</B> <a href="/browse/?ein=311726494">Folks who paid for COVID for Fauci.</a></li>
+        <li> <B>Preset</B> <a href="/browse/?ein=132621497&ein=221643997">2 Planned Parenthoods with the most taxpayer Funding (Searching for PP brings up an overwhelming number of nodes.)</a></li>
+        <li> <B>Preset</B> <a href="/browse/?ein=520794300&ein=521194741">AARP and fellow traveler</a></li>
+       </ul>
       </div>
     </div>
   </div>
@@ -1021,14 +1028,14 @@ $(document).ready(function() {
     <div class="relative flex flex-col gap-2 max-w-lg">
       <div class="inline-flex flex-col gap-1">
   <div class="">
-    <label class="text-sm font-semibold" for="einHideInput">Remove EIN(s)</label>
+    <label class="text-sm font-semibold" for="einHideInput">Block EIN(s)</label>
     
-    <span class="inline-block ml-1"><button id='clearEINsBtnHide' class='frameless'>Add Back EINs</button></span>
+    <span class="inline-block ml-1"><button id='clearEINsBtnHide' class='frameless'>Unblock All EINs</button></span>
     
   </div>
   <div class="flex items-center gap-1.5">
     <input type="text" id="einHideInput" placeholder="XX-XXXXXXX or 9 digits" class="px-2 py-2 md:py-1 rounded text-sm border border-gray-300 flex-1 md:flex-none" />
-    <button id="hideEinBtn" class="whitespace-nowrap">Remove EIN</button>
+    <button id="hideEinBtn" class="whitespace-nowrap">Block EIN</button>
   </div>
 </div>
 
@@ -1130,7 +1137,7 @@ $(document).ready(function() {
 </div>
 
 <div class="absolute bottom-4 right-16 z-10 flex flex-col gap-1">
-  <button id="scaleUp" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
+  <button id="scaleUp" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black" title="Expand Flows">
     <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
               <path d="M12.0,12.0 L12.11,12.01 L12.21,12.04
       L12.3,12.09 L12.39,12.17 L12.47,12.25 L12.53,12.36
@@ -1156,7 +1163,7 @@ $(document).ready(function() {
       L2.85,15.08 L2.48,14.18 L2.21,13.23 L2.03,12.25"
       stroke="white" stroke-width=".75" fill="none" />
   </button>
-  <button id="scaleDown" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
+  <button id="scaleDown" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black" title="Compact Flows">
     <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
          <path d="M12.0,12.0 L12.03,12.0 L12.06,12.01
          L12.09,12.03 L12.12,12.05 L12.14,12.08 L12.16,12.11 L12.17,12.14
@@ -1225,7 +1232,7 @@ $(document).ready(function() {
     </svg>
   </svg>
   </button>
-  <button id="scaleReset" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black">
+  <button id="scaleReset" class="p-2 rounded min-w-0 bg-black/60 hover:bg-black" title="Default Flows (3)">
     <svg class="w-5 h-5" fill="none" stroke="black" viewBox="0 0 24 24">
               <path d="M12.0,12.0 L12.05,12.01 L12.1,12.02
       L12.15,12.05 L12.2,12.08 L12.23,12.13 L12.26,12.18
