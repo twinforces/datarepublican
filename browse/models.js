@@ -7,6 +7,7 @@ const NEXT_REVEAL_MAX = 15;
 const GOV_EIN = "001";
 const MAX_NODES = 100;
 const CHUNK_SIZE = 1000;
+const MAX_KEYWORD_NODES = 15;
 
 /* keep this around and export it mostly for debugging*/
 let GOV_NODE = null;
@@ -328,19 +329,24 @@ class BrowseViewModel {
       if (c) c.desiredVisible = false;
     });
     if (this.getKeywordList().length) {
-      const matches = Charity.invisibleCharities.filter((c) =>
-        !this.shouldHide(c.id) &&
-        c.searchMatch(Object.keys(this.keywords)) &&
-        !c.desiredVisible
+      const matches = Charity.invisibleCharities.filter(
+        (c) =>
+          !this.shouldHide(c.id) &&
+          c.searchMatch(Object.keys(this.keywords)) &&
+          !c.desiredVisible
       );
-      
-      const limitedMatches = matches.slice(0, 5);
-      if (matches.length > 5) {
-        updateStatus(`<span>Note: Graph limited to first 5 of ${matches.length} matching results</span>`, "black", false);
+
+      const limitedMatches = matches.slice(0, MAX_KEYWORD_NODES);
+      if (matches.length > MAX_KEYWORD_NODES) {
+        updateStatus(
+          `<span>Note: Graph limited to first ${MAX_KEYWORD_NODES} of ${matches.length} matching results</span>`,
+          "black",
+          false
+        );
       }
-      
-      limitedMatches.forEach(c => {
-        c.place(1,1); // avoid sankey explosion
+
+      limitedMatches.forEach((c) => {
+        c.place(1, 1); // avoid sankey explosion
       });
     }
     this.computeImpliedVisibility(null, true, true);
@@ -440,7 +446,9 @@ class BrowseViewModel {
     const charitiesTotal = Object.values(Charity.charityLookup).length;
     let charitiesProcessed = 0;
 
-    updateStatus("<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>");
+    updateStatus(
+      "<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>"
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     for (let charity of Object.values(Charity.charityLookup)) {
       const obviousCircles = charity.simpleCircular();
@@ -463,7 +471,9 @@ class BrowseViewModel {
     console.log(`${obviousCirclesCount} obvious circular grants found`);
     updateStatus(`${obviousCirclesCount} obvious circular grants found`);
 
-    updateStatus("<span>Finding deeper loopback grants</span><span class='text-[13px] opacity-60'>(A->B->C->A)</span>");
+    updateStatus(
+      "<span>Finding deeper loopback grants</span><span class='text-[13px] opacity-60'>(A->B->C->A)</span>"
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const totalGrants = Object.values(Charity.charityLookup).reduce(
@@ -526,7 +536,9 @@ class BrowseViewModel {
     });
 
     updateStatus(
-      `<span>$${formatNumber(badTotal)} of loopbacks removed</span><span class="text-[13px] opacity-60">${
+      `<span>$${formatNumber(
+        badTotal
+      )} of loopbacks removed</span><span class="text-[13px] opacity-60">${
         cycleGrants.size
       } in ${charitiesWithBadGrants} charities</span>`
     );
@@ -1053,17 +1065,17 @@ class Charity {
     if (this._impliedVisible != value) {
       this._impliedVisible = value;
       if (!value) {
-        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+        if (this.filer && typeof this.filer.impliedVisible === "number") {
           this.filer.impliedVisible--;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
           this.grantee.impliedVisible--;
         }
       } else {
-        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+        if (this.filer && typeof this.filer.impliedVisible === "number") {
           this.filer.impliedVisible++;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
           this.grantee.impliedVisible++;
         }
       }
@@ -1731,17 +1743,17 @@ class Grant {
    */
   set isVisible(value) {
     if (value) {
-      if (this.filer && typeof this.filer.impliedVisible === 'number') {
+      if (this.filer && typeof this.filer.impliedVisible === "number") {
         this.filer.impliedVisible++;
       }
-      if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+      if (this.grantee && typeof this.grantee.impliedVisible === "number") {
         this.grantee.impliedVisible++;
       }
     } else {
-      if (this.filer && typeof this.filer.impliedVisible === 'number') {
+      if (this.filer && typeof this.filer.impliedVisible === "number") {
         this.filer.impliedVisible--;
       }
-      if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+      if (this.grantee && typeof this.grantee.impliedVisible === "number") {
         this.grantee.impliedVisible--;
       }
     }
@@ -1774,17 +1786,17 @@ class Grant {
     if (this._impliedVisible != value) {
       this._impliedVisible = value;
       if (!value) {
-        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+        if (this.filer && typeof this.filer.impliedVisible === "number") {
           this.filer.impliedVisible--;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
           this.grantee.impliedVisible--;
         }
       } else {
-        if (this.filer && typeof this.filer.impliedVisible === 'number') {
+        if (this.filer && typeof this.filer.impliedVisible === "number") {
           this.filer.impliedVisible++;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === 'number') {
+        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
           this.grantee.impliedVisible++;
         }
       }
@@ -1921,11 +1933,7 @@ class Grant {
  */
 function updateStatus(message, color = "black", loading = true) {
   $("#status").html(`<span class="flex flex-col items-end text-sm">
-    ${
-      loading
-        ? ''
-        : ""
-    }
+    ${loading ? "" : ""}
     ${message}</span>`);
 }
 
