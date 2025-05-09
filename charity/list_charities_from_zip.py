@@ -13,6 +13,9 @@ import numpy as np
 from tqdm import tqdm
 import logging
 import pandas as pd
+import re
+from mako.template import Template
+from mako.exceptions import MakoException
 
 total_xml_files = 0
 file_counter_local = threading.local()
@@ -22,8 +25,9 @@ invalid_taxyr_by_year = defaultdict(int)
 missing_filer_by_year = defaultdict(int)
 missing_revenue_by_year = defaultdict(int)
 invalid_predicate_by_year = defaultdict(int)
+high_conferences_count = 0
+high_comp_count = 0
 
-# Set up logging to a file
 logging.basicConfig(
     filename='error_log.txt',
     level=logging.ERROR,
@@ -31,10 +35,16 @@ logging.basicConfig(
 )
 
 def log_error(message, exc_info=False):
+    global high_conferences_count, high_comp_count
     logging.error(message, exc_info=exc_info)
+    if "High conferences_amt" in message and high_conferences_count < 5:
+        high_conferences_count += 1
+        print(f"Error Log: {message}")
+    elif "Potential high grift org" in message and high_comp_count < 5:
+        high_comp_count += 1
+        print(f"Error Log: {message}")
 
 def assign_grift_rating(percentile):
-    """Assign a grift rating based on grift_pct_percentile."""
     if percentile < 50:
         return 'A'
     elif percentile < 70:
@@ -46,7 +56,22 @@ def assign_grift_rating(percentile):
     else:
         return 'F'
 
+ORG_TYPE_DESCRIPTIONS = {
+    "501(c)(3)": "Charitable organizations, including religious, educational, scientific, and public safety organizations.",
+    "501(c)(4)": "Civic leagues, social welfare organizations, and local associations of employees.",
+    "501(c)(5)": "Labor, agricultural, and horticultural organizations.",
+    "501(c)(6)": "Business leagues, chambers of commerce, and real estate boards.",
+    "501(c)(7)": "Social and recreational clubs.",
+    "501(c)(8)": "Fraternal beneficiary societies and associations.",
+    "501(c)(9)": "Voluntary employees’ beneficiary associations.",
+    "501(c)(10)": "Domestic fraternal societies and associations.",
+    "501(c)(12)": "Benevolent life insurance associations, mutual ditch or irrigation companies, and mutual or cooperative telephone companies.",
+    "501(c)(14)": "State-chartered credit unions and mutual reserve funds.",
+    "Unknown": "Organization type not specified or not recognized as a 501(c) entity."
+}
+
 def parse_xml_file(xml_content, xml_filename, zip_prefix):
+    global high_conferences_count, high_comp_count
     if not hasattr(file_counter_local, 'value'):
         file_counter_local.value = 0
         file_counter_local.entries = 0
@@ -62,11 +87,9 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
     root = tree.getroot()
     namespaces = {'irs': 'http://www.irs.gov/efile'}
 
-    # Determine form type
     form_type_elem = root.find(".//irs:ReturnHeader/irs:ReturnTypeCd", namespaces=namespaces)
     form_type = form_type_elem.text.strip() if form_type_elem is not None else "Unknown"
 
-    # Attempt to get TaxYr, with fallbacks
     tax_year_elem = root.find(".//irs:ReturnHeader/irs:TaxYr", namespaces=namespaces)
     if tax_year_elem is None:
         missing_taxyr_by_year["Unknown"] += 1
@@ -94,15 +117,6 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         filer_name = filer_name_elem.text.strip() if filer_name_elem is not None else "Unknown"
 
     file_counter_local.value += 1
-
-    filer_address_elem = root.find(".//irs:Filer/irs:USAddress", namespaces=namespaces)
-    filer_address = ""
-    if filer_address_elem is not None:
-        address_line = filer_address_elem.find("irs:AddressLine1Txt", namespaces=namespaces)
-        city = filer_address_elem.find("irs:CityNm", namespaces=namespaces)
-        state = filer_address_elem.find("irs:StateAbbreviationCd", namespaces=namespaces)
-        zip_code = filer_address_elem.find("irs:ZIPCd", namespaces=namespaces)
-        filer_address = ", ".join([x.text.strip() for x in [address_line, city, state, zip_code] if x is not None and x.text])
 
     receipt_amt = 0
     for revenue_field in [
@@ -275,7 +289,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         except Exception as e:
             log_error(f"Error during ConferencesMeetingsGrp lookup in {xml_filename}: {e}", exc_info=True)
 
-    if conferences_amt > 1_000_000:
+    if conferences_amt > 1_000_000 and high_conferences_count < 5:
         log_error(f"High conferences_amt ${conferences_amt} for EIN {filer_ein}, Name {filer_name}, TaxYear {tax_year}")
 
     officer_comp = 0
@@ -303,30 +317,66 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         except Exception as e:
             log_error(f"Error during Form990PartVIISectionAGrp lookup in {xml_filename}: {e}", exc_info=True)
 
-    avg_hours = 0
-    if form_type == "990PF":
-        try:
-            officer = root.find(".//irs:OfficerDirTrstKeyEmplGrp", namespaces=namespaces)
-            if officer is not None:
-                hours_elem = officer.find("irs:AverageHrsPerWkDevotedToPosRt", namespaces=namespaces)
-                if hours_elem is not None and hours_elem.text.strip():
+    grants_to_others = 0
+    try:
+        schedule_f = root.find(".//irs:ScheduleF", namespaces=namespaces)
+        if schedule_f is not None:
+            for grant in schedule_f.findall(".//irs:GrantsToOrgOutsideUSGrp", namespaces=namespaces):
+                for field in ["irs:CashGrantAmt", "irs:TotalAmt"]:
+                    amount_elem = grant.find(field, namespaces=namespaces)
+                    if amount_elem is not None:
+                        try:
+                            amount = int(float(amount_elem.text.strip()))
+                            grants_to_others += amount
+                            log_error(f"Found {field} ${amount} in ScheduleF for EIN {filer_ein}, File {xml_filename}")
+                        except (ValueError, TypeError) as e:
+                            log_error(f"Invalid {field} in ScheduleF: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
+            for grant in schedule_f.findall(".//irs:GrantsToOrganizationsOutsideUS", namespaces=namespaces):
+                amount_elem = grant.find("irs:TotalAmt", namespaces=namespaces)
+                if amount_elem is not None:
                     try:
-                        avg_hours = float(hours_elem.text.strip())
+                        amount = int(float(amount_elem.text.strip()))
+                        grants_to_others += amount
+                        log_error(f"Found irs:GrantsToOrganizationsOutsideUS/irs:TotalAmt ${amount} in ScheduleF for EIN {filer_ein}, File {xml_filename}")
                     except (ValueError, TypeError) as e:
-                        log_error(f"Invalid AverageHrsPerWkDevotedToPosRt value: {hours_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-        except Exception as e:
-            log_error(f"Error during OfficerDirTrstKeyEmplGrp lookup for avg_hours in {xml_filename}: {e}", exc_info=True)
-    else:
-        try:
-            for person in root.findall(".//irs:Form990PartVIISectionAGrp", namespaces=namespaces):
-                hours_elem = person.find("irs:AverageHoursPerWeekRt", namespaces=namespaces)
-                if hours_elem is not None and hours_elem.text.strip():
-                    try:
-                        avg_hours += float(hours_elem.text.strip())
-                    except (ValueError, TypeError) as e:
-                        log_error(f"Invalid AverageHoursPerWeekRt value: {hours_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-        except Exception as e:
-            log_error(f"Error during AverageHoursPerWeekRt lookup in {xml_filename}: {e}", exc_info=True)
+                        log_error(f"Invalid irs:GrantsToOrganizationsOutsideUS/irs:TotalAmt: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
+        schedule_i = root.find(".//irs:ScheduleI", namespaces=namespaces)
+        if schedule_i is not None:
+            for grant in schedule_i.findall(".//irs:GrantOrContributionPdDurYrGrp", namespaces=namespaces):
+                for field in ["irs:CashGrantAmt", "irs:Amount", "irs:TotalAmt"]:
+                    amount_elem = grant.find(field, namespaces=namespaces)
+                    if amount_elem is not None:
+                        try:
+                            amount = int(float(amount_elem.text.strip()))
+                            grants_to_others += amount
+                            log_error(f"Found {field} ${amount} in ScheduleI for EIN {filer_ein}, File {xml_filename}")
+                        except (ValueError, TypeError) as e:
+                            log_error(f"Invalid {field} in ScheduleI: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
+        if grants_to_others > 0:
+            log_error(f"Non-zero grants_to_others ${grants_to_others} for EIN {filer_ein}, Name {filer_name}, TaxYear {tax_year}")
+        elif filer_ein in ["271414646", "520851555"]:
+            log_error(f"Zero grants_to_others for EIN {filer_ein}, Name {filer_name}, File {xml_filename}. Parent XML: {ET.tostring(root, encoding='unicode')[:1000]}")
+    except Exception as e:
+        log_error(f"Error during ScheduleF/I lookup for grants in {xml_filename}: {e}", exc_info=True)
+
+    foreign_expenses = 0
+    try:
+        schedule_f = root.find(".//irs:ScheduleF", namespaces=namespaces)
+        if schedule_f is not None:
+            for activity in schedule_f.findall(".//irs:StmtOfActyOutsdUSGrp", namespaces=namespaces):
+                for field in ["irs:RegionTotalExpendituresAmt", "irs:TotalAmt"]:
+                    amount_elem = activity.find(field, namespaces=namespaces)
+                    if amount_elem is not None:
+                        try:
+                            amount = int(float(amount_elem.text.strip()))
+                            foreign_expenses += amount
+                            log_error(f"Found {field} ${amount} in ScheduleF for EIN {filer_ein}, File {xml_filename}")
+                        except (ValueError, TypeError) as e:
+                            log_error(f"Invalid {field} in ScheduleF: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
+        if foreign_expenses == 0 and filer_ein in ["271414646", "520851555"]:
+            log_error(f"Zero foreign_expenses for EIN {filer_ein}, Name {filer_name}, File {xml_filename}. Parent XML: {ET.tostring(root, encoding='unicode')[:1000]}")
+    except Exception as e:
+        log_error(f"Error during ScheduleF lookup for foreign expenses in {xml_filename}: {e}", exc_info=True)
 
     org_type = "Unknown"
     org_type_debug = "Not found"
@@ -361,20 +411,32 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         except Exception as e:
             log_error(f"Error during Organization type lookup in {xml_filename}: {e}", exc_info=True)
 
+    foreign_office = False
+    try:
+        foreign_office_elem = root.find(".//irs:ForeignOfficeInd", namespaces=namespaces)
+        if foreign_office_elem is not None and foreign_office_elem.text.strip().upper() == 'X':
+            foreign_office = True
+    except Exception as e:
+        log_error(f"Error during ForeignOfficeInd lookup in {xml_filename}: {e}", exc_info=True)
+
     comp_pct = (officer_comp / receipt_amt * 100) if receipt_amt > 0 else 0
     travel_pct = ((travel_amt + conferences_amt) / total_exp * 100) if total_exp > 0 else 0
     denominator = (total_assets + receipt_amt) if form_type == "990PF" else receipt_amt
     grift_pct = ((officer_comp + travel_amt + conferences_amt) / denominator * 100) if denominator > 0 else 0
-    grift_pct = min(grift_pct, 100.0)  # Cap at 100% to avoid outliers
-    if grift_pct > 100.0:
-        log_error(f"High grift_pct {grift_pct:.2f}% for EIN {filer_ein}, Name {filer_name}, Denominator {denominator}, OfficerComp {officer_comp}, Travel {travel_amt}, Conferences {conferences_amt}")
+    grift_pct = min(grift_pct, 100.0)
+    us_expenses = officer_comp + travel_amt + conferences_amt
+    total_relevant_exp = foreign_expenses + us_expenses
+    grift_ratio = (us_expenses / total_relevant_exp * 100) if total_relevant_exp > 0 else grift_pct
+    external_grants_ratio = (grants_to_others / total_exp * 100) if total_exp > 0 else 0
+    domestic_misrep_flag = grift_ratio > 10 and foreign_expenses < 0.1 * total_exp if total_exp > 0 else False
 
     results = []
     try:
-        results.append((tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type,
-                        total_exp, prog_exp, travel_amt, conferences_amt, officer_comp, comp_pct, travel_pct, grift_pct,
-                        prog_exp == 0, filer_address, avg_hours, total_assets, form_type, denominator))
-        file_counter_local.entries += 1
+        if denominator > 2_000_000:
+            results.append([tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type, total_exp, prog_exp,
+                            travel_amt, conferences_amt, officer_comp, comp_pct, travel_pct, grift_pct, total_assets, form_type,
+                            denominator, foreign_office, foreign_expenses, grants_to_others, external_grants_ratio, domestic_misrep_flag])
+            file_counter_local.entries += 1
         if (file_counter_local.value % 10000) == 0:
             tqdm.write("Thread %s processed %s files, %s entries, %s skipped" % (
                 threading.get_ident(), file_counter_local.value, file_counter_local.entries, file_counter_local.skipped))
@@ -384,21 +446,18 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
 
     return results
 
-def process_zip_files(start_year, end_year, max_workers=8):
+def process_zip_files(start_year, end_year, max_workers=4):
     global total_xml_files
     global missing_taxyr_by_year
     global invalid_taxyr_by_year
     global missing_filer_by_year
     global missing_revenue_by_year
     global invalid_predicate_by_year
+    global high_conferences_count, high_comp_count
     start_time = time.time()
     year_prefixes = [str(y) for y in range(int(start_year), int(end_year) + 1)]
     results_by_year = defaultdict(list)
     type_counts_by_year = {}
-    comp_pcts = []
-    travel_pcts = []
-    grift_pcts = []
-    totals = {"receipt_amt": 0, "govt_amt": 0, "contrib_amt": 0, "total_exp": 0, "prog_exp": 0, "travel_amt": 0, "conferences_amt": 0, "officer_comp": 0, "total_assets": 0}
     total_xml_files = 0
     total_processed_files = 0
     total_entries = 0
@@ -457,19 +516,6 @@ def process_zip_files(start_year, end_year, max_workers=8):
                         type_counts_by_year[tax_year] = type_counts_by_year.get(tax_year, Counter())
                         type_counts_by_year[tax_year].update([r[6] for r in results])
                         debug_entries_by_year[tax_year].append(results[0])
-                        for r in results:
-                            totals["receipt_amt"] += r[3]
-                            totals["govt_amt"] += r[4]
-                            totals["contrib_amt"] += r[5]
-                            totals["total_exp"] += r[7]
-                            totals["prog_exp"] += r[8]
-                            totals["travel_amt"] += r[9]
-                            totals["conferences_amt"] += r[10]
-                            totals["officer_comp"] += r[11]
-                            totals["total_assets"] += r[18]
-                            comp_pcts.append(r[12])
-                            travel_pcts.append(r[13])
-                            grift_pcts.append(r[14])
                         total_entries += len(results)
                 except Exception as e:
                     log_error(f"Error processing {xml_file} in {zip_file}: {e}", exc_info=True)
@@ -491,9 +537,9 @@ def process_zip_files(start_year, end_year, max_workers=8):
     for tax_year, entries in sorted(debug_entries_by_year.items()):
         print(f"\nDebug for Tax Year {tax_year}:")
         for entry in entries[:2]:
-            print(f"DEBUG: EIN={entry[1]}, Receipts={entry[3]}, TotalExp={entry[7]}, Travel={entry[9]}, Conferences={entry[10]}, OfficerComp={entry[11]}, Type={entry[6]}")
+            print(f"DEBUG: EIN={entry[1]}, Receipts={entry[3]}, TotalExp={entry[7]}, Travel={entry[9]}, Conferences={entry[10]}, OfficerComp={entry[11]}, Type={entry[6]}, ForeignOffice={entry[18]}, ForeignExpenses={entry[19]}, GrantsToOthers={entry[20]}")
         for entry in entries[-2:]:
-            print(f"DEBUG: EIN={entry[1]}, Receipts={entry[3]}, TotalExp={entry[7]}, Travel={entry[9]}, Conferences={entry[10]}, OfficerComp={entry[11]}, Type={entry[6]}")
+            print(f"DEBUG: EIN={entry[1]}, Receipts={entry[3]}, TotalExp={entry[7]}, Travel={entry[9]}, Conferences={entry[10]}, OfficerComp={entry[11]}, Type={entry[6]}, ForeignOffice={entry[18]}, ForeignExpenses={entry[19]}, GrantsToOthers={entry[20]}")
 
     print("\nCharities per Year:")
     print("| Tax Year | Number of Charities |")
@@ -512,102 +558,351 @@ def process_zip_files(start_year, end_year, max_workers=8):
               f"{missing_filer_by_year[tax_year]:>13} | {missing_revenue_by_year[tax_year]:>15} | "
               f"{invalid_predicate_by_year[tax_year]:>17} |")
 
+    histogram_template = Template("""
+## Org Type ${org_type}
+${description}
+
+### ${title} Histogram (0-100%, 100 bins)
+| Range         | Count    | Percentile |
+|---------------|----------|------------|
+% for start, end, count, percentile in data:
+| ${start}-${end}% | ${'{:>8}'.format(count)} | ${'{:>10.2f}'.format(percentile)}% |
+% endfor
+""")
+
+    report_template = Template("""
+# Grift Report for Tax Year ${tax_year}
+
+## Top Organizations by Foreign Grift Ratio
+| EIN | Name | Type | Grift Ratio (%) | Type Percentile | Rating | External Grants Ratio (%) | Grants Type Percentile | Grants Rating | Domestic Misrepresentation |
+|-----|------|------|-----------------|-----------------|--------|---------------------------|------------------------|---------------|---------------------------|
+% for org in top_grift:
+| ${org['filer_ein']} | ${org['filer_name']} | ${org['org_type']} | ${'{:.2f}'.format(org['grift_ratio'])} | ${'{:.2f}'.format(org['grift_ratio_type_percentile'])} | ${org['grift_rating']} | ${'{:.2f}'.format(org['external_grants_ratio'])} | ${'{:.2f}'.format(org['external_grants_type_percentile'])} | ${org['external_grants_rating']} | ${org['domestic_misrep_flag']} |
+% endfor
+
+## Top Organizations by External Grants Ratio
+| EIN | Name | Type | Grift Ratio (%) | Type Percentile | Rating | External Grants Ratio (%) | Grants Type Percentile | Grants Rating | Domestic Misrepresentation |
+|-----|------|------|-----------------|-----------------|--------|---------------------------|------------------------|---------------|---------------------------|
+% for org in top_grants:
+| ${org['filer_ein']} | ${org['filer_name']} | ${org['org_type']} | ${'{:.2f}'.format(org['grift_ratio'])} | ${'{:.2f}'.format(org['grift_ratio_type_percentile'])} | ${org['grift_rating']} | ${'{:.2f}'.format(org['external_grants_ratio'])} | ${'{:.2f}'.format(org['external_grants_type_percentile'])} | ${org['external_grants_rating']} | ${org['domestic_misrep_flag']} |
+% endfor
+
+## Calculation Methodology
+- **Grift Ratio (%)**: Measures domestic spending (officer compensation, travel, and conferences) as a percentage of total relevant expenses (domestic + foreign expenses). For organizations with a foreign office and foreign expenses > $0, calculated as `(officer_comp + travel_amt + conferences_amt) / (foreign_expenses + officer_comp + travel_amt + conferences_amt) * 100`. Otherwise, equals `grift_pct` (domestic spending / denominator * 100, where denominator is receipts for Form 990 or receipts + assets for Form 990PF). Rounded to 2 decimal places.
+- **Grift Rating**: Assigned based on `grift_ratio_type_percentile` (percentile rank among organizations of the same type): <50% = A, <70% = B, <85% = C, <95% = D, ≥95% = F. Higher percentiles indicate higher domestic spending, suggesting potential grift.
+- **External Grants Ratio (%)**: Measures grants to other organizations or individuals (domestic via Schedule I, foreign via Schedule F) as a percentage of total expenses. Calculated as `grants_to_others / total_exp * 100`. Rounded to 2 decimal places. High ratios may indicate pass-through funding.
+- **Grants Rating**: Assigned based on `external_grants_type_percentile` (percentile rank among organizations of the same type): <50% = A, <70% = B, <85% = C, <95% = D, ≥95% = F. Higher percentiles indicate higher grant activity, potentially signaling risk of funds being funneled inappropriately.
+- **Domestic Misrepresentation**: Flag set to `True` if `grift_ratio > 10%` and `foreign_expenses < 10% of total_exp`, indicating an organization may be misrepresenting its international focus by spending heavily on domestic activities.
+""")
+
     for tax_year, results in results_by_year.items():
         if results:
-            output_tsv = f"grift_ratings_{tax_year}.tsv"
-            comp_pcts = [r[12] for r in results]
-            travel_pcts = [r[13] for r in results]
-            grift_pcts = [r[14] for r in results]
-            total_ngos = len(comp_pcts)
-            comp_pcts = np.array(comp_pcts)
-            travel_pcts = np.array(travel_pcts)
-            grift_pcts = np.array(grift_pcts)
+            high_conferences_count = 0
+            high_comp_count = 0
 
-            grift_candidates = []
-            for result in results:
-                tax_year, filer_ein, filer_name, receipt_amt, gov_grants, _, org_type, total_exp, prog_exp, travel_amt, \
-                conferences_amt, officer_comp, comp_pct, travel_pct, grift_pct, no_prog_exp, address, avg_hours, total_assets, form_type, denominator = result
-                if denominator > 2_000_000:
-                    grift_pct_percentile = 100 * (1 - np.sum(grift_pcts < grift_pct) / total_ngos) if total_ngos > 0 else 0
-                    grift_pct_rank = np.sum(grift_pcts >= grift_pct)
-                    comp_pct_percentile = 100 * (1 - np.sum(comp_pcts < comp_pct) / total_ngos) if total_ngos > 0 else 0
-                    comp_pct_rank = np.sum(comp_pcts >= comp_pct)
-                    travel_pct_percentile = 100 * (1 - np.sum(travel_pcts < travel_pct) / total_ngos) if total_ngos > 0 else 0
-                    travel_pct_rank = np.sum(travel_pcts >= travel_pct)
-                    grift_candidates.append((
-                        filer_ein, filer_name, org_type, grift_pct, grift_pct_percentile, assign_grift_rating(grift_pct_percentile),
-                        travel_amt, conferences_amt, officer_comp, total_exp, prog_exp, denominator
-                    ))
+            grants_to_others_vals = [r[20] for r in results]
+            total_exp_vals = [r[7] for r in results]
+            external_grants_ratios = [r[21] for r in results]
+            non_zero_grants = sum(1 for g in grants_to_others_vals if g > 0)
+            print(f"\nStats for Tax Year {tax_year}:")
+            print(f"Orgs with grants_to_others > 0: {non_zero_grants}/{len(grants_to_others_vals)}")
+            print(f"grants_to_others: min={min(grants_to_others_vals, default=0)}, max={max(grants_to_others_vals, default=0)}, mean={np.mean(grants_to_others_vals) if grants_to_others_vals else 0:.2f}")
+            print(f"total_exp: min={min(total_exp_vals, default=0)}, max={max(total_exp_vals, default=0)}, mean={np.mean(total_exp_vals) if total_exp_vals else 0:.2f}")
+            print(f"external_grants_ratio: min={min(external_grants_ratios, default=0):.2f}%, max={max(external_grants_ratios, default=0):.2f}%, mean={np.mean(external_grants_ratios) if external_grants_ratios else 0:.2f}%")
 
-            if grift_candidates:
-                with open(output_tsv, mode="w", newline="", encoding="utf-8") as tsvfile:
-                    writer = csv.writer(tsvfile, delimiter='\t')
-                    writer.writerow([
-                        "filer_ein", "filer_name", "org_type", "grift_pct", "grift_pct_percentile", "grift_rating",
-                        "travel_amt", "conferences_amt", "officer_comp", "total_exp", "prog_exp", "denominator"
-                    ])
-                    for candidate in sorted(grift_candidates, key=lambda x: x[4], reverse=True):
-                        writer.writerow(candidate)
-                print(f"Wrote {len(grift_candidates)} grift ratings to {output_tsv}")
-                top_offenders = sorted(grift_candidates, key=lambda x: x[4], reverse=True)[:5]
-                print(f"Top 5 grift ratings for {tax_year} (by grift_pct_percentile):")
-                for cand in top_offenders:
-                    print(f"  EIN: {cand[0]}, Name: {cand[1]}, Type: {cand[2]}, Grift%: {cand[3]:.2f}, "
-                          f"Percentile: {cand[4]:.2f}%, Rating: {cand[5]}, Travel: ${cand[6]}, Conferences: ${cand[7]}")
+            # Deduplicate results by EIN, keeping highest total_exp
+            dedup_results = {}
+            for r in results:
+                ein = r[1]
+                if ein not in dedup_results or r[7] > dedup_results[ein][7]:
+                    dedup_results[ein] = r
+            results = list(dedup_results.values())
 
-    if len(comp_pcts) > 0:
-        comp_bins, bin_edges = np.histogram(comp_pcts, bins=100, range=(0, 100))
-        cumulative_comp = np.cumsum(comp_bins)
-        total_comp = sum(comp_bins)
-        percentiles_comp = (cumulative_comp / total_comp * 100) if total_comp > 0 else np.zeros_like(cumulative_comp)
-        print("\nOfficer Compensation % Histogram (0-100%, 100 bins):")
-        print("| Range     | Count    | Percentile |")
-        print("|-----------|----------|------------|")
-        for i, (count, percentile) in enumerate(zip(comp_bins, percentiles_comp)):
-            lower = i
-            upper = i + 1
-            print(f"| {lower:3d}-{upper:3d}% | {count:>8} | {percentile:>10.2f}% |")
+            # Generate histograms by org_type in batches
+            histogram_report = []
+            results_by_type = defaultdict(list)
+            for r in results:
+                results_by_type[r[6]].append(r)
 
-    if len(travel_pcts) > 0:
-        travel_bins, bin_edges = np.histogram(travel_pcts, bins=100, range=(0, 100))
-        cumulative_travel = np.cumsum(travel_bins)
-        total_travel = sum(travel_bins)
-        percentiles_travel = (cumulative_travel / total_travel * 100) if total_travel > 0 else np.zeros_like(cumulative_travel)
-        print("\nTravel and Conferences % Histogram (0-100%, 100 bins):")
-        print("| Range     | Count    | Percentile |")
-        print("|-----------|----------|------------|")
-        for i, (count, percentile) in enumerate(zip(travel_bins, percentiles_travel)):
-            lower = i
-            upper = i + 1
-            print(f"| {lower:3d}-{upper:3d}% | {count:>8} | {percentile:>10.2f}% |")
+            batch_size = 10000
+            for org_type, type_results in sorted(results_by_type.items()):
+                if len(type_results) > 0:
+                    description = ORG_TYPE_DESCRIPTIONS.get(org_type, "No description available.")
+                    for batch_start in range(0, len(type_results), batch_size):
+                        batch_results = type_results[batch_start:batch_start + batch_size]
+                        # Officer Compensation % Histogram
+                        type_comp_pcts = [r[12] for r in batch_results]
+                        if type_comp_pcts:
+                            comp_bins, bin_edges = np.histogram(type_comp_pcts, bins=100, range=(0, 100))
+                            cumulative_comp = np.cumsum(comp_bins)
+                            total_comp = sum(comp_bins)
+                            percentiles_comp = (cumulative_comp / total_comp * 100) if total_comp > 0 else np.zeros_like(cumulative_comp)
+                            data = []
+                            i = 0
+                            while i < len(comp_bins):
+                                start = i
+                                count = comp_bins[i]
+                                percentile = percentiles_comp[i]
+                                if count == 0:
+                                    while i < len(comp_bins) - 1 and comp_bins[i + 1] == 0:
+                                        i += 1
+                                    end = i + 1
+                                else:
+                                    end = i + 1
+                                    i += 1
+                                data.append((f"{start}", f"{end}", count, percentile))
+                            try:
+                                histogram_output = histogram_template.render(title=f"Officer Compensation % (Tax Year {tax_year})", org_type=org_type, description=description, data=data)
+                                histogram_report.append(histogram_output)
+                            except MakoException as e:
+                                log_error(f"Error rendering histogram for comp_pcts in {tax_year}, {org_type}: {e}", exc_info=True)
 
-    if len(grift_pcts) > 0:
-        grift_bins, bin_edges = np.histogram(grift_pcts, bins=100, range=(0, 100))
-        cumulative_grift = np.cumsum(grift_bins)
-        total_grift = sum(grift_bins)
-        percentiles_grift = (cumulative_grift / total_grift * 100) if total_grift > 0 else np.zeros_like(cumulative_grift)
-        print("\nGrift % Histogram (0-100%, 100 bins):")
-        print("| Range     | Count    | Percentile |")
-        print("|-----------|----------|------------|")
-        for i, (count, percentile) in enumerate(zip(grift_bins, percentiles_grift)):
-            lower = i
-            upper = i + 1
-            print(f"| {lower:3d}-{upper:3d}% | {count:>8} | {percentile:>10.2f}% |")
+                        # Travel and Conferences % Histogram
+                        type_travel_pcts = [r[13] for r in batch_results]
+                        if type_travel_pcts:
+                            travel_bins, bin_edges = np.histogram(type_travel_pcts, bins=100, range=(0, 100))
+                            cumulative_travel = np.cumsum(travel_bins)
+                            total_travel = sum(travel_bins)
+                            percentiles_travel = (cumulative_travel / total_travel * 100) if total_travel > 0 else np.zeros_like(cumulative_travel)
+                            data = []
+                            i = 0
+                            while i < len(travel_bins):
+                                start = i
+                                count = travel_bins[i]
+                                percentile = percentiles_travel[i]
+                                if count == 0:
+                                    while i < len(travel_bins) - 1 and travel_bins[i + 1] == 0:
+                                        i += 1
+                                    end = i + 1
+                                else:
+                                    end = i + 1
+                                    i += 1
+                                data.append((f"{start}", f"{end}", count, percentile))
+                            try:
+                                histogram_output = histogram_template.render(title=f"Travel and Conferences % (Tax Year {tax_year})", org_type=org_type, description=description, data=data)
+                                histogram_report.append(histogram_output)
+                            except MakoException as e:
+                                log_error(f"Error rendering histogram for travel_pcts in {tax_year}, {org_type}: {e}", exc_info=True)
 
-    if len(comp_pcts) > 0 and len(travel_pcts) > 0 and len(grift_pcts) > 0:
-        comp_threshold = np.percentile(comp_pcts, 90)
-        travel_threshold = np.percentile(travel_pcts, 90)
-        grift_threshold = np.percentile(grift_pcts, 90)
-        print(f"\nSuggested thresholds (90th percentile):")
-        print(f"  Officer Comp %: {comp_threshold:.2f}%")
-        print(f"  Travel and Conferences %: {travel_threshold:.2f}%")
-        print(f"  Grift %: {grift_threshold:.2f}%")
+                        # Domestic Grift % Histogram
+                        type_grift_pcts = [r[14] for r in batch_results]
+                        if type_grift_pcts:
+                            grift_bins, bin_edges = np.histogram(type_grift_pcts, bins=100, range=(0, 100))
+                            cumulative_grift = np.cumsum(grift_bins)
+                            total_grift = sum(grift_bins)
+                            percentiles_grift = (cumulative_grift / total_grift * 100) if total_grift > 0 else np.zeros_like(cumulative_grift)
+                            data = []
+                            i = 0
+                            while i < len(grift_bins):
+                                start = i
+                                count = grift_bins[i]
+                                percentile = percentiles_grift[i]
+                                if count == 0:
+                                    while i < len(grift_bins) - 1 and grift_bins[i + 1] == 0:
+                                        i += 1
+                                    end = i + 1
+                                else:
+                                    end = i + 1
+                                    i += 1
+                                data.append((f"{start}", f"{end}", count, percentile))
+                            try:
+                                histogram_output = histogram_template.render(title=f"Domestic Grift % (Tax Year {tax_year})", org_type=org_type, description=description, data=data)
+                                histogram_report.append(histogram_output)
+                            except MakoException as e:
+                                log_error(f"Error rendering histogram for grift_pcts in {tax_year}, {org_type}: {e}", exc_info=True)
 
-    print("\nTotals Across All Organizations:")
-    print("| Metric             | Total Value    |")
-    print("|--------------------|----------------|")
-    for key, value in totals.items():
-        print(f"| {key:<18} | {value:>14} |")
+                        # External Grants Ratio % Histogram
+                        type_external_grants_ratios = [r[21] for r in batch_results]
+                        if type_external_grants_ratios:
+                            grants_bins, bin_edges = np.histogram(type_external_grants_ratios, bins=100, range=(0, 100))
+                            cumulative_grants = np.cumsum(grants_bins)
+                            total_grants = sum(grants_bins)
+                            percentiles_grants = (cumulative_grants / total_grants * 100) if total_grants > 0 else np.zeros_like(cumulative_grants)
+                            data = []
+                            i = 0
+                            while i < len(grants_bins):
+                                start = i
+                                count = grants_bins[i]
+                                percentile = percentiles_grants[i]
+                                if count == 0:
+                                    while i < len(grants_bins) - 1 and grants_bins[i + 1] == 0:
+                                        i += 1
+                                    end = i + 1
+                                else:
+                                    end = i + 1
+                                    i += 1
+                                data.append((f"{start}", f"{end}", count, percentile))
+                            try:
+                                histogram_output = histogram_template.render(title=f"External Grants Ratio % (Tax Year {tax_year})", org_type=org_type, description=description, data=data)
+                                histogram_report.append(histogram_output)
+                            except MakoException as e:
+                                log_error(f"Error rendering histogram for external_grants_ratios in {tax_year}, {org_type}: {e}", exc_info=True)
+
+            with open(f"histogram_report_{tax_year}.md", "w", encoding="utf-8") as md_file:
+                md_file.write("\n\n".join(histogram_report))
+            print(f"Wrote histogram report to histogram_report_{tax_year}.md")
+
+            output_tsv = f"charities_{tax_year}.tsv"
+            with open(output_tsv, mode="w", newline="", encoding="utf-8") as tsvfile:
+                writer = csv.writer(tsvfile, delimiter='\t')
+                writer.writerow([
+                    "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
+                    "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "travel_pct",
+                    "grift_pct", "grift_pct_percentile", "grift_pct_rating", "grift_ratio", "grift_ratio_percentile",
+                    "grift_ratio_rating", "external_grants_ratio", "external_grants_percentile", "external_grants_rating",
+                    "grift_pct_type_percentile", "grift_ratio_type_percentile", "external_grants_type_percentile",
+                    "total_assets", "form_type", "denominator", "foreign_office", "foreign_expenses", "grants_to_others",
+                    "domestic_misrep_flag"
+                ])
+
+                # Cache percentiles for all orgs
+                comp_pcts = np.array([r[12] for r in results], dtype=np.float32)
+                travel_pcts = np.array([r[13] for r in results], dtype=np.float32)
+                grift_pcts = np.array([r[14] for r in results], dtype=np.float32)
+                grift_ratios = np.array([r[14] if r[18] else r[14] for r in results], dtype=np.float32)
+                external_grants_ratios = np.array([r[21] for r in results], dtype=np.float32)
+                total_ngos = len(comp_pcts)
+
+                # Cache type-specific percentiles
+                results_by_type = defaultdict(list)
+                for r in tqdm(results, desc=f"Grouping results by type for {tax_year}"):
+                    results_by_type[r[6]].append(r)
+
+                type_percentiles = {}
+                for org_type, type_results in tqdm(results_by_type.items(), desc=f"Computing type percentiles for {tax_year}"):
+                    type_total_ngos = len(type_results)
+                    if type_total_ngos > 0:
+                        type_comp_pcts = np.fromiter((r[12] for r in type_results), dtype=np.float32, count=type_total_ngos)
+                        type_travel_pcts = np.fromiter((r[13] for r in type_results), dtype=np.float32, count=type_total_ngos)
+                        type_grift_pcts = np.fromiter((r[14] for r in type_results), dtype=np.float32, count=type_total_ngos)
+                        type_grift_ratios = np.fromiter((r[14] if r[18] else r[14] for r in type_results), dtype=np.float32, count=type_total_ngos)
+                        type_external_grants_ratios = np.fromiter((r[21] for r in type_results), dtype=np.float32, count=type_total_ngos)
+                        type_percentiles[org_type] = (type_grift_pcts, type_grift_ratios, type_external_grants_ratios, type_total_ngos)
+
+                for batch_start in range(0, len(results), batch_size):
+                    batch_results = results[batch_start:batch_start + batch_size]
+                    for result in tqdm(batch_results, desc=f"Writing TSV batch for {tax_year}"):
+                        tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type, total_exp, prog_exp, \
+                        travel_amt, conferences_amt, officer_comp, comp_pct, travel_pct, grift_pct, total_assets, form_type, \
+                        denominator, foreign_office, foreign_expenses, grants_to_others, external_grants_ratio, domestic_misrep_flag = result
+
+                        if denominator > 2_000_000 and "501(c)" in org_type:
+                            grift_pct_percentile = 100 * (1 - np.sum(grift_pcts < grift_pct) / total_ngos) if total_ngos > 0 else 0
+                            grift_pct_rating = assign_grift_rating(grift_pct_percentile)
+                            if foreign_office and foreign_expenses > 0:
+                                grift_ratio = (officer_comp + travel_amt + conferences_amt) / (foreign_expenses + officer_comp + travel_amt + conferences_amt) * 100
+                                grift_ratio_percentile = 100 * (1 - np.sum(grift_ratios < grift_ratio) / total_ngos) if total_ngos > 0 else 0
+                            else:
+                                grift_ratio = grift_pct
+                                grift_ratio_percentile = grift_pct_percentile
+                            grift_ratio_rating = assign_grift_rating(grift_ratio_percentile)
+                            external_grants_percentile = 100 * (1 - np.sum(external_grants_ratios < external_grants_ratio) / total_ngos) if total_ngos > 0 else 0
+                            external_grants_rating = assign_grift_rating(external_grants_percentile)
+
+                            if org_type in type_percentiles:
+                                type_grift_pcts, type_grift_ratios, type_external_grants_ratios, type_total_ngos = type_percentiles[org_type]
+                                grift_pct_type_percentile = 100 * (1 - np.sum(type_grift_pcts < grift_pct) / type_total_ngos) if type_total_ngos > 0 else 0
+                                grift_ratio_type_percentile = 100 * (1 - np.sum(type_grift_ratios < grift_ratio) / type_total_ngos) if type_total_ngos > 0 else 0
+                                external_grants_type_percentile = 100 * (1 - np.sum(type_external_grants_ratios < external_grants_ratio) / type_total_ngos) if type_total_ngos > 0 else 0
+                            else:
+                                grift_pct_type_percentile = grift_ratio_type_percentile = external_grants_type_percentile = 0
+
+                            receipt_amt = round(receipt_amt, 2)
+                            govt_amt = round(govt_amt, 2)
+                            contrib_amt = round(contrib_amt, 2)
+                            total_exp = round(total_exp, 2)
+                            prog_exp = round(prog_exp, 2)
+                            travel_amt = round(travel_amt, 2)
+                            conferences_amt = round(conferences_amt, 2)
+                            officer_comp = round(officer_comp, 2)
+                            total_assets = round(total_assets, 2)
+                            foreign_expenses = round(foreign_expenses, 2)
+                            grants_to_others = round(grants_to_others, 2)
+                            denominator = round(denominator, 2)
+
+                            comp_pct = round(comp_pct, 2)
+                            travel_pct = round(travel_pct, 2)
+                            grift_pct = round(grift_pct, 2)
+                            grift_pct_percentile = round(grift_pct_percentile, 2)
+                            grift_ratio = round(grift_ratio, 2)
+                            grift_ratio_percentile = round(grift_ratio_percentile, 2)
+                            external_grants_ratio = round(external_grants_ratio, 2)
+                            external_grants_percentile = round(external_grants_percentile, 2)
+                            grift_pct_type_percentile = round(grift_pct_type_percentile, 2)
+                            grift_ratio_type_percentile = round(grift_ratio_type_percentile, 2)
+                            external_grants_type_percentile = round(external_grants_type_percentile, 2)
+
+                            writer.writerow([
+                                tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type, total_exp,
+                                prog_exp, travel_amt, conferences_amt, officer_comp, comp_pct, travel_pct, grift_pct,
+                                grift_pct_percentile, grift_pct_rating, grift_ratio, grift_ratio_percentile, grift_ratio_rating,
+                                external_grants_ratio, external_grants_percentile, external_grants_rating,
+                                grift_pct_type_percentile, grift_ratio_type_percentile, external_grants_type_percentile,
+                                total_assets, form_type, denominator, foreign_office, foreign_expenses, grants_to_others,
+                                domestic_misrep_flag
+                            ])
+
+                            if officer_comp > 500_000 and high_comp_count < 5:
+                                log_error(f"Potential high grift org: EIN {filer_ein}, Name {filer_name}, OfficerComp ${officer_comp}, GriftRatio {grift_ratio:.2f}%, GriftPercentile {grift_ratio_percentile:.2f}%, GrantsRatio {external_grants_ratio:.2f}%")
+                print(f"Wrote entries to {output_tsv}")
+
+                # Generate Markdown report in batches
+                grift_candidates = []
+                type_percentiles_cache = type_percentiles
+                for batch_start in range(0, len(results), batch_size):
+                    batch_results = results[batch_start:batch_start + batch_size]
+                    for result in tqdm(batch_results, desc=f"Generating grift report batch for {tax_year}"):
+                        tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type, total_exp, prog_exp, \
+                        travel_amt, conferences_amt, officer_comp, comp_pct, travel_pct, grift_pct, total_assets, form_type, \
+                        denominator, foreign_office, foreign_expenses, grants_to_others, external_grants_ratio, domestic_misrep_flag = result
+
+                        if denominator > 2_000_000 and "501(c)" in org_type:
+                            grift_pct_percentile = 100 * (1 - np.sum(grift_pcts < grift_pct) / total_ngos) if total_ngos > 0 else 0
+                            grift_pct_rating = assign_grift_rating(grift_pct_percentile)
+                            if foreign_office and foreign_expenses > 0:
+                                grift_ratio = (officer_comp + travel_amt + conferences_amt) / (foreign_expenses + officer_comp + travel_amt + conferences_amt) * 100
+                                grift_ratio_percentile = 100 * (1 - np.sum(grift_ratios < grift_ratio) / total_ngos) if total_ngos > 0 else 0
+                            else:
+                                grift_ratio = grift_pct
+                                grift_ratio_percentile = grift_pct_percentile
+                            grift_ratio_rating = assign_grift_rating(grift_ratio_percentile)
+                            external_grants_percentile = 100 * (1 - np.sum(external_grants_ratios < external_grants_ratio) / total_ngos) if total_ngos > 0 else 0
+                            external_grants_rating = assign_grift_rating(external_grants_percentile)
+
+                            if org_type in type_percentiles_cache:
+                                type_grift_pcts, type_grift_ratios, type_external_grants_ratios, type_total_ngos = type_percentiles_cache[org_type]
+                                grift_pct_type_percentile = 100 * (1 - np.sum(type_grift_pcts < grift_pct) / type_total_ngos) if type_total_ngos > 0 else 0
+                                grift_ratio_type_percentile = 100 * (1 - np.sum(type_grift_ratios < grift_ratio) / type_total_ngos) if type_total_ngos > 0 else 0
+                                external_grants_type_percentile = 100 * (1 - np.sum(type_external_grants_ratios < external_grants_ratio) / type_total_ngos) if type_total_ngos > 0 else 0
+                            else:
+                                grift_pct_type_percentile = grift_ratio_type_percentile = external_grants_type_percentile = 0
+
+                            grift_candidates.append({
+                                'filer_ein': filer_ein,
+                                'filer_name': filer_name,
+                                'org_type': org_type,
+                                'grift_ratio': round(grift_ratio, 2),
+                                'grift_rating': assign_grift_rating(grift_ratio_type_percentile),
+                                'external_grants_ratio': round(external_grants_ratio, 2),
+                                'external_grants_rating': assign_grift_rating(external_grants_type_percentile),
+                                'grift_ratio_percentile': round(grift_ratio_percentile, 2),
+                                'external_grants_percentile': round(external_grants_percentile, 2),
+                                'grift_ratio_type_percentile': round(grift_ratio_type_percentile, 2),
+                                'external_grants_type_percentile': round(external_grants_type_percentile, 2),
+                                'domestic_misrep_flag': domestic_misrep_flag
+                            })
+
+                if grift_candidates:
+                    top_grift = sorted(grift_candidates, key=lambda x: x['grift_ratio_type_percentile'], reverse=True)[:10]
+                    top_grants = sorted(grift_candidates, key=lambda x: x['external_grants_type_percentile'], reverse=True)[:10]
+                    try:
+                        report_output = report_template.render(tax_year=tax_year, top_grift=top_grift, top_grants=top_grants)
+                        with open(f"grift_report_{tax_year}.md", "w", encoding="utf-8") as md_file:
+                            md_file.write(report_output)
+                        print(f"Wrote grift report to grift_report_{tax_year}.md")
+                    except MakoException as e:
+                        log_error(f"Error rendering Mako template for tax year {tax_year}: {e}", exc_info=True)
+                        print(f"Failed to generate grift_report_{tax_year}.md due to template error")
 
     end_time = time.time()
     print(f"Total processing time: {(end_time - start_time):.2f} seconds ({(end_time - start_time) / 60:.2f} minutes)")
@@ -623,7 +918,7 @@ def valid_tax_year(year):
         raise argparse.ArgumentTypeError("Tax year must be an integer.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="List all 501(c) orgs with namespace fix, EIN dict, and TSV grift ratings.")
+    parser = argparse.ArgumentParser(description="List all 501(c) orgs with TSV outputs for grift ratings.")
     parser.add_argument("start_year", type=valid_tax_year, help="Start year for ZIP prefixes (e.g., 2016).")
     parser.add_argument("end_year", type=valid_tax_year, help="End year for ZIP prefixes (e.g., 2024).")
 
@@ -631,4 +926,4 @@ if __name__ == "__main__":
     if args.start_year > args.end_year:
         raise argparse.ArgumentError(None, "Start year must be less than or equal to end year.")
 
-    process_zip_files(str(args.start_year), str(args.end_year), max_workers=8)
+    process_zip_files(str(args.start_year), str(args.end_year), max_workers=4)
