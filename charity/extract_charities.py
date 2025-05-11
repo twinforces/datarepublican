@@ -100,9 +100,10 @@ def write_tsv_row(tax_year, org_type, row, tsv_files, xml_filename):
         if not file_exists:
             writer.writerow([
                 "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
-                "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "travel_pct",
-                "conferences_pct", "grants_pct", "foreign_exp_pct", "grift_ratio", "total_assets", "form_type",
-                "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag"
+                "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
+                "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
+                "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
+                "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
             ])
             tsv_files[tsv_key].flush()
             log_error(f"Wrote header to new TSV {tsv_path}")
@@ -115,9 +116,10 @@ def write_tsv_row(tax_year, org_type, row, tsv_files, xml_filename):
                 tsv_files[tsv_key].truncate(0)
                 writer.writerow([
                     "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
-                    "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "travel_pct",
-                    "conferences_pct", "grants_pct", "foreign_exp_pct", "grift_ratio", "total_assets", "form_type",
-                    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag"
+                    "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
+                    "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
+                    "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
+                    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
                 ])
                 log_error(f"Restarted TSV {tsv_path} with new header")
             else:
@@ -162,12 +164,24 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         file_counter_local.skipped += 1
         return []
 
-    tax_year_elem = root.find(".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}TaxYr")
-    if tax_year_elem is None:
-        tax_year_elem = root.find(".//ReturnHeader/TaxYr")
+    # Enhanced tax year lookup with multiple paths
+    tax_year_elem = None
+    for path in [
+        ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}TaxYr",
+        ".//irs:ReturnHeader/irs:TaxYr",
+        ".//{http://www.irs.gov/efile}ReturnHeader/TaxYr",
+        ".//ReturnHeader/{http://www.irs.gov/efile}TaxYr",
+        ".//ReturnHeader/TaxYr"
+    ]:
+        tax_year_elem = root.find(path, namespaces)
+        if tax_year_elem is not None:
+            break
+
     if tax_year_elem is None:
         missing_taxyr_by_year["Unknown"] += 1
-        log_error(f"Missing TaxYr element in {xml_filename}, inferring from filename/zip")
+        return_header = root.find(".//{http://www.irs.gov/efile}ReturnHeader", namespaces) or root.find(".//ReturnHeader")
+        header_snippet = ET.tostring(return_header, encoding='unicode', method='xml')[:2000] if return_header is not None else "No ReturnHeader"
+        log_error(f"Missing TaxYr element in {xml_filename}, inferring from filename/zip. ReturnHeader: {header_snippet}")
         tax_year = xml_filename[:4] if xml_filename[:4].isdigit() else zip_prefix
     else:
         tax_year = tax_year_elem.text.strip()
@@ -178,9 +192,9 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
             log_error(f"Invalid tax year {tax_year} in {xml_filename}, inferring from filename/zip")
             tax_year = xml_filename[:4] if xml_filename[:4].isdigit() else zip_prefix
 
-    filer = root.find(".//{http://www.irs.gov/efile}Filer")
-    if filer is None:
-        filer = root.find(".//Filer")
+    filer = root.find(".//{http://www.irs.gov/efile}Filer") if \
+            root.find(".//{http://www.irs.gov/efile}Filer") is not None else \
+            root.find(".//Filer")
     if filer is None:
         missing_filer_by_year[tax_year] += 1
         log_error(f"Missing Filer element in {xml_filename}")
@@ -372,7 +386,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
             if travel_elem is not None:
                 try:
                     travel_amt = int(float(travel_elem.text.strip()))
-                except ( =
+                except (ValueError, TypeError) as e:
                     log_error(f"Invalid TravelGrp value in {xml_filename}, error: {e}", exc_info=True)
                     travel_amt = 0
         except Exception as e:
@@ -569,13 +583,18 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
 
     foreign_expenses = 0
     try:
+        return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
+                      root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
+                      root.find(".//ReturnData")
         if return_data is not None:
             for schedule_f in (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleF", namespaces) or
                                root.findall(".//ReturnData/IRS990ScheduleF")) + \
                               (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}ScheduleF", namespaces) or
                                root.findall(".//ReturnData/ScheduleF")) + \
                               (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990/{http://www.irs.gov/efile}IRS990ScheduleF", namespaces) or
-                               root.findall(".//ReturnData/IRS990/IRS990ScheduleF")):
+                               root.findall(".//ReturnData/IRS990/IRS990ScheduleF")) + \
+                              (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleF", namespaces) or
+                               root.findall(".//ReturnData/IRS990EZ/IRS990ScheduleF")):
                 for activity in (schedule_f.findall(".//{http://www.irs.gov/efile}StmtOfActyOutsdUSGrp", namespaces) or
                                  schedule_f.findall(".//StmtOfActyOutsdUSGrp")) + \
                                 (schedule_f.findall(".//{http://www.irs.gov/efile}AccountActivitiesOutsideUSGrp", namespaces) or
@@ -634,7 +653,13 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
                     ".//{http://www.irs.gov/efile}Organization4947a1Ind",
                     ".//Organization4947a1Ind",
                     ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1Ind",
-                    ".//IRS990PF/Organization4947a1Ind"
+                    ".//IRS990PF/Organization4947a1Ind",
+                    ".//{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
+                    ".//Organization4947a1TrtdPFInd",
+                    ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
+                    ".//IRS990PF/Organization4947a1TrtdPFInd",
+                    ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
+                    ".//ReturnData/IRS990PF/Organization4947a1TrtdPFInd"
                 ]:
                     org_type_elem = root.find(path, namespaces)
                     if org_type_elem is not None and org_type_elem.text.strip().upper() == 'X':
@@ -645,7 +670,9 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
             if org_type == "Unknown" and filer_ein in ein_type_dict:
                 org_type = ein_type_dict[filer_ein]
             if org_type == "Unknown":
-                return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) or root.find(".//ReturnData")
+                return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
+                              root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
+                              root.find(".//ReturnData")
                 org_type_debug = ET.tostring(return_data, encoding='unicode', method='xml')[:2000] if return_data is not None else "No ReturnData"
                 log_error(f"Unparsed org type for 990PF in {xml_filename}, EIN {filer_ein}: {org_type_debug}")
         except Exception as e:
@@ -671,12 +698,22 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
                     org_type = "501(c)(3)"
                     org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
                     ein_type_dict[filer_ein] = org_type
-                elif filer_ein in ein_type_dict:
-                    org_type = ein_type_dict[filer_ein]
                 else:
-                    return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) or root.find(".//ReturnData")
-                    org_type_debug = ET.tostring(return_data, encoding='unicode', method='xml')[:2000] if return_data is not None else "No ReturnData"
-                    log_error(f"Unparsed org type in {xml_filename}, EIN {filer_ein}: No Organization501cInd or Organization501c3Ind, XML: {org_type_debug}")
+                    org_type_elem = root.find(".//{http://www.irs.gov/efile}Organization4947a1NotPFInd", namespaces) if \
+                                    root.find(".//{http://www.irs.gov/efile}Organization4947a1NotPFInd", namespaces) is not None else \
+                                    root.find(".//Organization4947a1NotPFInd")
+                    if org_type_elem is not None and org_type_elem.text.strip().upper() == 'X':
+                        org_type = "4947(a)(1)"
+                        org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
+                        ein_type_dict[filer_ein] = org_type
+                    elif filer_ein in ein_type_dict:
+                        org_type = ein_type_dict[filer_ein]
+                    else:
+                        return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
+                                      root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
+                                      root.find(".//ReturnData")
+                        org_type_debug = ET.tostring(return_data, encoding='unicode', method='xml')[:2000] if return_data is not None else "No ReturnData"
+                        log_error(f"Unparsed org type in {xml_filename}, EIN {filer_ein}: No Organization501cInd, Organization501c3Ind, or Organization4947a1NotPFInd, XML: {org_type_debug}")
         except Exception as e:
             log_error(f"Error during Organization type lookup in {xml_filename}, EIN {filer_ein}: {e}", exc_info=True)
 
@@ -690,14 +727,38 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
     except Exception as e:
         log_error(f"Error during ForeignOfficeInd lookup in {xml_filename}: {e}", exc_info=True)
 
-    comp_pct = (officer_comp / total_exp * 100) if total_exp > 0 else 0
-    travel_pct = (travel_amt / total_exp * 100) if total_exp > 0 else 0
-    conferences_pct = (conferences_amt / total_exp * 100) if total_exp > 0 else 0
-    grants_pct = (grants_to_others / total_exp * 100) if total_exp > 0 else 0
-    foreign_exp_pct = (foreign_expenses / total_exp * 100) if total_exp > 0 else 0
-    grift_ratio = ((officer_comp + travel_amt + conferences_amt) / total_exp * 100) if total_exp > 0 else 0
-    denominator = (total_assets + receipt_amt) if form_type == "990PF" else receipt_amt
-    domestic_misrep_flag = grift_ratio > 10 and foreign_expenses < 0.1 * total_exp if total_exp > 0 else False
+    # Calculate denominator for all form types
+    denominator = total_assets + receipt_amt
+
+    # Calculate percentages: value / denominator * 100, clamp negatives to 0, cap at 100, set undefined to -1
+    def calculate_percentage(value, denom):
+        if denom == 0:
+            return -1
+        pct = (value / denom) * 100
+        if pct < 0:
+            return 0
+        if pct > 100:
+            return 100
+        return round(pct, 2)
+
+    comp_pct = calculate_percentage(officer_comp, denominator)
+    travel_pct = calculate_percentage(travel_amt, denominator)
+    conferences_pct = calculate_percentage(conferences_amt, denominator)
+    grants_pct = calculate_percentage(grants_to_others, denominator)
+    foreign_expenses_pct = calculate_percentage(foreign_expenses, denominator)
+
+    # Calculate grift_ratio: (officer_comp + travel_amt + conferences_amt) / denominator * 100
+    grift_ratio = calculate_percentage(officer_comp + travel_amt + conferences_amt, denominator)
+
+    # Placeholder percentile columns
+    comp_ptile = "n/y"
+    travel_ptile = "n/y"
+    conferences_ptile = "n/y"
+    grants_ptile = "n/y"
+    foreign_expenses_ptile = "n/y"
+
+    # Calculate domestic_misrep_flag
+    domestic_misrep_flag = grift_ratio > 10 and foreign_expenses_pct < 0.1 * 100 if denominator > 0 else False
 
     if parsed_ein_count < 5 or filer_ein in ["271414646", "520851555"]:
         log_error(f"Parsed EIN {filer_ein}: denominator {denominator}, receipt_amt {receipt_amt}, total_assets {total_assets}, org_type {org_type}, grants_to_others {grants_to_others}, XML {xml_filename}")
@@ -706,9 +767,10 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
     try:
         row = [
             tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type, total_exp, prog_exp,
-            travel_amt, conferences_amt, officer_comp, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_exp_pct,
-            grift_ratio, total_assets, form_type, denominator, foreign_office, foreign_expenses, grants_to_others,
-            domestic_misrep_flag
+            travel_amt, conferences_amt, officer_comp, comp_pct, comp_ptile, travel_pct, travel_ptile, conferences_pct,
+            conferences_ptile, grants_pct, grants_ptile, foreign_expenses_pct, foreign_expenses_ptile, grift_ratio,
+            total_assets, form_type, denominator, foreign_office, foreign_expenses, grants_to_others, domestic_misrep_flag,
+            xml_filename
         ]
         results.append(row)
         file_counter_local.entries += 1
