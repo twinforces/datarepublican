@@ -12,7 +12,19 @@ from collections import Counter, defaultdict
 from tqdm import tqdm
 import logging
 import re
+from xpaths import XPATHS_BY_FORM
 
+# Constants
+SEARCH_EINS = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486"}
+TSV_COLUMNS = [
+    "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
+    "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
+    "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
+    "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
+    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
+]
+
+# Thread-local counters
 total_xml_files = 0
 file_counter_local = threading.local()
 ein_type_dict = {}
@@ -37,14 +49,13 @@ logging.basicConfig(
 )
 
 def log_error(message, exc_info=False):
-    """Log errors with full context, limiting non-critical logs."""
     global high_conferences_count, high_comp_count, parsed_ein_count, grant_log_count, error_log_count, foreign_exp_log_count, chai_amnesty_grant_count
     if any(x in message for x in ["Thread", "Opening TSV", "Wrote row", "Closed and flushed", "Assigned tax_year"]) and not verbose:
         logging.info(message)
         return
-    if "Parsed EIN" in message and parsed_ein_count >= 5 and not any(ein in message for ein in ["271414646", "520851555"]):
+    if "Parsed EIN" in message and parsed_ein_count >= 5 and not any(ein in message for ein in SEARCH_EINS):
         return
-    if "grants_to_others" in message and grant_log_count >= 5 and not any(ein in message for ein in ["271414646", "520851555"]):
+    if "grants_to_others" in message and grant_log_count >= 5 and not any(ein in message for ein in SEARCH_EINS):
         return
     if "High conferences_amt" in message and high_conferences_count >= 5:
         return
@@ -52,9 +63,9 @@ def log_error(message, exc_info=False):
         logging.error(message, exc_info=exc_info)
         error_log_count += 1
         return
-    if "RegionTotalExpendituresAmt" in message and foreign_exp_log_count >= 5 and not any(ein in message for ein in ["271414646", "520851555"]):
+    if "RegionTotalExpendituresAmt" in message and foreign_exp_log_count >= 5 and not any(ein in message for ein in SEARCH_EINS):
         return
-    if any(ein in message for ein in ["271414646", "520851555"]) and "Grant" in message and chai_amnesty_grant_count[message.split("EIN ")[1].split(",")[0]] >= 5:
+    if any(ein in message for ein in SEARCH_EINS) and "Grant" in message and chai_amnesty_grant_count[message.split("EIN ")[1].split(",")[0]] >= 5:
         return
 
     logging.error(message, exc_info=exc_info)
@@ -70,12 +81,11 @@ def log_error(message, exc_info=False):
         error_log_count += 1
     if "RegionTotalExpendituresAmt" in message:
         foreign_exp_log_count += 1
-    if any(ein in message for ein in ["271414646", "520851555"]) and "Grant" in message:
+    if any(ein in message for ein in SEARCH_EINS) and "Grant" in message:
         ein = message.split("EIN ")[1].split(",")[0]
         chai_amnesty_grant_count[ein] += 1
 
 def clean_org_type(org_type):
-    """Map organization type to clean file name format."""
     org_type = org_type.replace('(', '').replace(')', '').replace(' ', '')
     if org_type == "501c3":
         return "501c3"
@@ -95,32 +105,19 @@ def write_tsv_row(tax_year, org_type, row, tsv_files, xml_filename):
         mode = 'w' if not file_exists else 'r+'
         tsv_files[tsv_key] = open(tsv_path, mode=mode, newline="", encoding="utf-8")
         writer = csv.writer(tsv_files[tsv_key], delimiter='\t')
-
         log_error(f"Opening TSV {tsv_path} in mode {mode}")
         if not file_exists:
-            writer.writerow([
-                "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
-                "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
-                "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
-                "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
-                "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
-            ])
+            writer.writerow(TSV_COLUMNS)
             tsv_files[tsv_key].flush()
             log_error(f"Wrote header to new TSV {tsv_path}")
         else:
             reader = csv.reader(tsv_files[tsv_key], delimiter='\t')
-            next(reader, None)  # Skip header
+            next(reader, None)
             first_data_row = next(reader, None)
             tsv_files[tsv_key].seek(0)
             if first_data_row and first_data_row[0] == str(row[0]) and first_data_row[1] == row[1]:
                 tsv_files[tsv_key].truncate(0)
-                writer.writerow([
-                    "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
-                    "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
-                    "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
-                    "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
-                    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
-                ])
+                writer.writerow(TSV_COLUMNS)
                 log_error(f"Restarted TSV {tsv_path} with new header")
             else:
                 tsv_files[tsv_key].seek(0, os.SEEK_END)
@@ -139,6 +136,344 @@ def close_year_files(year, tsv_files):
             del tsv_files[(tax_year, org_type)]
             log_error(f"Closed and flushed TSV for org_type {org_type}, tax_year {tax_year}")
 
+def find_element(root, xpaths, namespaces):
+    for xpath in xpaths:
+        elem = root.find(xpath, namespaces)
+        if elem is not None:
+            return elem
+    return None
+
+def parse_int(value):
+    try:
+        return int(float(value.strip()))
+    except (ValueError, TypeError, AttributeError):
+        return 0
+
+def parse_field_990(root, field, namespaces, xml_filename, context):
+    if field not in XPATHS_BY_FORM["990"]:
+        return 0 if field not in ["org_type", "form_type", "filer_ein", "filer_name", "tax_year"] else "Unknown"
+
+    if field == "officer_comp":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990"]["officer_comp_elements"]:
+            officer_elem = find_element(root, [xpath], namespaces)
+            if officer_elem is not None:
+                for person in officer_elem.findall(".//*", namespaces):
+                    comp_elem = find_element(person, XPATHS_BY_FORM["990"]["officer_comp_value"], namespaces)
+                    if comp_elem is not None:
+                        comp = parse_int(comp_elem.text)
+                        if comp > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
+                            log_error(f"Suspicious officer_comp ${comp} exceeds total_exp ${context['total_exp']} in {xml_filename}")
+                            continue
+                        total += comp
+        return total
+
+    if field == "grants":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990"]["grant_elements_f"]:
+            schedule_f = find_element(root, [xpath], namespaces)
+            if schedule_f is not None:
+                for sub_xpath in XPATHS_BY_FORM["990"]["grant_sub_elements_f"]:
+                    for grant in schedule_f.findall(sub_xpath, namespaces):
+                        amount_elem = find_element(grant, XPATHS_BY_FORM["990"]["grant_value"], namespaces)
+                        if amount_elem is not None:
+                            amount = parse_int(amount_elem.text)
+                            total += amount
+                            if context["filer_ein"] in SEARCH_EINS:
+                                log_error(f"{'CHAI' if context['filer_ein'] == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleF for EIN {context['filer_ein']}, File {xml_filename}")
+                            elif amount > 5_000_000 and grant_log_count < 5:
+                                log_error(f"Found CashGrantAmt ${amount} in ScheduleF for EIN {context['filer_ein']}, File {xml_filename}")
+        for xpath in XPATHS_BY_FORM["990"]["grant_elements_i"]:
+            schedule_i = find_element(root, [xpath], namespaces)
+            if schedule_i is not None:
+                for sub_xpath in XPATHS_BY_FORM["990"]["grant_sub_elements_i"]:
+                    for grant in schedule_i.findall(sub_xpath, namespaces):
+                        amount_elem = find_element(grant, XPATHS_BY_FORM["990"]["grant_value"], namespaces)
+                        if amount_elem is not None:
+                            amount = parse_int(amount_elem.text)
+                            total += amount
+                            if context["filer_ein"] in SEARCH_EINS:
+                                log_error(f"{'CHAI' if context['filer_ein'] == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleI for EIN {context['filer_ein']}, File {xml_filename}")
+                            elif amount > 5_000_000 and grant_log_count < 5:
+                                log_error(f"Found CashGrantAmt ${amount} in ScheduleI for EIN {context['filer_ein']}, File {xml_filename}")
+        if total > 5_000_000 or context["filer_ein"] in SEARCH_EINS:
+            log_error(f"Non-zero grants_to_others ${total} for EIN {context['filer_ein']}, Name {context['filer_name']}, TaxYear {context['tax_year']}, XML {xml_filename}")
+        elif total == 0 and context["filer_ein"] in SEARCH_EINS:
+            return_data = find_element(root, [".//{http://www.irs.gov/efile}ReturnData", ".//ReturnData"], namespaces)
+            child_tags = [child.tag for child in return_data.findall("*")] if return_data is not None else []
+            log_error(f"Zero grants_to_others for EIN {context['filer_ein']}, Name {context['filer_name']}, File {xml_filename}. ReturnData children: {child_tags}")
+        return total
+
+    if field == "foreign_exp":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990"]["foreign_exp_elements"]:
+            schedule_f = find_element(root, [xpath], namespaces)
+            if schedule_f is not None:
+                for sub_xpath in XPATHS_BY_FORM["990"]["foreign_exp_sub_elements"]:
+                    for activity in schedule_f.findall(sub_xpath, namespaces):
+                        amount_elem = find_element(activity, XPATHS_BY_FORM["990"]["foreign_exp_value"], namespaces)
+                        if amount_elem is not None:
+                            amount = parse_int(amount_elem.text)
+                            total += amount
+                            if context["filer_ein"] in SEARCH_EINS or (amount > 5_000_000 and foreign_exp_log_count < 5):
+                                log_error(f"Found RegionTotalExpendituresAmt ${amount} in ScheduleF for EIN {context['filer_ein']}, File {xml_filename}")
+        if total == 0 and context["filer_ein"] in SEARCH_EINS:
+            return_data = find_element(root, [".//{http://www.irs.gov/efile}ReturnData", ".//ReturnData"], namespaces)
+            child_tags = [child.tag for child in return_data.findall("*")] if return_data is not None else []
+            log_error(f"Zero foreign_expenses for EIN {context['filer_ein']}, Name {context['filer_name']}, File {xml_filename}. ReturnData children: {child_tags}")
+        return total
+
+    elem = find_element(root, XPATHS_BY_FORM["990"][field], namespaces)
+    if elem is None:
+        if field in ["tax_year", "filer_ein", "filer_name", "form_type"]:
+            return "Unknown"
+        if field == "org_type":
+            return "Unknown"
+        if field == "foreign_office":
+            return False
+        return 0
+
+    if field == "org_type":
+        for xpath in XPATHS_BY_FORM["990"]["org_type"]:
+            if elem.tag in xpath:
+                if "501c3" in xpath:
+                    return "501(c)(3)"
+                if "4947a1" in xpath:
+                    return "4947(a)(1)"
+                if "501cInd" in xpath:
+                    type_num = elem.get("organization501cTypeTxt")
+                    if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
+                        return f"501(c)({type_num})"
+        return "Unknown"
+
+    if field == "foreign_office":
+        return elem.text.strip().upper() == 'X'
+
+    return parse_int(elem.text) if field not in ["tax_year", "filer_ein", "filer_name", "form_type"] else elem.text.strip()
+
+def parse_field_990EZ(root, field, namespaces, xml_filename, context):
+    if field not in XPATHS_BY_FORM["990EZ"]:
+        return 0 if field not in ["org_type", "form_type", "filer_ein", "filer_name", "tax_year"] else "Unknown"
+
+    if field in ["travel", "conferences"]:
+        total = 0
+        for xpath in XPATHS_BY_FORM["990EZ"][field]:
+            schedule_o = find_element(root, [xpath], namespaces)
+            if schedule_o is not None:
+                desc = find_element(schedule_o, XPATHS_BY_FORM["990EZ"]["schedule_o_value"], namespaces)
+                if desc is not None:
+                    desc_text = desc.text.upper()
+                    if field == "travel" and "TRAVEL" in desc_text:
+                        match = re.search(r'\$(\d+\.\d{2}|\d+)', desc.text)
+                        if match:
+                            amount = int(float(match.group(1).replace('$', '')))
+                            total += amount
+                            log_error(f"Parsed travel_amt ${amount} from Schedule O in {xml_filename}")
+                    if field == "conferences" and ("CONFERENCE" in desc_text or "MEETING" in desc_text):
+                        match = re.search(r'\$(\d+\.\d{2}|\d+)', desc.text)
+                        if match:
+                            amount = int(float(match.group(1).replace('$', '')))
+                            total += amount
+                            log_error(f"Parsed conferences_amt ${amount} from Schedule O in {xml_filename}")
+        return total
+
+    if field == "officer_comp":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990EZ"]["officer_comp_elements"]:
+            officer_elem = find_element(root, [xpath], namespaces)
+            if officer_elem is not None:
+                comp_elem = find_element(officer_elem, XPATHS_BY_FORM["990EZ"]["officer_comp_value"], namespaces)
+                if comp_elem is not None:
+                    comp = parse_int(comp_elem.text)
+                    if comp > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
+                        log_error(f"Suspicious officer_comp ${comp} exceeds total_exp ${context['total_exp']} in {xml_filename}")
+                        continue
+                    total += comp
+        return total
+
+    if field == "grants":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990EZ"]["grant_elements_o"]:
+            schedule_o = find_element(root, [xpath], namespaces)
+            if schedule_o is not None:
+                desc = find_element(schedule_o, XPATHS_BY_FORM["990EZ"]["schedule_o_value"], namespaces)
+                if desc is not None and "DISBURSEMENT" in desc.text.upper():
+                    match = re.search(r'\$(\d+\.\d{2}|\d+)', desc.text)
+                    if match:
+                        amount = int(float(match.group(1).replace('$', '')))
+                        total += amount
+                        log_error(f"Parsed grants_to_others ${amount} from Schedule O DISBURSEMENT in {xml_filename}")
+        for xpath in XPATHS_BY_FORM["990EZ"]["grant_elements_i"]:
+            schedule_i = find_element(root, [xpath], namespaces)
+            if schedule_i is not None:
+                for sub_xpath in XPATHS_BY_FORM["990EZ"]["grant_sub_elements_i"]:
+                    for grant in schedule_i.findall(sub_xpath, namespaces):
+                        amount_elem = find_element(grant, XPATHS_BY_FORM["990EZ"]["grant_value"], namespaces)
+                        if amount_elem is not None:
+                            amount = parse_int(amount_elem.text)
+                            total += amount
+                            if context["filer_ein"] in SEARCH_EINS:
+                                log_error(f"{'CHAI' if context['filer_ein'] == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleI for EIN {context['filer_ein']}, File {xml_filename}")
+                            elif amount > 5_000_000 and grant_log_count < 5:
+                                log_error(f"Found CashGrantAmt ${amount} in ScheduleI for EIN {context['filer_ein']}, File {xml_filename}")
+        for xpath in XPATHS_BY_FORM["990EZ"]["grant_elements_f"]:
+            schedule_f = find_element(root, [xpath], namespaces)
+            if schedule_f is not None:
+                for sub_xpath in XPATHS_BY_FORM["990EZ"]["grant_sub_elements_f"]:
+                    for grant in schedule_f.findall(sub_xpath, namespaces):
+                        amount_elem = find_element(grant, XPATHS_BY_FORM["990EZ"]["grant_value"], namespaces)
+                        if amount_elem is not None:
+                            amount = parse_int(amount_elem.text)
+                            total += amount
+                            if context["filer_ein"] in SEARCH_EINS:
+                                log_error(f"{'CHAI' if context['filer_ein'] == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleF for EIN {context['filer_ein']}, File {xml_filename}")
+                            elif amount > 5_000_000 and grant_log_count < 5:
+                                log_error(f"Found CashGrantAmt ${amount} in ScheduleF for EIN {context['filer_ein']}, File {xml_filename}")
+        if total > 5_000_000 or context["filer_ein"] in SEARCH_EINS:
+            log_error(f"Non-zero grants_to_others ${total} for EIN {context['filer_ein']}, Name {context['filer_name']}, TaxYear {context['tax_year']}, XML {xml_filename}")
+        elif total == 0 and context["filer_ein"] in SEARCH_EINS:
+            return_data = find_element(root, [".//{http://www.irs.gov/efile}ReturnData", ".//ReturnData"], namespaces)
+            child_tags = [child.tag for child in return_data.findall("*")] if return_data is not None else []
+            log_error(f"Zero grants_to_others for EIN {context['filer_ein']}, Name {context['filer_name']}, File {xml_filename}. ReturnData children: {child_tags}")
+        return total
+
+    if field == "foreign_exp":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990EZ"]["foreign_exp_elements"]:
+            schedule_f = find_element(root, [xpath], namespaces)
+            if schedule_f is not None:
+                for sub_xpath in XPATHS_BY_FORM["990EZ"]["foreign_exp_sub_elements"]:
+                    for activity in schedule_f.findall(sub_xpath, namespaces):
+                        amount_elem = find_element(activity, XPATHS_BY_FORM["990EZ"]["foreign_exp_value"], namespaces)
+                        if amount_elem is not None:
+                            amount = parse_int(amount_elem.text)
+                            total += amount
+                            if context["filer_ein"] in SEARCH_EINS or (amount > 5_000_000 and foreign_exp_log_count < 5):
+                                log_error(f"Found RegionTotalExpendituresAmt ${amount} in ScheduleF for EIN {context['filer_ein']}, File {xml_filename}")
+        if total == 0 and context["filer_ein"] in SEARCH_EINS:
+            return_data = find_element(root, [".//{http://www.irs.gov/efile}ReturnData", ".//ReturnData"], namespaces)
+            child_tags = [child.tag for child in return_data.findall("*")] if return_data is not None else []
+            log_error(f"Zero foreign_expenses for EIN {context['filer_ein']}, Name {context['filer_name']}, File {xml_filename}. ReturnData children: {child_tags}")
+        return total
+
+    elem = find_element(root, XPATHS_BY_FORM["990EZ"][field], namespaces)
+    if elem is None:
+        if field in ["tax_year", "filer_ein", "filer_name", "form_type"]:
+            return "Unknown"
+        if field == "org_type":
+            return "Unknown"
+        if field == "foreign_office":
+            return False
+        return 0
+
+    if field == "org_type":
+        for xpath in XPATHS_BY_FORM["990EZ"]["org_type"]:
+            if elem.tag in xpath:
+                if "501c3" in xpath:
+                    return "501(c)(3)"
+                if "4947a1" in xpath:
+                    return "4947(a)(1)"
+        return "Unknown"
+
+    if field == "foreign_office":
+        return elem.text.strip().upper() == 'X'
+
+    return parse_int(elem.text) if field not in ["tax_year", "filer_ein", "filer_name", "form_type"] else elem.text.strip()
+
+def parse_field_990PF(root, field, namespaces, xml_filename, context):
+    if field not in XPATHS_BY_FORM["990PF"]:
+        return 0 if field not in ["org_type", "form_type", "filer_ein", "filer_name", "tax_year"] else "Unknown"
+
+    if field == "receipt":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990PF"]["receipt"]:
+            elem = find_element(root, [xpath], namespaces)
+            if elem is not None:
+                total += parse_int(elem.text)
+        if total == 0:
+            missing_revenue_by_year[context.get("tax_year", "Unknown")] += 1
+            log_error(f"Missing revenue fields in {xml_filename}")
+        return total
+
+    if field in ["travel", "conferences"]:
+        total = 0
+        for xpath in XPATHS_BY_FORM["990PF"][field]:
+            expense_elem = find_element(root, [xpath], namespaces)
+            if expense_elem is not None:
+                desc_elem = find_element(expense_elem, XPATHS_BY_FORM["990PF"]["expense_desc"], namespaces)
+                amount_elem = find_element(expense_elem, XPATHS_BY_FORM["990PF"]["expense_value"], namespaces)
+                if desc_elem is not None and amount_elem is not None:
+                    amount = parse_int(amount_elem.text)
+                    desc_text = desc_elem.text.upper()
+                    if field == "travel" and "TRAVEL" in desc_text:
+                        total += amount
+                        log_error(f"Parsed travel_amt ${total} from OtherExpensesSchedule in {xml_filename}")
+                    if field == "conferences" and ("CONFERENCE" in desc_text or "MEETING" in desc_text):
+                        total += amount
+                        log_error(f"Parsed conferences_amt ${total} from OtherExpensesSchedule in {xml_filename}")
+        return total
+
+    if field == "officer_comp":
+        total = 0
+        for xpath in XPATHS_BY_FORM["990PF"]["officer_comp_elements"]:
+            officer_elem = find_element(root, [xpath], namespaces)
+            if officer_elem is not None:
+                comp_elem = find_element(officer_elem, XPATHS_BY_FORM["990PF"]["officer_comp_value"], namespaces)
+                if comp_elem is not None:
+                    comp = parse_int(comp_elem.text)
+                    if comp > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
+                        log_error(f"Suspicious officer_comp ${comp} exceeds total_exp ${context['total_exp']} in {xml_filename}")
+                        continue
+                    total += comp
+        return total
+
+    if field == "grants":
+        total = 0
+        elem = find_element(root, XPATHS_BY_FORM["990PF"]["grants"], namespaces)
+        if elem is not None:
+            total += parse_int(elem.text)
+            log_error(f"Parsed grants_to_others ${total} from 990PF in {xml_filename}")
+        if total > 5_000_000 or context["filer_ein"] in SEARCH_EINS:
+            log_error(f"Non-zero grants_to_others ${total} for EIN {context['filer_ein']}, Name {context['filer_name']}, TaxYear {context['tax_year']}, XML {xml_filename}")
+        elif total == 0 and context["filer_ein"] in SEARCH_EINS:
+            return_data = find_element(root, [".//{http://www.irs.gov/efile}ReturnData", ".//ReturnData"], namespaces)
+            child_tags = [child.tag for child in return_data.findall("*")] if return_data is not None else []
+            log_error(f"Zero grants_to_others for EIN {context['filer_ein']}, Name {context['filer_name']}, File {xml_filename}. ReturnData children: {child_tags}")
+        return total
+
+    elem = find_element(root, XPATHS_BY_FORM["990PF"][field], namespaces)
+    if elem is None:
+        if field in ["tax_year", "filer_ein", "filer_name", "form_type"]:
+            return "Unknown"
+        if field == "org_type":
+            return "Unknown"
+        if field == "foreign_office":
+            return False
+        return 0
+
+    if field == "org_type":
+        for xpath in XPATHS_BY_FORM["990PF"]["org_type"]:
+            if elem.tag in xpath:
+                if "501c3" in xpath:
+                    return "501(c)(3)"
+                if "4947a1" in xpath:
+                    return "4947(a)(1)"
+        return "Unknown"
+
+    if field == "foreign_office":
+        return elem.text.strip().upper() == 'X'
+
+    return parse_int(elem.text) if field not in ["tax_year", "filer_ein", "filer_name", "form_type"] else elem.text.strip()
+
+PARSE_FIELD_METHODS = {
+    "990": parse_field_990,
+    "990EZ": parse_field_990EZ,
+    "990PF": parse_field_990PF
+}
+
+def parse_field(root, field, form_type, namespaces, xml_filename, context):
+    return PARSE_FIELD_METHODS[form_type](root, field, namespaces, xml_filename, context)
+
 def parse_xml_file(xml_content, xml_filename, zip_prefix):
     global high_conferences_count, high_comp_count
     if not hasattr(file_counter_local, 'value'):
@@ -156,631 +491,96 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
     root = tree.getroot()
     namespaces = {'irs': 'http://www.irs.gov/efile', '': 'http://www.irs.gov/efile'}
 
-    form_type_elem = root.find(".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}ReturnTypeCd")
-    if form_type_elem is None:
-        form_type_elem = root.find(".//ReturnHeader/ReturnTypeCd")
-    form_type = form_type_elem.text.strip() if form_type_elem is not None else "Unknown"
-    if form_type == "990T":
+    # Parse basic fields
+    context = {}
+    context["form_type"] = parse_field(root, "form_type", "990", namespaces, xml_filename, context)
+    if context["form_type"] == "990T":
         file_counter_local.skipped += 1
         return []
 
-    # Enhanced tax year lookup with multiple paths
-    tax_year_elem = None
-    for path in [
-        ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}TaxYr",
-        ".//irs:ReturnHeader/irs:TaxYr",
-        ".//{http://www.irs.gov/efile}ReturnHeader/TaxYr",
-        ".//ReturnHeader/{http://www.irs.gov/efile}TaxYr",
-        ".//ReturnHeader/TaxYr"
-    ]:
-        tax_year_elem = root.find(path, namespaces)
-        if tax_year_elem is not None:
-            break
-
-    if tax_year_elem is None:
+    context["tax_year"] = parse_field(root, "tax_year", context["form_type"], namespaces, xml_filename, context)
+    if context["tax_year"] == "Unknown":
         missing_taxyr_by_year["Unknown"] += 1
-        return_header = root.find(".//{http://www.irs.gov/efile}ReturnHeader", namespaces) or root.find(".//ReturnHeader")
+        return_header = find_element(root, [".//{http://www.irs.gov/efile}ReturnHeader", ".//ReturnHeader"], namespaces)
         header_snippet = ET.tostring(return_header, encoding='unicode', method='xml')[:2000] if return_header is not None else "No ReturnHeader"
         log_error(f"Missing TaxYr element in {xml_filename}, inferring from filename/zip. ReturnHeader: {header_snippet}")
-        tax_year = xml_filename[:4] if xml_filename[:4].isdigit() else zip_prefix
+        context["tax_year"] = xml_filename[:4] if xml_filename[:4].isdigit() else zip_prefix
     else:
-        tax_year = tax_year_elem.text.strip()
         try:
-            int(tax_year)
+            int(context["tax_year"])
         except ValueError:
-            invalid_taxyr_by_year[tax_year] += 1
-            log_error(f"Invalid tax year {tax_year} in {xml_filename}, inferring from filename/zip")
-            tax_year = xml_filename[:4] if xml_filename[:4].isdigit() else zip_prefix
+            invalid_taxyr_by_year[context["tax_year"]] += 1
+            log_error(f"Invalid tax year {context['tax_year']} in {xml_filename}, inferring from filename/zip")
+            context["tax_year"] = xml_filename[:4] if xml_filename[:4].isdigit() else zip_prefix
 
-    filer = root.find(".//{http://www.irs.gov/efile}Filer") if \
-            root.find(".//{http://www.irs.gov/efile}Filer") is not None else \
-            root.find(".//Filer")
-    if filer is None:
-        missing_filer_by_year[tax_year] += 1
+    context["filer_ein"] = parse_field(root, "filer_ein", context["form_type"], namespaces, xml_filename, context)
+    context["filer_name"] = parse_field(root, "filer_name", context["form_type"], namespaces, xml_filename, context)
+    if context["filer_ein"] == "Unknown" or context["filer_name"] == "Unknown":
+        missing_filer_by_year[context["tax_year"]] += 1
         log_error(f"Missing Filer element in {xml_filename}")
-        filer_ein = "Unknown"
-        filer_name = "Unknown"
-    else:
-        filer_ein_elem = filer.find("{http://www.irs.gov/efile}EIN") if filer.find("{http://www.irs.gov/efile}EIN") is not None else filer.find("EIN")
-        filer_name_elem = filer.find(".//{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1Txt") if \
-                          filer.find(".//{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1Txt") is not None else \
-                          filer.find(".//BusinessName/BusinessNameLine1Txt") if \
-                          filer.find(".//BusinessName/BusinessNameLine1Txt") is not None else \
-                          filer.find(".//{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1") if \
-                          filer.find(".//{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1") is not None else \
-                          filer.find(".//BusinessName/BusinessNameLine1")
-        filer_ein = filer_ein_elem.text.strip() if filer_ein_elem is not None else "Unknown"
-        filer_name = filer_name_elem.text.strip() if filer_name_elem is not None else "Unknown"
 
-    if filer_ein in ["271414646", "520851555"] or parsed_ein_count < 5:
-        log_error(f"Assigned tax_year {tax_year} for {xml_filename}, EIN {filer_ein}")
+    if context["filer_ein"] in SEARCH_EINS or parsed_ein_count < 5:
+        log_error(f"Assigned tax_year {context['tax_year']} for {xml_filename}, EIN {context['filer_ein']}")
 
     file_counter_local.value += 1
 
-    receipt_amt = 0
-    for revenue_field in [
-        "{http://www.irs.gov/efile}GrossReceiptsAmt",
-        "{http://www.irs.gov/efile}TotalRevenueAmt",
-        "{http://www.irs.gov/efile}CYTotalRevenueAmt",
-        "{http://www.irs.gov/efile}RevenueAndExpensesPerBooksAmt",
-        "{http://www.irs.gov/efile}TotalRevenue",
-        "{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}TotalRevAndExpnssAmt",
-        "GrossReceiptsAmt",
-        "TotalRevenueAmt",
-        "CYTotalRevenueAmt",
-        "RevenueAndExpensesPerBooksAmt",
-        "TotalRevenue",
-        "AnalysisOfRevenueAndExpenses/TotalRevAndExpnssAmt"
-    ]:
-        try:
-            receipt_elem = root.find(f".//{revenue_field}", namespaces)
-            if receipt_elem is not None:
-                try:
-                    receipt_amt = int(float(receipt_elem.text.strip()))
-                    break
-                except (ValueError, TypeError) as e:
-                    log_error(f"Invalid value in {revenue_field} in {xml_filename}, error: {e}", exc_info=True)
-                    receipt_amt = 0
-                    break
-        except Exception as e:
-            log_error(f"Error during {revenue_field} lookup in {xml_filename}: {e}", exc_info=True)
-            continue
-    else:
-        missing_revenue_by_year[tax_year] += 1
-        log_error(f"Missing revenue fields in {xml_filename}")
+    # Parse financial fields
+    fields = [
+        "receipt", "govt_grants", "contributions", "total_exp", "prog_exp",
+        "travel", "conferences", "officer_comp", "grants", "foreign_exp",
+        "total_assets", "org_type", "foreign_office"
+    ]
+    data = {field: parse_field(root, field, context["form_type"], namespaces, xml_filename, context) for field in fields}
 
-    total_assets = 0
-    try:
-        assets_amt = None
-        assets_eoy = None
-        assets_elem = root.find(".//{http://www.irs.gov/efile}TotalAssetsAmt", namespaces) if \
-                      root.find(".//{http://www.irs.gov/efile}TotalAssetsAmt", namespaces) is not None else \
-                      root.find(".//TotalAssetsAmt")
-        if assets_elem is not None:
-            try:
-                assets_amt = int(float(assets_elem.text.strip()))
-            except (ValueError, TypeError) as e:
-                log_error(f"Invalid TotalAssetsAmt value in {xml_filename}, error: {e}", exc_info=True)
-        assets_elem = root.find(".//{http://www.irs.gov/efile}TotalAssetsEOYAmt", namespaces) if \
-                      root.find(".//{http://www.irs.gov/efile}TotalAssetsEOYAmt", namespaces) is not None else \
-                      root.find(".//TotalAssetsEOYAmt")
-        if assets_elem is not None:
-            try:
-                assets_eoy = int(float(assets_elem.text.strip()))
-            except (ValueError, TypeError) as e:
-                log_error(f"Invalid TotalAssetsEOYAmt value in {xml_filename}, error: {e}", exc_info=True)
-        total_assets = max(assets_amt or 0, assets_eoy or 0)
-    except Exception as e:
-        log_error(f"Error during TotalAssets lookup in {xml_filename}: {e}", exc_info=True)
-
-    govt_amt = 0
-    try:
-        grant_elem = root.find(".//{http://www.irs.gov/efile}GovernmentGrantsAmt", namespaces) if \
-                     root.find(".//{http://www.irs.gov/efile}GovernmentGrantsAmt", namespaces) is not None else \
-                     root.find(".//GovernmentGrantsAmt")
-        if grant_elem is not None:
-            try:
-                govt_amt = int(float(grant_elem.text.strip()))
-            except (ValueError, TypeError) as e:
-                log_error(f"Invalid GovernmentGrantsAmt value in {xml_filename}, error: {e}", exc_info=True)
-                govt_amt = 0
-    except Exception as e:
-        log_error(f"Error during GovernmentGrantsAmt lookup in {xml_filename}: {e}", exc_info=True)
-
-    contrib_amt = 0
-    try:
-        contrib_elem = root.find(".//{http://www.irs.gov/efile}AllOtherContributionsAmt", namespaces) if \
-                       root.find(".//{http://www.irs.gov/efile}AllOtherContributionsAmt", namespaces) is not None else \
-                       root.find(".//AllOtherContributionsAmt")
-        if contrib_elem is not None:
-            try:
-                contrib_amt = int(float(contrib_elem.text.strip()))
-            except (ValueError, TypeError) as e:
-                log_error(f"Invalid AllOtherContributionsAmt value in {xml_filename}, error: {e}", exc_info=True)
-                contrib_amt = 0
-    except Exception as e:
-        log_error(f"Error during AllOtherContributionsAmt lookup in {xml_filename}: {e}", exc_info=True)
-
-    total_exp = 0
-    if form_type == "990PF":
-        try:
-            total_exp_elem = root.find(".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}TotalExpensesRevAndExpnssAmt", namespaces) if \
-                             root.find(".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}TotalExpensesRevAndExpnssAmt", namespaces) is not None else \
-                             root.find(".//AnalysisOfRevenueAndExpenses/TotalExpensesRevAndExpnssAmt")
-            if total_exp_elem is not None:
-                try:
-                    total_exp = int(float(total_exp_elem.text.strip()))
-                except (ValueError, TypeError) as e:
-                    log_error(f"Invalid TotalExpensesRevAndExpnssAmt value in {xml_filename}, error: {e}", exc_info=True)
-                    total_exp = 0
-        except Exception as e:
-            log_error(f"Error during TotalExpensesRevAndExpnssAmt lookup in {xml_filename}: {e}", exc_info=True)
-    else:
-        try:
-            total_exp_elem = root.find(".//{http://www.irs.gov/efile}TotalFunctionalExpensesGrp/{http://www.irs.gov/efile}TotalAmt", namespaces) if \
-                             root.find(".//{http://www.irs.gov/efile}TotalFunctionalExpensesGrp/{http://www.irs.gov/efile}TotalAmt", namespaces) is not None else \
-                             root.find(".//TotalFunctionalExpensesGrp/TotalAmt")
-            if total_exp_elem is not None:
-                try:
-                    total_exp = int(float(total_exp_elem.text.strip()))
-                except (ValueError, TypeError) as e:
-                    log_error(f"Invalid TotalFunctionalExpensesGrp value in {xml_filename}, error: {e}", exc_info=True)
-                    total_exp = 0
-            if total_exp == 0:
-                total_exp_elem = root.find(".//{http://www.irs.gov/efile}TotalExpensesAmt", namespaces) if \
-                                 root.find(".//{http://www.irs.gov/efile}TotalExpensesAmt", namespaces) is not None else \
-                                 root.find(".//TotalExpensesAmt")
-                if total_exp_elem is not None:
-                    try:
-                        total_exp = int(float(total_exp_elem.text.strip()))
-                    except (ValueError, TypeError) as e:
-                        log_error(f"Invalid TotalExpensesAmt value in {xml_filename}, error: {e}", exc_info=True)
-                        total_exp = 0
-        except Exception as e:
-            log_error(f"Error during TotalExpenses lookup in {xml_filename}: {e}", exc_info=True)
-
-    prog_exp = 0
-    try:
-        prog_exp_elem = root.find(".//{http://www.irs.gov/efile}TotalProgramServiceExpensesAmt", namespaces) if \
-                        root.find(".//{http://www.irs.gov/efile}TotalProgramServiceExpensesAmt", namespaces) is not None else \
-                        root.find(".//TotalProgramServiceExpensesAmt")
-        if prog_exp_elem is not None:
-            try:
-                prog_exp = int(float(prog_exp_elem.text.strip()))
-            except (ValueError, TypeError) as e:
-                log_error(f"Invalid TotalProgramServiceExpensesAmt value in {xml_filename}, error: {e}", exc_info=True)
-                prog_exp = 0
-    except Exception as e:
-        log_error(f"Error during TotalProgramServiceExpensesAmt lookup in {xml_filename}: {e}", exc_info=True)
-
-    travel_amt = 0
-    if form_type == "990PF":
-        try:
-            other_exp_schedule = root.find(".//{http://www.irs.gov/efile}OtherExpensesSchedule", namespaces) if \
-                                 root.find(".//{http://www.irs.gov/efile}OtherExpensesSchedule", namespaces) is not None else \
-                                 root.find(".//OtherExpensesSchedule")
-            if other_exp_schedule is not None:
-                for expense in (other_exp_schedule.findall("{http://www.irs.gov/efile}OtherExpensesScheduleGrp", namespaces) or
-                                other_exp_schedule.findall("OtherExpensesScheduleGrp")):
-                    desc_elem = expense.find("{http://www.irs.gov/efile}Desc", namespaces) if \
-                                expense.find("{http://www.irs.gov/efile}Desc", namespaces) is not None else \
-                                expense.find("Desc")
-                    if desc_elem is not None and "TRAVEL" in desc_elem.text.upper():
-                        amount_elem = expense.find("{http://www.irs.gov/efile}RevenueAndExpensesPerBooksAmt", namespaces) if \
-                                      expense.find("{http://www.irs.gov/efile}RevenueAndExpensesPerBooksAmt", namespaces) is not None else \
-                                      expense.find("RevenueAndExpensesPerBooksAmt")
-                        if amount_elem is not None:
-                            try:
-                                travel_amt = int(float(amount_elem.text.strip()))
-                            except (ValueError, TypeError) as e:
-                                log_error(f"Invalid travel amount in OtherExpensesSchedule in {xml_filename}, error: {e}", exc_info=True)
-                                travel_amt = 0
-                            break
-        except Exception as e:
-            log_error(f"Error during OtherExpensesSchedule lookup for travel in {xml_filename}: {e}", exc_info=True)
-    else:
-        try:
-            travel_elem = root.find(".//{http://www.irs.gov/efile}TravelGrp/{http://www.irs.gov/efile}TotalAmt", namespaces) if \
-                          root.find(".//{http://www.irs.gov/efile}TravelGrp/{http://www.irs.gov/efile}TotalAmt", namespaces) is not None else \
-                          root.find(".//TravelGrp/TotalAmt")
-            if travel_elem is not None:
-                try:
-                    travel_amt = int(float(travel_elem.text.strip()))
-                except (ValueError, TypeError) as e:
-                    log_error(f"Invalid TravelGrp value in {xml_filename}, error: {e}", exc_info=True)
-                    travel_amt = 0
-        except Exception as e:
-            log_error(f"Error during TravelGrp lookup in {xml_filename}: {e}", exc_info=True)
-
-    conferences_amt = 0
-    if form_type == "990PF":
-        try:
-            other_exp_schedule = root.find(".//{http://www.irs.gov/efile}OtherExpensesSchedule", namespaces) if \
-                                 root.find(".//{http://www.irs.gov/efile}OtherExpensesSchedule", namespaces) is not None else \
-                                 root.find(".//OtherExpensesSchedule")
-            if other_exp_schedule is not None:
-                for expense in (other_exp_schedule.findall("{http://www.irs.gov/efile}OtherExpensesScheduleGrp", namespaces) or
-                                other_exp_schedule.findall("OtherExpensesScheduleGrp")):
-                    desc_elem = expense.find("{http://www.irs.gov/efile}Desc", namespaces) if \
-                                expense.find("{http://www.irs.gov/efile}Desc", namespaces) is not None else \
-                                expense.find("Desc")
-                    if desc_elem is not None and ("CONFERENCE" in desc_elem.text.upper() or "MEETING" in desc_elem.text.upper()):
-                        amount_elem = expense.find("{http://www.irs.gov/efile}RevenueAndExpensesPerBooksAmt", namespaces) if \
-                                      expense.find("{http://www.irs.gov/efile}RevenueAndExpensesPerBooksAmt", namespaces) is not None else \
-                                      expense.find("RevenueAndExpensesPerBooksAmt")
-                        if amount_elem is not None:
-                            try:
-                                conferences_amt += int(float(amount_elem.text.strip()))
-                            except (ValueError, TypeError) as e:
-                                log_error(f"Invalid conference amount in OtherExpensesSchedule in {xml_filename}, error: {e}", exc_info=True)
-        except Exception as e:
-            log_error(f"Error during OtherExpensesSchedule lookup for conferences in {xml_filename}: {e}", exc_info=True)
-    else:
-        try:
-            conferences_elem = root.find(".//{http://www.irs.gov/efile}ConferencesMeetingsGrp/{http://www.irs.gov/efile}TotalAmt", namespaces) if \
-                               root.find(".//{http://www.irs.gov/efile}ConferencesMeetingsGrp/{http://www.irs.gov/efile}TotalAmt", namespaces) is not None else \
-                               root.find(".//ConferencesMeetingsGrp/TotalAmt")
-            if conferences_elem is not None:
-                try:
-                    conferences_amt = int(float(conferences_elem.text.strip()))
-                except (ValueError, TypeError) as e:
-                    log_error(f"Invalid ConferencesMeetingsGrp value in {xml_filename}, error: {e}", exc_info=True)
-                    conferences_amt = 0
-        except Exception as e:
-            log_error(f"Error during ConferencesMeetingsGrp lookup in {xml_filename}: {e}", exc_info=True)
-
-    if conferences_amt > 1_000_000 and high_conferences_count < 5:
-        log_error(f"High conferences_amt ${conferences_amt} for EIN {filer_ein}, Name {filer_name}, TaxYear {tax_year}, XML {xml_filename}")
-
-    officer_comp = 0
-    if form_type == "990PF":
-        try:
-            officer = root.find(".//{http://www.irs.gov/efile}OfficerDirTrstKeyEmplGrp", namespaces) if \
-                      root.find(".//{http://www.irs.gov/efile}OfficerDirTrstKeyEmplGrp", namespaces) is not None else \
-                      root.find(".//OfficerDirTrstKeyEmplGrp")
-            if officer is not None:
-                comp_elem = officer.find("{http://www.irs.gov/efile}CompensationAmt", namespaces) if \
-                            officer.find("{http://www.irs.gov/efile}CompensationAmt", namespaces) is not None else \
-                            officer.find("CompensationAmt")
-                if comp_elem is not None and comp_elem.text.strip():
-                    try:
-                        officer_comp = int(float(comp_elem.text.strip()))
-                    except (ValueError, TypeError) as e:
-                        log_error(f"Invalid CompensationAmt value in {xml_filename}, error: {e}", exc_info=True)
-        except Exception as e:
-            log_error(f"Error during OfficerDirTrstKeyEmplGrp lookup in {xml_filename}: {e}", exc_info=True)
-    else:
-        try:
-            for person in (root.findall(".//{http://www.irs.gov/efile}Form990PartVIISectionAGrp", namespaces) or
-                           root.findall(".//Form990PartVIISectionAGrp")) + \
-                          (root.findall(".//{http://www.irs.gov/efile}OfficerDirectorTrusteeEmplGrp", namespaces) or
-                           root.findall(".//OfficerDirectorTrusteeEmplGrp")):
-                comp_elem = person.find("{http://www.irs.gov/efile}ReportableCompFromOrgAmt", namespaces) if \
-                            person.find("{http://www.irs.gov/efile}ReportableCompFromOrgAmt", namespaces) is not None else \
-                            person.find("ReportableCompFromOrgAmt") if \
-                            person.find("ReportableCompFromOrgAmt") is not None else \
-                            person.find("{http://www.irs.gov/efile}CompensationAmt", namespaces) if \
-                            person.find("{http://www.irs.gov/efile}CompensationAmt", namespaces) is not None else \
-                            person.find("CompensationAmt")
-                if comp_elem is not None and comp_elem.text.strip():
-                    try:
-                        officer_comp += int(float(comp_elem.text.strip()))
-                    except (ValueError, TypeError) as e:
-                        log_error(f"Invalid ReportableCompFromOrgAmt/CompensationAmt value in {xml_filename}, error: {e}", exc_info=True)
-        except Exception as e:
-            log_error(f"Error during Form990PartVIISectionAGrp/OfficerDirectorTrusteeEmplGrp lookup in {xml_filename}: {e}", exc_info=True)
-
-    grants_to_others = 0
-    try:
-        return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
-                      root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
-                      root.find(".//ReturnData")
-        if return_data is not None:
-            schedule_f_paths = [
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleF",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}ScheduleF",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990/{http://www.irs.gov/efile}IRS990ScheduleF",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleF",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990/{http://www.irs.gov/efile}ScheduleF",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}ScheduleF",
-                ".//ReturnData/IRS990ScheduleF",
-                ".//ReturnData/ScheduleF",
-                ".//ReturnData/IRS990/IRS990ScheduleF",
-                ".//ReturnData/IRS990EZ/IRS990ScheduleF",
-                ".//ReturnData/IRS990/ScheduleF",
-                ".//ReturnData/IRS990EZ/ScheduleF"
-            ]
-            for path in schedule_f_paths:
-                for schedule_f in root.findall(path, namespaces):
-                    for grant in (schedule_f.findall(".//{http://www.irs.gov/efile}GrantsToOrgOutsideUSGrp", namespaces) or
-                                  schedule_f.findall(".//GrantsToOrgOutsideUSGrp")) + \
-                                 (schedule_f.findall(".//{http://www.irs.gov/efile}GrantsToOrganizationsOutsideUS", namespaces) or
-                                  schedule_f.findall(".//GrantsToOrganizationsOutsideUS")) + \
-                                 (schedule_f.findall(".//{http://www.irs.gov/efile}GrantsToOrgsOutsideUS", namespaces) or
-                                  schedule_f.findall(".//GrantsToOrgsOutsideUS")):
-                        amount_elem = grant.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) if \
-                                      grant.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) is not None else \
-                                      grant.find("CashGrantAmt")
-                        if amount_elem is not None:
-                            try:
-                                amount = int(float(amount_elem.text.strip()))
-                                grants_to_others += amount
-                                if filer_ein in ["271414646", "520851555"]:
-                                    log_error(f"{'CHAI' if filer_ein == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleF GrantsToOrg for EIN {filer_ein}, File {xml_filename}")
-                                elif amount > 5_000_000 and grant_log_count < 5:
-                                    log_error(f"Found CashGrantAmt ${amount} in ScheduleF GrantsToOrg for EIN {filer_ein}, File {xml_filename}")
-                            except (ValueError, TypeError) as e:
-                                log_error(f"Invalid CashGrantAmt in ScheduleF: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-                    for grant in (schedule_f.findall(".//{http://www.irs.gov/efile}ForeignIndividualsGrantsGrp", namespaces) or
-                                  schedule_f.findall(".//ForeignIndividualsGrantsGrp")):
-                        amount_elem = grant.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) if \
-                                      grant.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) is not None else \
-                                      grant.find("CashGrantAmt")
-                        if amount_elem is not None:
-                            try:
-                                amount = int(float(amount_elem.text.strip()))
-                                grants_to_others += amount
-                                if filer_ein in ["271414646", "520851555"]:
-                                    log_error(f"{'CHAI' if filer_ein == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleF ForeignIndividuals for EIN {filer_ein}, File {xml_filename}")
-                                elif amount > 5_000_000 and grant_log_count < 5:
-                                    log_error(f"Found CashGrantAmt ${amount} in ScheduleF ForeignIndividuals for EIN {filer_ein}, File {xml_filename}")
-                            except (ValueError, TypeError) as e:
-                                log_error(f"Invalid CashGrantAmt in ScheduleF ForeignIndividuals: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-            schedule_i_paths = [
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleI",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}ScheduleI",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990/{http://www.irs.gov/efile}IRS990ScheduleI",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleI",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990/{http://www.irs.gov/efile}ScheduleI",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}ScheduleI",
-                ".//ReturnData/IRS990ScheduleI",
-                ".//ReturnData/ScheduleI",
-                ".//ReturnData/IRS990/IRS990ScheduleI",
-                ".//ReturnData/IRS990EZ/IRS990ScheduleI",
-                ".//ReturnData/IRS990/ScheduleI",
-                ".//ReturnData/IRS990EZ/ScheduleI"
-            ]
-            for path in schedule_i_paths:
-                for schedule_i in root.findall(path, namespaces):
-                    for recipient in (schedule_i.findall(".//{http://www.irs.gov/efile}RecipientTable", namespaces) or
-                                      schedule_i.findall(".//RecipientTable")):
-                        amount_elem = recipient.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) if \
-                                      recipient.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) is not None else \
-                                      recipient.find("CashGrantAmt")
-                        if amount_elem is not None:
-                            try:
-                                amount = int(float(amount_elem.text.strip()))
-                                grants_to_others += amount
-                                if filer_ein in ["271414646", "520851555"]:
-                                    log_error(f"{'CHAI' if filer_ein == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleI RecipientTable for EIN {filer_ein}, File {xml_filename}")
-                                elif amount > 5_000_000 and grant_log_count < 5:
-                                    log_error(f"Found CashGrantAmt ${amount} in ScheduleI RecipientTable for EIN {filer_ein}, File {xml_filename}")
-                            except (ValueError, TypeError) as e:
-                                log_error(f"Invalid CashGrantAmt in ScheduleI RecipientTable: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-                    for individual_grant in (schedule_i.findall(".//{http://www.irs.gov/efile}GrantsOtherAsstToIndivInUSGrp", namespaces) or
-                                             schedule_i.findall(".//GrantsOtherAsstToIndivInUSGrp")):
-                        amount_elem = individual_grant.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) if \
-                                      individual_grant.find("{http://www.irs.gov/efile}CashGrantAmt", namespaces) is not None else \
-                                      individual_grant.find("CashGrantAmt")
-                        if amount_elem is not None:
-                            try:
-                                amount = int(float(amount_elem.text.strip()))
-                                grants_to_others += amount
-                                if filer_ein in ["271414646", "520851555"]:
-                                    log_error(f"{'CHAI' if filer_ein == '271414646' else 'Amnesty'} Grant: ${amount} in ScheduleI GrantsOtherAsstToIndivInUSGrp for EIN {filer_ein}, File {xml_filename}")
-                                elif amount > 5_000_000 and grant_log_count < 5:
-                                    log_error(f"Found CashGrantAmt ${amount} in ScheduleI GrantsOtherAsstToIndivInUSGrp for EIN {filer_ein}, File {xml_filename}")
-                            except (ValueError, TypeError) as e:
-                                log_error(f"Invalid CashGrantAmt in ScheduleI GrantsOtherAsstToIndivInUSGrp: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-            if grants_to_others > 5_000_000 or filer_ein in ["271414646", "520851555"]:
-                log_error(f"Non-zero grants_to_others ${grants_to_others} for EIN {filer_ein}, Name {filer_name}, TaxYear {tax_year}, XML {xml_filename}")
-            elif grants_to_others == 0 and filer_ein in ["271414646", "520851555"]:
-                children = root.findall(".//{http://www.irs.gov/efile}ReturnData/*", namespaces) or root.findall(".//ReturnData/*")
-                child_tags = [child.tag for child in children]
-                log_error(f"Zero grants_to_others for EIN {filer_ein}, Name {filer_name}, File {xml_filename}. ReturnData children: {child_tags}")
-    except Exception as e:
-        log_error(f"Error during ScheduleF/I lookup for grants in {xml_filename}: {e}", exc_info=True)
-
-    foreign_expenses = 0
-    try:
-        return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
-                      root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
-                      root.find(".//ReturnData")
-        if return_data is not None:
-            for schedule_f in (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleF", namespaces) or
-                               root.findall(".//ReturnData/IRS990ScheduleF")) + \
-                              (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}ScheduleF", namespaces) or
-                               root.findall(".//ReturnData/ScheduleF")) + \
-                              (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990/{http://www.irs.gov/efile}IRS990ScheduleF", namespaces) or
-                               root.findall(".//ReturnData/IRS990/IRS990ScheduleF")) + \
-                              (root.findall(".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleF", namespaces) or
-                               root.findall(".//ReturnData/IRS990EZ/IRS990ScheduleF")):
-                for activity in (schedule_f.findall(".//{http://www.irs.gov/efile}StmtOfActyOutsdUSGrp", namespaces) or
-                                 schedule_f.findall(".//StmtOfActyOutsdUSGrp")) + \
-                                (schedule_f.findall(".//{http://www.irs.gov/efile}AccountActivitiesOutsideUSGrp", namespaces) or
-                                 schedule_f.findall(".//AccountActivitiesOutsideUSGrp")):
-                    amount_elem = activity.find("{http://www.irs.gov/efile}RegionTotalExpendituresAmt", namespaces) if \
-                                  activity.find("{http://www.irs.gov/efile}RegionTotalExpendituresAmt", namespaces) is not None else \
-                                  activity.find("RegionTotalExpendituresAmt")
-                    if amount_elem is not None:
-                        try:
-                            amount = int(float(amount_elem.text.strip()))
-                            foreign_expenses += amount
-                            if filer_ein in ["271414646", "520851555"] or (amount > 5_000_000 and foreign_exp_log_count < 5):
-                                log_error(f"Found RegionTotalExpendituresAmt ${amount} in ScheduleF for EIN {filer_ein}, File {xml_filename}")
-                        except (ValueError, TypeError) as e:
-                            log_error(f"Invalid RegionTotalExpendituresAmt in ScheduleF: {amount_elem.text} in {xml_filename}, error: {e}", exc_info=True)
-        if foreign_expenses == 0 and filer_ein in ["271414646", "520851555"]:
-            children = root.findall(".//{http://www.irs.gov/efile}ReturnData/*", namespaces) or root.findall(".//ReturnData/*")
-            child_tags = [child.tag for child in children]
-            log_error(f"Zero foreign_expenses for EIN {filer_ein}, Name {filer_name}, File {xml_filename}. ReturnData children: {child_tags}")
-    except Exception as e:
-        log_error(f"Error during ScheduleF lookup for foreign expenses in {xml_filename}: {e}", exc_info=True)
-
-    org_type = "Unknown"
-    org_type_debug = "Not found"
-    if form_type == "990PF":
-        try:
-            org_type_elem = None
-            for path in [
-                ".//{http://www.irs.gov/efile}Organization501c3ExemptPFInd",
-                ".//Organization501c3ExemptPFInd",
-                ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization501c3ExemptPFInd",
-                ".//IRS990PF/Organization501c3ExemptPFInd",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization501c3ExemptPFInd",
-                ".//ReturnData/IRS990PF/Organization501c3ExemptPFInd",
-                ".//{http://www.irs.gov/efile}Organization501c3TaxablePFInd",
-                ".//Organization501c3TaxablePFInd",
-                ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization501c3TaxablePFInd",
-                ".//IRS990PF/Organization501c3TaxablePFInd",
-                ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization501c3TaxablePFInd",
-                ".//ReturnData/IRS990PF/Organization501c3TaxablePFInd"
-            ]:
-                org_type_elem = root.find(path, namespaces)
-                if org_type_elem is not None and org_type_elem.text.strip().upper() == 'X':
-                    org_type = "501(c)(3)"
-                    org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
-                    ein_type_dict[filer_ein] = org_type
-                    break
-            if org_type == "Unknown":
-                for path in [
-                    ".//{http://www.irs.gov/efile}Organization4947a1NotExemptCharitableTrustInd",
-                    ".//Organization4947a1NotExemptCharitableTrustInd",
-                    ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1NotExemptCharitableTrustInd",
-                    ".//IRS990PF/Organization4947a1NotExemptCharitableTrustInd",
-                    ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1NotExemptCharitableTrustInd",
-                    ".//ReturnData/IRS990PF/Organization4947a1NotExemptCharitableTrustInd",
-                    ".//{http://www.irs.gov/efile}Organization4947a1Ind",
-                    ".//Organization4947a1Ind",
-                    ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1Ind",
-                    ".//IRS990PF/Organization4947a1Ind",
-                    ".//{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
-                    ".//Organization4947a1TrtdPFInd",
-                    ".//{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
-                    ".//IRS990PF/Organization4947a1TrtdPFInd",
-                    ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990PF/{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
-                    ".//ReturnData/IRS990PF/Organization4947a1TrtdPFInd"
-                ]:
-                    org_type_elem = root.find(path, namespaces)
-                    if org_type_elem is not None and org_type_elem.text.strip().upper() == 'X':
-                        org_type = "4947(a)(1)"
-                        org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
-                        ein_type_dict[filer_ein] = org_type
-                        break
-            if org_type == "Unknown" and filer_ein in ein_type_dict:
-                org_type = ein_type_dict[filer_ein]
-            if org_type == "Unknown":
-                return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
-                              root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
-                              root.find(".//ReturnData")
-                org_type_debug = ET.tostring(return_data, encoding='unicode', method='xml')[:2000] if return_data is not None else "No ReturnData"
-                log_error(f"Unparsed org type for 990PF in {xml_filename}, EIN {filer_ein}: {org_type_debug}")
-        except Exception as e:
-            log_error(f"Error during Organization501c3ExemptPFInd/4947a1 lookup in {xml_filename}, EIN {filer_ein}: {e}", exc_info=True)
-    else:
-        try:
-            org_type_elem = root.find(".//{http://www.irs.gov/efile}Organization501cInd", namespaces) if \
-                            root.find(".//{http://www.irs.gov/efile}Organization501cInd", namespaces) is not None else \
-                            root.find(".//Organization501cInd")
-            if org_type_elem is not None:
-                type_num = org_type_elem.get("organization501cTypeTxt")
-                org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
-                if type_num and org_type_elem.text.strip().upper() == 'X' and type_num.isdigit() and 1 <= int(type_num) <= 29:
-                    org_type = f"501(c)({type_num})"
-                    ein_type_dict[filer_ein] = org_type
-                else:
-                    log_error(f"Unparsed org type in {xml_filename}, EIN {filer_ein}: {org_type_debug}")
-            else:
-                org_type_elem = root.find(".//{http://www.irs.gov/efile}Organization501c3Ind", namespaces) if \
-                                root.find(".//{http://www.irs.gov/efile}Organization501c3Ind", namespaces) is not None else \
-                                root.find(".//Organization501c3Ind")
-                if org_type_elem is not None and org_type_elem.text.strip().upper() == 'X':
-                    org_type = "501(c)(3)"
-                    org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
-                    ein_type_dict[filer_ein] = org_type
-                else:
-                    org_type_elem = root.find(".//{http://www.irs.gov/efile}Organization4947a1NotPFInd", namespaces) if \
-                                    root.find(".//{http://www.irs.gov/efile}Organization4947a1NotPFInd", namespaces) is not None else \
-                                    root.find(".//Organization4947a1NotPFInd")
-                    if org_type_elem is not None and org_type_elem.text.strip().upper() == 'X':
-                        org_type = "4947(a)(1)"
-                        org_type_debug = ET.tostring(org_type_elem, encoding='unicode', method='xml').strip()
-                        ein_type_dict[filer_ein] = org_type
-                    elif filer_ein in ein_type_dict:
-                        org_type = ein_type_dict[filer_ein]
-                    else:
-                        return_data = root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) if \
-                                      root.find(".//{http://www.irs.gov/efile}ReturnData", namespaces) is not None else \
-                                      root.find(".//ReturnData")
-                        org_type_debug = ET.tostring(return_data, encoding='unicode', method='xml')[:2000] if return_data is not None else "No ReturnData"
-                        log_error(f"Unparsed org type in {xml_filename}, EIN {filer_ein}: No Organization501cInd, Organization501c3Ind, or Organization4947a1NotPFInd, XML: {org_type_debug}")
-        except Exception as e:
-            log_error(f"Error during Organization type lookup in {xml_filename}, EIN {filer_ein}: {e}", exc_info=True)
-
-    foreign_office = False
-    try:
-        foreign_office_elem = root.find(".//{http://www.irs.gov/efile}ForeignOfficeInd", namespaces) if \
-                              root.find(".//{http://www.irs.gov/efile}ForeignOfficeInd", namespaces) is not None else \
-                              root.find(".//ForeignOfficeInd")
-        if foreign_office_elem is not None and foreign_office_elem.text.strip().upper() == 'X':
-            foreign_office = True
-    except Exception as e:
-        log_error(f"Error during ForeignOfficeInd lookup in {xml_filename}: {e}", exc_info=True)
-
-    # Calculate denominator for all form types
-    denominator = total_assets + receipt_amt
-
-    # Calculate percentages: value / denominator * 100, clamp negatives to 0, cap at 100, set undefined to -1
+    # Calculate percentages
     def calculate_percentage(value, denom):
-        if denom == 0:
-            return -1
-        pct = (value / denom) * 100
-        if pct < 0:
-            return 0
-        if pct > 100:
-            return 100
-        return round(pct, 2)
+        if denom == 0 or value is None or denom is None:
+            return 0.0
+        return round((value / denom) * 100, 2)
 
-    comp_pct = calculate_percentage(officer_comp, denominator)
-    travel_pct = calculate_percentage(travel_amt, denominator)
-    conferences_pct = calculate_percentage(conferences_amt, denominator)
-    grants_pct = calculate_percentage(grants_to_others, denominator)
-    foreign_expenses_pct = calculate_percentage(foreign_expenses, denominator)
+    data["comp_pct"] = calculate_percentage(data["officer_comp"], data["total_exp"])
+    data["travel_pct"] = calculate_percentage(data["travel"], data["total_exp"])
+    data["conferences_pct"] = calculate_percentage(data["conferences"], data["total_exp"])
+    data["grants_pct"] = calculate_percentage(data["grants"], data["total_exp"])
+    data["foreign_expenses_pct"] = calculate_percentage(data["foreign_exp"], data["total_exp"])
+    data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
-    # Calculate grift_ratio: (officer_comp + travel_amt + conferences_amt) / denominator * 100
-    grift_ratio = calculate_percentage(officer_comp + travel_amt + conferences_amt, denominator)
+    # Denominator for other purposes
+    data["denominator"] = data["total_assets"] + data["receipt"]
 
     # Placeholder percentile columns
-    comp_ptile = "n/y"
-    travel_ptile = "n/y"
-    conferences_ptile = "n/y"
-    grants_ptile = "n/y"
-    foreign_expenses_ptile = "n/y"
+    data["comp_ptile"] = "n/y"
+    data["travel_ptile"] = "n/y"
+    data["conferences_ptile"] = "n/y"
+    data["grants_ptile"] = "n/y"
+    data["foreign_expenses_ptile"] = "n/y"
 
     # Calculate domestic_misrep_flag
-    domestic_misrep_flag = grift_ratio > 10 and foreign_expenses_pct < 0.1 * 100 if denominator > 0 else False
+    data["domestic_misrep_flag"] = data["grift_ratio"] > 10 and data["foreign_expenses_pct"] < 0.1 * 100 if data["total_exp"] > 0 else False
 
-    if parsed_ein_count < 5 or filer_ein in ["271414646", "520851555"]:
-        log_error(f"Parsed EIN {filer_ein}: denominator {denominator}, receipt_amt {receipt_amt}, total_assets {total_assets}, org_type {org_type}, grants_to_others {grants_to_others}, XML {xml_filename}")
+    if parsed_ein_count < 5 or context["filer_ein"] in SEARCH_EINS:
+        log_error(f"Parsed EIN {context['filer_ein']}: denominator {data['denominator']}, receipt_amt {data['receipt']}, total_assets {data['total_assets']}, org_type {data['org_type']}, grants_to_others {data['grants']}, XML {xml_filename}")
 
     results = []
     try:
         row = [
-            tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt, org_type, total_exp, prog_exp,
-            travel_amt, conferences_amt, officer_comp, comp_pct, comp_ptile, travel_pct, travel_ptile, conferences_pct,
-            conferences_ptile, grants_pct, grants_ptile, foreign_expenses_pct, foreign_expenses_ptile, grift_ratio,
-            total_assets, form_type, denominator, foreign_office, foreign_expenses, grants_to_others, domestic_misrep_flag,
-            xml_filename
+            context["tax_year"], context["filer_ein"], context["filer_name"], data["receipt"], data["govt_grants"],
+            data["contributions"], data["org_type"], data["total_exp"], data["prog_exp"], data["travel"],
+            data["conferences"], data["officer_comp"], data["comp_pct"], data["comp_ptile"], data["travel_pct"],
+            data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],
+            data["grants_ptile"], data["foreign_expenses_pct"], data["foreign_expenses_ptile"], data["grift_ratio"],
+            data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
+            data["foreign_exp"], data["grants"], data["domestic_misrep_flag"], xml_filename
         ]
         results.append(row)
         file_counter_local.entries += 1
         if (file_counter_local.value % 10000) == 0:
             log_error(f"Thread {threading.get_ident()} processed {file_counter_local.value} files, {file_counter_local.entries} entries, {file_counter_local.skipped} skipped")
     except Exception as e:
-        log_error(f"Failed to append result for {xml_filename}, EIN {filer_ein}: {e}", exc_info=True)
+        log_error(f"Failed to append result for {xml_filename}, EIN {context['filer_ein']}: {e}", exc_info=True)
         return []
 
-    return results, org_type, xml_filename
+    return results, data["org_type"], xml_filename
 
 def process_zip_files(start_year, end_year, max_workers=4):
     global total_xml_files, parsed_ein_count, grant_log_count, error_log_count, foreign_exp_log_count, chai_amnesty_grant_count
