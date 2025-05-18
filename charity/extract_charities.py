@@ -184,6 +184,9 @@ def clean_org_type(org_type, for_filename=False):
     
 def tsv_writer_thread(tsv_files, writer_id):
     global done_queuing
+    # Buffer rows for each (tax_year, org_type) combination until we're ready to write
+    row_buffers = defaultdict(list)
+
     while True:
         try:
             # Get the next write task from the queue (non-blocking with timeout)
@@ -191,55 +194,71 @@ def tsv_writer_thread(tsv_files, writer_id):
         except queue.Empty:
             # If the queue is empty for 60 seconds, check if main thread is done queuing
             if done_queuing and tsv_write_queue.empty():
+                # Write any buffered rows before exiting
+                for (tax_year, org_type), rows in list(row_buffers.items()):
+                    write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id)
                 log_error("TSV writer thread {} exiting, queue empty and main thread done queuing", writer_id)
                 break
             log_error("TSV writer thread {} waiting, queue size: {}", writer_id, tsv_write_queue.qsize())
             continue
 
         try:
-            start_write_time = time.time()
-            # Use the cleaned version for the filename, but keep the original org_type in the row
-            org_type_filename = clean_org_type(org_type, for_filename=True)
-            org_type_clean = clean_org_type(org_type, for_filename=False)
-            tsv_key = (tax_year, org_type)
-            tsv_path = f"charities_{org_type_filename}_{tax_year}.tsv"
+            # Buffer the row instead of writing immediately
+            key = (tax_year, org_type)
+            row_buffers[key].append((row, xml_filename))
 
-            # Open the TSV file if it’s not already open
-            if tsv_key not in tsv_files:
-                file_exists = os.path.exists(tsv_path)
-                mode = 'a' if file_exists else 'w'
-                tsv_files[tsv_key] = open(tsv_path, mode=mode, newline="", encoding="utf-8", buffering=8192)
-                writer = csv.writer(tsv_files[tsv_key], delimiter='\t')
-                if not file_exists:
-                    writer.writerow(TSV_COLUMNS)
-                    tsv_files[tsv_key].flush()
-                    log_error("Created new TSV {} with header", tsv_path)
-                log_error("Opened TSV {} in mode {}, total open files: {}", tsv_path, mode, len(tsv_files))
-                tsv_write_counts[tsv_key] = 0
+            # Write the buffer if it reaches a threshold (e.g., 1000 rows) or we're done queuing
+            if len(row_buffers[key]) >= 1000 or (done_queuing and tsv_write_queue.empty()):
+                write_buffered_rows(tsv_files, tax_year, org_type, row_buffers[key], writer_id)
+                del row_buffers[key]
 
-            writer = csv.writer(tsv_files[tsv_key], delimiter='\t')
-            writer.writerow(row)
-            # Flush less frequently to reduce disk I/O
-            tsv_write_counts[tsv_key] += 1
-            if tsv_write_counts[tsv_key] % 5000 == 0:
-                tsv_files[tsv_key].flush()
-                log_error("Periodic flush after {} rows to TSV {} by writer {}", tsv_write_counts[tsv_key], tsv_path, writer_id)
-                # Close the file if we've written a lot to free up file handles
-                if tsv_write_counts[tsv_key] % 50000 == 0:
-                    tsv_files[tsv_key].close()
-                    del tsv_files[tsv_key]
-                    log_error("Closed TSV {} to free resources, will reopen on next write", tsv_path)
-            if tsv_write_counts[tsv_key] % 1000 == 0:
-                write_duration = time.time() - start_write_time
-                log_error("TSV writer {} wrote row to TSV {} for EIN {}, org_type {}, tax_year {}, XML {}, write took {:.2f}s, queue size: {}", 
-                          writer_id, tsv_path, row[1], org_type, tax_year, xml_filename, write_duration, tsv_write_queue.qsize())
         except Exception as e:
-            log_error("Error writing TSV row for {} by writer {}: {}", xml_filename, writer_id, str(e), exc_info=True)
+            log_error("Error processing TSV row for {} by writer {}: {}", xml_filename, writer_id, str(e), exc_info=True)
             # Ensure the task is marked as done even if there's an error
             tsv_write_queue.task_done()
-            continue  # Continue to the next task
+            continue
         finally:
             tsv_write_queue.task_done()
+
+def write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id):
+    if not rows:
+        return  # Nothing to write
+
+    start_write_time = time.time()
+    # Use the cleaned version for the filename, but keep the original org_type in the row
+    org_type_filename = clean_org_type(org_type, for_filename=True)
+    tsv_key = (tax_year, org_type)
+    tsv_path = f"charities_{org_type_filename}_{tax_year}.tsv"
+
+    # Open the TSV file if it’s not already open
+    if tsv_key not in tsv_files:
+        file_exists = os.path.exists(tsv_path)
+        mode = 'a' if file_exists else 'w'
+        tsv_files[tsv_key] = open(tsv_path, mode=mode, newline="", encoding="utf-8", buffering=8192)
+        writer = csv.writer(tsv_files[tsv_key], delimiter='\t')
+        if not file_exists:
+            writer.writerow(TSV_COLUMNS)
+            tsv_files[tsv_key].flush()
+            log_error("Created new TSV {} with header", tsv_path)
+        log_error("Opened TSV {} in mode {}, total open files: {}", tsv_path, mode, len(tsv_files))
+        tsv_write_counts[tsv_key] = 0
+
+    writer = csv.writer(tsv_files[tsv_key], delimiter='\t')
+    for row, xml_filename in rows:
+        writer.writerow(row)
+        tsv_write_counts[tsv_key] += 1
+        if tsv_write_counts[tsv_key] % 5000 == 0:
+            tsv_files[tsv_key].flush()
+            log_error("Periodic flush after {} rows to TSV {} by writer {}", tsv_write_counts[tsv_key], tsv_path, writer_id)
+            # Close the file if we've written a lot to free up file handles
+            if tsv_write_counts[tsv_key] % 50000 == 0:
+                tsv_files[tsv_key].close()
+                del tsv_files[tsv_key]
+                log_error("Closed TSV {} to free resources, will reopen on next write", tsv_path)
+        if tsv_write_counts[tsv_key] % 1000 == 0:
+            write_duration = time.time() - start_write_time
+            log_error("TSV writer {} wrote row to TSV {} for EIN {}, org_type {}, tax_year {}, XML {}, write took {:.2f}s, queue size: {}", 
+                      writer_id, tsv_path, row[1], org_type, tax_year, xml_filename, write_duration, tsv_write_queue.qsize())
 
 def find_element(root, xpaths, namespaces):
     for xpath in xpaths:
