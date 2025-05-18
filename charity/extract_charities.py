@@ -60,6 +60,7 @@ xml_processed_count = 0  # Track total XMLs processed for sparse logging
 log_counts = defaultdict(int)  # Dictionary to count log occurrences by preamble
 total_entries = 0
 tsv_write_counts = defaultdict(int)
+done_queuing = False  # Flag to signal when main thread is done queuing tasks
 
 # Queue for TSV writes
 tsv_write_queue = queue.Queue()
@@ -144,36 +145,64 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
     if verbose:
         print(f"Log: {formatted_message}")
 
-def clean_org_type(org_type):
+def clean_org_type(org_type, for_filename=False):
+    # First, preserve the original for logging
+    original_org_type = org_type
+    # Remove all parentheses and spaces
     org_type = org_type.replace('(', '').replace(')', '').replace(' ', '')
+    
+    # Handle specific cases
     if org_type == "501c3":
-        return "501(c)(3)"
+        cleaned = "501c3"
+        formatted = "501(c)(3)"
     elif org_type == "4947a1":
-        return "4947(a)(1)"
+        cleaned = "4947a1"
+        formatted = "4947(a)(1)"
     elif org_type.startswith("501c"):
-        # Fix typos like "501(c)(c3)" to "501(c)(3)"
-        org_type = re.sub(r'501c(?:\(c\))*(\d+)', r'501(c)(\1)', org_type)
-        return org_type
-    return org_type.lower()
+        # Extract the number after "501c"
+        match = re.match(r'501c(\d+)', org_type)
+        if match:
+            num = match.group(1)
+            # Validate the number
+            if num.isdigit() and 1 <= int(num) <= 29:
+                cleaned = f"501c{num}"
+                formatted = f"501(c)({num})"
+            else:
+                log_error("Invalid org_type number in {}: {}", original_org_type, num)
+                cleaned = "501c3"
+                formatted = "501(c)(3)"  # Default to 501(c)(3) for invalid numbers
+        else:
+            log_error("Failed to parse org_type number from {}, defaulting to 501(c)(3)", original_org_type)
+            cleaned = "501c3"
+            formatted = "501(c)(3)"
+    else:
+        cleaned = org_type.lower()
+        formatted = org_type.lower()
 
+    # Return the appropriate format based on the for_filename flag
+    return cleaned if for_filename else formatted
+    
 def tsv_writer_thread(tsv_files, writer_id):
+    global done_queuing
     while True:
         try:
             # Get the next write task from the queue (non-blocking with timeout)
             tax_year, org_type, row, xml_filename = tsv_write_queue.get(timeout=60)
         except queue.Empty:
-            # If the queue is empty for 60 seconds, check if we should exit
-            if tsv_write_queue.empty():
-                log_error("TSV writer thread {} exiting, queue empty", writer_id)
+            # If the queue is empty for 60 seconds, check if main thread is done queuing
+            if done_queuing and tsv_write_queue.empty():
+                log_error("TSV writer thread {} exiting, queue empty and main thread done queuing", writer_id)
                 break
             log_error("TSV writer thread {} waiting, queue size: {}", writer_id, tsv_write_queue.qsize())
             continue
 
         try:
             start_write_time = time.time()
-            org_type_clean = clean_org_type(org_type)
+            # Use the cleaned version for the filename, but keep the original org_type in the row
+            org_type_filename = clean_org_type(org_type, for_filename=True)
+            org_type_clean = clean_org_type(org_type, for_filename=False)
             tsv_key = (tax_year, org_type)
-            tsv_path = f"charities_{org_type_clean}_{tax_year}.tsv"
+            tsv_path = f"charities_{org_type_filename}_{tax_year}.tsv"
 
             # Open the TSV file if it’s not already open
             if tsv_key not in tsv_files:
@@ -824,7 +853,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         return []
 
 def process_zip_files(start_year, end_year, max_workers=4):
-    global total_xml_files, pending_tasks, total_entries
+    global total_xml_files, pending_tasks, total_entries, done_queuing
     global missing_taxyr_by_year, invalid_taxyr_by_year, missing_filer_by_year
     global missing_revenue_by_year, invalid_predicate_by_year
     start_time = time.time()
@@ -971,6 +1000,8 @@ def process_zip_files(start_year, end_year, max_workers=4):
                         continue
 
     finally:
+        # Signal that we're done queuing tasks
+        done_queuing = True
         # Custom wait for the queue to empty with a timeout
         timeout = 600  # 10 minutes
         start_wait_time = time.time()
