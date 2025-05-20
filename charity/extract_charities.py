@@ -1,10 +1,8 @@
 import os
 import glob
 import argparse
-from lxml import etree
 import logging
 import zipfile
-from io import BytesIO
 import csv
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
@@ -18,6 +16,8 @@ import queue
 from logging.handlers import QueueHandler, QueueListener
 import logging.handlers
 import inspect
+from lxml import etree  # Import for XML parsing
+from io import BytesIO  # Import for BytesIO
 
 # Import parsing functions from new scripts
 from parse_990 import parse_990
@@ -25,7 +25,8 @@ from parse_990ez import parse_990ez
 from parse_990pf import parse_990pf
 
 # Constants
-DEBUG_EINS = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
+# DEBUG_EINS will be set by --eins argument
+DEBUG_EINS = set()
 TSV_COLUMNS = [
     "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
     "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
@@ -48,12 +49,12 @@ pending_tasks = 0
 seen_eins = defaultdict(set)  # Track (EIN, tax_year) to deduplicate entries
 xml_processed_count = 0  # Track total XMLs processed for sparse logging
 log_counts = defaultdict(int)  # Dictionary to count log occurrences by preamble
-total_entries = 0
+total_entries = 0  # Global counter for total entries processed
 tsv_write_counts = defaultdict(int)
 done_queuing = False  # Flag to signal when main thread is done queuing tasks
 
-# Queue for TSV writes
-tsv_write_queue = queue.Queue()
+# Queue for TSV writes with increased size
+tsv_write_queue = queue.Queue(maxsize=10000)  # Increased queue size to 10000
 
 # Setup queue-based logging
 log_queue = queue.Queue(-1)  # Unlimited size
@@ -76,6 +77,15 @@ logger.handlers = []  # Clear default handlers
 logger.addHandler(queue_handler)
 logger.addHandler(console_handler)
 
+def initialize_thread_local_counters():
+    """Initialize thread-local counters if they haven't been set in the current thread."""
+    if not hasattr(file_counter_local, 'value'):
+        file_counter_local.value = 0
+    if not hasattr(file_counter_local, 'entries'):
+        file_counter_local.entries = 0
+    if not hasattr(file_counter_local, 'skipped'):
+        file_counter_local.skipped = 0
+
 def log_error(msg_format, *args, ein=None, exc_info=False):
     global xml_processed_count, log_counts
 
@@ -87,6 +97,13 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
     else:
         preamble = msg_format[:preamble_end]
         data = msg_format[preamble_end:]
+
+    # Increment the counter for this preamble early
+    log_counts[preamble] += 1
+
+    # Limit to 5 logs per preamble unless EIN is in DEBUG_EINS (apply this check first)
+    if ein and ein not in DEBUG_EINS and log_counts[preamble] > 5:
+        return
 
     # Skip verbose logs unless EIN is in DEBUG_EINS
     if ein and ein not in DEBUG_EINS:
@@ -113,13 +130,6 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
             xml_processed_count += 1
             if xml_processed_count % 100000 != 0:
                 return
-
-    # Increment the counter for this preamble
-    log_counts[preamble] += 1
-
-    # Limit to 5 logs per preamble unless EIN is in DEBUG_EINS
-    if ein and ein not in DEBUG_EINS and log_counts[preamble] > 5:
-        return
 
     # Now that we've decided to log, get the line number and format the message
     line_no = inspect.currentframe().f_back.f_lineno
@@ -176,37 +186,46 @@ def tsv_writer_thread(tsv_files, writer_id):
     global done_queuing
     # Buffer rows for each (tax_year, org_type) combination until we're ready to write
     row_buffers = defaultdict(list)
+    last_write_time = time.time()
 
     while True:
         try:
             # Get the next write task from the queue (non-blocking with timeout)
-            tax_year, org_type, row, xml_filename = tsv_write_queue.get(timeout=60)
+            tax_year, org_type, row, xml_filename = tsv_write_queue.get(timeout=10)
         except queue.Empty:
-            # If the queue is empty for 60 seconds, check if main thread is done queuing
+            # If the queue is empty for 10 seconds, check if main thread is done queuing
             if done_queuing and tsv_write_queue.empty():
                 # Write any buffered rows before exiting
                 for (tax_year, org_type), rows in list(row_buffers.items()):
-                    write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id)
+                    if rows:  # Only write if there are rows in the buffer
+                        write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id)
+                        del row_buffers[(tax_year, org_type)]
                 log_error("TSV writer thread {} exiting, queue empty and main thread done queuing", writer_id)
                 break
+            # Periodically write the buffer even if not full
+            current_time = time.time()
+            if current_time - last_write_time >= 5:  # Write every 5 seconds if there's anything in the buffer
+                for (tax_year, org_type), rows in list(row_buffers.items()):
+                    if rows:  # Only write if there are rows in the buffer
+                        write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id)
+                        del row_buffers[(tax_year, org_type)]
+                last_write_time = current_time
             log_error("TSV writer thread {} waiting, queue size: {}", writer_id, tsv_write_queue.qsize())
             continue
 
         try:
-            # Buffer the row instead of writing immediately
+            # Buffer the row
             key = (tax_year, org_type)
             row_buffers[key].append((row, xml_filename))
 
-            # Write the buffer if it reaches a threshold (e.g., 1000 rows) or we're done queuing
-            if len(row_buffers[key]) >= 1000 or (done_queuing and tsv_write_queue.empty()):
+            # Write the buffer if it reaches a threshold (e.g., 1000 rows)
+            if len(row_buffers[key]) >= 1000:
                 write_buffered_rows(tsv_files, tax_year, org_type, row_buffers[key], writer_id)
                 del row_buffers[key]
+                last_write_time = time.time()
 
         except Exception as e:
             log_error("Error processing TSV row for {} by writer {}: {}", xml_filename, writer_id, str(e), exc_info=True)
-            # Ensure the task is marked as done even if there's an error
-            tsv_write_queue.task_done()
-            continue
         finally:
             tsv_write_queue.task_done()
 
@@ -251,10 +270,8 @@ def write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id):
                       writer_id, tsv_path, row[1], org_type, tax_year, xml_filename, write_duration, tsv_write_queue.qsize())
 
 def parse_xml_file(xml_content, xml_filename, zip_prefix):
-    if not hasattr(file_counter_local, 'value'):
-        file_counter_local.value = 0
-        file_counter_local.entries = 0
-        file_counter_local.skipped = 0
+    # Initialize thread-local counters for this thread
+    initialize_thread_local_counters()
 
     start_time = time.time()
     form_type = None
@@ -283,24 +300,32 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         else:
             log_error("Unsupported form type {} in {}, skipping", form_type, xml_filename)
             file_counter_local.skipped += 1
-            return []
+            return [], None, xml_filename
 
         if row is None:
             file_counter_local.skipped += 1
-            return []
+            return [], None, xml_filename
 
         # Extract tax_year and org_type from the row for TSV writing
         tax_year = row[0]  # First column: tax_year
         org_type = row[6]  # Seventh column: org_type
+        total_exp = float(row[7]) if row[7] else 0  # Eighth column: total_exp
+        grift_ratio = float(row[22]) if row[22] else 0  # Twenty-third column: grift_ratio
+        ein = row[1]  # Second column: filer_ein
+
+        # Check for suspicious grift_ratio and log using log_error
+        if grift_ratio > 100 and total_exp > 0:
+            log_error("Suspicious grift_ratio {}% for EIN {} in {}", grift_ratio, ein, xml_filename, ein=ein)
+
         results = [row]
 
-        log_error("Finished processing XML {}, took {:.2f} seconds, memory usage: {}%", xml_filename, time.time() - start_time, psutil.virtual_memory().percent, ein=row[1])
+        log_error("Finished processing XML {}, took {:.2f} seconds, memory usage: {}%", xml_filename, time.time() - start_time, psutil.virtual_memory().percent, ein=ein)
         return results, org_type, xml_filename
 
     except Exception as e:
         log_error("Error processing {}: {}", xml_filename, str(e), exc_info=True, ein=None)
         file_counter_local.skipped += 1
-        return []
+        return [], None, xml_filename
 
 def find_element(root, xpaths, namespaces):
     for xpath in xpaths:
@@ -320,8 +345,11 @@ def find_element(root, xpaths, namespaces):
                 log_error("Non-namespaced XPath error for {}: {}. XML snippet: {}", non_ns_xpath, str(e), xml_snippet)
     return None
 
-def process_zip_file(zip_path, start_year, end_year, eins_to_process=None):
-    global pending_tasks
+def process_zip_file(zip_path, start_year, end_year):
+    # Initialize thread-local counters for this thread
+    initialize_thread_local_counters()
+
+    global pending_tasks, total_entries
     log_error("Processing ZIP: {}", zip_path)
     zip_prefix = os.path.basename(zip_path)[:4]
 
@@ -340,27 +368,48 @@ def process_zip_file(zip_path, start_year, end_year, eins_to_process=None):
             total_xml_files = len(xml_files)
             log_error("Found {} XML files in {}", total_xml_files, zip_path)
 
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = []
-                for xml_filename in xml_files:
+            # Read all XML contents into memory first to avoid I/O contention in threads
+            xml_contents = []
+            for xml_filename in xml_files:
+                try:
                     with zip_ref.open(xml_filename) as xml_file:
                         xml_content = xml_file.read()
+                    xml_contents.append((xml_content, xml_filename))
+                except Exception as e:
+                    log_error("Error reading XML {} from {}: {}", xml_filename, zip_path, str(e), exc_info=True)
+                    continue
+
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = []
+                for xml_content, xml_filename in xml_contents:
                     future = executor.submit(parse_xml_file, xml_content, xml_filename, zip_prefix)
                     futures.append((future, xml_filename))
 
                 for future, xml_filename in tqdm(futures, total=len(futures), desc=f"Processing {zip_path}"):
                     try:
                         result = future.result(timeout=300)  # 5-minute timeout per XML
+                        if not isinstance(result, tuple) or len(result) != 3:
+                            log_error("Invalid return value from parse_xml_file for {}: expected 3-tuple, got {}", xml_filename, result)
+                            file_counter_local.skipped += 1
+                            continue
                         results, org_type, xml_filename = result
+                        if results is None or org_type is None:
+                            log_error("Parsing failed for {}, skipping", xml_filename)
+                            file_counter_local.skipped += 1
+                            continue
                         for row in results:
                             tax_year = row[0]
                             if tax_year == "Unknown":
                                 tax_year = zip_prefix
                                 row[0] = tax_year
-                            if eins_to_process and row[1] not in eins_to_process:
-                                continue
-                            tsv_write_queue.put((tax_year, org_type, row, xml_filename))
-                            total_entries += 1
+                            # Use non-blocking put to avoid deadlock
+                            try:
+                                tsv_write_queue.put_nowait((tax_year, org_type, row, xml_filename))
+                                total_entries += 1
+                            except queue.Full:
+                                log_error("TSV write queue full, waiting to put row for {}", xml_filename)
+                                tsv_write_queue.put((tax_year, org_type, row, xml_filename), block=True)
+                                total_entries += 1
                     except TimeoutError:
                         log_error("Timeout processing XML {} in {}", xml_filename, zip_path)
                         file_counter_local.skipped += 1
@@ -372,18 +421,21 @@ def process_zip_file(zip_path, start_year, end_year, eins_to_process=None):
         log_error("Error processing ZIP {}: {}", zip_path, str(e), exc_info=True)
 
 def main():
-    global verbose, done_queuing, total_entries
+    global verbose, done_queuing, total_entries, DEBUG_EINS
     parser = argparse.ArgumentParser(description="Extract charity data from IRS 990 XML files.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
-    parser.add_argument("--eins", type=str, help="Comma-separated list of EINs to process")
+    parser.add_argument("--eins", type=str, help="Comma-separated list of EINs for extra logging")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     args = parser.parse_args()
 
     verbose = args.verbose
     start_year = args.start_year
     end_year = args.end_year
-    eins_to_process = set(args.eins.split(',')) if args.eins else None
+    # Set DEBUG_EINS based on --eins argument
+    if args.eins:
+        DEBUG_EINS = set(args.eins.split(','))
+        log_error("Set DEBUG_EINS for extra logging: {}", ",".join(DEBUG_EINS))
 
     zip_files = sorted(glob.glob("*.zip"))
     if not zip_files:
@@ -400,7 +452,7 @@ def main():
 
     try:
         for zip_path in zip_files:
-            process_zip_file(zip_path, start_year, end_year, eins_to_process)
+            process_zip_file(zip_path, start_year, end_year)
 
     finally:
         done_queuing = True  # Signal writer threads to exit
