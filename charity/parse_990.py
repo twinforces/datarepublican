@@ -320,8 +320,10 @@ def parse_990(xml_content, xml_filename):
     data["foreign_expenses_pct"] = calculate_percentage(data["foreign_expenses"], data["total_exp"])
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
-    if data["grift_ratio"] > 100 and data["total_exp"] > 0:
-        logger.error("Suspicious grift_ratio {}% for EIN {} in {}".format(data['grift_ratio'], context['filer_ein'], xml_filename))
+    # Removed direct logger.error call for grift_ratio
+    # Let extract_charities.py handle this logging
+    # if data["grift_ratio"] > 100 and data["total_exp"] > 0:
+    #     logger.error("Suspicious grift_ratio {}% for EIN {} in {}".format(data['grift_ratio'], context['filer_ein'], xml_filename))
 
     data["denominator"] = data["total_assets"] + data["receipt"]
     data["comp_ptile"] = "n/y"
@@ -341,6 +343,8 @@ def parse_990(xml_content, xml_filename):
         data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename
     ]
     return row
+
+
 
 def main():
     if len(sys.argv) != 2:

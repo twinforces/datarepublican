@@ -333,6 +333,8 @@ def parse_filer_name_990ez(root, field, namespaces, xml_filename, context):
     logger.info("Parsed {} {} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
     return value
 
+# ... (previous code unchanged until parse_990ez)
+
 def parse_990ez(xml_content, xml_filename):
     try:
         parser = etree.XMLParser(recover=True)
@@ -397,8 +399,10 @@ def parse_990ez(xml_content, xml_filename):
     data["foreign_expenses_pct"] = calculate_percentage(data["foreign_expenses"], data["total_exp"])
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
-    if data["grift_ratio"] > 100 and data["total_exp"] > 0:
-        logger.error("Suspicious grift_ratio {}% for EIN {} in {}".format(data['grift_ratio'], context['filer_ein'], xml_filename))
+    # Removed direct logger.error call for grift_ratio
+    # Let extract_charities.py handle this logging
+    # if data["grift_ratio"] > 100 and data["total_exp"] > 0:
+    #     logger.error("Suspicious grift_ratio {}% for EIN {} in {}".format(data['grift_ratio'], context['filer_ein'], xml_filename))
 
     data["denominator"] = data["total_assets"] + data["receipt"]
     data["comp_ptile"] = "n/y"
