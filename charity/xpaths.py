@@ -1,349 +1,351 @@
 XPATHS_BY_FORM = {
     "990": {
         "form_type": [
-            ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}ReturnTypeCd",
+            ".//irs:ReturnHeader/irs:ReturnTypeCd",
             ".//ReturnHeader/ReturnTypeCd"
         ],
         "tax_year": [
-            ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}TaxYr",
             ".//irs:ReturnHeader/irs:TaxYr",
-            ".//{http://www.irs.gov/efile}ReturnHeader/TaxYr",
-            ".//ReturnHeader/{http://www.irs.gov/efile}TaxYr",
             ".//ReturnHeader/TaxYr"
         ],
         "filer_ein": [
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}EIN",
+            ".//irs:Filer/irs:EIN",
             ".//Filer/EIN"
         ],
         "filer_name": [
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1Txt",
-            ".//Filer/BusinessName/BusinessNameLine1Txt",
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1",
-            ".//Filer/BusinessName/BusinessNameLine1"
+            ".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt",
+            ".//Filer/BusinessName/BusinessNameLine1Txt"
         ],
         "receipt": [
-            ".//{http://www.irs.gov/efile}GrossReceiptsAmt",
+            ".//irs:IRS990/irs:GrossReceiptsAmt",
             ".//GrossReceiptsAmt",
-            ".//{http://www.irs.gov/efile}TotalRevenueAmt",
+            ".//irs:IRS990/irs:TotalRevenueAmt",
             ".//TotalRevenueAmt",
-            ".//{http://www.irs.gov/efile}CYTotalRevenueAmt",
+            ".//irs:IRS990/irs:CYTotalRevenueAmt",
             ".//CYTotalRevenueAmt"
         ],
         "govt_grants": [
-            ".//{http://www.irs.gov/efile}GovernmentGrantsAmt",
+            ".//irs:IRS990/irs:GovernmentGrantsAmt",
             ".//GovernmentGrantsAmt"
         ],
         "contributions": [
-            ".//{http://www.irs.gov/efile}AllOtherContributionsAmt",
+            ".//irs:IRS990/irs:AllOtherContributionsAmt",
             ".//AllOtherContributionsAmt"
         ],
         "total_exp": [
-            ".//{http://www.irs.gov/efile}TotalFunctionalExpensesGrp/{http://www.irs.gov/efile}TotalAmt",
+            ".//irs:IRS990/irs:TotalFunctionalExpensesGrp/irs:TotalAmt",
             ".//TotalFunctionalExpensesGrp/TotalAmt",
-            ".//{http://www.irs.gov/efile}TotalExpensesAmt",
+            ".//irs:IRS990/irs:TotalExpensesAmt",
             ".//TotalExpensesAmt"
         ],
         "prog_exp": [
-            ".//{http://www.irs.gov/efile}TotalProgramServiceExpensesAmt",
+            ".//irs:IRS990/irs:TotalProgramServiceExpensesAmt",
             ".//TotalProgramServiceExpensesAmt"
         ],
         "travel": [
-            ".//{http://www.irs.gov/efile}TravelGrp/{http://www.irs.gov/efile}TotalAmt",
+            ".//irs:IRS990/irs:TravelGrp/irs:TotalAmt",
             ".//TravelGrp/TotalAmt"
         ],
         "conferences": [
-            ".//{http://www.irs.gov/efile}ConferencesMeetingsGrp/{http://www.irs.gov/efile}TotalAmt",
+            ".//irs:IRS990/irs:ConferencesMeetingsGrp/irs:TotalAmt",
             ".//ConferencesMeetingsGrp/TotalAmt"
         ],
         "officer_comp_elements": [
-            ".//{http://www.irs.gov/efile}Form990PartVIISectionAGrp",
+            ".//irs:IRS990/irs:Form990PartVIISectionAGrp",
             ".//Form990PartVIISectionAGrp",
-            ".//{http://www.irs.gov/efile}OfficerDirectorTrusteeEmplGrp",
+            ".//irs:IRS990/irs:OfficerDirectorTrusteeEmplGrp",
             ".//OfficerDirectorTrusteeEmplGrp"
         ],
         "officer_comp_value": [
-            "{http://www.irs.gov/efile}ReportableCompFromOrgAmt",
+            "irs:ReportableCompFromOrgAmt",
             "ReportableCompFromOrgAmt",
-            "{http://www.irs.gov/efile}CompensationAmt",
+            "irs:CompensationAmt",
             "CompensationAmt"
         ],
+        "officer_comp": [
+            ".//irs:IRS990/irs:Form990PartVIISectionAGrp/irs:ReportableCompFromOrgAmt",
+            ".//Form990PartVIISectionAGrp/ReportableCompFromOrgAmt",
+            ".//irs:IRS990/irs:OfficerDirectorTrusteeEmplGrp/irs:CompensationAmt",
+            ".//OfficerDirectorTrusteeEmplGrp/CompensationAmt"
+        ],
         "grant_elements_f": [
-            ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleF",
+            ".//irs:ReturnData/irs:IRS990ScheduleF",
             ".//ReturnData/IRS990ScheduleF"
         ],
         "grant_sub_elements_f": [
-            ".//{http://www.irs.gov/efile}GrantsToOrgOutsideUSGrp",
+            ".//irs:GrantsToOrgOutsideUSGrp",
             ".//GrantsToOrgOutsideUSGrp",
-            ".//{http://www.irs.gov/efile}GrantsToOrganizationsOutsideUS",
+            ".//irs:GrantsToOrganizationsOutsideUS",
             ".//GrantsToOrganizationsOutsideUS",
-            ".//{http://www.irs.gov/efile}GrantsToOrgsOutsideUS",
+            ".//irs:GrantsToOrgsOutsideUS",
             ".//GrantsToOrgsOutsideUS",
-            ".//{http://www.irs.gov/efile}ForeignIndividualsGrantsGrp",
+            ".//irs:ForeignIndividualsGrantsGrp",
             ".//ForeignIndividualsGrantsGrp"
         ],
         "grant_elements_i": [
-            ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleI",
+            ".//irs:ReturnData/irs:IRS990ScheduleI",
             ".//ReturnData/IRS990ScheduleI"
         ],
         "grant_sub_elements_i": [
-            ".//{http://www.irs.gov/efile}RecipientTable",
+            ".//irs:RecipientTable",
             ".//RecipientTable",
-            ".//{http://www.irs.gov/efile}GrantsOtherAsstToIndivInUSGrp",
+            ".//irs:GrantsOtherAsstToIndivInUSGrp",
             ".//GrantsOtherAsstToIndivInUSGrp"
         ],
         "grant_value": [
-            "{http://www.irs.gov/efile}CashGrantAmt",
+            "irs:CashGrantAmt",
             "CashGrantAmt"
         ],
         "foreign_exp_elements": [
-            ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990ScheduleF",
+            ".//irs:ReturnData/irs:IRS990ScheduleF",
             ".//ReturnData/IRS990ScheduleF"
         ],
         "foreign_exp_sub_elements": [
-            ".//{http://www.irs.gov/efile}StmtOfActyOutsdUSGrp",
+            ".//irs:StmtOfActyOutsdUSGrp",
             ".//StmtOfActyOutsdUSGrp",
-            ".//{http://www.irs.gov/efile}AccountActivitiesOutsideUSGrp",
+            ".//irs:AccountActivitiesOutsideUSGrp",
             ".//AccountActivitiesOutsideUSGrp"
         ],
         "foreign_exp_value": [
-            "{http://www.irs.gov/efile}RegionTotalExpendituresAmt",
+            "irs:RegionTotalExpendituresAmt",
             "RegionTotalExpendituresAmt"
         ],
         "org_type": [
-            ".//{http://www.irs.gov/efile}Organization501cInd",
+            ".//irs:IRS990/irs:Organization501cInd",
             ".//Organization501cInd",
-            ".//{http://www.irs.gov/efile}Organization501c3Ind",
+            ".//irs:IRS990/irs:Organization501c3Ind",
             ".//Organization501c3Ind",
-            ".//{http://www.irs.gov/efile}Organization4947a1NotPFInd",
+            ".//irs:IRS990/irs:Organization4947a1NotPFInd",
             ".//Organization4947a1NotPFInd"
         ],
         "foreign_office": [
-            ".//{http://www.irs.gov/efile}ForeignOfficeInd",
+            ".//irs:IRS990/irs:ForeignOfficeInd",
             ".//ForeignOfficeInd"
         ],
         "total_assets": [
-            ".//{http://www.irs.gov/efile}TotalAssetsEOYAmt",
+            ".//irs:IRS990/irs:TotalAssetsEOYAmt",
             ".//TotalAssetsEOYAmt",
-            ".//{http://www.irs.gov/efile}TotalAssetsAmt",
+            ".//irs:IRS990/irs:TotalAssetsAmt",
             ".//TotalAssetsAmt"
         ]
     },
     "990EZ": {
         "form_type": [
-            ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}ReturnTypeCd",
+            ".//irs:ReturnHeader/irs:ReturnTypeCd",
             ".//ReturnHeader/ReturnTypeCd"
         ],
         "tax_year": [
-            ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}TaxYr",
             ".//irs:ReturnHeader/irs:TaxYr",
-            ".//{http://www.irs.gov/efile}ReturnHeader/TaxYr",
-            ".//ReturnHeader/{http://www.irs.gov/efile}TaxYr",
             ".//ReturnHeader/TaxYr"
         ],
         "filer_ein": [
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}EIN",
+            ".//irs:Filer/irs:EIN",
             ".//Filer/EIN"
         ],
         "filer_name": [
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1Txt",
-            ".//Filer/BusinessName/BusinessNameLine1Txt",
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1",
-            ".//Filer/BusinessName/BusinessNameLine1"
+            ".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt",
+            ".//Filer/BusinessName/BusinessNameLine1Txt"
         ],
         "receipt": [
-            ".//{http://www.irs.gov/efile}GrossReceiptsAmt",
+            ".//irs:IRS990EZ/irs:GrossReceiptsAmt",
             ".//GrossReceiptsAmt",
-            ".//{http://www.irs.gov/efile}TotalRevenueAmt",
+            ".//irs:IRS990EZ/irs:TotalRevenueAmt",
             ".//TotalRevenueAmt"
         ],
         "govt_grants": [
-            ".//{http://www.irs.gov/efile}GovernmentGrantsAmt",
+            ".//irs:IRS990EZ/irs:GovernmentGrantsAmt",
             ".//GovernmentGrantsAmt"
         ],
         "contributions": [
-            ".//{http://www.irs.gov/efile}AllOtherContributionsAmt",
+            ".//irs:IRS990EZ/irs:AllOtherContributionsAmt",
             ".//AllOtherContributionsAmt"
         ],
         "total_exp": [
-            ".//{http://www.irs.gov/efile}TotalExpensesAmt",
+            ".//irs:IRS990EZ/irs:TotalExpensesAmt",
             ".//TotalExpensesAmt"
         ],
         "prog_exp": [
-            ".//{http://www.irs.gov/efile}TotalProgramServiceExpensesAmt",
+            ".//irs:IRS990EZ/irs:TotalProgramServiceExpensesAmt",
             ".//TotalProgramServiceExpensesAmt"
         ],
         "travel": [
-            ".//{http://www.irs.gov/efile}IRS990ScheduleO/{http://www.irs.gov/efile}SupplementalInformationDetail",
+            ".//irs:IRS990ScheduleO/irs:SupplementalInformationDetail",
             ".//IRS990ScheduleO/SupplementalInformationDetail"
         ],
         "conferences": [
-            ".//{http://www.irs.gov/efile}IRS990ScheduleO/{http://www.irs.gov/efile}SupplementalInformationDetail",
+            ".//irs:IRS990ScheduleO/irs:SupplementalInformationDetail",
             ".//IRS990ScheduleO/SupplementalInformationDetail"
         ],
         "schedule_o_value": [
-            "{http://www.irs.gov/efile}ExplanationTxt",
+            "irs:ExplanationTxt",
             "ExplanationTxt"
         ],
         "officer_comp_elements": [
-            ".//{http://www.irs.gov/efile}OfficerDirectorTrusteeEmplGrp",
+            ".//irs:IRS990EZ/irs:OfficerDirectorTrusteeEmplGrp",
             ".//OfficerDirectorTrusteeEmplGrp"
         ],
         "officer_comp_value": [
-            "{http://www.irs.gov/efile}CompensationAmt",
+            "irs:CompensationAmt",
             "CompensationAmt"
         ],
+        "officer_comp": [
+            ".//irs:IRS990EZ/irs:OfficerDirectorTrusteeEmplGrp/irs:CompensationAmt",
+            ".//OfficerDirectorTrusteeEmplGrp/CompensationAmt"
+        ],
         "grant_elements_f": [
-            ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleF",
+            ".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleF",
             ".//ReturnData/IRS990EZ/IRS990ScheduleF"
         ],
         "grant_sub_elements_f": [
-            ".//{http://www.irs.gov/efile}GrantsToOrgOutsideUSGrp",
+            ".//irs:GrantsToOrgOutsideUSGrp",
             ".//GrantsToOrgOutsideUSGrp",
-            ".//{http://www.irs.gov/efile}GrantsToOrganizationsOutsideUS",
+            ".//irs:GrantsToOrganizationsOutsideUS",
             ".//GrantsToOrganizationsOutsideUS",
-            ".//{http://www.irs.gov/efile}GrantsToOrgsOutsideUS",
+            ".//irs:GrantsToOrgsOutsideUS",
             ".//GrantsToOrgsOutsideUS",
-            ".//{http://www.irs.gov/efile}ForeignIndividualsGrantsGrp",
+            ".//irs:ForeignIndividualsGrantsGrp",
             ".//ForeignIndividualsGrantsGrp"
         ],
         "grant_elements_i": [
-            ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleI",
+            ".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleI",
             ".//ReturnData/IRS990EZ/IRS990ScheduleI"
         ],
         "grant_sub_elements_i": [
-            ".//{http://www.irs.gov/efile}RecipientTable",
+            ".//irs:RecipientTable",
             ".//RecipientTable",
-            ".//{http://www.irs.gov/efile}GrantsOtherAsstToIndivInUSGrp",
+            ".//irs:GrantsOtherAsstToIndivInUSGrp",
             ".//GrantsOtherAsstToIndivInUSGrp"
         ],
         "grant_elements_o": [
-            ".//{http://www.irs.gov/efile}IRS990ScheduleO/{http://www.irs.gov/efile}SupplementalInformationDetail",
+            ".//irs:IRS990ScheduleO/irs:SupplementalInformationDetail",
             ".//IRS990ScheduleO/SupplementalInformationDetail"
         ],
         "grant_value": [
-            "{http://www.irs.gov/efile}CashGrantAmt",
+            "irs:CashGrantAmt",
             "CashGrantAmt"
         ],
         "foreign_exp_elements": [
-            ".//{http://www.irs.gov/efile}ReturnData/{http://www.irs.gov/efile}IRS990EZ/{http://www.irs.gov/efile}IRS990ScheduleF",
+            ".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleF",
             ".//ReturnData/IRS990EZ/IRS990ScheduleF"
         ],
         "foreign_exp_sub_elements": [
-            ".//{http://www.irs.gov/efile}StmtOfActyOutsdUSGrp",
+            ".//irs:StmtOfActyOutsdUSGrp",
             ".//StmtOfActyOutsdUSGrp",
-            ".//{http://www.irs.gov/efile}AccountActivitiesOutsideUSGrp",
+            ".//irs:AccountActivitiesOutsideUSGrp",
             ".//AccountActivitiesOutsideUSGrp"
         ],
         "foreign_exp_value": [
-            "{http://www.irs.gov/efile}RegionTotalExpendituresAmt",
+            "irs:RegionTotalExpendituresAmt",
             "RegionTotalExpendituresAmt"
         ],
         "org_type": [
-            ".//{http://www.irs.gov/efile}Organization501c3Ind",
+            ".//irs:IRS990EZ/irs:Organization501c3Ind",
             ".//Organization501c3Ind",
-            ".//{http://www.irs.gov/efile}Organization4947a1NotPFInd",
+            ".//irs:IRS990EZ/irs:Organization4947a1NotPFInd",
             ".//Organization4947a1NotPFInd"
         ],
         "foreign_office": [
-            ".//{http://www.irs.gov/efile}ForeignOfficeInd",
+            ".//irs:IRS990EZ/irs:ForeignOfficeInd",
             ".//ForeignOfficeInd"
         ],
         "total_assets": [
-            ".//{http://www.irs.gov/efile}TotalAssetsEOYAmt",
+            ".//irs:IRS990EZ/irs:TotalAssetsEOYAmt",
             ".//TotalAssetsEOYAmt",
-            ".//{http://www.irs.gov/efile}TotalAssetsAmt",
+            ".//irs:IRS990EZ/irs:TotalAssetsAmt",
             ".//TotalAssetsAmt"
         ]
     },
     "990PF": {
         "form_type": [
-            ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}ReturnTypeCd",
+            ".//irs:ReturnHeader/irs:ReturnTypeCd",
             ".//ReturnHeader/ReturnTypeCd"
         ],
         "tax_year": [
-            ".//{http://www.irs.gov/efile}ReturnHeader/{http://www.irs.gov/efile}TaxYr",
             ".//irs:ReturnHeader/irs:TaxYr",
-            ".//{http://www.irs.gov/efile}ReturnHeader/TaxYr",
-            ".//ReturnHeader/{http://www.irs.gov/efile}TaxYr",
             ".//ReturnHeader/TaxYr"
         ],
         "filer_ein": [
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}EIN",
+            ".//irs:Filer/irs:EIN",
             ".//Filer/EIN"
         ],
         "filer_name": [
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1Txt",
-            ".//Filer/BusinessName/BusinessNameLine1Txt",
-            ".//{http://www.irs.gov/efile}Filer/{http://www.irs.gov/efile}BusinessName/{http://www.irs.gov/efile}BusinessNameLine1",
-            ".//Filer/BusinessName/BusinessNameLine1"
+            ".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt",
+            ".//Filer/BusinessName/BusinessNameLine1Txt"
         ],
         "receipt": [
-            ".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}DividendsRevAndExpnssAmt",
+            ".//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:DividendsRevAndExpnssAmt",
             ".//AnalysisOfRevenueAndExpenses/DividendsRevAndExpnssAmt",
-            ".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}NetGainSaleAstRevAndExpnssAmt",
+            ".//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:NetGainSaleAstRevAndExpnssAmt",
             ".//AnalysisOfRevenueAndExpenses/NetGainSaleAstRevAndExpnssAmt",
-            ".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}OtherIncomeRevAndExpnssAmt",
+            ".//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:OtherIncomeRevAndExpnssAmt",
             ".//AnalysisOfRevenueAndExpenses/OtherIncomeRevAndExpnssAmt"
         ],
         "govt_grants": [],
         "contributions": [],
         "total_exp": [
-            ".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}TotalExpensesRevAndExpnssAmt",
+            ".//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:TotalExpensesRevAndExpnssAmt",
             ".//AnalysisOfRevenueAndExpenses/TotalExpensesRevAndExpnssAmt"
         ],
         "prog_exp": [
-            ".//{http://www.irs.gov/efile}AnalysisOfRevenueAndExpenses/{http://www.irs.gov/efile}ContriPaidDsbrsChrtblAmt",
+            ".//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:ContriPaidDsbrsChrtblAmt",
             ".//AnalysisOfRevenueAndExpenses/ContriPaidDsbrsChrtblAmt"
         ],
         "travel": [
-            ".//{http://www.irs.gov/efile}OtherExpensesSchedule/{http://www.irs.gov/efile}OtherExpensesScheduleGrp",
+            ".//irs:IRS990PF/irs:OtherExpensesSchedule/irs:OtherExpensesScheduleGrp",
             ".//OtherExpensesSchedule/OtherExpensesScheduleGrp"
         ],
         "conferences": [
-            ".//{http://www.irs.gov/efile}OtherExpensesSchedule/{http://www.irs.gov/efile}OtherExpensesScheduleGrp",
+            ".//irs:IRS990PF/irs:OtherExpensesSchedule/irs:OtherExpensesScheduleGrp",
             ".//OtherExpensesSchedule/OtherExpensesScheduleGrp"
         ],
         "expense_value": [
-            "{http://www.irs.gov/efile}RevenueAndExpensesPerBooksAmt",
+            "irs:RevenueAndExpensesPerBooksAmt",
             "RevenueAndExpensesPerBooksAmt"
         ],
         "expense_desc": [
-            "{http://www.irs.gov/efile}Desc",
+            "irs:Desc",
             "Desc"
         ],
         "officer_comp_elements": [
-            ".//{http://www.irs.gov/efile}OfficerDirTrstKeyEmplGrp",
+            ".//irs:IRS990PF/irs:OfficerDirTrstKeyEmplGrp",
             ".//OfficerDirTrstKeyEmplGrp"
         ],
         "officer_comp_value": [
-            "{http://www.irs.gov/efile}CompensationAmt",
+            "irs:CompensationAmt",
             "CompensationAmt"
         ],
+        "officer_comp": [
+            ".//irs:IRS990PF/irs:OfficerDirTrstKeyEmplGrp/irs:CompensationAmt",
+            ".//OfficerDirTrstKeyEmplGrp/CompensationAmt"
+        ],
         "grants": [
-            ".//{http://www.irs.gov/efile}SupplementaryInformationGrp/{http://www.irs.gov/efile}TotalGrantOrContriPdDurYrAmt",
+            ".//irs:IRS990PF/irs:SupplementaryInformationGrp/irs:TotalGrantOrContriPdDurYrAmt",
             ".//SupplementaryInformationGrp/TotalGrantOrContriPdDurYrAmt"
         ],
-        "foreign_exp": [],
+        "foreign_expenses": [
+            ".//irs:ReturnData/irs:IRS990ScheduleF",
+            ".//ReturnData/IRS990ScheduleF"
+        ],
         "org_type": [
-            ".//{http://www.irs.gov/efile}Organization501c3ExemptPFInd",
+            ".//irs:IRS990PF/irs:Organization501c3ExemptPFInd",
             ".//Organization501c3ExemptPFInd",
-            ".//{http://www.irs.gov/efile}Organization501c3TaxablePFInd",
+            ".//irs:IRS990PF/irs:Organization501c3TaxablePFInd",
             ".//Organization501c3TaxablePFInd",
-            ".//{http://www.irs.gov/efile}Organization4947a1NotExemptCharitableTrustInd",
+            ".//irs:IRS990PF/irs:Organization4947a1NotExemptCharitableTrustInd",
             ".//Organization4947a1NotExemptCharitableTrustInd",
-            ".//{http://www.irs.gov/efile}Organization4947a1Ind",
+            ".//irs:IRS990PF/irs:Organization4947a1Ind",
             ".//Organization4947a1Ind",
-            ".//{http://www.irs.gov/efile}Organization4947a1TrtdPFInd",
+            ".//irs:IRS990PF/irs:Organization4947a1TrtdPFInd",
             ".//Organization4947a1TrtdPFInd"
         ],
         "foreign_office": [
-            ".//{http://www.irs.gov/efile}ForeignOfficeInd",
+            ".//irs:IRS990PF/irs:ForeignOfficeInd",
             ".//ForeignOfficeInd"
         ],
         "total_assets": [
-            ".//{http://www.irs.gov/efile}TotalAssetsEOYAmt",
+            ".//irs:IRS990PF/irs:TotalAssetsEOYAmt",
             ".//TotalAssetsEOYAmt",
-            ".//{http://www.irs.gov/efile}TotalAssetsAmt",
+            ".//irs:IRS990PF/irs:TotalAssetsAmt",
             ".//TotalAssetsAmt"
         ]
     }
