@@ -20,9 +20,9 @@ from lxml import etree  # Import for XML parsing
 from io import BytesIO  # Import for BytesIO
 
 # Import parsing functions from new scripts
-from parse_990 import parse_990
-from parse_990ez import parse_990ez
-from parse_990pf import parse_990pf
+import parse_990
+import parse_990ez
+import parse_990pf
 
 # Constants
 # DEBUG_EINS will be set by --eins argument
@@ -57,8 +57,8 @@ tsv_write_queue = queue.Queue(maxsize=10000)  # Increased queue size to 10000
 
 # Setup queue-based logging
 log_queue = queue.Queue(-1)  # Unlimited size
-queue_handler = QueueHandler(log_queue)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+queue_handler = QueueHandler(log_queue)
 queue_handler.setFormatter(formatter)
 
 file_handler = logging.FileHandler('extract_log.txt')
@@ -70,11 +70,99 @@ console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.ERROR)
 console_handler.setFormatter(formatter)
 
+# Custom logging handler to apply filtering
+class FilteredHandler(logging.Handler):
+    def emit(self, record):
+        global xml_processed_count, log_counts
+
+        # Extract the message, args, and ein
+        msg = record.msg  # The format string
+        args = record.args  # The arguments to the format string
+        ein = getattr(record, 'ein', None) if hasattr(record, 'ein') else None
+        exc_info = record.exc_info
+
+        # Extract the preamble (everything up to the first '{')
+        preamble_end = msg.find('{')
+        if preamble_end == -1:
+            preamble = msg
+            data = ""
+        else:
+            preamble = msg[:preamble_end]
+            data = msg[preamble_end:]
+
+        # Increment the counter for this preamble
+        log_counts[preamble] += 1
+
+        # Apply filtering logic
+        # Limit to 5 logs per preamble unless EIN is in DEBUG_EINS
+        if ein and ein not in DEBUG_EINS and log_counts[preamble] > 5:
+            return
+
+        # Skip verbose logs unless EIN is in DEBUG_EINS
+        if ein and ein not in DEBUG_EINS:
+            if any(x in preamble for x in ["Raw ", "Parsed ", "Extracted ", "Assigned tax_year"]):
+                return
+
+        # Skip thread-related and TSV creation logs unless verbose or EIN is in DEBUG_EINS
+        if any(x in preamble for x in ["Thread", "Wrote row", "Closed and flushed", "Created new TSV", "Periodic flush", "TSV writer thread ", "TSV writer "]):
+            if not verbose and (not ein or ein not in DEBUG_EINS):
+                return
+
+        # Skip certain missing field logs for 990PF unless verbose or EIN is in DEBUG_EINS
+        if "Missing" in preamble and any(field in msg for field in ["govt_grants", "contributions", "foreign_office"]) and "990PF" in msg:
+            if not verbose and (not ein or ein not in DEBUG_EINS):
+                return
+
+        # For non-DEBUG_EINS, log "Processing XML" and "Finished processing XML" only every 100,000th XML
+        if ein and ein not in DEBUG_EINS:
+            if "Processing XML" in preamble or "Finished processing XML" in preamble:
+                xml_processed_count += 1
+                if xml_processed_count % 100000 != 0:
+                    return
+
+        # Now that we've passed filtering, format the message with the original arguments
+        line_no = inspect.currentframe().f_back.f_lineno
+        try:
+            formatted_message = f"{line_no} {preamble}{data}"
+            if args:
+                formatted_message = msg.format(*args)
+            formatted_message = f"{line_no} {formatted_message}"
+        except (ValueError, TypeError) as e:
+            # If formatting fails, log the raw message and arguments for debugging
+            formatted_message = f"{line_no} [Formatting error: {str(e)}] {msg} with args {args}"
+
+        # Create a new log record with the formatted message
+        new_record = logging.LogRecord(
+            name=record.name,
+            level=record.levelno,
+            pathname=record.pathname,
+            lineno=record.lineno,
+            msg=formatted_message,
+            args=(),  # Clear args to avoid further formatting
+            exc_info=exc_info
+        )
+        # Add ein attribute if present
+        if ein:
+            setattr(new_record, 'ein', ein)
+
+        # Send the record to the queue handler
+        queue_handler.emit(new_record)
+
+        if verbose:
+            print(f"Log: {formatted_message}")
+
+# Configure the master logger with the filtered handler
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.handlers = []  # Clear default handlers
-logger.addHandler(queue_handler)
+filtered_handler = FilteredHandler()
+logger.addHandler(filtered_handler)
 logger.addHandler(console_handler)
+
+# Assign the master logger and log_error to each parse module
+parse_990.set_logger(logger, log_error)
+parse_990ez.set_logger(logger, log_error)
+parse_990pf.set_logger(logger, log_error)
 
 def initialize_thread_local_counters():
     """Initialize thread-local counters if they haven't been set in the current thread."""
@@ -86,59 +174,11 @@ def initialize_thread_local_counters():
         file_counter_local.skipped = 0
 
 def log_error(msg_format, *args, ein=None, exc_info=False):
-    global xml_processed_count, log_counts
-
-    # Extract the preamble (everything up to the first '{')
-    preamble_end = msg_format.find('{')
-    if preamble_end == -1:
-        preamble = msg_format
-        data = ""
+    # Format the message and log it through the master logger
+    if ein:
+        logging.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
     else:
-        preamble = msg_format[:preamble_end]
-        data = msg_format[preamble_end:]
-
-    # Increment the counter for this preamble early
-    log_counts[preamble] += 1
-
-    # Limit to 5 logs per preamble unless EIN is in DEBUG_EINS (apply this check first)
-    if ein and ein not in DEBUG_EINS and log_counts[preamble] > 5:
-        return
-
-    # Skip verbose logs unless EIN is in DEBUG_EINS
-    if ein and ein not in DEBUG_EINS:
-        if any(x in preamble for x in ["Raw ", "Parsed ", "Extracted ", "Assigned tax_year"]):
-            return
-
-    # Skip thread-related and TSV creation logs unless verbose or EIN is in DEBUG_EINS
-    if any(x in preamble for x in ["Thread", "Wrote row", "Closed and flushed", "Created new TSV", "Periodic flush", "TSV writer thread ", "TSV writer "]):
-        if not verbose and (not ein or ein not in DEBUG_EINS):
-            return
-
-    # Skip certain missing field logs for 990PF unless verbose or EIN is in DEBUG_EINS
-    if "Missing" in preamble and any(field in msg_format for field in ["govt_grants", "contributions", "foreign_office"]) and "990PF" in msg_format:
-        if not verbose and (not ein or ein not in DEBUG_EINS):
-            return
-
-    # For non-DEBUG_EINS, log "Processing XML" and "Finished processing XML" only every 100,000th XML
-    if ein and ein not in DEBUG_EINS:
-        if "Processing XML" in preamble or "Finished processing XML" in preamble:
-            xml_processed_count += 1
-            if xml_processed_count % 100000 != 0:
-                return
-
-    # Now that we've decided to log, get the line number and format the message
-    line_no = inspect.currentframe().f_back.f_lineno
-    message = msg_format.format(*args) if args else msg_format
-    formatted_message = f"{line_no} {preamble}{message[len(preamble):]}"
-
-    # Log the message
-    if exc_info:
-        logging.error(formatted_message, exc_info=exc_info)
-    else:
-        logging.info(formatted_message)
-
-    if verbose:
-        print(f"Log: {formatted_message}")
+        logging.info(msg_format, *args, exc_info=exc_info)
 
 def clean_org_type(org_type, for_filename=False):
     # First, preserve the original for logging
@@ -241,6 +281,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
     start_time = time.time()
     form_type = None
     try:
+        log_error("Processing XML: {}", xml_filename)
         # Determine form type by parsing the XML
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
@@ -257,11 +298,11 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
 
         # Delegate parsing to the appropriate script
         if form_type == "990":
-            row = parse_990(xml_content, xml_filename)
+            row = parse_990.parse_990(xml_content, xml_filename)
         elif form_type == "990EZ":
-            row = parse_990ez(xml_content, xml_filename)
+            row = parse_990ez.parse_990ez(xml_content, xml_filename)
         elif form_type == "990PF":
-            row = parse_990pf(xml_content, xml_filename)
+            row = parse_990pf.parse_990pf(xml_content, xml_filename)
         else:
             log_error("Unsupported form type {} in {}, skipping", form_type, xml_filename)
             file_counter_local.skipped += 1
