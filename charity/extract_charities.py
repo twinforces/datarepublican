@@ -109,19 +109,15 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
         if any(x in preamble for x in ["Raw ", "Parsed ", "Extracted ", "Assigned tax_year"]):
             return
 
-    # Skip thread-related and TSV creation logs unless verbose
-    if any(x in preamble for x in ["Thread", "Wrote row", "Closed and flushed", "Created new TSV", "Periodic flush"]):
-        if not verbose:
-            # Format the message now since we need to log it
-            message = msg_format.format(*args) if args else msg_format
-            line_no = inspect.currentframe().f_back.f_lineno
-            formatted_message = f"{line_no} {preamble}{message[len(preamble):]}"
-            logging.info(formatted_message)
+    # Skip thread-related and TSV creation logs unless verbose or EIN is in DEBUG_EINS
+    if any(x in preamble for x in ["Thread", "Wrote row", "Closed and flushed", "Created new TSV", "Periodic flush", "TSV writer thread ", "TSV writer "]):
+        if not verbose and (not ein or ein not in DEBUG_EINS):
             return
 
-    # Skip certain missing field logs for 990PF unless verbose
-    if not verbose and "Missing" in preamble and any(field in msg_format for field in ["govt_grants", "contributions", "foreign_office"]) and "990PF" in msg_format:
-        return
+    # Skip certain missing field logs for 990PF unless verbose or EIN is in DEBUG_EINS
+    if "Missing" in preamble and any(field in msg_format for field in ["govt_grants", "contributions", "foreign_office"]) and "990PF" in msg_format:
+        if not verbose and (not ein or ein not in DEBUG_EINS):
+            return
 
     # For non-DEBUG_EINS, log "Processing XML" and "Finished processing XML" only every 100,000th XML
     if ein and ein not in DEBUG_EINS:
