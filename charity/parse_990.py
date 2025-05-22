@@ -8,6 +8,24 @@ from xpaths_990 import XPATHS_990
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def set_logger(new_logger, new_log_error):
+    global logger, log_error
+    logger = new_logger
+    log_error = new_log_error
+    
+def stub_log_error(msg_format, *args, ein=None, exc_info=False):
+    global logger
+    if logger is None:
+        # If logger isn't set, fall back to basic logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        logger = logging.getLogger(__name__)
+    if exc_info:
+        logger.info(msg_format.format(*args) if args else msg_format, exc_info=exc_info)
+    else:
+        logger.error(msg_format.format(*args) if args else msg_format)
+
+log_error = stub_log_error        
+    
 def parse_int(value):
     try:
         return int(float(value.strip()))
@@ -22,15 +40,14 @@ def find_element(root, xpaths, namespaces):
                 return elem[0]
         except etree.XPathEvalError as e:
             xml_snippet = etree.tostring(root, encoding='unicode', method='xml')[:2000]
-            logger.error("XPath error for {}: {}. XML snippet: {}".format(xpath, e, xml_snippet))
+            log_error("XPath error for {}: {}. XML snippet: {}", xpath, e, xml_snippet)
             non_ns_xpath = xpath.replace('irs:', '').replace('{http://www.irs.gov/efile}', '')
             try:
                 elem = root.xpath(non_ns_xpath, namespaces=None)
                 if elem:
                     return elem[0]
             except etree.XPathEvalError as e:
-                logger.error("Non-namespaced XPath error for {}: {}. XML snippet: {}".format(non_ns_xpath, e, xml_snippet))
-    return None
+                return None
 
 def parse_org_type_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["org_type"], namespaces)
@@ -49,14 +66,14 @@ def parse_org_type_990(root, field, namespaces, xml_filename, context):
             org_type = "4947(a)(1)"
         else:
             org_type = "Unknown"
-            logger.error("Unexpected org_type element tag {} for EIN {} in {}".format(elem.tag, context.get('filer_ein', 'Unknown'), xml_filename))
+            log_error("Unexpected org_type element tag {} for EIN {} in {}", elem.tag, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     else:
-        logger.error("Failed to parse org_type for EIN {} in {}".format(context.get('filer_ein', 'Unknown'), xml_filename))
+        log_error("Failed to parse org_type for EIN {} in {}", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
         return_data = find_element(root, [".//irs:ReturnData", ".//ReturnData"], namespaces)
         org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None else []
-        logger.error("Form type: {}, Available org_type tags: {} in {}".format(context.get('form_type', 'Unknown'), org_tags, xml_filename))
+        log_error("Form type: {}, Available org_type tags: {} in {}", context.get('form_type', 'Unknown'), org_tags, xml_filename, ein=context.get('filer_ein', 'Unknown'))
         org_type = "Unknown"
-    logger.info("Parsed org_type {} for EIN {} in {}".format(org_type, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed org_type {} for EIN {} in {}", org_type, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return org_type
 
 def parse_officer_comp_990(root, field, namespaces, xml_filename, context):
@@ -67,12 +84,12 @@ def parse_officer_comp_990(root, field, namespaces, xml_filename, context):
             comp_elem = find_element(person, XPATHS_990["officer_comp_value"], namespaces)
             if comp_elem is not None:
                 comp = parse_int(comp_elem.text)
-                logger.info("Raw officer_comp value: {} for EIN {} in {}".format(comp_elem.text, context.get('filer_ein', 'Unknown'), xml_filename))
+                log_error("Raw officer_comp value: {} for EIN {} in {}", comp_elem.text, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
                 if comp > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
-                    logger.error("Suspicious officer_comp ${} exceeds total_exp ${} in {}".format(comp, context['total_exp'], xml_filename))
+                    log_error("Suspicious officer_comp ${} exceeds total_exp ${} in {}", comp, context['total_exp'], xml_filename, ein=context.get('filer_ein', 'Unknown'))
                     continue
                 total += comp
-    logger.info("Parsed officer_comp ${} for EIN {} in {}".format(total, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed officer_comp ${} for EIN {} in {}", total, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return total
 
 def parse_grants_to_others_990(root, field, namespaces, xml_filename, context):
@@ -88,13 +105,13 @@ def parse_grants_to_others_990(root, field, namespaces, xml_filename, context):
                     amount_elem = find_element(grant, XPATHS_990["grant_value"], namespaces)
                     if amount_elem is not None:
                         amount = parse_int(amount_elem.text)
-                        logger.info("Raw grant value: {} for EIN {} in {}".format(amount_elem.text, context.get('filer_ein', 'Unknown'), xml_filename))
+                        log_error("Raw grant value: {} for EIN {} in {}", amount_elem.text, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
                         total += amount
                         if context.get('filer_ein', 'Unknown') in debug_eins:
-                            logger.info("{} Grant: ${} in ScheduleF for EIN {}, File {}".format(
-                                'CHAI' if context.get('filer_ein', 'Unknown') == '271414646' else 'Amnesty', amount, context.get('filer_ein', 'Unknown'), xml_filename))
+                            log_error("{} Grant: ${} in ScheduleF for EIN {}, File {}",
+                                'CHAI' if context.get('filer_ein', 'Unknown') == '271414646' else 'Amnesty', amount, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
                         elif amount > 5_000_000:
-                            logger.info("Found CashGrantAmt ${} in ScheduleF for EIN {}, File {}".format(amount, context.get('filer_ein', 'Unknown'), xml_filename))
+                            log_error("Found CashGrantAmt ${} in ScheduleF for EIN {}, File {}", amount, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     for xpath in XPATHS_990["grant_elements_i"]:
         schedule_i = find_element(root, [xpath], namespaces)
         if schedule_i is not None:
@@ -103,21 +120,21 @@ def parse_grants_to_others_990(root, field, namespaces, xml_filename, context):
                     amount_elem = find_element(grant, XPATHS_990["grant_value"], namespaces)
                     if amount_elem is not None:
                         amount = parse_int(amount_elem.text)
-                        logger.info("Raw grant value: {} for EIN {} in {}".format(amount_elem.text, context.get('filer_ein', 'Unknown'), xml_filename))
+                        log_error("Raw grant value: {} for EIN {} in {}", amount_elem.text, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
                         total += amount
                         if context.get('filer_ein', 'Unknown') in debug_eins:
-                            logger.info("{} Grant: ${} in ScheduleI for EIN {}, File {}".format(
-                                'CHAI' if context.get('filer_ein', 'Unknown') == '271414646' else 'Amnesty', amount, context.get('filer_ein', 'Unknown'), xml_filename))
+                            log_error("{} Grant: ${} in ScheduleI for EIN {}, File {}",
+                                'CHAI' if context.get('filer_ein', 'Unknown') == '271414646' else 'Amnesty', amount, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
                         elif amount > 5_000_000:
-                            logger.info("Found CashGrantAmt ${} in ScheduleI for EIN {}, File {}".format(amount, context.get('filer_ein', 'Unknown'), xml_filename))
+                            log_error("Found CashGrantAmt ${} in ScheduleI for EIN {}, File {}", amount, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
-        logger.info("Non-zero grants_to_others ${} for EIN {}, Name {}, TaxYear {}, XML {}".format(
-            total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename))
+        log_error("Non-zero grants_to_others ${} for EIN {}, Name {}, TaxYear {}, XML {}",
+            total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
         return_data = find_element(root, [".//irs:ReturnData", ".//ReturnData"], namespaces)
         child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
-        logger.info("Zero grants_to_others for EIN {}, Name {}, File {}. ReturnData children: {}".format(
-            context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags))
+        log_error("Zero grants_to_others for EIN {}, Name {}, File {}. ReturnData children: {}",
+            context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags, ein=context.get('filer_ein', 'Unknown'))
     return total
 
 def parse_foreign_expenses_990(root, field, namespaces, xml_filename, context):
@@ -133,130 +150,130 @@ def parse_foreign_expenses_990(root, field, namespaces, xml_filename, context):
                     amount_elem = find_element(activity, XPATHS_990["foreign_exp_value"], namespaces)
                     if amount_elem is not None:
                         amount = parse_int(amount_elem.text)
-                        logger.info("Raw foreign_exp value: {} for EIN {} in {}".format(amount_elem.text, context.get('filer_ein', 'Unknown'), xml_filename))
+                        log_error("Raw foreign_exp value: {} for EIN {} in {}", amount_elem.text, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
                         total += amount
                         if context.get('filer_ein', 'Unknown') in debug_eins or (amount > 5_000_000):
-                            logger.info("Found RegionTotalExpendituresAmt ${} in ScheduleF for EIN {}, File {}".format(amount, context.get('filer_ein', 'Unknown'), xml_filename))
+                            log_error("Found RegionTotalExpendituresAmt ${} in ScheduleF for EIN {}, File {}", amount, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     if total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
         return_data = find_element(root, [".//irs:ReturnData", ".//ReturnData"], namespaces)
         child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
-        logger.info("Zero foreign_expenses for EIN {}, Name {}, File {}. ReturnData children: {}".format(
-            context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags))
+        log_error("Zero foreign_expenses for EIN {}, Name {}, File {}. ReturnData children: {}",
+            context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags, ein=context.get('filer_ein', 'Unknown'))
     return total
 
 def parse_receipt_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["receipt"], namespaces)
     if elem is not None:
         value = parse_int(elem.text)
-        logger.info("Parsed receipt ${} for EIN {} in {}".format(value, context.get('filer_ein', 'Unknown'), xml_filename))
+        log_error("Parsed receipt ${} for EIN {} in {}", value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
         return value
-    logger.info("Missing receipt for EIN {} in {}. Tried XPaths: {}".format(context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990['receipt']))
+    log_error("Missing receipt for EIN {} in {}. Tried XPaths: {}", context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990['receipt'], ein=context.get('filer_ein', 'Unknown'))
     return 0
 
 def parse_govt_grants_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["govt_grants"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_contributions_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["contributions"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_total_exp_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["total_exp"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_prog_exp_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["prog_exp"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_travel_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["travel"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_conferences_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["conferences"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_total_assets_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["total_assets"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return 0
     value = parse_int(elem.text)
-    logger.info("Parsed {} ${} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} ${} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_foreign_office_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["foreign_office"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return False
     return elem.text.strip().upper() == 'X'
 
 def parse_filer_ein_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["filer_ein"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return "Unknown"
     value = elem.text.strip()
-    logger.info("Parsed {} {} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} {} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_form_type_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["form_type"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return "Unknown"
     value = elem.text.strip()
-    logger.info("Parsed {} {} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} {} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_tax_year_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["tax_year"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return "Unknown"
     value = elem.text.strip()
-    logger.info("Parsed {} {} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} {} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_filer_name_990(root, field, namespaces, xml_filename, context):
     elem = find_element(root, XPATHS_990["filer_name"], namespaces)
     if elem is None:
-        logger.info("Missing {} for EIN {} in {}. Tried XPaths: {}".format(field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field]))
+        log_error("Missing {} for EIN {} in {}. Tried XPaths: {}", field, context.get('filer_ein', 'Unknown'), xml_filename, XPATHS_990[field], ein=context.get('filer_ein', 'Unknown'))
         return "Unknown"
     value = elem.text.strip()
-    logger.info("Parsed {} {} for EIN {} in {}".format(field, value, context.get('filer_ein', 'Unknown'), xml_filename))
+    log_error("Parsed {} {} for EIN {} in {}", field, value, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     return value
 
 def parse_990(xml_content, xml_filename):
@@ -264,41 +281,41 @@ def parse_990(xml_content, xml_filename):
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
     except etree.ParseError as e:
-        logger.error("Parse error in XML file {}: {}".format(xml_filename, e))
+        log_error("Parse error in XML file {}: {}", xml_filename, e, ein=context.get('filer_ein', 'Unknown'))
         return None
 
     root = tree.getroot()
     namespaces = {'irs': 'http://www.irs.gov/efile'}
-    logger.info("Processing XML: {}".format(xml_filename))
 
     context = {}
     context["filer_ein"] = parse_filer_ein_990(root, "filer_ein", namespaces, xml_filename, context)
-    logger.info("Extracted filer_ein: {} for {}".format(context['filer_ein'], xml_filename))
+    log_error("Processing XML: {}", xml_filename, ein=context.get('filer_ein', 'Unknown'))
+    log_error("Extracted filer_ein: {} for {}", context['filer_ein'], xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
     context["form_type"] = parse_form_type_990(root, "form_type", namespaces, xml_filename, context)
     if context["form_type"] != "990":
-        logger.error("XML {} is not a Form 990 (form_type: {}), skipping".format(xml_filename, context['form_type']))
+        log_error("XML {} is not a Form 990 (form_type: {}), skipping",xml_filename, context['form_type'], ein=context.get('filer_ein', 'Unknown'))
         return None
-    logger.info("Extracted form_type: {} for {}".format(context['form_type'], xml_filename))
+    log_error("Extracted form_type: {} for {}", context['form_type'], xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
     context["tax_year"] = parse_tax_year_990(root, "tax_year", namespaces, xml_filename, context)
-    logger.info("Extracted tax_year: {} for {}".format(context['tax_year'], xml_filename))
+    log_error("Extracted tax_year: {} for {}", context['tax_year'], xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
     if context["tax_year"] == "Unknown":
-        logger.info("Missing TaxYr element in {}, inferring from filename".format(xml_filename))
+        log_error("Missing TaxYr element in {}, inferring from filename",xml_filename, ein=context.get('filer_ein', 'Unknown'))
         context["tax_year"] = xml_filename[:4] if xml_filename[:4].isdigit() else "Unknown"
     else:
         try:
             int(context["tax_year"])
         except ValueError:
-            logger.info("Invalid tax year {} in {}, inferring from filename".format(context['tax_year'], xml_filename))
+            log_error("Invalid tax year {} in {}, inferring from filename",context['tax_year'], xml_filename, ein=context.get('filer_ein', 'Unknown'))
             context["tax_year"] = xml_filename[:4] if xml_filename[:4].isdigit() else "Unknown"
 
     context["filer_name"] = parse_filer_name_990(root, "filer_name", namespaces, xml_filename, context)
-    logger.info("Extracted filer_name: {} for {}".format(context['filer_name'], xml_filename))
+    log_error("Extracted filer_name: {} for {}", context['filer_name'], xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
     if context["filer_ein"] == "Unknown":
-        logger.error("Missing Filer EIN in {}".format(xml_filename))
+        log_error("Missing Filer EIN in {}", xml_filename, ein=context.get('filer_ein', 'Unknown'))
         return None
 
     fields = [
@@ -323,7 +340,7 @@ def parse_990(xml_content, xml_filename):
     # Removed direct logger.error call for grift_ratio
     # Let extract_charities.py handle this logging
     # if data["grift_ratio"] > 100 and data["total_exp"] > 0:
-    #     logger.error("Suspicious grift_ratio {}% for EIN {} in {}".format(data['grift_ratio'], context['filer_ein'], xml_filename))
+    #     log_error("Suspicious grift_ratio {}% for EIN {} in {}", data['grift_ratio'], context['filer_ein'], xml_filename)
 
     data["denominator"] = data["total_assets"] + data["receipt"]
     data["comp_ptile"] = "n/y"
@@ -356,7 +373,7 @@ def main():
         with open(xml_file, 'rb') as f:
             xml_content = f.read()
     except IOError as e:
-        print("Error reading XML file {}: {}".format(xml_file, e), file=sys.stderr)
+        print("Error reading XML file {}: {}",xml_file, file=sys.stderr)
         sys.exit(1)
 
     row = parse_990(xml_content, xml_file)

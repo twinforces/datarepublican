@@ -151,6 +151,14 @@ class FilteredHandler(logging.Handler):
         if verbose:
             print(f"Log: {formatted_message}")
 
+
+def log_error(msg_format, *args, ein=None, exc_info=False):
+    # Format the message and log it through the master logger
+    if ein:
+        logging.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
+    else:
+        logging.info(msg_format, *args, exc_info=exc_info)
+
 # Configure the master logger with the filtered handler
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -172,13 +180,6 @@ def initialize_thread_local_counters():
         file_counter_local.entries = 0
     if not hasattr(file_counter_local, 'skipped'):
         file_counter_local.skipped = 0
-
-def log_error(msg_format, *args, ein=None, exc_info=False):
-    # Format the message and log it through the master logger
-    if ein:
-        logging.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
-    else:
-        logging.info(msg_format, *args, exc_info=exc_info)
 
 def clean_org_type(org_type, for_filename=False):
     # First, preserve the original for logging
