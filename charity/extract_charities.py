@@ -76,6 +76,13 @@ console_handler.setFormatter(formatter)
 # Global dictionary to track XPath match statistics
 xpath_match_stats = defaultdict(int)
 
+# Precompile XPaths for common fields
+NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
+FORM_TYPE_XPATHS = [
+    etree.XPath(".//irs:ReturnHeader/irs:ReturnTypeCd", namespaces=NAMESPACES),
+    etree.XPath(".//ReturnHeader/ReturnTypeCd", namespaces=NAMESPACES)
+]
+
 # Custom logging handler to apply filtering
 class FilteredHandler(logging.Handler):
     def emit(self, record):
@@ -284,7 +291,7 @@ def write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id):
         tsv_write_counts[tsv_key] += 1
         log_error("TSV writer {} wrote row to TSV {} for EIN {}, org_type {}, tax_year {}, XML {}", 
                   writer_id, tsv_path, row[1], org_type, tax_year, xml_filename, ein=row[1])
-        if tsv_write_counts[tsv_key] % 5000 == 0:
+        if tsv_write_counts[tsv_key] % 10000 == 0:  # Reduced flush frequency
             tsv_files[tsv_key].flush()
             log_error("Periodic flush after {} rows to TSV {} by writer {}", tsv_write_counts[tsv_key], tsv_path, writer_id)
 
@@ -299,20 +306,19 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, xpath_cache=None):
     start_time = time.time()
     form_type = None
     try:
-        #log_error("Processing XML: {}", xml_filename)
         # Determine form type by parsing the XML
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
         root = tree.getroot()
-        namespaces = {'irs': 'http://www.irs.gov/efile'}
 
-        # Extract form type (minimal parsing to determine which script to use)
-        form_type_paths = [
-            ".//irs:ReturnHeader/irs:ReturnTypeCd",
-            ".//ReturnHeader/ReturnTypeCd"
-        ]
-        form_type_elem = find_element(root, form_type_paths, namespaces, xpath_cache, "form_type")
-        form_type = form_type_elem.text if form_type_elem is not None else "Unknown"
+        # Extract form type using precompiled XPaths
+        for xpath in FORM_TYPE_XPATHS:
+            elem = xpath(root)
+            if elem:
+                form_type = elem[0].text if elem[0].text else "Unknown"
+                break
+        else:
+            form_type = "Unknown"
 
         # Delegate parsing to the appropriate script, passing the xpath_cache
         if form_type == "990":
@@ -421,9 +427,9 @@ def process_zip_file(zip_path, start_year, end_year):
             total_xml_files = len(xml_files)
             log_error("Found {} XML files in {}", total_xml_files, zip_path)
 
-            with ThreadPoolExecutor(max_workers=16) as executor:
+            with ThreadPoolExecutor(max_workers=24) as executor:  # Increased to 24
                 futures = []
-                batch_size = 10  # Process up to 10 XML files at a time
+                batch_size = 20  # Increased to 20 to reduce threading overhead
                 with tqdm(total=len(xml_files), desc=f"Processing {zip_path}") as pbar:
                     for i, xml_filename in enumerate(xml_files):
                         # Read one XML file at a time to reduce memory usage
