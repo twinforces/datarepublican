@@ -1909,6 +1909,9 @@ body > div#main-content {
 .whitespace-nowrap {
   white-space: nowrap;
 }
+.whitespace-pre-wrap {
+  white-space: pre-wrap;
+}
 .text-wrap {
   text-wrap: wrap;
 }

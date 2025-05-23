@@ -1,0 +1,546 @@
+---
+layout: default
+title: CEU Documents Search
+---
+
+<!-- Include JS dependencies (adjust paths as needed) -->
+<script src="jquery.min.js"></script>
+<script src="jszip.min.js"></script>
+<script src="papaparse.min.js"></script>
+
+<!-- Page Header -->
+<h1 class="mb-1">CEU Documents Search</h1>
+<p class="opacity-80 mb-0 text-[15px]">
+  View cross-referenced AI-generated and AI-translated summaries of Central European University documents. These include the early years of Hungarian Soros Foundation annual reports. 
+</p>
+
+<!-- Warning Box (same style as in OLD_JEKYLL_FILE) -->
+<div class="my-4 p-4 border border-yellow-400 bg-yellow-100 rounded-md text-sm" style="background-color:#FEF9C3; border:1px solid #FACC15;">
+  <strong>Warning:</strong> The contents are AI-generated and may contain incorrect or incomplete information.
+  By using this website you agree not to hold the owner liable. Always verify with the original sources.
+</div>
+
+<div id="searchContainer" class="mb-2">
+  <div class="flex flex-col gap-2">
+    <form id="searchForm" class="flex flex-wrap items-center gap-2">
+      <label for="searchBox"
+             class="text-sm md:text-[15px] whitespace-nowrap shrink-0">
+        Enter keywords:
+      </label>
+
+      <input type="text" id="searchBox"
+             class="px-2 py-1 rounded text-sm border border-gray-300 md:w-60"
+             placeholder="Keywords" autofocus />
+
+      <label for="prefixCheck"
+             class="text-sm flex items-center gap-1 whitespace-nowrap shrink-0">
+        <input type="checkbox" id="prefixCheck" />
+        Prefix search
+      </label>
+
+      <button type="submit" id="searchButton" disabled>Search</button>
+      <span id="searchStatus" class="text-sm"></span>
+    </form>
+  </div>
+</div>
+
+<!-- Main results container -->
+<div id="resultsContainer" class="flex flex-col gap-2"></div>
+
+<script>
+/*
+  Two modes: Search and Document.
+
+  On load:
+   1) Parse mode= from URL (Search or Document). Default to "Search" if missing/invalid.
+   2) Parse id= if relevant (for Document mode).
+   3) Parse keywords= and prefix= for search form.
+   4) Fetch data.zip and parse:
+       - reverse_index.txt -> index_keywords[], index_row_ids[]
+       - documents.csv -> documents_array[], plus documents_lookup keyed by doc.id
+   5) Render the appropriate mode.
+*/
+
+// Global structures
+let index_keywords = [];
+let index_row_ids = [];
+let documents_array = [];     // raw row order
+let documents_lookup = {};    // keyed by 'id'
+
+// Mapping from short language codes to their English names
+const LANG_MAP = {
+  "cs": "Czech",
+  "de": "German",
+  "en": "English",
+  "fr": "French",
+  "hr": "Croatian",
+  "hu": "Hungarian",
+  "mk": "Macedonian",
+  "pl": "Polish",
+  "ro": "Romanian",
+  "ru": "Russian",
+  "uk": "Ukrainian"
+};
+
+$(async function() {
+  const urlParams = new URLSearchParams(window.location.search);
+
+  let mode = urlParams.get('mode');
+  if (mode !== "Search" && mode !== "Document") {
+    mode = "Search";
+  }
+
+  let idParam = urlParams.get('id') || null;
+
+  // For search mode, get the user input
+  let keywords = urlParams.get('keywords') || "";
+  const prefix = (urlParams.get('prefix') === '1');
+
+  // Populate search box & prefix checkbox
+  $("#searchBox").val(keywords.trim());
+  $("#prefixCheck").prop("checked", prefix);
+
+  // Attempt to load data
+  $("#searchStatus").text("Loading data...");
+  try {
+    await loadDataZip();
+    $("#searchStatus").text("");
+  } catch (err) {
+    console.error(err);
+    $("#searchStatus").text("Error loading data: " + err.message);
+    return;
+  }
+  // Data is loaded => enable the search button
+  $("#searchButton").prop("disabled", false);
+
+  // Decide how to render
+  if (mode === "Document") {
+    // must have a valid idParam that exists in documents_lookup
+    if (!idParam || !(idParam in documents_lookup)) {
+      // fallback to Search
+      urlParams.set('mode', 'Search');
+      urlParams.delete('id');
+      window.location.search = urlParams.toString();
+    } else {
+      renderDocument(idParam);
+    }
+  } else {
+    // Search mode
+    renderSearchResults(keywords.trim(), prefix);
+  }
+});
+
+/* Handle the search form submission => new URL with mode=Search */
+$("#searchForm").on("submit", function(e) {
+  e.preventDefault();
+  const keywordsVal = $("#searchBox").val().trim();
+  const prefixVal = $("#prefixCheck").is(":checked");
+
+  const urlParams = new URLSearchParams(window.location.search);
+  urlParams.set('mode','Search');
+
+  if (keywordsVal) urlParams.set('keywords', keywordsVal);
+  else urlParams.delete('keywords');
+
+  if (prefixVal) urlParams.set('prefix','1');
+  else urlParams.delete('prefix');
+
+  urlParams.delete('id');
+
+  window.location.search = urlParams.toString();
+});
+
+/* ------------------------------------------------------------------
+   loadDataZip
+   ------------------------------------------------------------------ */
+async function loadDataZip() {
+  const resp = await fetch("data.zip");
+  if (!resp.ok) throw new Error("Failed to fetch data.zip");
+  const arrayBuffer = await resp.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+
+  // 1) reverse_index.txt
+  const revFile = zip.file("reverse_index.txt");
+  if (!revFile) throw new Error("reverse_index.txt missing in data.zip");
+  const revText = await revFile.async("string");
+  parseReverseIndex(revText);
+
+  // 2) documents.csv
+  const docsFile = zip.file("documents.csv");
+  if (!docsFile) throw new Error("documents.csv missing in data.zip");
+  const docsStr = await docsFile.async("string");
+  parseDocumentsCSV(docsStr);
+}
+
+/* ------------------------------------------------------------------
+   parseReverseIndex
+   Fill index_keywords[] and index_row_ids[]
+   ------------------------------------------------------------------ */
+function parseReverseIndex(text) {
+  index_keywords = [];
+  index_row_ids = [];
+
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(":");
+    if (parts.length !== 2) continue;
+    const kw = parts[0];
+    const rowNums = parts[1].split(",").map(x => parseInt(x,10)).filter(n=>!isNaN(n));
+    index_keywords.push(kw);
+    index_row_ids.push(rowNums);
+  }
+}
+
+/* ------------------------------------------------------------------
+   parseDocumentsCSV
+   - read into documents_array (keeping row order).
+   - also fill documents_lookup keyed by the 'id' column
+   - if a column name ends in "_json", parse it as JSON
+   ------------------------------------------------------------------ */
+function parseDocumentsCSV(csvStr) {
+  const parsed = Papa.parse(csvStr, {header:true, skipEmptyLines:false});
+  documents_array = [];
+  documents_lookup = {};
+
+  for (const row of parsed.data) {
+    if (!row.id) continue; // skip empty lines or rows missing 'id'
+
+    const docObj = {};
+    for (const [col, val] of Object.entries(row)) {
+      if (col.endsWith("_json")) {
+        const newKey = col.replace("_json","");
+        try {
+          docObj[newKey] = JSON.parse(val);
+        } catch {
+          docObj[newKey] = null;
+        }
+      } else {
+        docObj[col] = val;
+      }
+    }
+    documents_array.push(docObj);
+    documents_lookup[docObj.id] = docObj;
+  }
+}
+
+/* ------------------------------------------------------------------
+   renderSearchResults
+   1) If no keywords => display ALL documents
+   2) Otherwise do prefix & exact match intersection same as old approach
+   ------------------------------------------------------------------ */
+function renderSearchResults(keywords, prefix) {
+  $("#resultsContainer").empty();
+
+  let finalRowIds = [];
+  if (!keywords) {
+    // If no keywords, display ALL docs
+    // We'll just assign row IDs from 1..N
+    for (let i=1; i<=documents_array.length; i++) {
+      finalRowIds.push(i);
+    }
+  } else {
+    // Normal search
+    const tokens = tokenize(keywords);
+    if (!tokens.length) {
+      // no real tokens => no results
+      $("#resultsContainer").append(`<div class="p-4 text-center">No results found.</div>`);
+      return;
+    }
+
+    let runningSet = null;
+    for (const t of tokens) {
+      const unionSet = new Set();
+
+      // exact match
+      const exactIdx = binarySearch(index_keywords, t);
+      if (exactIdx >= 0) {
+        for (const rid of index_row_ids[exactIdx]) {
+          unionSet.add(rid);
+        }
+      }
+
+      // prefix expansions
+      if (prefix) {
+        const {start, end} = findPrefixRange(t);
+        for (let i = start; i < end; i++) {
+          for (const rid of index_row_ids[i]) {
+            unionSet.add(rid);
+          }
+        }
+      }
+
+      if (runningSet === null) {
+        runningSet = unionSet;
+      } else {
+        const temp = new Set();
+        for (const rid of runningSet) {
+          if (unionSet.has(rid)) temp.add(rid);
+        }
+        runningSet = temp;
+        if (runningSet.size === 0) break;
+      }
+    }
+    finalRowIds = runningSet ? Array.from(runningSet).sort((a,b)=>a-b) : [];
+  }
+
+  if (!finalRowIds.length) {
+    $("#resultsContainer").append(`<div class="p-4 text-center">No results found.</div>`);
+    return;
+  }
+
+  const shownRowIds = finalRowIds.slice(0,100); // limit to 100
+  const infoLine = `<div class="text-sm mb-2">Showing ${shownRowIds.length}${finalRowIds.length>100 ? " (limit)" : ""} results</div>`;
+  $("#resultsContainer").append(infoLine);
+
+  // We'll just produce one grouped card: "Documents"
+  let html = `<div class="border border-gray-200 rounded bg-white p-4 mb-2">
+                <div class="mb-2 flex flex-row justify-between items-center">
+                  <h2 class="text-base font-bold mt-0">
+                    Documents <span class="text-sm opacity-80">: Found (${shownRowIds.length})</span>
+                  </h2>
+                </div>`;
+
+  for (const rowId of shownRowIds) {
+    const idx = rowId - 1; // rowId is 1-based, array is 0-based
+    if (idx<0 || idx >= documents_array.length) continue;
+    const doc = documents_array[idx];
+
+    const linkQuery = buildLinkQuery(doc.id, "Document");
+
+    // date formatting: just show doc.date as-is
+    let dateLine = "";
+    if (doc.date) {
+      dateLine = `<div class="text-sm"><i>Publication date: ${escapeHtml(doc.date)}</i></div>`;
+    }
+
+    html += `
+      <div class="mb-3">
+        <div class="font-semibold">
+          <a href="?${linkQuery}">${escapeHtml(doc.title)}</a>
+        </div>
+        <div>${escapeHtml(doc.short_summary)}</div>
+        ${dateLine}
+      </div>
+    `;
+  }
+  html += `</div>`;
+
+  $("#resultsContainer").append(html);
+}
+
+/* ------------------------------------------------------------------
+   renderDocument(mode=Document)
+   Sub-cards for each page:
+     - fixed width font
+     - border and white background, black text
+     - if page is empty or whitespace => [No Text Detected]
+   ------------------------------------------------------------------ */
+function renderDocument(docId) {
+  $("#resultsContainer").empty();
+  const docData = documents_lookup[docId];
+
+  const container = document.createElement("div");
+  container.className = "border border-gray-200 rounded bg-white p-4 mb-2";
+
+  // Top row => "Article" label as per instructions
+  const topHTML = `
+    <div class="flex flex-col md:flex-row md:justify-between gap-2">
+      <div>
+        <span class="text-sm opacity-80">Article</span>
+        <div class="font-semibold">${escapeHtml(docData.title || "")}</div>
+      </div>
+      <div>
+        <span class="text-sm opacity-80">Full Text (CEU)</span>
+        <div>
+          <a href="https://catalog.archivum.org/catalog/${escapeAttr(docData.catalog_id || "")}"
+             target="_blank">
+            ${escapeHtml(docData.catalog_id || "")}
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+  container.innerHTML = topHTML;
+
+  // Second row => left: Language, right: Publication Date
+  const secondRow = document.createElement("div");
+  secondRow.className = "flex flex-col md:flex-row md:justify-between gap-2 mt-3";
+
+  let langLabel = docData.lang_code || "";
+  if (LANG_MAP[langLabel]) {
+    langLabel = LANG_MAP[langLabel];
+  }
+  const leftHTML = `
+    <div>
+      <span class="text-sm opacity-80">Language</span>
+      <div>${escapeHtml(langLabel)}</div>
+    </div>
+  `;
+  secondRow.innerHTML = leftHTML;
+
+  const rightDiv = document.createElement("div");
+  rightDiv.innerHTML = `
+    <span class="text-sm opacity-80">Publication Date</span>
+    <div>${escapeHtml(docData.date || "")}</div>
+  `;
+  secondRow.appendChild(rightDiv);
+  container.appendChild(secondRow);
+
+  // Authors
+  // docData.authors is the parsed "authors_json" array
+  if (Array.isArray(docData.authors) && docData.authors.length > 0) {
+    const authorsBox = document.createElement("div");
+    authorsBox.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let authorsHTML = `<h3 class="font-bold mb-1 mt-0">Authors</h3>`;
+    authorsHTML += `<div>${escapeHtml(docData.authors.join(", "))}</div>`;
+    authorsBox.innerHTML = authorsHTML;
+    container.appendChild(authorsBox);
+  }
+
+  // Summary (AI-Generated)
+  if (docData.extended_summary) {
+    const sumBox = document.createElement("div");
+    sumBox.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    sumBox.innerHTML = `
+      <h3 class="font-bold mb-1 mt-0">Summary (AI-Generated)</h3>
+      <div>${escapeHtml(docData.extended_summary)}</div>
+    `;
+    container.appendChild(sumBox);
+  }
+
+  // Key Quotes (AI-Derived)
+  if (Array.isArray(docData.quotes) && docData.quotes.length > 0) {
+    const quotesBox = document.createElement("div");
+    quotesBox.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let qHtml = `<h3 class="font-bold mb-1 mt-0">Key Quotes (AI-Derived)</h3>`;
+
+    const docLang = (docData.lang_code || "").toLowerCase();
+    const notEnglish = (docLang !== "en");
+
+    for (const rawQ of docData.quotes) {
+      // if not English and we see a '|' delimiter => Original / English
+      if (notEnglish && rawQ.includes("|")) {
+        const [originalPart, englishPart] = rawQ.split("|", 2);
+        qHtml += `
+          <div class="mb-4">
+            <div class="italic">Original: ${escapeHtml(originalPart)}</div>
+            <div class="italic">English: ${escapeHtml(englishPart)}</div>
+          </div>
+        `;
+      } else {
+        qHtml += `<p class="italic mb-4">"${escapeHtml(rawQ)}"</p>`;
+      }
+    }
+    quotesBox.innerHTML = qHtml;
+    container.appendChild(quotesBox);
+  }
+
+  // English Translation (AI-Generated) => docData.contents
+  // sub-cards with fixed-width font, white background, black text, etc.
+  if (Array.isArray(docData.contents) && docData.contents.length > 0) {
+    const transBox = document.createElement("div");
+    transBox.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+
+    let tHtml = `<h3 class="font-bold mb-1 mt-0">English Translation (AI-Generated)</h3>`;
+    docData.contents.forEach((pageText, idx) => {
+      const pageNum = idx + 1;
+      // Check if it's empty or whitespace
+      const trimmedText = pageText.trim();
+      const displayText = trimmedText ? trimmedText : "[No Text Detected]";
+
+      tHtml += `
+        <div class="border border-gray-300 rounded p-2 mb-3"
+             style="background-color:#fff; color:#000;">
+          <div class="font-semibold mb-1">Page ${pageNum}</div>
+          <div style="white-space:pre-wrap; font-family:monospace;">
+            ${escapeHtml(displayText)}
+          </div>
+        </div>
+      `;
+    });
+
+    transBox.innerHTML = tHtml;
+    container.appendChild(transBox);
+  }
+
+  $("#resultsContainer").append(container);
+}
+
+/* ------------------------------------------------------------------
+   Helper Functions
+   ------------------------------------------------------------------ */
+function tokenize(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/* Basic binary search for exact matches in index_keywords */
+function binarySearch(arr, val) {
+  let low = 0, high = arr.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (arr[mid] === val) return mid;
+    if (arr[mid] < val) low = mid + 1; else high = mid - 1;
+  }
+  return -1;
+}
+
+/* For prefix search: find the range of index_keywords that start with prefix */
+function findPrefixRange(prefix) {
+  let low = 0, high = index_keywords.length;
+  // find start
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (index_keywords[mid] < prefix) low = mid + 1; else high = mid;
+  }
+  const start = low;
+
+  // find end
+  high = index_keywords.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (index_keywords[mid].startsWith(prefix)) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  const end = low;
+  return { start, end };
+}
+
+function buildLinkQuery(idVal, modeVal) {
+  const current = new URLSearchParams(window.location.search);
+  const next = new URLSearchParams();
+
+  // preserve keywords/prefix if present
+  const kw = current.get('keywords');
+  if (kw) next.set('keywords', kw);
+  const px = current.get('prefix');
+  if (px) next.set('prefix', px);
+
+  // set or overwrite mode + id
+  next.set('mode', modeVal);
+  next.set('id', idVal);
+
+  return next.toString();
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/'/g,"&#39;");
+}
+</script>
