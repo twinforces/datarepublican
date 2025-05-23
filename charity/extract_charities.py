@@ -5,6 +5,7 @@ import logging
 import zipfile
 import csv
 import threading
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from tqdm import tqdm
 import time
@@ -23,9 +24,11 @@ from io import BytesIO  # Import for BytesIO
 import parse_990
 import parse_990ez
 import parse_990pf
+from xpaths_990 import XPATHS_990
+from xpaths_990ez import XPATHS_990EZ
+from xpaths_990pf import XPATHS_990PF
 
 # Constants
-# DEBUG_EINS will be set by --eins argument
 DEBUG_EINS = set()
 TSV_COLUMNS = [
     "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
@@ -53,7 +56,7 @@ tsv_write_counts = defaultdict(int)
 done_queuing = False  # Flag to signal when main thread is done queuing tasks
 
 # Queue for TSV writes with increased size
-tsv_write_queue = queue.Queue(maxsize=10000)  # Increased queue size to 10000
+tsv_write_queue = queue.Queue(maxsize=20000)  # Increased to 20000
 
 # Setup queue-based logging
 log_queue = queue.Queue(-1)  # Unlimited size
@@ -70,14 +73,17 @@ console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.ERROR)
 console_handler.setFormatter(formatter)
 
+# Global dictionary to track XPath match statistics
+xpath_match_stats = defaultdict(int)
+
 # Custom logging handler to apply filtering
 class FilteredHandler(logging.Handler):
     def emit(self, record):
         global xml_processed_count, log_counts
 
         # Extract the message, args, and ein
-        msg = record.msg  # The format string
-        args = record.args  # The arguments to the format string
+        msg = record.msg
+        args = record.args
         ein = getattr(record, 'ein', None) if hasattr(record, 'ein') else None
         exc_info = record.exc_info
 
@@ -120,6 +126,11 @@ class FilteredHandler(logging.Handler):
                 if xml_processed_count % 100000 != 0:
                     return
 
+        # Suppress non-EIN messages unless verbose
+        if ein is None and not verbose:
+            if any(preamble.startswith(x) for x in ["Processing ZIP", "Found ", "Set DEBUG_EINS", "Extracted "]):
+                return
+
         # Now that we've passed filtering, format the message with the original arguments
         line_no = inspect.currentframe().f_back.f_lineno
         try:
@@ -138,7 +149,7 @@ class FilteredHandler(logging.Handler):
             pathname=record.pathname,
             lineno=record.lineno,
             msg=formatted_message,
-            args=(),  # Clear args to avoid further formatting
+            args=(),
             exc_info=exc_info
         )
         # Add ein attribute if present
@@ -151,14 +162,6 @@ class FilteredHandler(logging.Handler):
         if verbose:
             print(f"Log: {formatted_message}")
 
-
-def log_error(msg_format, *args, ein=None, exc_info=False):
-    # Format the message and log it through the master logger
-    if ein:
-        logging.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
-    else:
-        logging.info(msg_format, *args, exc_info=exc_info)
-
 # Configure the master logger with the filtered handler
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -166,6 +169,13 @@ logger.handlers = []  # Clear default handlers
 filtered_handler = FilteredHandler()
 logger.addHandler(filtered_handler)
 logger.addHandler(console_handler)
+
+def log_error(msg_format, *args, ein=None, exc_info=False):
+    # Format the message and log it through the master logger
+    if ein:
+        logging.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
+    else:
+        logging.info(msg_format, *args, exc_info=exc_info)
 
 # Assign the master logger and log_error to each parse module
 parse_990.set_logger(logger, log_error)
@@ -222,15 +232,18 @@ def tsv_writer_thread(tsv_files, writer_id):
     global done_queuing
     while True:
         try:
-            # Get the next write task from the queue (non-blocking with timeout)
-            tax_year, org_type, row, xml_filename = tsv_write_queue.get(timeout=10)
+            # Get the next write task from the queue with a short timeout
+            item = tsv_write_queue.get(timeout=0.1)
+            if item is None:  # Sentinel value to indicate shutdown
+                log_error("TSV writer thread {} received shutdown signal", writer_id)
+                break
+            tax_year, org_type, row, xml_filename = item
             log_error("TSV writer thread {} dequeued row for EIN {} in {}", writer_id, row[1], xml_filename, ein=row[1])
         except queue.Empty:
-            # If the queue is empty for 10 seconds, check if main thread is done queuing
+            # If the queue is empty, check if main thread is done queuing
             if done_queuing and tsv_write_queue.empty():
                 log_error("TSV writer thread {} exiting, queue empty and main thread done queuing", writer_id)
                 break
-            log_error("TSV writer thread {} waiting, queue size: {}", writer_id, tsv_write_queue.qsize())
             continue
 
         try:
@@ -275,14 +288,18 @@ def write_buffered_rows(tsv_files, tax_year, org_type, rows, writer_id):
             tsv_files[tsv_key].flush()
             log_error("Periodic flush after {} rows to TSV {} by writer {}", tsv_write_counts[tsv_key], tsv_path, writer_id)
 
-def parse_xml_file(xml_content, xml_filename, zip_prefix):
+def parse_xml_file(xml_content, xml_filename, zip_prefix, xpath_cache=None):
     # Initialize thread-local counters for this thread
     initialize_thread_local_counters()
+
+    # Initialize the XPath cache if not provided
+    if xpath_cache is None:
+        xpath_cache = {}
 
     start_time = time.time()
     form_type = None
     try:
-        log_error("Processing XML: {}", xml_filename)
+        #log_error("Processing XML: {}", xml_filename)
         # Determine form type by parsing the XML
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
@@ -294,16 +311,16 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
             ".//irs:ReturnHeader/irs:ReturnTypeCd",
             ".//ReturnHeader/ReturnTypeCd"
         ]
-        form_type_elem = find_element(root, form_type_paths, namespaces)
+        form_type_elem = find_element(root, form_type_paths, namespaces, xpath_cache, "form_type")
         form_type = form_type_elem.text if form_type_elem is not None else "Unknown"
 
-        # Delegate parsing to the appropriate script
+        # Delegate parsing to the appropriate script, passing the xpath_cache
         if form_type == "990":
-            row = parse_990.parse_990(xml_content, xml_filename)
+            row = parse_990.parse_990(xml_content, xml_filename, xpath_cache)
         elif form_type == "990EZ":
-            row = parse_990ez.parse_990ez(xml_content, xml_filename)
+            row = parse_990ez.parse_990ez(xml_content, xml_filename, xpath_cache)
         elif form_type == "990PF":
-            row = parse_990pf.parse_990pf(xml_content, xml_filename)
+            row = parse_990pf.parse_990pf(xml_content, xml_filename, xpath_cache)
         else:
             log_error("Unsupported form type {} in {}, skipping", form_type, xml_filename)
             file_counter_local.skipped += 1
@@ -334,22 +351,51 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix):
         file_counter_local.skipped += 1
         return [], None, xml_filename
 
-def find_element(root, xpaths, namespaces):
+def find_element(root, xpaths, namespaces, xpath_cache=None, field=None):
+    # Initialize the XPath cache if not provided
+    if xpath_cache is None:
+        xpath_cache = {}
+
+    # Create a unique key for the cache based on root, xpath, and namespaces
+    root_id = id(root)
+    namespaces_key = tuple(sorted(namespaces.items())) if namespaces else None
+
     for xpath in xpaths:
+        # Check the cache first
+        cache_key = (root_id, xpath, namespaces_key)
+        if cache_key in xpath_cache:
+            elem = xpath_cache[cache_key]
+            if elem is not None:
+                if field:
+                    xpath_match_stats[f"{field}:{xpath}"] += 1
+                return elem
+            continue
+
+        # Evaluate the XPath if not in cache
         try:
             elem = root.xpath(xpath, namespaces=namespaces)
             if elem:
+                xpath_cache[cache_key] = elem[0]
+                if field:
+                    xpath_match_stats[f"{field}:{xpath}"] += 1
                 return elem[0]
         except etree.XPathEvalError as e:
             xml_snippet = etree.tostring(root, encoding='unicode', method='xml')[:2000]
-            log_error("XPath error for {}: {}. XML snippet: {}", xpath, str(e), xml_snippet)
+            log_error("XPath error for {}: {}. XML snippet: {}", xpath, e, xml_snippet)
             non_ns_xpath = xpath.replace('irs:', '').replace('{http://www.irs.gov/efile}', '')
             try:
                 elem = root.xpath(non_ns_xpath, namespaces=None)
                 if elem:
+                    xpath_cache[cache_key] = elem[0]
+                    if field:
+                        xpath_match_stats[f"{field}:{xpath}"] += 1
                     return elem[0]
             except etree.XPathEvalError as e:
-                log_error("Non-namespaced XPath error for {}: {}. XML snippet: {}", non_ns_xpath, str(e), xml_snippet)
+                log_error("Non-namespaced XPath error for {}: {}. XML snippet: {}", non_ns_xpath, e, xml_snippet)
+
+        # Cache the None result to avoid re-evaluating
+        xpath_cache[cache_key] = None
+
     return None
 
 def process_zip_file(zip_path, start_year, end_year):
@@ -375,7 +421,7 @@ def process_zip_file(zip_path, start_year, end_year):
             total_xml_files = len(xml_files)
             log_error("Found {} XML files in {}", total_xml_files, zip_path)
 
-            with ThreadPoolExecutor(max_workers=10) as executor:
+            with ThreadPoolExecutor(max_workers=16) as executor:
                 futures = []
                 batch_size = 10  # Process up to 10 XML files at a time
                 with tqdm(total=len(xml_files), desc=f"Processing {zip_path}") as pbar:
@@ -389,7 +435,9 @@ def process_zip_file(zip_path, start_year, end_year):
                             pbar.update(1)
                             continue
 
-                        future = executor.submit(parse_xml_file, xml_content, xml_filename, zip_prefix)
+                        # Create a new XPath cache for each XML file
+                        xpath_cache = {}
+                        future = executor.submit(parse_xml_file, xml_content, xml_filename, zip_prefix, xpath_cache)
                         futures.append((future, xml_filename))
 
                         # Process futures in batches
@@ -435,6 +483,52 @@ def process_zip_file(zip_path, start_year, end_year):
     except Exception as e:
         log_error("Error processing ZIP {}: {}", zip_path, str(e), exc_info=True)
 
+def save_xpath_stats():
+    # Save the XPath match statistics to a file
+    with open("xpath_stats.json", "w") as f:
+        json.dump(dict(xpath_match_stats), f, indent=4)
+
+def reorder_xpaths():
+    # Reorder XPaths based on match statistics
+    def reorder_dict(xpaths_dict):
+        for field, xpaths in xpaths_dict.items():
+            # Sort XPaths by match count in descending order
+            xpaths_with_counts = [(xpath, xpath_match_stats.get(f"{field}:{xpath}", 0)) for xpath in xpaths]
+            xpaths_with_counts.sort(key=lambda x: x[1], reverse=True)
+            xpaths_dict[field] = [xpath for xpath, count in xpaths_with_counts]
+
+    reorder_dict(XPATHS_990)
+    reorder_dict(XPATHS_990EZ)
+    reorder_dict(XPATHS_990PF)
+
+    # Optionally, save the reordered XPaths to new files
+    with open("xpaths_990_reordered.py", "w") as f:
+        f.write("XPATHS_990 = {\n")
+        for field, xpaths in XPATHS_990.items():
+            f.write(f'    "{field}": [\n')
+            for xpath in xpaths:
+                f.write(f'        "{xpath}",\n')
+            f.write("    ],\n")
+        f.write("}\n")
+
+    with open("xpaths_990ez_reordered.py", "w") as f:
+        f.write("XPATHS_990EZ = {\n")
+        for field, xpaths in XPATHS_990EZ.items():
+            f.write(f'    "{field}": [\n')
+            for xpath in xpaths:
+                f.write(f'        "{xpath}",\n')
+            f.write("    ],\n")
+        f.write("}\n")
+
+    with open("xpaths_990pf_reordered.py", "w") as f:
+        f.write("XPATHS_990PF = {\n")
+        for field, xpaths in XPATHS_990PF.items():
+            f.write(f'    "{field}": [\n')
+            for xpath in xpaths:
+                f.write(f'        "{xpath}",\n')
+            f.write("    ],\n")
+        f.write("}\n")
+
 def main():
     global verbose, done_queuing, total_entries, DEBUG_EINS
     parser = argparse.ArgumentParser(description="Extract charity data from IRS 990 XML files.")
@@ -460,7 +554,7 @@ def main():
     # Start TSV writer threads
     tsv_files = {}
     writer_threads = []
-    for i in range(5):  # 5 TSV writer threads
+    for i in range(10):  # Increased to 10 TSV writer threads
         thread = threading.Thread(target=tsv_writer_thread, args=(tsv_files, f"writer-{i}"))
         thread.start()
         writer_threads.append(thread)
@@ -471,12 +565,19 @@ def main():
 
     finally:
         done_queuing = True  # Signal writer threads to exit
+        # Send sentinel values to all writer threads
+        for _ in range(10):  # One for each writer thread
+            tsv_write_queue.put(None)
         for thread in writer_threads:
             thread.join()
 
         # Close all open TSV files
         for tsv_file in tsv_files.values():
             tsv_file.close()
+
+        # Save XPath statistics and reorder XPaths
+        save_xpath_stats()
+        reorder_xpaths()
 
         # Stop the logging listener
         listener.stop()

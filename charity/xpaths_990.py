@@ -105,6 +105,11 @@ XPATHS_990 = {
         ".//irs:ReturnData/irs:IRS990ScheduleF/irs:StmtOfActyOutsdUSGrp/irs:RegionTotalExpendituresAmt",
         ".//irs:ReturnData/irs:IRS990ScheduleF/irs:AccountActivitiesOutsideUSGrp/irs:RegionTotalExpendituresAmt",
     ],
+    "schedule_o_value": [
+        ".//irs:ExplanationTxt",
+        ".//irs:SupplementalInformationDetail/irs:ExplanationTxt",
+        ".//irs:Form990ScheduleO/irs:Explanation"
+    ],
     "foreign_exp_elements": [
         ".//irs:ReturnData/irs:IRS990ScheduleF",
     ],
