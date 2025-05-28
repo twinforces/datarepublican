@@ -3,16 +3,17 @@ from lxml import etree
 from io import BytesIO
 import logging
 import re
+from nameparser import HumanName
 from xpaths_990 import XPATHS_990
-from parse_utils import parse_int_field, parse_string_field, parse_total, parse_schedule
+from parse_utils import parse_int_field, parse_string_field, parse_total, parse_schedule, clean_name, MONEY_PATTERN
 
 # Setup logging
 logger = None
 log_error = None
-verbose = False  # Add verbose flag for controlling logging
-DEBUG_EINS = set()  # Add DEBUG_EINS for conditional logging
+verbose = False
+DEBUG_EINS = set()
 
-# XPaths are now precompiled in xpaths_990.py
+# XPaths are precompiled in xpaths_990.py
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 
 def set_logger(new_logger, new_log_error, is_verbose=False, debug_eins=None):
@@ -21,11 +22,10 @@ def set_logger(new_logger, new_log_error, is_verbose=False, debug_eins=None):
     log_error = new_log_error
     verbose = is_verbose
     DEBUG_EINS = debug_eins if debug_eins is not None else set()
-    
+
 def stub_log_error(msg_format, *args, ein=None, exc_info=False):
     global logger
     if logger is None:
-        # If logger isn't set, fall back to basic logging
         import logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         logger = logging.getLogger(__name__)
@@ -34,12 +34,10 @@ def stub_log_error(msg_format, *args, ein=None, exc_info=False):
     else:
         logger.error(msg_format.format(*args) if args else msg_format)
 
-# Default to stub if log_error isn't set by extract_charities.py
 if log_error is None:
     log_error = stub_log_error
 
 def parse_org_type_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    # Use return_element=True to get the lxml.etree.Element
     elem = parse_string_field(root, XPATHS_990, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
     if elem is not None:
         if verbose:
@@ -53,7 +51,7 @@ def parse_org_type_990(root, field, namespaces, xml_filename, context, xpath_cac
             elif elem.text and "X" in elem.text.upper():
                 org_type = "501(c)(3)"
             else:
-                org_type = "501(c)(3)"  # Default if no type_num or text
+                org_type = "501(c)(3)"
         elif elem.tag.endswith("Organization501c3Ind"):
             org_type = "501(c)(3)"
         elif elem.tag.endswith("Organization4947a1NotPFInd"):
@@ -80,27 +78,64 @@ def parse_org_type_990(root, field, namespaces, xml_filename, context, xpath_cac
     return org_type
 
 def parse_officer_comp_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    total = parse_total(root, XPATHS_990, "officer_comp_elements", "officer_comp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=DEBUG_EINS)
+    """
+    Parse officer compensation and names, returning total and individual entries.
     
-    # Additional validation specific to officer compensation
-    for amount in [total]:  # Since parse_total returns a single total
-        if amount > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
+    Returns:
+        Tuple of (total compensation, list of officer entries)
+    """
+    form_type = context.get('form_type', 'Unknown')
+    total = 0
+    officer_entries = []
+    
+    elements = []
+    for xpath in XPATHS_990["officer_comp_elements"]:
+        result = xpath(root)
+        elements.extend(result)
+    
+    for elem in elements:
+        name_elem = parse_string_field(elem, XPATHS_990, "officer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+        value_elem = parse_string_field(elem, XPATHS_990, "officer_comp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+        
+        if name_elem and value_elem:
+            cleaned_name = clean_name(name_elem)
+            name = HumanName(cleaned_name)
+            first_name = name.first or "Unknown"
+            last_name = name.last or "Unknown"
+            value = parse_int_field(elem, XPATHS_990, "officer_comp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+            
+            if value > 0:
+                officer_entries.append({
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "amount": value,
+                    "ein": context.get('filer_ein', 'Unknown'),
+                    "charity_name": context.get('filer_name', 'Unknown'),
+                    "tax_year": context.get('tax_year', 'Unknown')
+                })
+                total += value
+                
+                if verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS:
+                    log_error("Parsed officer {} {} compensation: ${} for EIN {} in {}", 
+                              first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename, 
+                              ein=context.get('filer_ein', 'Unknown'))
+        
+        if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
             log_error("Suspicious officer_comp ${} exceeds total_exp ${} in {}", 
-                      amount, context['total_exp'], xml_filename, 
+                      total, context.get('total_exp', 0), xml_filename, 
                       ein=context.get('filer_ein', 'Unknown'))
-            total = 0  # Reset to 0 if suspicious
-            break
-    return total
+            total = 0
+            officer_entries = []
+            
+    return total, officer_entries
 
 def parse_grants_to_others_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
     debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
 
-    # Parse grants from Schedule F
     schedule_f_total = parse_schedule(root, XPATHS_990, "grant_elements_f", "grant_sub_elements_f", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
     total += schedule_f_total
 
-    # Parse grants from Schedule I
     schedule_i_total = parse_schedule(root, XPATHS_990, "grant_elements_i", "grant_sub_elements_i", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
     total += schedule_i_total
 
@@ -145,22 +180,16 @@ def parse_prog_exp_990(root, field, namespaces, xml_filename, context, xpath_cac
 
 def parse_travel_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    if "schedule_o_value" not in XPATHS_990:
-        if verbose:
-            log_error("Warning: 'schedule_o_value' not found in XPATHS_990, using fallback XPaths: {}", 
-                      [xpath.path for xpath in XPATHS_990.get("schedule_o_value", [])], 
-                      ein=context.get('filer_ein', 'Unknown'))
-
     schedule_field = "schedule_o"
     travel_xpaths = [xpath for xpath in XPATHS_990["schedule_o"] if "TravelGrp" in xpath.path]
-    for xpath in travel_xpaths:        # Use parse_string_field with return_element=True to get the element
+    for xpath in travel_xpaths:
         schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if schedule_o is not None:
             desc = parse_string_field(schedule_o, XPATHS_990, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             if desc is not None:
                 desc_text = desc.upper()
                 if "TRAVEL" in desc_text:
-                    match = re.search(r'\$(\d+\.\d{2}|\d+)', desc)
+                    match = MONEY_PATTERN.search( desc)
                     if match:
                         amount = int(float(match.group(1).replace('$', '')))
                         total += amount
@@ -172,23 +201,16 @@ def parse_travel_990(root, field, namespaces, xml_filename, context, xpath_cache
 
 def parse_conferences_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    if "schedule_o_value" not in XPATHS_990:
-        if verbose:
-            log_error("Warning: 'schedule_o_value' not found in XPATHS_990, using fallback XPaths: {}", 
-                      [xpath.path for xpath in XPATHS_990.get("schedule_o_value", [])], 
-                      ein=context.get('filer_ein', 'Unknown'))
-
     schedule_field = "schedule_o"
     conferences_xpaths = [xpath for xpath in XPATHS_990["schedule_o"] if "ConferencesMeetingsGrp" in xpath.path]
     for xpath in conferences_xpaths:
-        # Use parse_string_field with return_element=True to get the element
         schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if schedule_o is not None:
             desc = parse_string_field(schedule_o, XPATHS_990, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             if desc is not None:
                 desc_text = desc.upper()
                 if "CONFERENCE" in desc_text or "MEETING" in desc_text:
-                    match = re.search(r'\$(\d+\.\d{2}|\d+)', desc)
+                    match = MONEY_PATTERN.search( desc)
                     if match:
                         amount = int(float(match.group(1).replace('$', '')))
                         total += amount
@@ -220,7 +242,7 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         log_error("XML {} is not a Form 990 (form_type: {}), skipping", 
                   xml_filename, context['form_type'], 
                   ein=context['filer_ein'])
-        return None
+        return None, []
 
     context["filer_name"] = parse_filer_name_990(root, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
@@ -239,7 +261,15 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         ("org_type", parse_org_type_990),
         ("foreign_office", parse_foreign_office_990)
     ]
-    data = {field: func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats) for field, func in fields}
+    data = {}
+    officer_entries = []
+    for field, func in fields:
+        if field == "officer_comp":
+            total, entries = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            data[field] = total
+            officer_entries.extend(entries)
+        else:
+            data[field] = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
     def calculate_percentage(value, denom):
         if denom == 0 or value is None or denom is None:
@@ -270,7 +300,7 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
         data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename
     ]
-    return row
+    return row, officer_entries
 
 def main():
     if len(sys.argv) != 2:
@@ -282,10 +312,9 @@ def main():
         with open(xml_file, 'rb') as f:
             xml_content = f.read()
     except IOError as e:
-        print("Error reading XML file {}: {}", xml_file, file=sys.stderr)
+        print("Error reading XML file {}: {}", xml_file, e, file=sys.stderr)
         sys.exit(1)
 
-    # Parse the XML once and extract necessary fields
     parser = etree.XMLParser(recover=True)
     tree = etree.parse(BytesIO(xml_content), parser)
     root = tree.getroot()
@@ -334,9 +363,8 @@ def main():
             break
     filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
-    row = parse_990(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
+    row, _ = parse_990(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
     if row:
-        # Ensure all elements are strings and handle potential formatting issues
         row_str = [str(x).replace('\t', ' ').replace('\n', ' ') for x in row]
         print('\t'.join(row_str))
 

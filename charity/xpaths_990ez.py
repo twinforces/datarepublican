@@ -49,6 +49,10 @@ XPATHS_990EZ = {
     "officer_comp_value": [
         etree.XPath("irs:CompensationAmt", namespaces=NAMESPACES),
     ],
+    "officer_name": [
+        etree.XPath("irs:PersonNm", namespaces=NAMESPACES),
+        etree.XPath("PersonNm", namespaces=NAMESPACES),
+    ],
     "officer_comp": [
         etree.XPath(".//irs:IRS990EZ/irs:OfficerDirectorTrusteeEmplGrp/irs:CompensationAmt", namespaces=NAMESPACES),
         etree.XPath(".//irs:OfficerDirectorTrusteeEmplGrp/irs:CompensationAmt", namespaces=NAMESPACES),
