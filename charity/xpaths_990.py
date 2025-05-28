@@ -64,9 +64,13 @@ XPATHS_990 = {
         etree.XPath("irs:CompensationAmt", namespaces=NAMESPACES),
         etree.XPath("CompensationAmt", namespaces=NAMESPACES),
     ],
+    "officer_name": [
+        etree.XPath("irs:PersonNm", namespaces=NAMESPACES),
+        etree.XPath("PersonNm", namespaces=NAMESPACES),
+    ],
     "officer_comp": [
         etree.XPath(".//irs:IRS990/irs:Form990PartVIISectionAGrp/irs:ReportableCompFromOrgAmt", namespaces=NAMESPACES),
-        etree.XPath(".//irs:Form990PartVIISectionAGrp/irs:ReportableCompFromOrgAmt", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990/irs:Form990PartVIISectionAGrp/irs:ReportableCompFromOrgAmt", namespaces=NAMESPACES),
         etree.XPath(".//irs:IRS990/irs:OfficerDirectorTrusteeEmplGrp/irs:CompensationAmt", namespaces=NAMESPACES),
         etree.XPath(".//irs:OfficerDirectorTrusteeEmplGrp/irs:CompensationAmt", namespaces=NAMESPACES),
     ],

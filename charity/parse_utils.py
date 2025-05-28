@@ -192,3 +192,27 @@ def parse_int(value):
         return int(float(value.strip()))
     except (ValueError, TypeError, AttributeError):
         return 0
+    
+import re
+
+NON_ALPHA_PATTERN = re.compile(r'[^a-zA-Z\-]')
+WHITESPACE_PATTERN = re.compile(r'\s+')
+ORG_TYPE_PATTERN = re.compile(r'501\(c\)\((\d+)\)')
+MONEY_PATTERN = re.compile(r'\$(\d+\.\d{2}|\d+)')
+
+def clean_name(name):
+    """
+    Clean a name by removing all non-alphabetic characters except hyphens,
+    allowing names like "Rodham-Clinton", and normalizing whitespace.
+    
+    Args:
+        name (str): The raw name to clean.
+    
+    Returns:
+        str: The cleaned name.
+    """
+    # Keep alphabetic characters and hyphens, remove everything else
+    cleaned = NON_ALPHA_PATTERN.sub(' ', name)
+    # Replace multiple spaces with a single space and strip
+    cleaned = WHITESPACE_PATTERN.sub(' ', cleaned).strip()
+    return cleaned
