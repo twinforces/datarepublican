@@ -446,6 +446,7 @@ class BrowseViewModel {
     const charitiesTotal = Object.values(Charity.charityLookup).length;
     let charitiesProcessed = 0;
 
+    return; // now using circular sankey module
     updateStatus(
       "<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>"
     );
