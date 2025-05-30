@@ -1,0 +1,874 @@
+---
+layout: default
+title: NED Journal of Democracy Index
+---
+
+<!-- Include JS dependencies (adjust paths as needed) -->
+<script src="jquery.min.js"></script>
+<script src="jszip.min.js"></script>
+<script src="papaparse.min.js"></script>
+
+<!-- Page Header (patterned after OLD_INDEX_HTML) -->
+<h1 class="mb-1">Journal of Democracy (Summaries Index)</h1>
+<p class="opacity-80 mb-0 text-[15px]">
+  View cross-referenced AI-generated summaries of NED's Journal of Democracy articles, authors, and NGOs.
+</p>
+
+<!-- Warning Box (re-uses old "border" / "bg" patterns) -->
+<div class="my-4 p-4 border border-yellow-400 bg-yellow-100 rounded-md text-sm" style="background-color:#FEF9C3; border:1px solid #FACC15;">
+  <strong>Warning:</strong> These summaries are AI-generated and may contain incorrect or incomplete information.
+  By using this website you agree not to hold the owner liable. Always verify with the original sources.
+</div>
+
+<div id="searchContainer" class="mb-2">
+  <div class="flex flex-col gap-2">
+
+    <!-- no element in this row has grow / flex-1 / w-full -->
+    <form id="searchForm" class="flex flex-wrap items-center gap-2">
+
+      <label for="searchBox"
+             class="text-sm md:text-[15px] whitespace-nowrap shrink-0">
+        Enter keywords:
+      </label>
+
+      <!-- fixed-ish width so it won’t stretch;
+           adjust md:w-60 to whatever you like or drop it entirely for “auto” -->
+      <input type="text" id="searchBox"
+             class="px-2 py-1 rounded text-sm border border-gray-300 md:w-60"
+             placeholder="Keywords" autofocus />
+
+      <label for="prefixCheck"
+             class="text-sm flex items-center gap-1 whitespace-nowrap shrink-0">
+        <input type="checkbox" id="prefixCheck" />
+        Prefix search
+      </label>
+
+      <!-- now sits directly after the checkbox -->
+      <button type="submit" id="searchButton" disabled>Search</button>
+
+      <span id="searchStatus" class="text-sm"></span>
+    </form>
+  </div>
+</div>
+
+<!-- Main results container -->
+<div id="resultsContainer" class="flex flex-col gap-2"></div>
+
+<script>
+/*
+  On load:
+  1) Parse mode= from URL (Search, Author, Article, NGO). Default to Search if missing/invalid.
+  2) Parse id= if relevant.
+  3) Parse keywords= and prefix= for search form.
+  4) Fetch data.zip and parse:
+     - reverse_index.txt -> index_keywords, index_row_ids
+     - entries.csv -> entries_list (array)
+     - ngos_master.csv -> ngo_lookup
+     - articles_master.csv -> articles_lookup
+     - authors_master.csv -> authors_lookup
+  5) Render the correct mode.
+*/
+
+// Global structures
+let index_keywords = [];
+let index_row_ids = [];
+let entries_list = [];
+let ngo_lookup = {};
+let articles_lookup = {};
+let authors_lookup = {};
+
+/**
+ * Return the author’s role in a given NGO (if any).
+ *
+ * @param {string} ngoName                    – organization name to match
+ * @param {Object} authorData                 – row from authors_master.csv
+ * @param {Object|string} authorData.affliations_json
+ *        (may already be parsed JSON or still the raw JSON string)
+ *
+ * @returns {string} The matching role (first one found) or "" if none.
+ */
+function getRoleForNgo(ngoName, authorData) {
+  if (!ngoName || !authorData) return "";
+
+  // Parse affliations_json if it’s still a string
+  let aff;
+  try {
+    aff = typeof authorData.affliations === "string"
+      ? JSON.parse(authorData.affliations || "{}")
+      : (authorData.affliations || {});
+  } catch (_) {
+    // malformed JSON
+    return "";
+  }
+
+  // Helper: search an array of {organization, role}
+  const findRole = (arr) => {
+    if (!Array.isArray(arr)) return "";
+    for (const rec of arr) {
+      if (
+        rec &&
+        typeof rec.organization === "string" &&
+        rec.organization.trim() === ngoName
+      ) {
+        return typeof rec.role === "string" ? rec.role : "";
+      }
+    }
+    return "";
+  };
+
+  // Search the three possible buckets in priority order
+  const buckets = [
+    aff.ngo_affiliations,
+    aff.government_roles,
+    aff.academic_or_journalistic_roles,
+  ];
+
+  for (const bucket of buckets) {
+    const role = findRole(bucket);
+    if (role) return role;
+  }
+
+  return "";
+}
+
+function wikiLinkToTitle(link) {
+  try {
+    const url = new URL(link);
+
+    // Accept *.wikipedia.org and *.wikipedia.org.* (language + mobile sub-domains)
+    if (!/\.wikipedia\.org$/.test(url.hostname.replace(/^m\./, ''))) {
+      return null;
+    }
+
+    // 1. If it’s the canonical /wiki/Article_Name form, use the last path segment
+    if (url.pathname.startsWith('/wiki/')) {
+      const segments = url.pathname.split('/');
+      let page = segments.pop() || segments.pop(); // handles trailing “/”
+      if (!page) return null;
+
+      page = decodeURIComponent(page).replace(/_/g, ' ');
+      return page;
+    }
+
+    // 2. If it’s the “index.php?title=Article_Name” form
+    const titleParam = url.searchParams.get('title');
+    if (titleParam) {
+      return decodeURIComponent(titleParam).replace(/_/g, ' ');
+    }
+
+  } catch (_) {
+    /* fall through */
+  }
+  return null;
+}
+
+$(async function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  let mode = urlParams.get('mode');
+  if (!["Search","Author","Article","NGO"].includes(mode)) {
+    mode = "Search";
+  }
+
+  let idParam = urlParams.get('id') || null;
+
+  // If search mode, handle default keywords
+  let keywords = urlParams.get('keywords') || "";
+  if (mode === "Search" && !keywords.trim()) {
+    // default to "soros"
+    keywords = "trump";
+  }
+  $("#searchBox").val(keywords);
+  // prefix=1 => checkbox
+  const prefix = (urlParams.get('prefix') === '1');
+  $("#prefixCheck").prop("checked", prefix);
+
+  // Load data.zip
+  $("#searchStatus").text("Loading data...");
+  try {
+    await loadDataZip();
+    $("#searchStatus").text("");
+  } catch (err) {
+    console.error(err);
+    $("#searchStatus").text("Error loading data: " + err.message);
+    return;
+  }
+  // Now enabled
+  $("#searchButton").prop("disabled", false);
+
+  // Render
+  if (mode === "Author") {
+    if (!idParam || !(idParam in authors_lookup)) {
+      // redirect back to search
+      urlParams.set('mode','Search');
+      urlParams.delete('id');
+      window.location.search = urlParams.toString();
+    } else {
+      renderAuthor(idParam);
+    }
+  }
+  else if (mode === "Article") {
+    if (!idParam || !(idParam in articles_lookup)) {
+      urlParams.set('mode','Search');
+      urlParams.delete('id');
+      window.location.search = urlParams.toString();
+    } else {
+      renderArticle(idParam);
+    }
+  }
+  else if (mode === "NGO") {
+    if (!idParam || !(idParam in ngo_lookup)) {
+      urlParams.set('mode','Search');
+      urlParams.delete('id');
+      window.location.search = urlParams.toString();
+    } else {
+      renderNGO(idParam);
+    }
+  }
+  else {
+    // Search
+    renderSearchResults(keywords, prefix);
+  }
+});
+
+/* Handle search submission => new URL with mode=Search etc. */
+$("#searchForm").on("submit", function(e) {
+  e.preventDefault();
+  const keywordsVal = $("#searchBox").val().trim();
+  const prefixVal = $("#prefixCheck").is(":checked");
+
+  const urlParams = new URLSearchParams(window.location.search);
+  urlParams.set('mode','Search');
+  if (keywordsVal) urlParams.set('keywords', keywordsVal);
+  else urlParams.delete('keywords');
+
+  if (prefixVal) urlParams.set('prefix','1');
+  else urlParams.delete('prefix');
+
+  urlParams.delete('id');
+  window.location.search = urlParams.toString();
+});
+
+/* ---------------------------------------------------
+   loadDataZip
+   ---------------------------------------------------*/
+async function loadDataZip() {
+  const resp = await fetch("data.zip");
+  if (!resp.ok) throw new Error("Failed to fetch data.zip");
+  const arrayBuffer = await resp.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+
+  // 1) reverse_index.txt
+  const revFile = zip.file("reverse_index.txt");
+  if (!revFile) throw new Error("reverse_index.txt missing in data.zip");
+  const revText = await revFile.async("string");
+  parseReverseIndex(revText);
+
+  // 2) entries.csv
+  const entriesFile = zip.file("entries.csv");
+  if (!entriesFile) throw new Error("entries.csv missing in data.zip");
+  const entriesStr = await entriesFile.async("string");
+  entries_list = Papa.parse(entriesStr, {header:true, skipEmptyLines:false}).data;
+
+  // 3) ngos_master.csv
+  const ngosFile = zip.file("ngos_master.csv");
+  if (!ngosFile) throw new Error("ngos_master.csv missing in data.zip");
+  const ngosStr = await ngosFile.async("string");
+  parseMasterCSV(ngosStr, ngo_lookup, "name");
+
+  // 4) articles_master.csv
+  const articlesFile = zip.file("articles_master.csv");
+  if (!articlesFile) throw new Error("articles_master.csv missing in data.zip");
+  const articlesStr = await articlesFile.async("string");
+  parseMasterCSV(articlesStr, articles_lookup, "id");
+
+  // 5) authors_master.csv
+  const authorsFile = zip.file("authors_master.csv");
+  if (!authorsFile) throw new Error("authors_master.csv missing in data.zip");
+  const authorsStr = await authorsFile.async("string");
+  parseMasterCSV(authorsStr, authors_lookup, "name");
+}
+
+/* parseReverseIndex => fill index_keywords / index_row_ids */
+function parseReverseIndex(text) {
+  index_keywords = [];
+  index_row_ids = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(":");
+    if (parts.length !== 2) continue;
+    const kw = parts[0];
+    const rowIds = parts[1].split(",").map(x => parseInt(x,10)).filter(n=>!isNaN(n));
+    index_keywords.push(kw);
+    index_row_ids.push(rowIds);
+  }
+}
+
+/* parseMasterCSV => fill object with { [uniqueKeyVal] : rowDataObj } */
+function parseMasterCSV(csvStr, lookupObj, keyCol) {
+  const parsed = Papa.parse(csvStr, {header:true, skipEmptyLines:false});
+  for (const row of parsed.data) {
+    if (!row[keyCol]) continue;
+    const rec = {};
+    for (const [col, val] of Object.entries(row)) {
+      if (col.endsWith("_json")) {
+        const newKey = col.replace("_json","");
+        try {
+          rec[newKey] = JSON.parse(val);
+        } catch {
+          rec[newKey] = null;
+        }
+      } else {
+        rec[col] = val;
+      }
+    }
+    lookupObj[row[keyCol]] = rec;
+  }
+}
+
+/* ---------------------------------------------------
+   renderSearchResults
+   ---------------------------------------------------*/
+function renderSearchResults(keywords, prefix) {
+  $("#resultsContainer").empty();
+
+  const tokens = tokenize(keywords);
+  if (!tokens.length) {
+    $("#resultsContainer").append(`<div class="p-4 text-center">No results found.</div>`);
+    return;
+  }
+
+  // intersection across tokens
+  let runningSet = null;
+  for (const t of tokens) {
+    const unionSet = new Set();
+    // exact
+    const exactIdx = binarySearch(index_keywords, t);
+    if (exactIdx >= 0) {
+      for (const rid of index_row_ids[exactIdx]) {
+        unionSet.add(rid);
+      }
+    }
+    // prefix
+    if (prefix) {
+      const {start, end} = findPrefixRange(t);
+      for (let i = start; i < end; i++) {
+        for (const rid of index_row_ids[i]) {
+          unionSet.add(rid);
+        }
+      }
+    }
+
+    if (runningSet === null) {
+      runningSet = unionSet;
+    } else {
+      // intersect
+      const temp = new Set();
+      for (const rid of runningSet) {
+        if (unionSet.has(rid)) temp.add(rid);
+      }
+      runningSet = temp;
+      if (runningSet.size===0) break;
+    }
+  }
+
+  const finalRowIds = runningSet ? Array.from(runningSet).sort((a,b)=>a-b) : [];
+  const shownRowIds = finalRowIds.slice(0,100);
+
+  if (shownRowIds.length===0) {
+    $("#resultsContainer").append(`<div class="p-4 text-center">No results found.</div>`);
+    return;
+  }
+
+  const infoLine = `<div class="text-sm mb-2">Showing ${shownRowIds.length}${finalRowIds.length>100 ? " (limit)" : ""} results</div>`;
+  $("#resultsContainer").append(infoLine);
+
+  const resultsN = [];
+  const resultsP = [];
+  const resultsA = [];
+
+  for (const rowId of shownRowIds) {
+    const idx = rowId - 1;
+    if (idx<0 || idx>=entries_list.length) continue;
+    const row = entries_list[idx];
+    if (!row.type) continue;
+    if (row.type==='N') resultsN.push(row);
+    else if (row.type==='P') resultsP.push(row);
+    else if (row.type==='A') resultsA.push(row);
+  }
+
+  // Render 3 group cards
+  if (resultsN.length>0) {
+    $("#resultsContainer").append(buildResultsGroupCard("NGOs", resultsN, "NGO"));
+  }
+  if (resultsA.length>0) {
+    $("#resultsContainer").append(buildResultsGroupCard("AUTHORS", resultsA, "Author"));
+  }
+  if (resultsP.length>0) {
+    $("#resultsContainer").append(buildResultsGroupCard("ARTICLES", resultsP, "Article"));
+  }
+}
+
+function buildResultsGroupCard(title, items, mode) {
+  let html = `<div class="border border-gray-200 rounded bg-white p-4 mb-2">
+                <div class="mb-2 flex flex-row justify-between items-center">
+                  <h2 class="text-base font-bold mt-0">${title}                   <span class="text-sm opacity-80">: Found (${items.length})</span></h2>
+                </div>`;
+  for (const it of items) {
+    const linkQuery = buildLinkQuery(it.id, mode);
+    let pubdate = "";
+    if (title === "ARTICLES") {
+      article_data = articles_lookup[it.id];
+      if (article_data) {
+        pubdate = formatDate(article_data.pub_date);
+        if (pubdate) {
+          pubdate = `<div class="text-sm"><i>Published: ${pubdate}</i></div>`;
+        }     
+      }
+    }
+
+    html += `<div class="mb-3">
+               <div class="font-semibold"><a href="?${linkQuery}">${escapeHtml(it.header)}</a></div>
+               <div>${escapeHtml(it.summary)}</div>
+               ${pubdate}
+             </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+/* ---------------------------------------------------
+   renderAuthor
+   ---------------------------------------------------*/
+function renderAuthor(authorName) {
+  $("#resultsContainer").empty();
+  const data = authors_lookup[authorName];
+
+  const card = document.createElement("div");
+  card.className = "border border-gray-200 rounded bg-white p-4 mb-2";
+
+  // top left: "Author" -> name + optional bio link
+  const topHTML = `
+    <div class="flex flex-col md:flex-row md:justify-between gap-2">
+      <div>
+        <span class="text-sm opacity-80">Author:</span>
+        <div class="font-semibold">${escapeHtml(data.name || authorName)}
+          ${data.bio_link ? ` <a href="${escapeAttr(data.bio_link)}" target="_blank" class="text-xs">(bio link)</a>` : ""}
+        </div>
+      </div>
+      <div></div>
+    </div>
+  `;
+  card.innerHTML = topHTML;
+
+  // affliations
+  const aff = data.affliations || {};
+
+  // Biography
+  if (data.short_bio) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    box.innerHTML = `<h3 class="font-bold mb-1 mt-0">Biography</h3><div>${escapeHtml(data.short_bio)}</div>`;
+    card.appendChild(box);
+  }
+
+  // NGO Affiliations
+  if (aff.ngo_affiliations && Array.isArray(aff.ngo_affiliations) && aff.ngo_affiliations.length>0) {
+    const box = buildAffiliationBox("NGO Affiliations", aff.ngo_affiliations);
+    card.appendChild(box);
+  }
+
+  // Government Roles
+  if (aff.government_roles && Array.isArray(aff.government_roles) && aff.government_roles.length>0) {
+    const box = buildAffiliationBox("Government Roles", aff.government_roles);
+    card.appendChild(box);
+  }
+
+  // Academic or Journalistic
+  if (aff.academic_or_journalistic_roles && 
+      Array.isArray(aff.academic_or_journalistic_roles) &&
+      aff.academic_or_journalistic_roles.length>0) {
+    const box = buildAffiliationBox("Academic or Journalistic", aff.academic_or_journalistic_roles);
+    card.appendChild(box);
+  }
+
+  // Articles
+  if (data.articles && Array.isArray(data.articles) && data.articles.length>0) {
+    // sort => desc by date, asc by article_name
+    const sorted = [...data.articles].sort((a,b) => {
+      const dateA = parseInt(a[2],10);
+      const dateB = parseInt(b[2],10);
+      if (dateB !== dateA) return dateB - dateA;
+      if (a[0]<b[0]) return -1;
+      if (a[0]>b[0]) return 1;
+      return 0;
+    });
+
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let inner = `<h3 class="font-bold mb-1 mt-0">Journal of Democracy Articles</h3>`;
+    for (const [article_name, article_id, pub_date] of sorted) {
+      const short_summary = articles_lookup[article_id]?.short_summary || "";
+      const dateText = formatDate(pub_date);
+      const linkQuery = buildLinkQuery(article_id, "Article");
+      inner += `
+        <div class="mb-4">
+          <div class="font-semibold"><a href="?${linkQuery}">${escapeHtml(article_name)}</a>
+          </div>
+          <div>${escapeHtml(short_summary)}</div>
+          <div class="text-sm"><i>Publication Date: ${dateText}</i></div>
+        </div>
+      `;
+    }
+    box.innerHTML = inner;
+    card.appendChild(box);
+  }
+
+  $("#resultsContainer").append(card);
+}
+
+function buildAffiliationBox(title, affRecords) {
+  const box = document.createElement("div");
+  box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+  box.innerHTML = `<h3 class="font-bold mb-1 mt-0">${escapeHtml(title)}</h3>`;
+  for (const rec of affRecords) {
+    // if missing org or citation or invalid citation => skip
+    if (!rec.organization) continue;
+    if (!rec.citation || !isValidUrl(rec.citation)) continue;
+
+    let orgPart = escapeHtml(rec.organization);
+    if (ngo_lookup[rec.organization]) {
+      const linkQuery = buildLinkQuery(rec.organization, "NGO");
+      orgPart = `<a href="?${linkQuery}">${escapeHtml(rec.organization)}</a>`;
+    }
+
+    const rowDiv = document.createElement("div");
+    rowDiv.className = "mb-5";
+    rowDiv.innerHTML = `
+      <div><span class="font-semibold">${orgPart}</span>, <i>${escapeHtml(rec.role||"")}</i></div>
+      <div class="text-sm">source: <a href="${escapeAttr(rec.citation)}" target="_blank">${escapeHtml(rec.citation)}</a></div>
+    `;
+    box.appendChild(rowDiv);
+  }
+  return box;
+}
+
+/* ---------------------------------------------------
+   renderArticle
+   ---------------------------------------------------*/
+function renderArticle(articleId) {
+  $("#resultsContainer").empty();
+  const data = articles_lookup[articleId];
+
+  const card = document.createElement("div");
+  card.className = "border border-gray-200 rounded bg-white p-4 mb-2";
+
+  // top row
+  const topHTML = `
+    <div class="flex flex-col md:flex-row md:justify-between gap-2">
+      <div>
+        <span class="text-sm opacity-80">Article</span>
+        <div class="font-semibold">${escapeHtml(data.title || "")}</div>
+      </div>
+      <div>
+        <span class="text-sm opacity-80">Full text (John Hopkins)</span>
+        <div>
+          <a href="https://muse.jhu.edu/article/${escapeAttr(articleId)}" target="_blank">
+            ${escapeHtml(articleId)}
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+  card.innerHTML = topHTML;
+
+  // publication date
+  const dateTxt = formatDate(data.pub_date);
+  const pubDiv = document.createElement("div");
+  pubDiv.className = "mt-3";
+  pubDiv.innerHTML = `
+    <span class="text-sm opacity-80">Publication Date</span>
+    <div>${dateTxt}</div>
+  `;
+  card.appendChild(pubDiv);
+
+  // authors
+  if (data.authors && Array.isArray(data.authors) && data.authors.length>0) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let txt = `<h3 class="font-bold mb-1 mt-0">Authors</h3>`;
+    for (const authorName of data.authors) {
+      let aName = `${escapeHtml(authorName)}`;
+      if (authors_lookup[authorName]) {
+        const linkQuery = buildLinkQuery(aName, "Author");
+        aName = `<a href="?${linkQuery}">${aName}</a>`;
+      }
+      const shortBio = authors_lookup[authorName]?.short_bio || "";
+      txt += `
+        <div class="mb-2">
+          <div class="font-semibold">${aName}</div>
+          <div>${escapeHtml(shortBio)}</div>
+        </div>
+      `;
+    }
+    box.innerHTML = txt;
+    card.appendChild(box);
+  }
+
+  // summary
+  if (data.summary) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    box.innerHTML = `
+      <h3 class="font-bold mb-1 mt-0">Summary (AI-Generated)</h3>
+      <div>${escapeHtml(data.summary)}</div>
+    `;
+    card.appendChild(box);
+  }
+
+  // quotes
+  if (data.quotes && Array.isArray(data.quotes) && data.quotes.length>0) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let txt = `<h3 class="font-bold mb-1 mt-0">Key Quotes (AI-Derived)</h3>`;
+    for (const q of data.quotes) {
+      txt += `<p class="italic mb-4">"${escapeHtml(q)}"</p>`;
+    }
+    box.innerHTML = txt;
+    card.appendChild(box);
+  }
+
+  // NGOs
+  if (data.ngos && Array.isArray(data.ngos) && data.ngos.length>0) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let txt = `<h3 class="font-bold mb-1 mt-0">NGO Mentions</h3>`;
+    for (const ngoName of data.ngos) {
+      let ngo = `${escapeHtml(ngoName)}`;
+      if (ngo_lookup[ngoName]) {
+        const linkQuery = buildLinkQuery(ngoName, "NGO");
+        ngo = `<a href="?${linkQuery}">${ngo}</a>`;
+      }
+      const shortBio = ngo_lookup[ngoName]?.short_bio || "";
+      txt += `
+        <div class="mb-4">
+          <div class="font-semibold">${ngo}</div>
+          <div>${escapeHtml(shortBio)}</div>
+        </div>
+      `;
+    }
+    box.innerHTML = txt;
+    card.appendChild(box);
+  }
+
+  $("#resultsContainer").append(card);
+}
+
+/* ---------------------------------------------------
+   renderNGO
+   ---------------------------------------------------*/
+function renderNGO(ngoName) {
+  $("#resultsContainer").empty();
+  const data = ngo_lookup[ngoName];
+
+  const card = document.createElement("div");
+  card.className = "border border-gray-200 rounded bg-white p-4 mb-2";
+
+  // top row
+  const topHTML = `
+    <div class="flex flex-col md:flex-row md:justify-between gap-2">
+      <div>
+        <span class="text-sm opacity-80">Non-Governmental Organization</span>
+        <div class="font-semibold">${escapeHtml(data.name || ngoName)}</div>
+      </div>
+      <div>
+        <span class="text-sm opacity-80">Wikipedia Link</span>
+        <div>
+          <a href="${escapeAttr(data.wiki_link||"")}" target="_blank">
+            ${escapeHtml(wikiLinkToTitle(data.wiki_link||""))}
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+  card.innerHTML = topHTML;
+
+  // second row -> left: Abbreviation, right: EINS
+  const secondDiv = document.createElement("div");
+  secondDiv.className = "flex flex-col md:flex-row md:justify-between gap-2 mt-3";
+
+  const leftHTML = `
+    <div>
+      <span class="text-sm opacity-80">Abbreviation</span>
+      <div>${escapeHtml(data.abbreviation||"")}</div>
+    </div>
+  `;
+  secondDiv.innerHTML = leftHTML;
+
+  const rightDiv = document.createElement("div");
+  // EINS (Propublica)
+  if (data.eins && Array.isArray(data.eins) && data.eins.length>0) {
+    const links = data.eins.map(e => {
+      const trimmed = String(e).trim();
+      if (!trimmed) return "";
+      return `<a href="https://projects.propublica.org/nonprofits/organizations/${escapeAttr(trimmed)}" target="_blank">${escapeHtml(trimmed)}</a>`;
+    }).filter(x=>x).join(", ");
+    if (links) {
+      rightDiv.innerHTML = `
+        <span class="text-sm opacity-80">EINS (Propublica)</span>
+        <div>${links}</div>
+      `;
+    }
+  }
+  secondDiv.appendChild(rightDiv);
+  card.appendChild(secondDiv);
+
+  // NGO Description
+  if (data.bio) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    box.innerHTML = `
+      <h3 class="font-bold mt-0">NGO Description (AI-Generated)</h3>
+      <div>${escapeHtml(data.bio)}</div>
+    `;
+    card.appendChild(box);
+  }
+
+  // Authors
+  if (data.authors && Array.isArray(data.authors) && data.authors.length>0) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let txt = `<h3 class="font-bold mt-0">Affiliated Authors</h3>`;
+    for (const aName of data.authors) {
+      let link = "";
+      let role = "";
+      let auth = `${escapeHtml(aName)}`
+      if (authors_lookup[aName]) {
+        const linkQuery = buildLinkQuery(aName,"Author");
+        auth = ` <a href="?${linkQuery}">${auth}</a>`;
+        role = getRoleForNgo(data.name, authors_lookup[aName]);
+        if (role)
+          role = `<span class="font-normal text-sm"><i>, ${escapeHtml(role)}</i></span>`;
+      }
+      const shortBio = authors_lookup[aName]?.short_bio || "";
+      txt += `
+        <div class="mb-4">
+          <div class="font-semibold">${auth}${role}</div>
+          <div>${escapeHtml(shortBio)}</div>
+        </div>
+      `;
+    }
+    box.innerHTML = txt;
+    card.appendChild(box);
+  }
+
+  // Article Mentions
+  if (data.articles && Array.isArray(data.articles) && data.articles.length>0) {
+    const box = document.createElement("div");
+    box.className = "border border-gray-200 rounded bg-gray-50 p-3 mt-3";
+    let txt = `<h3 class="font-bold mb-4 mt-0">Article Mentions</h3>`;
+    let pubdate = "";
+    for (const artId of data.articles) {
+      let artTitle = articles_lookup[artId]?.title || "";
+      artTitle = `${escapeHtml(artTitle)}`;
+      const artSummary = articles_lookup[artId]?.short_summary || "";
+      let link = "";
+      if (articles_lookup[artId]) {
+        const linkQuery = buildLinkQuery(artId, "Article");
+        artTitle = `<a href="?${linkQuery}">${artTitle}</a>`;
+        pubdate = `<div class="text-sm"><i>Published: ${formatDate(articles_lookup[artId].pub_date)}</i></div>`;
+      }
+      txt += `
+        <div class="mb-4">
+          <div class="font-semibold">${artTitle}</div>
+          <div>${escapeHtml(artSummary)}</div>
+          ${pubdate}
+        </div>
+      `;
+    }
+    box.innerHTML = txt;
+    card.appendChild(box);
+  }
+
+  $("#resultsContainer").append(card);
+}
+
+/* ------------- Helper Functions ------------- */
+function tokenize(str) {
+  // lower, remove punctuation -> split
+  const tokens = str.toLowerCase().replace(/[^a-z0-9]+/g," ").split(/\s+/).filter(Boolean);
+  return tokens;
+}
+function binarySearch(arr,val) {
+  let low=0, high=arr.length-1;
+  while (low<=high) {
+    const mid=(low+high)>>>1;
+    if (arr[mid]===val) return mid;
+    if (arr[mid]<val) low=mid+1; else high=mid-1;
+  }
+  return -1;
+}
+function findPrefixRange(prefix) {
+  // find insertion start
+  let low=0, high=index_keywords.length;
+  while (low<high) {
+    const mid=(low+high)>>>1;
+    if (index_keywords[mid]<prefix) low=mid+1; else high=mid;
+  }
+  const start=low;
+  high=index_keywords.length;
+  while (low<high) {
+    const mid=(low+high)>>>1;
+    if (index_keywords[mid].startsWith(prefix)) low=mid+1; else high=mid;
+  }
+  const end=low;
+  return {start,end};
+}
+function buildLinkQuery(idVal, modeVal) {
+  const current = new URLSearchParams(window.location.search);
+  const next    = new URLSearchParams();
+
+  // keep the keywords parameter if it already exists
+  const kw = current.get('keywords');
+  if (kw) next.set('keywords', kw);
+
+  // set/overwrite the destination mode + id
+  next.set('mode', modeVal);
+  next.set('id',   idVal);
+
+  return next.toString();
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/'/g,"&#39;");
+}
+function isValidUrl(u) {
+  try {
+    const urlObj = new URL(u);
+    return urlObj.protocol==="http:" || urlObj.protocol==="https:";
+  } catch {
+    return false;
+  }
+}
+function formatDate(yyyymm) {
+  if (!yyyymm) return "";
+  const s = String(yyyymm).padStart(6,"0");
+  const year = s.slice(0,4);
+  const mo = s.slice(4);
+  let monthName="";
+  if (mo==="01") monthName="January";
+  else if (mo==="04") monthName="April";
+  else if (mo==="07") monthName="July";
+  else if (mo==="10") monthName="October";
+  return monthName ? `${monthName} ${year}` : year;
+}
+</script>
