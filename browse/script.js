@@ -602,13 +602,13 @@ function generateGraph() {
     .attr("transform", "translate(50, 50)");
 
   const sankey = d3
-    .sankey()
-    .nodeId((d) => d.id)
+    .sankeyCircular()
+    .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
-    .linkSort(compareLinks)
+    //.linkSort(compareLinks)
     .nodeAlign(d3.sankeyCenter)
-    .nodeSort(compareCharities)
+    //.nodeSort(compareCharities)
     .size([width - 100, height - 100]);
 
   viewModel.parseQueryParams();
