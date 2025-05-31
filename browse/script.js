@@ -6,6 +6,8 @@ import {
   BrowseViewModel,
 } from "./models.js";
 
+import { sankeyCircular } from "./d3-sankey-circular.js";
+
 let svg = null;
 let zoom = null;
 
@@ -601,8 +603,7 @@ function generateGraph() {
     .attr("class", "main")
     .attr("transform", "translate(50, 50)");
 
-  const sankey = d3
-    .sankeyCircular()
+  const sankey = sankeyCircular()
     .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
