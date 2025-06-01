@@ -6,7 +6,7 @@ import {
   BrowseViewModel,
 } from "./models.js";
 
-import { sankeyCircular } from "./d3-sankey-circular.js";
+import { sankeyWithCircles } from "./d3-sankey-circular.js";
 
 let svg = null;
 let zoom = null;
@@ -603,13 +603,13 @@ function generateGraph() {
     .attr("class", "main")
     .attr("transform", "translate(50, 50)");
 
-  const sankey = sankeyCircular()
+  const sankey = sankeyWithCircles()
     .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
     //.linkSort(compareLinks)
     .nodeAlign(d3.sankeyCenter)
-    //.nodeSort(compareCharities)
+    .nodeSort(compareCharities)
     .size([width - 100, height - 100]);
 
   viewModel.parseQueryParams();
@@ -719,6 +719,7 @@ function renderFocusedSankey(
   $("#downloadBtn").hide();
 
   let currentData = viewModel.buildSankeyData();
+
   savePreviousState(currentData);
 
   const sankeyWidth = width - 100;
@@ -784,14 +785,13 @@ function renderFocusedSankey(
     .attr("class", "main")
     .attr("transform", `translate(50, 50) scale(${scale})`);
 
-  // No local zoom definition here—rely on global zoom from generateGraph
-
   const masterGroup = g
     .selectAll(".graph-group")
     .data([0])
     .join("g")
     .attr("class", "graph-group");
 
+  // Regular (non-circular) links
   const linkGroup = masterGroup
     .selectAll("g.links")
     .data([0])
@@ -801,9 +801,10 @@ function renderFocusedSankey(
     .attr("stroke-opacity", 1)
     .style("mix-blend-mode", "multiply");
 
+  const regularLinks = graph.links.filter((d) => !d.circular);
   const link = linkGroup
     .selectAll(".link")
-    .data(graph.links, (d) => `${d.source.id}-${d.target.id}`);
+    .data(regularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   link.exit().transition().duration(ANIM_LINK).attr("stroke-width", 0).remove();
 
@@ -830,6 +831,54 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
+  // Circular links
+  const circularLinkGroup = masterGroup
+    .selectAll("g.circular-links")
+    .data([0])
+    .join("g")
+    .attr("class", "circular-links")
+    .attr("fill", "none")
+    .attr("stroke-opacity", 0.5);
+
+  const circularLinks = graph.links.filter((d) => d.circular);
+  const circularLink = circularLinkGroup
+    .selectAll(".circular-link")
+    .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
+
+  circularLink
+    .exit()
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("stroke-width", 0)
+    .remove();
+
+  const circularLinkEnter = circularLink
+    .enter()
+    .append("path")
+    .attr("class", "circular-link")
+    .attr("d", (d) => d.path) // Use the precomputed path from createCircularPathString
+    .attr("stroke", "rgba(255, 105, 180, 0.5)") // Translucent pink
+    .style("stroke-opacity", "0.5")
+    .attr("stroke-width", 0);
+
+  circularLink
+    .merge(circularLinkEnter)
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("d", (d) => d.path)
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-width", (d) => d.width || 1);
+
+  circularLinkEnter
+    .append("title")
+    .text(
+      (d) =>
+        `${d.source.name} → ${d.target.name}\n$${formatNumber(
+          d.amt
+        )} (Circular)`
+    );
+
+  // Node rendering (unchanged)
   const nodeGroup = masterGroup
     .selectAll("g.nodes")
     .data([0])
@@ -950,6 +999,7 @@ function renderFocusedSankey(
     .attr("d", (d) =>
       generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
     );
+
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
       (d) =>
