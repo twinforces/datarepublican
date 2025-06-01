@@ -1,271 +1,105 @@
-function stronglyConnectedComponents(adjList) {
-  var numVertices = adjList.length;
-  var index = new Array(numVertices);
-  var lowValue = new Array(numVertices);
-  var active = new Array(numVertices);
-  var child = new Array(numVertices);
-  var scc = new Array(numVertices);
-  var sccLinks = new Array(numVertices);
+function findCircuits(adj) {
+  const n = adj.length;
+  const cyclesSet = new Set();
 
-  // Initialize tables
-  for (var i = 0; i < numVertices; ++i) {
-    index[i] = -1;
-    lowValue[i] = 0;
-    active[i] = false;
-    child[i] = 0;
-    scc[i] = -1;
-    sccLinks[i] = [];
+  function circuit(v, adj, path, onPath) {
+    path.push(v);
+    onPath[v] = true;
+
+    const neighbors = adj[v] || [];
+    for (const w of neighbors) {
+      if (path.includes(w)) {
+        if (w === path[0] && path.length >= 2) {
+          // Allow cycles of length 3 or more
+          const cycle = [...path, w];
+          const minIdx = cycle.indexOf(Math.min(...cycle));
+          const normalized = [
+            ...cycle.slice(minIdx),
+            ...cycle.slice(0, minIdx),
+          ];
+          cyclesSet.add(normalized.join(","));
+        }
+      } else {
+        circuit(w, adj, path, onPath);
+      }
+    }
+
+    path.pop();
+    onPath[v] = false;
   }
 
-  // The strongConnect function
-  var count = 0;
-  var components = [];
-  var sccAdjList = [];
+  // Collect all cycles
+  for (let s = 0; s < n; s++) {
+    const onPath = new Array(n).fill(false);
+    const path = [];
+    circuit(s, adj, path, onPath);
+  }
 
-  function strongConnect(v) {
-    // To avoid running out of stack space, this emulates the recursive behaviour of the normal algorithm, effectively using T as the call stack.
-    var S = [v],
-      T = [v];
-    index[v] = lowValue[v] = count;
-    active[v] = true;
-    count += 1;
-    while (T.length > 0) {
-      v = T[T.length - 1];
-      var e = adjList[v];
-      if (child[v] < e.length) {
-        // If we're not done iterating over the children, first try finishing that.
-        for (var i = child[v]; i < e.length; ++i) {
-          // Start where we left off.
-          var u = e[i];
-          if (index[u] < 0) {
-            index[u] = lowValue[u] = count;
-            active[u] = true;
-            count += 1;
-            S.push(u);
-            T.push(u);
-            break; // First recurse, then continue here (with the same child!).
-          } else if (active[u]) {
-            lowValue[v] = Math.min(lowValue[v], lowValue[u]) | 0;
-          }
-          if (scc[u] >= 0) {
-            // Node v is not yet assigned an scc, but once it is that scc can apparently reach scc[u].
-            sccLinks[v].push(scc[u]);
-          }
+  // Convert cycles to arrays and validate edges
+  let cycles = Array.from(cyclesSet).map((cycle) =>
+    cycle.split(",").map(Number)
+  );
+  cycles = cycles.filter((cycle) => {
+    for (let i = 0; i < cycle.length - 1; i++) {
+      const from = cycle[i];
+      const to = cycle[i + 1];
+      if (!(adj[from] || []).includes(to)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // Filter sub-cycles: reject a cycle if it is a strict sub-path of a larger cycle
+  const elementaryCycles = [];
+  cycles.sort((a, b) => a.length - b.length); // Sort by length (ascending)
+  for (let i = 0; i < cycles.length; i++) {
+    const cycle = cycles[i];
+    let isElementary = true;
+    const cycleVertices = new Set(cycle.slice(0, -1)); // Exclude the repeated end vertex
+    for (let j = 0; j < cycles.length; j++) {
+      if (i === j) continue;
+      const other = cycles[j];
+      if (other.length <= cycle.length) continue;
+
+      const otherVertices = new Set(other.slice(0, -1));
+      let isSubset = true;
+      for (const vertex of cycleVertices) {
+        if (!otherVertices.has(vertex)) {
+          isSubset = false;
+          break;
         }
-        child[v] = i; // Remember where we left off.
-      } else {
-        // If we're done iterating over the children, check whether we have an scc.
-        if (lowValue[v] === index[v]) {
-          var component = [];
-          var links = [],
-            linkCount = 0;
-          for (var i = S.length - 1; i >= 0; --i) {
-            var w = S[i];
-            active[w] = false;
-            component.push(w);
-            links.push(sccLinks[w]);
-            linkCount += sccLinks[w].length;
-            scc[w] = components.length;
-            if (w === v) {
-              S.length = i;
+      }
+      // Only reject if the smaller cycle is a strict sub-path (check edges)
+      if (isSubset) {
+        let isSubPath = false;
+        const cycleLen = cycle.length - 1;
+        for (let k = 0; k < other.length; k++) {
+          let matches = true;
+          for (let m = 0; m < cycleLen; m++) {
+            const otherIdx = (k + m) % (other.length - 1);
+            if (cycle[m] !== other[otherIdx]) {
+              matches = false;
               break;
             }
           }
-          components.push(component);
-          var allLinks = new Array(linkCount);
-          for (var i = 0; i < links.length; i++) {
-            for (var j = 0; j < links[i].length; j++) {
-              allLinks[--linkCount] = links[i][j];
-            }
+          if (matches) {
+            isSubPath = true;
+            break;
           }
-          sccAdjList.push(allLinks);
         }
-        T.pop(); // Now we're finished exploring this particular node
-      }
-    }
-  }
-
-  // Run strong connect starting from each vertex
-  for (var i = 0; i < numVertices; ++i) {
-    if (index[i] < 0) {
-      strongConnect(i);
-    }
-  }
-
-  // Compact sccAdjList
-  var newE;
-  for (var i = 0; i < sccAdjList.length; i++) {
-    var e = sccAdjList[i];
-    if (e.length === 0) continue;
-    e.sort(function (a, b) {
-      return a - b;
-    });
-    newE = [e[0]];
-    for (var j = 1; j < e.length; j++) {
-      if (e[j] !== e[j - 1]) {
-        newE.push(e[j]);
-      }
-    }
-    sccAdjList[i] = newE;
-  }
-
-  return { components: components, adjacencyList: sccAdjList };
-}
-
-function findCircuits(edges, cb) {
-  var circuits = []; // Output
-
-  var stack = [];
-  var blocked = [];
-  var B = {};
-  var Ak = [];
-  var s;
-
-  function unblock(u) {
-    blocked[u] = false;
-    if (B.hasOwnProperty(u)) {
-      Object.keys(B[u]).forEach(function (w) {
-        delete B[u][w];
-        if (blocked[w]) {
-          unblock(w);
-        }
-      });
-    }
-  }
-
-  function circuit(v) {
-    var found = false;
-
-    stack.push(v);
-    blocked[v] = true;
-
-    // L1
-    var i;
-    var w;
-    for (i = 0; i < Ak[v].length; i++) {
-      w = Ak[v][i];
-      if (w === s) {
-        output(s, stack);
-        found = true;
-      } else if (!blocked[w]) {
-        found = circuit(w);
-      }
-    }
-
-    // L2
-    if (found) {
-      unblock(v);
-    } else {
-      for (i = 0; i < Ak[v].length; i++) {
-        w = Ak[v][i];
-        var entry = B[w];
-
-        if (!entry) {
-          entry = {};
-          B[w] = entry;
-        }
-
-        entry[w] = true;
-      }
-    }
-    stack.pop();
-    return found;
-  }
-
-  function output(start, stack) {
-    var cycle = [].concat(stack).concat(start);
-    if (cb) {
-      cb(cycle);
-    } else {
-      circuits.push(cycle);
-    }
-  }
-
-  function subgraph(minId) {
-    // Remove edges with indice smaller than minId
-    for (var i = 0; i < edges.length; i++) {
-      if (i < minId || !edges[i]) edges[i] = [];
-      edges[i] = edges[i].filter(function (i) {
-        return i >= minId;
-      });
-    }
-  }
-
-  function adjacencyStructureSCC(from) {
-    // Make subgraph starting from vertex minId
-    subgraph(from);
-    var g = edges;
-
-    // Find strongly connected components using Tarjan algorithm
-    var sccs = stronglyConnectedComponents(g);
-
-    // Filter out trivial connected components (ie. made of one node)
-    var ccs = sccs.components.filter(function (scc) {
-      return scc.length > 1;
-    });
-
-    // Find least vertex
-    var leastVertex = Infinity;
-    var leastVertexComponent;
-    for (var i = 0; i < ccs.length; i++) {
-      for (var j = 0; j < ccs[i].length; j++) {
-        if (ccs[i][j] < leastVertex) {
-          leastVertex = ccs[i][j];
-          leastVertexComponent = i;
+        if (isSubPath) {
+          isElementary = false;
+          break;
         }
       }
     }
-
-    var cc = ccs[leastVertexComponent];
-
-    if (!cc) return false;
-
-    // Return the adjacency list of first component
-    var adjList = edges.map(function (l, index) {
-      if (cc.indexOf(index) === -1) return [];
-      return l.filter(function (i) {
-        return cc.indexOf(i) !== -1;
-      });
-    });
-
-    return {
-      leastVertex: leastVertex,
-      adjList: adjList,
-    };
-  }
-
-  s = 0;
-  var n = edges.length;
-  while (s < n) {
-    // find strong component with least vertex in
-    // subgraph starting from vertex `s`
-    var p = adjacencyStructureSCC(s);
-
-    // Its least vertex
-    s = p.leastVertex;
-    // Its adjacency list
-    Ak = p.adjList;
-
-    if (Ak) {
-      for (var i = 0; i < Ak.length; i++) {
-        for (var j = 0; j < Ak[i].length; j++) {
-          var vertexId = Ak[i][j];
-          blocked[+vertexId] = false;
-          B[vertexId] = {};
-        }
-      }
-      circuit(s);
-      s = s + 1;
-    } else {
-      s = n;
+    if (isElementary) {
+      elementaryCycles.push(cycle);
     }
   }
 
-  if (cb) {
-    return;
-  } else {
-    return circuits;
-  }
+  return elementaryCycles;
 }
 
 export { findCircuits };
