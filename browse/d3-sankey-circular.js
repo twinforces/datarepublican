@@ -863,6 +863,7 @@ function sankeyWithCircles() {
     const Fx1 = sourceX; // Right edge of FIDELITY trapezoid
     const Nx0 = targetX; // Left edge of target trapezoid
     if (sourceX < targetX) {
+      // this doesn't work have to switch trap sides.
       // reverse draw
       Fx1 = targetX;
       Nx0 = sourceX;
@@ -872,7 +873,7 @@ function sankeyWithCircles() {
     if (link.target.y0 < Ftop) Ftop = link.target.y0; //grab top of both
 
     // Compute offset for this link based on its position (links after it)
-    let offsetBefore = 0;
+    let offsetBefore = basePadding;
     circularLinks.forEach((otherLink, idx) => {
       const otherW = otherLink.width || otherLink.amt || 0;
       if (idx < linkIndex) {
@@ -880,30 +881,30 @@ function sankeyWithCircles() {
         offsetBefore += otherW + basePadding; // Width/height of outer links
       }
     });
-    offsetBefore -= basePadding; // reverse the last padding
+    //offsetBefore -= basePadding; // reverse the last padding
     const outerWidth = offsetBefore + W;
     // Compute outermost corners (maxX1, minX0, minY0)
     const maxX1 = Fx1 + outerWidth; // FIDELITY x1 + padding + total width + padding
     const minX0 = Nx0 - outerWidth; // c01 x - total width - padding
     const minY0 = Ftop - outerWidth; // FIDELITY y0 - total height - padding
+    const minY1 = Ftop - offsetBefore;
+    const entryBottom = Nentry0 + W;
 
     // Compute positions
-    const minY = minY0 - outerWidth; // Innermost x + width of outer links
-    const bottomY = minY0 - offsetBefore - W; // Outermost y + height of outer crossbars
     const leftX = Nx0 - outerWidth;
 
     // Forward path points (based on your suggestion)
     const p1 = { x: Fx1, y: Fexit0 }; // Exit point top (Fx1, Fexit0)
     const p2 = { x: Fx1, y: Fexit0 + W }; // down across face
-    let p3 = { x: maxX1, y: bottomY }; // bottom-right
-    let p4 = { x: maxX1, y: minY }; // Top-right corner
-    let p5 = { x: minX0, y: minY }; // top-left corner at target
-    let p6 = { x: Nx0 - outerWidth, y: Nentry0 + W }; // Bottom-left corner at target
-    const p7 = { x: Nx0, y: Nentry0 + W }; // touch target
+    let p3 = { x: maxX1, y: Fexit0 + W }; // bottom-right
+    let p4 = { x: maxX1, y: minY0 }; // Top-right corner
+    let p5 = { x: minX0, y: minY0 }; // top-left corner at target
+    let p6 = { x: minX0, y: entryBottom }; // Bottom-left corner at target
+    const p7 = { x: Nx0, y: entryBottom }; // touch target
     const p8 = { x: Nx0, y: Nentry0 }; // Touch target trap (top)
     let p9 = { x: Nx0 - offsetBefore, y: Nentry0 }; // Back from target
-    let p10 = { x: Nx0 - offsetBefore, y: minY + W }; // Up to crossbar bottom
-    let p11 = { x: maxX1 - W, y: minY + W }; // accross crossbar bottom
+    let p10 = { x: Nx0 - offsetBefore, y: minY1 }; // Up to crossbar bottom
+    let p11 = { x: maxX1 - W, y: minY1 }; // accross crossbar bottom
     let p12 = { x: maxX1 - W, y: Fexit0 }; // Down to trap level
     const p13 = { x: Fx1, y: Fexit0 }; // Touch source at start
 
