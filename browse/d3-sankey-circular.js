@@ -500,13 +500,19 @@ function sankeyWithCircles() {
     }
     const cycles = findCircuits(adjList);
 
-    const cycleEdges = new Set();
-    cycles.forEach((cycle) => {
+    // Assign a unique circularLinkID to each cycle
+    const cycleToId = new Map();
+    const cycleEdgesMap = new Map(); // Map cycle ID to its edges
+    cycles.forEach((cycle, cycleIndex) => {
+      const cycleId = cycleIndex; // Use cycle index as the unique ID
+      cycleToId.set(cycle.join(","), cycleId);
+      const cycleEdges = new Set();
       for (let i = 0; i < cycle.length - 1; i++) {
         const source = cycle[i];
         const target = cycle[i + 1];
         cycleEdges.add(`${source},${target}`);
       }
+      cycleEdgesMap.set(cycleId, cycleEdges);
     });
 
     graph.links.forEach((link) => {
@@ -516,12 +522,27 @@ function sankeyWithCircles() {
       }
       const source = link.source.index;
       const target = link.target.index;
-      if (cycleEdges.has(`${source},${target}`)) {
+      let foundCycleId = null;
+      for (const [cycleId, edges] of cycleEdgesMap) {
+        if (edges.has(`${source},${target}`)) {
+          foundCycleId = cycleId;
+          break;
+        }
+      }
+      if (foundCycleId !== null) {
         link.circular = true;
-        link.circularLinkID = Math.max(source, target);
+        link.circularLinkID = foundCycleId; // Assign the cycle ID
       } else {
         link.circular = false;
+        link.circularLinkID = undefined;
       }
+    });
+
+    console.log("Links after identifyCircles:");
+    graph.links.forEach((link) => {
+      console.log(
+        `Link ${link.source.id} -> ${link.target.id}: circular=${link.circular}, circularLinkID=${link.circularLinkID}`
+      );
     });
   }
 
@@ -860,8 +881,8 @@ function sankeyWithCircles() {
     const { sourceX, targetX } = link.circularPathData;
     const Fexit0 = link.circularPathData.sourceY; // Starting y-position
     const Nentry0 = link.target.y0; // Top of target trapezoid
-    const Fx1 = sourceX; // Right edge of FIDELITY trapezoid
-    const Nx0 = targetX; // Left edge of target trapezoid
+    let Fx1 = sourceX; // Right edge of FIDELITY trapezoid
+    let Nx0 = targetX; // Left edge of target trapezoid
     if (sourceX < targetX) {
       // this doesn't work have to switch trap sides.
       // reverse draw
