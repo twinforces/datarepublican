@@ -849,25 +849,24 @@ function renderFocusedSankey(
     .exit()
     .transition()
     .duration(ANIM_LINK)
-    .attr("stroke-width", 0)
+    .attr("fill-opacity", 0) // Fade out the fill
     .remove();
 
   const circularLinkEnter = circularLink
     .enter()
-    .append("path")
+    .append("polygon") // Use polygon instead of path
     .attr("class", "circular-link")
-    .attr("d", (d) => d.path) // Use the precomputed path from createCircularPathString
-    .attr("stroke", "rgba(255, 105, 180, 0.5)") // Translucent pink
-    .style("stroke-opacity", "0.5")
-    .attr("stroke-width", 0);
+    .attr("points", (d) => d.path) // Use the precomputed points from createCircularPathString
+    .attr("fill", "rgba(255, 105, 180, 0.5)") // Translucent pink fill
+    .attr("fill-opacity", 0); // Start with 0 opacity for transition
 
   circularLink
     .merge(circularLinkEnter)
     .transition()
     .duration(ANIM_LINK)
-    .attr("d", (d) => d.path)
-    .attr("stroke", "rgba(255, 105, 180, 0.5)")
-    .attr("stroke-width", (d) => d.width || 1);
+    .attr("points", (d) => d.path)
+    .attr("fill", "rgba(255, 105, 180, 0.5)")
+    .attr("fill-opacity", 0.5); // Match the previous stroke-opacity
 
   circularLinkEnter
     .append("title")
