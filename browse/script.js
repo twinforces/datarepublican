@@ -703,6 +703,27 @@ function generateGraph() {
   $("#loading").hide();
 }
 
+function adjustCircularLinks(graph) {
+  let circularLinkData = graph.links.filter((l) => l.circular);
+  // adjust circular links for trapezoid
+  for (const l of circularLinkData) {
+    l.y0 = computeLinkY(
+      l.source,
+      l.source.sourceLinks.indexOf(l),
+      l.source.sourceLinks,
+      "outflowHeight",
+      true
+    );
+    l.y1 = computeLinkY(
+      l.target,
+      l.target.targetLinks.indexOf(l),
+      l.target.targetLinks,
+      "inflowHeight",
+      false
+    );
+  }
+}
+
 function renderFocusedSankey(
   g,
   sankey,
@@ -730,6 +751,7 @@ function renderFocusedSankey(
 
   const scale = calculateScale(graph, width, height);
   calculateNodePositions(graph.nodes, scale, height);
+  adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
 
   if (!previousData) {
@@ -831,6 +853,36 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
+  // Function to extract points from an SVG path string
+  function extractPointsFromPath(pathString) {
+    const points = [];
+    let currentPoint = { x: 0, y: 0 };
+    const commands = pathString.split(/(?=[MLAZ])/); // Split on M, L, A, Z
+
+    commands.forEach((command) => {
+      const type = command[0];
+      const values = command
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(parseFloat);
+
+      if (type === "M") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "L") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "A") {
+        // For arcs, the endpoint is the last two values (x, y)
+        currentPoint = { x: values[5], y: values[6] };
+        points.push({ ...currentPoint });
+      }
+      // Ignore Z (close path) for now since our paths are open
+    });
+
+    return points;
+  } // Circular links
   // Circular links
   const circularLinkGroup = masterGroup
     .selectAll("g.circular-links")
@@ -840,7 +892,7 @@ function renderFocusedSankey(
     .attr("fill", "none")
     .attr("stroke-opacity", 0.5);
 
-  const circularLinks = graph.links.filter((d) => d.circular);
+  let circularLinks = graph.links.filter((d) => d.circular);
   const circularLink = circularLinkGroup
     .selectAll(".circular-link")
     .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
@@ -849,24 +901,48 @@ function renderFocusedSankey(
     .exit()
     .transition()
     .duration(ANIM_LINK)
-    .attr("fill-opacity", 0) // Fade out the fill
+    .attr("fill-opacity", 0)
     .remove();
 
   const circularLinkEnter = circularLink
     .enter()
-    .append("polygon") // Use polygon instead of path
+    .append("path")
     .attr("class", "circular-link")
-    .attr("points", (d) => d.path) // Use the precomputed points from createCircularPathString
-    .attr("fill", "rgba(255, 105, 180, 0.5)") // Translucent pink fill
-    .attr("fill-opacity", 0); // Start with 0 opacity for transition
+    .attr("d", (d) => d.path)
+    .attr("fill", "none")
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", "0.5")
+    .attr("stroke-width", (d) => d.width);
 
   circularLink
     .merge(circularLinkEnter)
     .transition()
     .duration(ANIM_LINK)
-    .attr("points", (d) => d.path)
-    .attr("fill", "rgba(255, 105, 180, 0.5)")
-    .attr("fill-opacity", 0.5); // Match the previous stroke-opacity
+    .attr("d", (d) => d.path)
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", 0.5);
+
+  // Add debug points for each circular link
+  circularLink.merge(circularLinkEnter).each(function (d) {
+    const path = d.path;
+    const points = extractPointsFromPath(path);
+
+    // Append circles for each point within the same group
+    d3.select(this.parentNode)
+      .selectAll("circle.debug-point-" + d.source.id + "-" + d.target.id)
+      .data(points)
+      .enter()
+      .append("circle")
+      .attr("class", "debug-point-" + d.source.id + "-" + d.target.id)
+      .attr("cx", (p) => p.x)
+      .attr("cy", (p) => p.y)
+      .attr("r", 3)
+      .attr("fill", "black")
+      .attr("stroke", "white")
+      .attr("stroke-width", 1)
+      .append("title")
+      .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
+  });
 
   circularLinkEnter
     .append("title")
