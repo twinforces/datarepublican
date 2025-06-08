@@ -6,7 +6,12 @@ import {
   BrowseViewModel,
 } from "./models.js";
 
-import { sankeyWithCircles, adjustCircularLink } from "./d3-sankey-circular.js";
+import {
+  sankeyWithCircles,
+  adjustCircularLink,
+  generateOctagonPath,
+  generateTrapezoidPath,
+} from "./d3-sankey-circular.js";
 
 let svg = null;
 let zoom = null;
@@ -272,31 +277,6 @@ function calculateScale(graph, width, height) {
   const layoutWidth = Math.max(maxX - minX, 1);
   const layoutHeight = Math.max(maxY - minY, 1);
   return Math.min(width / layoutWidth, height / layoutHeight);
-}
-
-function generateTrapezoidPath(d) {
-  const midY = (d.y0 + d.y1) / 2;
-  const y0In = midY - d.inflowHeight / 2;
-  const y1In = midY + d.inflowHeight / 2;
-  const y0Out = midY - d.outflowHeight / 2;
-  const y1Out = midY + d.outflowHeight / 2;
-  return `M${d.x0},${y0In} L${d.x0},${y1In} L${d.x1},${y1Out} L${d.x1},${y0Out} Z`;
-}
-
-function generateOctagonPath(d) {
-  const radius = d.inflowHeight / 2 || 10;
-  const cx = d.x0;
-  const cy = (d.y0 + d.y1) / 2;
-  const r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
-
-  const c = Math.sqrt(2 + Math.SQRT2) / 2;
-  const s = Math.sqrt(2 - Math.SQRT2) / 2;
-
-  return `M${cx + r * c},${cy + r * s} L${cx + r * s},${cy + r * c} L${
-    cx - r * s
-  },${cy + r * c} L${cx - r * c},${cy + r * s} L${cx - r * c},${cy - r * s} L${
-    cx - r * s
-  },${cy - r * c} L${cx + r * s},${cy - r * c} L${cx + r * c},${cy - r * s} Z`;
 }
 
 function generatePlusPath(d) {

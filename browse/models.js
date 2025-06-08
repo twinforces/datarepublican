@@ -573,6 +573,8 @@ class BrowseViewModel {
   clickNode(event, charity, refreshCallback) {
     console.log(`Clicked node ${charity.id} ${charity.name}`);
     //charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
+    charity.expandOutflows(NEXT_REVEAL);
+    charity.expandInflows(NEXT_REVEAL);
     this.computeImpliedVisibility(charity, true, true); // Compute connected visibility
     this.buildSankeyData(); // Update the graph data
     if (refreshCallback) refreshCallback(); // Always refresh
@@ -925,6 +927,7 @@ class Charity {
 
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
+    if (!ein) return null;
     const parts = ein.split(":");
     return Charity.charityLookup[parts[0]];
   }
