@@ -572,7 +572,7 @@ class BrowseViewModel {
    */
   clickNode(event, charity, refreshCallback) {
     console.log(`Clicked node ${charity.id} ${charity.name}`);
-    charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
+    //charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
     this.computeImpliedVisibility(charity, true, true); // Compute connected visibility
     this.buildSankeyData(); // Update the graph data
     if (refreshCallback) refreshCallback(); // Always refresh
