@@ -721,7 +721,7 @@ function adjustCircularLinks(graph) {
       "inflowHeight",
       false
     );
-    adjustCircularLink(graph, l);
+    adjustCircularLink(l);
   }
 }
 
