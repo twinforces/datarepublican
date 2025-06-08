@@ -6,7 +6,7 @@ import {
   BrowseViewModel,
 } from "./models.js";
 
-import { sankeyWithCircles } from "./d3-sankey-circular.js";
+import { sankeyWithCircles, adjustCircularLink } from "./d3-sankey-circular.js";
 
 let svg = null;
 let zoom = null;
@@ -607,7 +607,7 @@ function generateGraph() {
     .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
-    //.linkSort(compareLinks)
+    .linkSort(compareLinks)
     .nodeAlign(d3.sankeyCenter)
     .nodeSort(compareCharities)
     .size([width - 100, height - 100]);
@@ -721,6 +721,7 @@ function adjustCircularLinks(graph) {
       "inflowHeight",
       false
     );
+    adjustCircularLink(graph, l);
   }
 }
 
@@ -922,7 +923,7 @@ function renderFocusedSankey(
     .attr("stroke", "rgba(255, 105, 180, 0.5)")
     .attr("stroke-opacity", 0.5);
 
-  // Add debug points for each circular link
+  /*// Add debug points for each circular link
   circularLink.merge(circularLinkEnter).each(function (d) {
     const path = d.path;
     const points = extractPointsFromPath(path);
@@ -942,7 +943,7 @@ function renderFocusedSankey(
       .attr("stroke-width", 1)
       .append("title")
       .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
-  });
+  });*/
 
   circularLinkEnter
     .append("title")
