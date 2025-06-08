@@ -446,6 +446,7 @@ class BrowseViewModel {
     const charitiesTotal = Object.values(Charity.charityLookup).length;
     let charitiesProcessed = 0;
 
+    return; // now using circular sankey module
     updateStatus(
       "<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>"
     );
@@ -571,7 +572,9 @@ class BrowseViewModel {
    */
   clickNode(event, charity, refreshCallback) {
     console.log(`Clicked node ${charity.id} ${charity.name}`);
-    charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
+    //charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
+    charity.expandOutflows(NEXT_REVEAL);
+    charity.expandInflows(NEXT_REVEAL);
     this.computeImpliedVisibility(charity, true, true); // Compute connected visibility
     this.buildSankeyData(); // Update the graph data
     if (refreshCallback) refreshCallback(); // Always refresh
@@ -668,15 +671,17 @@ class BrowseViewModel {
     inflowsOnly = false,
     outflowsOnly = false
   ) {
-    /** DEAD CODE This was resetting everything. I don't think
-     * its necessary, except when rootCharity is null
-     * Object.values(Charity.charityLookup).forEach((c) => {
-      c.impliedVisible = c.desiredVisible;
+    Object.values(Charity.charityLookup).forEach((c) => {
+      if (c.desiredVisible) {
+        c.impliedVisible = 1;
+      } else {
+        c.impliedVisible = 0;
+      }
     });
     Object.values(Grant.grantLookup).forEach((g) => {
       g.impliedVisible = g.desiredVisible;
     });
-    */
+
     /**
      * Ok, so two cases: rootCharity is null, loop over desiredCharities and prop
      * the implied up and down based on existing state. i.e. if no grants are
@@ -922,6 +927,7 @@ class Charity {
 
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
+    if (!ein) return null;
     const parts = ein.split(":");
     return Charity.charityLookup[parts[0]];
   }
@@ -1010,7 +1016,7 @@ class Charity {
     this.loopbackgrants = loopbackgrants;
     this.loopforwardgrants = loopforwardgrants;
     this._desiredVisible = desiredVisible;
-    this._impliedVisible = false;
+    this._impliedVisible = 0;
     this.isOrganized = isOrganized;
     this.isGov = false;
     this.expanded = false;
@@ -1064,18 +1070,19 @@ class Charity {
   set impliedVisible(value) {
     if (this._impliedVisible != value) {
       this._impliedVisible = value;
+      this.isOrganized = false;
       if (!value) {
-        if (this.filer && typeof this.filer.impliedVisible === "number") {
+        if (this.filer) {
           this.filer.impliedVisible--;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
+        if (this.grantee) {
           this.grantee.impliedVisible--;
         }
       } else {
-        if (this.filer && typeof this.filer.impliedVisible === "number") {
+        if (this.filer) {
           this.filer.impliedVisible++;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
+        if (this.grantee) {
           this.grantee.impliedVisible++;
         }
       }
@@ -1306,6 +1313,7 @@ class Charity {
     if (this._isOrganized !== value) {
       this._valueCache = {};
       this._isOrganized = value;
+      this.clearValueCache(); // force regen
     }
   }
 
@@ -1355,6 +1363,10 @@ class Charity {
       this.isOrganized = false;
       this._origIn += grant.amt;
     }
+  }
+
+  clearValueCache() {
+    this._valueCache = {};
   }
 
   /** Part of organizing is keeping the grants sorted */
@@ -1435,7 +1447,7 @@ class Charity {
     if (!count || count == "0") return;
     const grantsToReveal = this.invisibleGrantsIn.slice(0, count); // count largest
     grantsToReveal.forEach((grant) => {
-      grant.impliedVisible++; // propogates both directions
+      grant.desiredVisible = true; // propogates both directions
     });
     viewModel.resetEIN(this.ein);
 
@@ -1470,7 +1482,7 @@ class Charity {
       `Expanding ${grantsToReveal.length} outflows for ${this.id} (total invisible: ${this.invisibleGrants.length})`
     );
     grantsToReveal.forEach((grant) => {
-      grant.impliedVisible = true;
+      grant.desiredVisible = true;
       console.log(
         `  Grant ${grant.id} set visible, grantee ${grant.grantee.id} set visible`
       );
@@ -1743,17 +1755,17 @@ class Grant {
    */
   set isVisible(value) {
     if (value) {
-      if (this.filer && typeof this.filer.impliedVisible === "number") {
+      if (this.filer) {
         this.filer.impliedVisible++;
       }
-      if (this.grantee && typeof this.grantee.impliedVisible === "number") {
+      if (this.grantee) {
         this.grantee.impliedVisible++;
       }
     } else {
-      if (this.filer && typeof this.filer.impliedVisible === "number") {
+      if (this.filer) {
         this.filer.impliedVisible--;
       }
-      if (this.grantee && typeof this.grantee.impliedVisible === "number") {
+      if (this.grantee) {
         this.grantee.impliedVisible--;
       }
     }
@@ -1786,17 +1798,17 @@ class Grant {
     if (this._impliedVisible != value) {
       this._impliedVisible = value;
       if (!value) {
-        if (this.filer && typeof this.filer.impliedVisible === "number") {
+        if (this.filer) {
           this.filer.impliedVisible--;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
+        if (this.grantee) {
           this.grantee.impliedVisible--;
         }
       } else {
-        if (this.filer && typeof this.filer.impliedVisible === "number") {
+        if (this.filer) {
           this.filer.impliedVisible++;
         }
-        if (this.grantee && typeof this.grantee.impliedVisible === "number") {
+        if (this.grantee) {
           this.grantee.impliedVisible++;
         }
       }

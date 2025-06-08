@@ -6,6 +6,13 @@ import {
   BrowseViewModel,
 } from "./models.js";
 
+import {
+  sankeyWithCircles,
+  adjustCircularLink,
+  generateOctagonPath,
+  generateTrapezoidPath,
+} from "./d3-sankey-circular.js";
+
 let svg = null;
 let zoom = null;
 
@@ -71,7 +78,7 @@ $(document).ready(function () {
       $btn.text("Hide details");
     } else {
       $list.height(0);
-      $btn.text("How it works");
+      $btn.text("How it works (& why you should use it)");
     }
   });
 
@@ -114,7 +121,7 @@ function addEINFromInput() {
   viewModel.addToShowList(val);
   $("#einShowInput").val("");
   renderActiveEINs();
-  Charity.placeNode(val);
+  charity.place();
   updateQueryParams();
   generateGraph();
 }
@@ -270,31 +277,6 @@ function calculateScale(graph, width, height) {
   const layoutWidth = Math.max(maxX - minX, 1);
   const layoutHeight = Math.max(maxY - minY, 1);
   return Math.min(width / layoutWidth, height / layoutHeight);
-}
-
-function generateTrapezoidPath(d) {
-  const midY = (d.y0 + d.y1) / 2;
-  const y0In = midY - d.inflowHeight / 2;
-  const y1In = midY + d.inflowHeight / 2;
-  const y0Out = midY - d.outflowHeight / 2;
-  const y1Out = midY + d.outflowHeight / 2;
-  return `M${d.x0},${y0In} L${d.x0},${y1In} L${d.x1},${y1Out} L${d.x1},${y0Out} Z`;
-}
-
-function generateOctagonPath(d) {
-  const radius = d.inflowHeight / 2 || 10;
-  const cx = d.x0;
-  const cy = (d.y0 + d.y1) / 2;
-  const r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
-
-  const c = Math.sqrt(2 + Math.SQRT2) / 2;
-  const s = Math.sqrt(2 - Math.SQRT2) / 2;
-
-  return `M${cx + r * c},${cy + r * s} L${cx + r * s},${cy + r * c} L${
-    cx - r * s
-  },${cy + r * c} L${cx - r * c},${cy + r * s} L${cx - r * c},${cy - r * s} L${
-    cx - r * s
-  },${cy - r * c} L${cx + r * s},${cy - r * c} L${cx + r * c},${cy - r * s} Z`;
 }
 
 function generatePlusPath(d) {
@@ -526,7 +508,35 @@ function bindEvents(g) {
   });
 }
 
-// [Previous imports and functions unchanged...]
+function zoomToFit() {
+  const g = svg.select("g.main"); // Select g.main dynamically
+  const bounds = g.node().getBBox();
+  if (
+    !isFinite(bounds.width) ||
+    bounds.width <= 0 ||
+    !isFinite(bounds.height) ||
+    bounds.height <= 0
+  ) {
+    console.warn("Invalid bounds for zoom:", bounds);
+    return;
+  }
+  const container = document.getElementById("graph-container");
+  const width = container.offsetWidth;
+  const height = container.offsetHeight || window.innerHeight * 0.7;
+  const dx = bounds.x;
+  const dy = bounds.y;
+  const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+  svg
+    .transition()
+    .duration(750)
+    .call(
+      zoom.transform,
+      d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(scale)
+        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+    );
+}
 
 function generateGraph() {
   if (!viewModel.dataReady) {
@@ -573,9 +583,8 @@ function generateGraph() {
     .attr("class", "main")
     .attr("transform", "translate(50, 50)");
 
-  const sankey = d3
-    .sankey()
-    .nodeId((d) => d.id)
+  const sankey = sankeyWithCircles()
+    .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
     .linkSort(compareLinks)
@@ -667,10 +676,33 @@ function generateGraph() {
       );
   }, 1000);*/
 
+  zoomToFit();
   renderActiveEINs();
   renderActiveKeywords();
   renderHideEINs();
   $("#loading").hide();
+}
+
+function adjustCircularLinks(graph) {
+  let circularLinkData = graph.links.filter((l) => l.circular);
+  // adjust circular links for trapezoid
+  for (const l of circularLinkData) {
+    l.y0 = computeLinkY(
+      l.source,
+      l.source.sourceLinks.indexOf(l),
+      l.source.sourceLinks,
+      "outflowHeight",
+      true
+    );
+    l.y1 = computeLinkY(
+      l.target,
+      l.target.targetLinks.indexOf(l),
+      l.target.targetLinks,
+      "inflowHeight",
+      false
+    );
+    adjustCircularLink(l);
+  }
 }
 
 function renderFocusedSankey(
@@ -689,6 +721,7 @@ function renderFocusedSankey(
   $("#downloadBtn").hide();
 
   let currentData = viewModel.buildSankeyData();
+
   savePreviousState(currentData);
 
   const sankeyWidth = width - 100;
@@ -699,6 +732,7 @@ function renderFocusedSankey(
 
   const scale = calculateScale(graph, width, height);
   calculateNodePositions(graph.nodes, scale, height);
+  adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
 
   if (!previousData) {
@@ -754,14 +788,13 @@ function renderFocusedSankey(
     .attr("class", "main")
     .attr("transform", `translate(50, 50) scale(${scale})`);
 
-  // No local zoom definition here—rely on global zoom from generateGraph
-
   const masterGroup = g
     .selectAll(".graph-group")
     .data([0])
     .join("g")
     .attr("class", "graph-group");
 
+  // Regular (non-circular) links
   const linkGroup = masterGroup
     .selectAll("g.links")
     .data([0])
@@ -771,9 +804,10 @@ function renderFocusedSankey(
     .attr("stroke-opacity", 1)
     .style("mix-blend-mode", "multiply");
 
+  const regularLinks = graph.links.filter((d) => !d.circular);
   const link = linkGroup
     .selectAll(".link")
-    .data(graph.links, (d) => `${d.source.id}-${d.target.id}`);
+    .data(regularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   link.exit().transition().duration(ANIM_LINK).attr("stroke-width", 0).remove();
 
@@ -800,6 +834,107 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
+  // Function to extract points from an SVG path string
+  function extractPointsFromPath(pathString) {
+    const points = [];
+    let currentPoint = { x: 0, y: 0 };
+    const commands = pathString.split(/(?=[MLAZ])/); // Split on M, L, A, Z
+
+    commands.forEach((command) => {
+      const type = command[0];
+      const values = command
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(parseFloat);
+
+      if (type === "M") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "L") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "A") {
+        // For arcs, the endpoint is the last two values (x, y)
+        currentPoint = { x: values[5], y: values[6] };
+        points.push({ ...currentPoint });
+      }
+      // Ignore Z (close path) for now since our paths are open
+    });
+
+    return points;
+  } // Circular links
+  // Circular links
+  const circularLinkGroup = masterGroup
+    .selectAll("g.circular-links")
+    .data([0])
+    .join("g")
+    .attr("class", "circular-links")
+    .attr("fill", "none")
+    .attr("stroke-opacity", 0.5);
+
+  let circularLinks = graph.links.filter((d) => d.circular);
+  const circularLink = circularLinkGroup
+    .selectAll(".circular-link")
+    .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
+
+  circularLink
+    .exit()
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("fill-opacity", 0)
+    .remove();
+
+  const circularLinkEnter = circularLink
+    .enter()
+    .append("path")
+    .attr("class", "circular-link")
+    .attr("d", (d) => d.path)
+    .attr("fill", "none")
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", "0.5")
+    .attr("stroke-width", (d) => d.width);
+
+  circularLink
+    .merge(circularLinkEnter)
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("d", (d) => d.path)
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", 0.5);
+
+  /*// Add debug points for each circular link
+  circularLink.merge(circularLinkEnter).each(function (d) {
+    const path = d.path;
+    const points = extractPointsFromPath(path);
+
+    // Append circles for each point within the same group
+    d3.select(this.parentNode)
+      .selectAll("circle.debug-point-" + d.source.id + "-" + d.target.id)
+      .data(points)
+      .enter()
+      .append("circle")
+      .attr("class", "debug-point-" + d.source.id + "-" + d.target.id)
+      .attr("cx", (p) => p.x)
+      .attr("cy", (p) => p.y)
+      .attr("r", 3)
+      .attr("fill", "black")
+      .attr("stroke", "white")
+      .attr("stroke-width", 1)
+      .append("title")
+      .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
+  });*/
+
+  circularLinkEnter
+    .append("title")
+    .text(
+      (d) =>
+        `${d.source.name} → ${d.target.name}\n$${formatNumber(
+          d.amt
+        )} (Circular)`
+    );
+
+  // Node rendering (unchanged)
   const nodeGroup = masterGroup
     .selectAll("g.nodes")
     .data([0])
@@ -920,6 +1055,7 @@ function renderFocusedSankey(
     .attr("d", (d) =>
       generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
     );
+
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
       (d) =>

@@ -1460,6 +1460,9 @@ body > div#main-content {
 .mb-4 {
   margin-bottom: 1rem;
 }
+.mb-5 {
+  margin-bottom: 1.25rem;
+}
 .mb-6 {
   margin-bottom: 1.5rem;
 }
@@ -1489,6 +1492,9 @@ body > div#main-content {
 }
 .mt-2 {
   margin-top: 0.5rem;
+}
+.mt-3 {
+  margin-top: 0.75rem;
 }
 .mt-4 {
   margin-top: 1rem;
@@ -3094,6 +3100,10 @@ body > div#main-content {
 
   .md\:min-h-\[50vh\] {
     min-height: 50vh;
+  }
+
+  .md\:w-60 {
+    width: 15rem;
   }
 
   .md\:w-64 {
