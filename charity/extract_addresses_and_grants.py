@@ -269,12 +269,15 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
     """Process rows to extract addresses and grants."""
     zip_cache = {}
     initialize_thread_local_counters()
+    total_skipped = 0
 
     def process_row(row):
+        nonlocal total_skipped
         xml_path = row.get('xml_name', '')
         if not xml_path:
             log_error("No xml_name for EIN={}, skipping", row['filer_ein'], ein=row['filer_ein'])
             file_counter_local.skipped += 1
+            total_skipped += 1
             return
         try:
             parts = xml_path.split('/')
@@ -284,6 +287,7 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
                     xml_path, row['filer_ein'], ein=row['filer_ein']
                 )
                 file_counter_local.skipped += 1
+                total_skipped += 1
                 return
             xml_filename = parts[-1]
             if xml_filename not in zip_index:
@@ -292,6 +296,7 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
                     xml_filename, row['filer_ein'], ein=row['filer_ein']
                 )
                 file_counter_local.skipped += 1
+                total_skipped += 1
                 return
             zip_path, internal_path = zip_index[xml_filename]
             zip_year_match = re.match(r'.*(\d{4})', os.path.basename(zip_path))
@@ -301,6 +306,7 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
                     zip_path, row['filer_ein'], ein=row['filer_ein']
                 )
                 file_counter_local.skipped += 1
+                total_skipped += 1
                 return
             zip_year = int(zip_year_match.group(1))
             if zip_year < start_year or zip_year > end_year + 1:
@@ -310,6 +316,7 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
                     ein=row['filer_ein']
                 )
                 file_counter_local.skipped += 1
+                total_skipped += 1
                 return
             if zip_path not in zip_cache:
                 zip_cache[zip_path] = zipfile.ZipFile(zip_path, 'r')
@@ -322,6 +329,7 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
                 xml_path, row['filer_ein'], str(e), exc_info=True, ein=row['filer_ein']
             )
             file_counter_local.skipped += 1
+            total_skipped += 1
 
     with ThreadPoolExecutor(max_workers=worker_threads) as executor:
         futures = [executor.submit(process_row, row) for row in rows]
@@ -335,6 +343,8 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
     
     for zip_file in zip_cache.values():
         zip_file.close()
+    
+    log_error("Total rows skipped: {}", total_skipped)
 
 def tsv_writer_thread(output_dir, writer_id):
     """Write addresses and grants to TSV files."""
@@ -345,6 +355,7 @@ def tsv_writer_thread(output_dir, writer_id):
     address_buffer = []
     grant_buffer = []
     write_buffer_size = 5000
+    item = None  # Initialize to avoid UnboundLocalError
 
     while True:
         try:
@@ -387,7 +398,7 @@ def tsv_writer_thread(output_dir, writer_id):
         except Exception as e:
             log_error("Error in TSV writer {}: {}", writer_id, str(e), exc_info=True)
         finally:
-            if item:
+            if item is not None:
                 tsv_write_queue.task_done()
     
     # Final flush
