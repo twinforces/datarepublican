@@ -499,60 +499,60 @@ video {
 [hidden]:where(:not([hidden="until-found"])) {
   display: none;
 }
-.\!container {
-  width: 100% !important;
-}
 .container {
   width: 100%;
 }
+.\!container {
+  width: 100% !important;
+}
 @media (min-width: 640px) {
-
-  .\!container {
-    max-width: 640px !important;
-  }
 
   .container {
     max-width: 640px;
   }
-}
-@media (min-width: 768px) {
 
   .\!container {
-    max-width: 768px !important;
+    max-width: 640px !important;
   }
+}
+@media (min-width: 768px) {
 
   .container {
     max-width: 768px;
   }
-}
-@media (min-width: 1024px) {
 
   .\!container {
-    max-width: 1024px !important;
+    max-width: 768px !important;
   }
+}
+@media (min-width: 1024px) {
 
   .container {
     max-width: 1024px;
   }
-}
-@media (min-width: 1280px) {
 
   .\!container {
-    max-width: 1280px !important;
+    max-width: 1024px !important;
   }
+}
+@media (min-width: 1280px) {
 
   .container {
     max-width: 1280px;
   }
+
+  .\!container {
+    max-width: 1280px !important;
+  }
 }
 @media (min-width: 1536px) {
 
-  .\!container {
-    max-width: 1536px !important;
-  }
-
   .container {
     max-width: 1536px;
+  }
+
+  .\!container {
+    max-width: 1536px !important;
   }
 }
 .prose {
@@ -1908,9 +1908,6 @@ body > div#main-content {
 }
 .whitespace-nowrap {
   white-space: nowrap;
-}
-.whitespace-pre-wrap {
-  white-space: pre-wrap;
 }
 .text-wrap {
   text-wrap: wrap;
