@@ -459,8 +459,12 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         for xpath in FILER_EIN_XPATHS:
             elem = xpath(root)
             if elem:
-                filer_ein = elem[0].text.strip()
-                break
+                raw_ein = elem[0].text.strip()
+                try:
+                    filer_ein = f"{int(raw_ein):09d}"
+                except ValueError:
+                    filer_ein = "Unknown"
+                 break                break
         filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
         if filer_ein == "Unknown":
