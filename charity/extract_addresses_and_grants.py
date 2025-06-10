@@ -51,8 +51,11 @@ verbose = False
 quiet = False
 total_addresses = 0
 total_grants = 0
+total_queue_puts = 0
+total_tasks_done = 0
 tsv_write_queue = queue.Queue(maxsize=20000)
 done_queuing = False
+queue_lock = threading.Lock()
 
 # Logging setup
 def setup_logging(output_dir):
@@ -119,7 +122,6 @@ def build_zip_index(zip_dir, start_year, end_year):
 def read_tsv_files(source_dir, start_year, end_year):
     """Read TSV files including charity_latest.tsv and collect rows with xml_name."""
     rows = []
-    # Look for charity_latest.tsv and charities_*.tsv
     tsv_patterns = [
         os.path.join(source_dir, "charity_latest.tsv"),
         os.path.join(source_dir, "charities_*.tsv")
@@ -140,7 +142,6 @@ def read_tsv_files(source_dir, start_year, end_year):
             year = int(match.group(2))
             if not (start_year <= year <= end_year):
                 continue
-        # Accept charity_latest.tsv without year check
         try:
             with open(tsv_file, 'r', encoding='utf-8') as f:
                 header = f.readline().strip().split('\t')
@@ -165,12 +166,9 @@ def canonicalize_address(address_components):
     """Canonicalize address using pypostal."""
     if not address_components:
         return ""
-    # Combine address parts
     address_str = " ".join(comp for comp in address_components if comp)
     try:
-        # Parse address
         parsed = parse_address(address_str)
-        # Normalize address
         normalized = expand_address(address_str)
         canonical = normalized[0] if normalized else address_str
         return canonical
@@ -180,7 +178,7 @@ def canonicalize_address(address_components):
 
 def parse_address_and_grants(xml_content, xml_filename, row, zip_index):
     """Parse address and grants (for 990PF) from XML file."""
-    global total_addresses, total_grants
+    global total_addresses, total_grants, total_queue_puts
     try:
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
@@ -198,7 +196,9 @@ def parse_address_and_grants(xml_content, xml_filename, row, zip_index):
                 'filer_ein': row['filer_ein'],
                 'canonical_address': canonical_address
             }
-            tsv_write_queue.put(('address', address_entry))
+            with queue_lock:
+                tsv_write_queue.put(('address', address_entry))
+                total_queue_puts += 1
             total_addresses += 1
             if verbose:
                 log_error(
@@ -226,7 +226,6 @@ def parse_address_and_grants(xml_content, xml_filename, row, zip_index):
                         try:
                             grant_amt = int(float(amount_elem[0].text.strip()))
                             if grant_amt > 0:
-                                # If no EIN, use address as identifier
                                 if grant_ein == "Unknown" and address_elems:
                                     address_str = " ".join(
                                         elem.text.strip() for elem in address_elems if elem.text
@@ -253,8 +252,10 @@ def parse_address_and_grants(xml_content, xml_filename, row, zip_index):
                                 ein=row['filer_ein']
                             )
             if grants:
-                for grant in grants:
-                    tsv_write_queue.put(('grant', grant))
+                with queue_lock:
+                    for grant in grants:
+                        tsv_write_queue.put(('grant', grant))
+                        total_queue_puts += 1
                 total_grants += len(grants)
         
         return True
@@ -348,6 +349,7 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year):
 
 def tsv_writer_thread(output_dir, writer_id):
     """Write addresses and grants to TSV files."""
+    global total_tasks_done
     address_file = os.path.join(output_dir, "charity_addresses.tsv")
     grant_file = os.path.join(output_dir, "inferred_grants.tsv")
     address_writer = None
@@ -355,7 +357,6 @@ def tsv_writer_thread(output_dir, writer_id):
     address_buffer = []
     grant_buffer = []
     write_buffer_size = 5000
-    item = None  # Initialize to avoid UnboundLocalError
 
     while True:
         try:
@@ -391,15 +392,19 @@ def tsv_writer_thread(output_dir, writer_id):
                     grant_writer.flush()
                     log_error("Flushed {} grant rows by writer {}", len(grant_buffer), writer_id)
                     grant_buffer = []
+            
+            # Mark task as done only after successful processing
+            with queue_lock:
+                tsv_write_queue.task_done()
+                total_tasks_done += 1
+                if verbose:
+                    log_error("Task done for item type {} by writer {}", type_, writer_id)
         except queue.Empty:
             if done_queuing and tsv_write_queue.empty():
                 log_error("TSV writer thread {} exiting, queue empty", writer_id)
                 break
         except Exception as e:
             log_error("Error in TSV writer {}: {}", writer_id, str(e), exc_info=True)
-        finally:
-            if item is not None:
-                tsv_write_queue.task_done()
     
     # Final flush
     if address_buffer and not address_writer:
@@ -426,7 +431,7 @@ def tsv_writer_thread(output_dir, writer_id):
         grant_writer.close()
 
 def main():
-    global verbose, quiet, done_queuing, total_addresses, total_grants
+    global verbose, quiet, done_queuing, total_addresses, total_grants, total_queue_puts, total_tasks_done
     parser = argparse.ArgumentParser(
         description="Extract addresses and grants from IRS 990 XML files."
     )
@@ -487,28 +492,24 @@ def main():
         os.makedirs(output_dir)
 
     listener = setup_logging(output_dir)
-    writer_threads_list = []  # Initialize to avoid UnboundLocalError
+    writer_threads_list = []
 
     try:
-        # Build ZIP index
         zip_index = build_zip_index(zip_dir, start_year, end_year)
         if not zip_index:
             print("No ZIP files found in {} for years {}-{}", zip_dir, start_year, end_year + 1)
             return
 
-        # Read TSV files
         rows = read_tsv_files(source_dir, start_year, end_year)
         if not rows:
             print("No valid TSV files found in {}. Ensure 'charity_latest.tsv' or 'charities_<org_type>_<year>.tsv' exist.", source_dir)
             return
 
-        # Start TSV writer threads
         for i in range(writer_threads):
             thread = threading.Thread(target=tsv_writer_thread, args=(output_dir, f"writer-{i}"))
             thread.start()
             writer_threads_list.append(thread)
 
-        # Process rows
         process_rows(rows, worker_threads, zip_index, start_year, end_year)
 
     finally:
@@ -518,9 +519,11 @@ def main():
         for thread in writer_threads_list:
             thread.join()
         listener.stop()
+        log_error("Queue summary: {} items put, {} tasks done", total_queue_puts, total_tasks_done)
 
     print(f"Total addresses extracted: {total_addresses}")
     print(f"Total grants extracted: {total_grants}")
+    print(f"Queue summary: {total_queue_puts} items put, {total_tasks_done} tasks done")
 
 if __name__ == "__main__":
     main()
