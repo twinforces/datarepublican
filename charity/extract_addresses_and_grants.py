@@ -52,6 +52,7 @@ GRANTEE_ADDRESS_XPATHS = [
     etree.XPath(".//RecipientUSAddress/* | .//RecipientForeignAddress/*", namespaces={}),
 ]
 ZIP_REGEX = re.compile(r'^\d{5}$')
+PO_BOX_NUMBER_REGEX = re.compile(r'\b\d+\b')  # Regex to extract PO Box number
 STOP_WORDS = {'and', 'the', 'of', 'for', 'in', 'to', 'a', 'an'}
 ADDRESS_COLUMNS = ["filer_ein", "filer_name", "canonical_address"]
 GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"]
@@ -225,8 +226,13 @@ def canonicalize_address(address_components, output_dir):
         zip_code = None
         for component, label in parsed:
             if label == 'po_box':
-                po_box = component
-                log_error("Extracted PO Box: {} from address: {}", po_box, address_str)
+                # Extract the numeric part of the PO Box
+                match = PO_BOX_NUMBER_REGEX.search(component)
+                if match:
+                    po_box = match.group(0)
+                    log_error("Extracted PO Box number: {} from full PO Box: {} in address: {}", po_box, component, address_str)
+                else:
+                    log_error("Failed to extract PO Box number from: {} in address: {}", component, address_str)
             elif label == 'postcode':
                 zip_code = component
                 log_error("Extracted ZIP code: {} from address: {}", zip_code, address_str)
@@ -251,7 +257,7 @@ def canonicalize_address(address_components, output_dir):
         
         # If PO Box was found, ensure it's included in the canonical address
         if po_box and 'po box' not in canonical.lower():
-            canonical = f"{po_box} {canonical}"
+            canonical = f"PO Box {po_box} {canonical}"
         
         return canonical, po_box, zip_code, ""
     except Exception as e:
