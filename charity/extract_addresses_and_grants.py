@@ -219,13 +219,19 @@ def canonicalize_address(address_components, output_dir):
         return "", None, None, ""
     address_str = " ".join(comp for comp in address_components if comp)
     raw_zip = next((comp for comp in address_components if comp and re.match(r'^\d{5}(-\d{4})?$', comp)), None)
-    if raw_zip and not re.match(r'^\d{5}$', raw_zip):
-        log_error("Invalid raw_zip={} in address: {}", raw_zip, address_str)
-        if log_zip_errors:
-            with open(os.path.join(output_dir, 'zip_errors.tsv'), 'a', encoding='utf-8', newline='') as f:
-                writer = csv.writer(f, delimiter='\t')
-                writer.writerow(['', '', '', raw_zip, address_str])
-        raw_zip = None
+    if raw_zip:
+        zip_match = re.match(r'^(\d{5})(-\d{4})?$', raw_zip)
+        if zip_match:
+            raw_zip = zip_match.group(1)  # Extract 5-digit ZIP
+            if zip_match.group(2):
+                log_error("Extracted 5-digit ZIP {} from ZIP+4 {} in address: {}", raw_zip, zip_match.group(0), address_str)
+        else:
+            log_error("Invalid raw_zip={} in address: {}", raw_zip, address_str)
+            if log_zip_errors:
+                with open(os.path.join(output_dir, 'zip_errors.tsv'), 'a', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f, delimiter='\t')
+                    writer.writerow(['', '', '', raw_zip, address_str])
+            raw_zip = None
     try:
         parsed = parse_address(address_str)
         normalized = expand_address(address_str)
