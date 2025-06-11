@@ -237,19 +237,15 @@ def canonicalize_address(address_components, output_dir):
                 zip_code = component
                 log_error("Extracted ZIP code: {} from address: {}", zip_code, address_str)
         
-        # If ZIP code is ZIP+4, extract the 5-digit part
-        if zip_code and '-' in zip_code:
-            zip_code = zip_code.split('-')[0]
-            log_error("Extracted 5-digit ZIP {} from ZIP+4 in address: {}", zip_code, address_str)
-        
-        # Validate ZIP code
-        if zip_code and not (ZIP_REGEX.match(zip_code) and zip_code.isdigit() and len(zip_code) == 5):
-            log_error("Invalid zip_code: {} in address: {}", zip_code, address_str)
-            if log_zip_errors:
-                with open(os.path.join(output_dir, 'zip_errors.tsv'), 'a', encoding='utf-8', newline='') as f:
-                    writer = csv.writer(f, delimiter='\t')
-                    writer.writerow(['', '', zip_code, '', address_str])
-            zip_code = None
+        # Process ZIP code to get the first 5 digits
+        if zip_code:
+            zip_code_digits = re.sub(r'\D', '', zip_code)
+            if len(zip_code_digits) >= 5:
+                zip_code = zip_code_digits[:5]
+                log_error("Extracted 5-digit ZIP {} from original ZIP {} in address: {}", zip_code, zip_code, address_str)
+            else:
+                log_error("Invalid zip_code: {} in address: {}", zip_code, address_str)
+                zip_code = None
         
         # Use pypostal to expand and normalize the address
         normalized = expand_address(address_str)
@@ -393,11 +389,11 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                         'status': 'success',
                         'reason': f"snippet: {address_snippet}"
                     })
-                if po_box:
-                    log_error("Adding filer PO Box: po_box={} zip_code={} ein={} name={}", po_box, zip_code or '', filer_ein, filer_name)
+                if po_box and zip_code:
+                    log_error("Adding filer PO Box: po_box={} zip_code={} ein={} name={}", po_box, zip_code, filer_ein, filer_name)
                     po_box_entries.append({
                         'po_box': po_box,
-                        'zip_code': zip_code or '',
+                        'zip_code': zip_code,
                         'org_name': filer_name,
                         'ein': filer_ein,
                         'type': 'filer',
@@ -431,7 +427,7 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
         
         log_error("Active threads in parse_addresses: {}", threading.active_count())
         log_error("zip_code_index size: {}", len(zip_code_index))
-        log_error("Unique ZIP codes indexed: {}", len(set(k for k in zip_code_index.keys() if k and k.isdigit() and len(k) == 5)))
+        log_error("Unique ZIP codes indexed: {}", len(set(k for k in list(zip_code_index.keys()) if k and k.isdigit() and len(k) == 5)))        
         log_error("po_box_zip_index size: {}", len(po_box_zip_index))
         for k in zip_code_index:
             if not (k and k.isdigit() and len(k) == 5):
@@ -973,7 +969,7 @@ def main():
     if not os.path.isdir(source_dir):
         raise ValueError(f"Source directory {source_dir} does not exist")
     if not os.path.isdir(zip_dir):
-        raise ValueError(f"ZIP directory {zip_dir} does not exist")
+        raise ValueValueError(f"ZIP directory {zip_dir} does not exist")
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
