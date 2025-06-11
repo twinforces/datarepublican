@@ -51,7 +51,6 @@ GRANTEE_ADDRESS_XPATHS = [
     etree.XPath(".//irs:RecipientUSAddress/* | .//irs:RecipientForeignAddress/*", namespaces=NAMESPACES),
     etree.XPath(".//RecipientUSAddress/* | .//RecipientForeignAddress/*", namespaces={}),
 ]
-PO_BOX_REGEX = re.compile(r'\b[Pp]\.?[Oo]\.? [Bb][Oo][Xx] (\d+)\b')
 ZIP_REGEX = re.compile(r'^\d{5}$')
 STOP_WORDS = {'and', 'the', 'of', 'for', 'in', 'to', 'a', 'an'}
 ADDRESS_COLUMNS = ["filer_ein", "filer_name", "canonical_address"]
@@ -218,43 +217,46 @@ def canonicalize_address(address_components, output_dir):
     if not address_components:
         return "", None, None, ""
     address_str = " ".join(comp for comp in address_components if comp)
-    raw_zip = next((comp for comp in address_components if comp and re.match(r'^\d{5}(-\d{4})?$', comp)), None)
-    if raw_zip:
-        zip_match = re.match(r'^(\d{5})(-\d{4})?$', raw_zip)
-        if zip_match:
-            raw_zip = zip_match.group(1)  # Extract 5-digit ZIP
-            if zip_match.group(2):
-                log_error("Extracted 5-digit ZIP {} from ZIP+4 {} in address: {}", raw_zip, zip_match.group(0), address_str)
-        else:
-            log_error("Invalid raw_zip={} in address: {}", raw_zip, address_str)
+    try:
+        # Use pypostal to parse the address into components
+        parsed = parse_address(address_str)
+        # Extract PO Box and ZIP code from parsed components
+        po_box = None
+        zip_code = None
+        for component, label in parsed:
+            if label == 'po_box':
+                po_box = component
+                log_error("Extracted PO Box: {} from address: {}", po_box, address_str)
+            elif label == 'postcode':
+                zip_code = component
+                log_error("Extracted ZIP code: {} from address: {}", zip_code, address_str)
+        
+        # If ZIP code is ZIP+4, extract the 5-digit part
+        if zip_code and '-' in zip_code:
+            zip_code = zip_code.split('-')[0]
+            log_error("Extracted 5-digit ZIP {} from ZIP+4 in address: {}", zip_code, address_str)
+        
+        # Validate ZIP code
+        if zip_code and not (ZIP_REGEX.match(zip_code) and zip_code.isdigit() and len(zip_code) == 5):
+            log_error("Invalid zip_code: {} in address: {}", zip_code, address_str)
             if log_zip_errors:
                 with open(os.path.join(output_dir, 'zip_errors.tsv'), 'a', encoding='utf-8', newline='') as f:
                     writer = csv.writer(f, delimiter='\t')
-                    writer.writerow(['', '', '', raw_zip, address_str])
-            raw_zip = None
-    try:
-        parsed = parse_address(address_str)
+                    writer.writerow(['', '', zip_code, '', address_str])
+            zip_code = None
+        
+        # Use pypostal to expand and normalize the address
         normalized = expand_address(address_str)
         canonical = normalized[0] if normalized else address_str
-        zip_match = re.search(r'\b(\d{5})\d{4}\b', canonical)
-        if zip_match:
-            canonical = canonical.replace(zip_match.group(0), zip_match.group(1))
-        po_box_match = PO_BOX_REGEX.search(canonical)
-        po_box = po_box_match.group(1) if po_box_match else None
-        zip_match = re.search(r'\b(\d{5})\b', canonical)
-        zip_code = zip_match.group(1) if zip_match else None
-        zip_code = str(zip_code).strip() if zip_code else None
-        if zip_code and not (ZIP_REGEX.match(zip_code) and zip_code.isdigit() and len(zip_code) == 5):
-            log_error("Invalid zip_code: {} (type={}) in address: {}; components: {}", zip_code, type(zip_code), address_str, address_components)
-            if log_zip_errors:
-                with open(os.path.join(output_dir, 'zip_errors.tsv'), 'a', encoding='utf-8', newline='') as f:
-                    writer = csv.writer(f, delimiter='\t')
-                    writer.writerow(['', '', zip_code, raw_zip, address_str])
-            zip_code = None
-        return canonical, po_box, zip_code, raw_zip or ""
+        
+        # If PO Box was found, ensure it's included in the canonical address
+        if po_box and 'po box' not in canonical.lower():
+            canonical = f"{po_box} {canonical}"
+        
+        return canonical, po_box, zip_code, ""
     except Exception as e:
-        log_error("Error canonicalizing address '{}': {}; components: {}", address_str, str(e), address_components, exc_info=True)
-        return address_str, None, None, raw_zip or ""
+        log_error("Error canonicalizing address '{}': {}", address_str, str(e), exc_info=True)
+        return address_str, None, None, ""
 
 def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
     global total_addresses, total_address_errors, total_queue_puts
@@ -336,7 +338,6 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
         
         # Parse address
         address_components = []
-        raw_zip = ""
         for xpath in ADDRESS_XPATHS:
             elements = xpath(root)
             for elem in elements:
@@ -344,10 +345,7 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                     text = elem.text.strip()
                     log_error("Extracted address component: {} from {}", text, xml_filename)
                     address_components.append(text)
-                    if elem.tag.endswith('ZIPCd'):
-                        raw_zip = text
-                        log_error("Extracted raw_zip={} from {}", raw_zip, xml_filename)
-        canonical_address, po_box, zip_code, raw_zip = canonicalize_address(address_components, output_dir)
+        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
         raw_components_str = ";".join(address_components)
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
@@ -384,7 +382,7 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                         'xml_filename': xml_filename,
                         'raw_components': raw_components_str,
                         'canonical_address': canonical_address,
-                        'raw_zip': raw_zip,
+                        'raw_zip': '',
                         'zip_code': zip_code or '',
                         'status': 'success',
                         'reason': f"snippet: {address_snippet}"
@@ -413,19 +411,15 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                         'xml_filename': xml_filename,
                         'raw_components': raw_components_str,
                         'canonical_address': '',
-                        'raw_zip': raw_zip,
-                        'zip_code': zip_code or '',
+                        'raw_zip': '',
+                        'zip_code': '',
                         'status': 'error',
-                        'reason': f"Invalid address; zip_code={zip_code}; raw_zip={raw_zip}; components={address_components}; snippet: {address_snippet}"
+                        'reason': f"Invalid address; zip_code=None; components={address_components}; snippet: {address_snippet}"
                     })
                 if sample_xml:
                     os.makedirs(sample_xml, exist_ok=True)
                     with open(os.path.join(sample_xml, xml_filename), 'wb') as f:
                         f.write(xml_content)
-                if log_zip_errors and (zip_code or raw_zip):
-                    with open(os.path.join(output_dir, 'zip_errors.tsv'), 'a', encoding='utf-8', newline='') as f:
-                        writer = csv.writer(f, delimiter='\t')
-                        writer.writerow([xml_filename, filer_ein, zip_code, raw_zip, ';'.join(address_components)])
             if not skip_address_errors:
                 return False, None
         
@@ -852,39 +846,25 @@ def write_outputs(output_dir):
               len(address_entries), len(grant_entries), len(debug_address_entries), len(debug_grant_entries),
               len(invalid_ein_entries), len(po_box_entries), total_990pf_rows, total_address_errors)
 
-    # Deduplicate and sort addresses
-    unique_addresses = {
-        (entry['filer_ein'], entry['filer_name'], entry['canonical_address']): entry
-        for entry in address_entries
-    }
-    sorted_addresses = sorted(
-        unique_addresses.values(),
-        key=lambda x: (x['filer_name'].lower(), x['canonical_address'].lower(), x['filer_ein'])
-    )
+    # Write addresses without de-duplication
     log_error("Opening TSV file: {}", address_file)
     with open(address_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(ADDRESS_COLUMNS)
-        for entry in sorted_addresses:
+        for entry in address_entries:
             writer.writerow([entry[col] for col in ADDRESS_COLUMNS])
         f.flush()
-    log_error("Wrote {} unique address rows to {}", len(sorted_addresses), address_file)
+    log_error("Wrote {} address rows to {}", len(address_entries), address_file)
 
-    # Deduplicate and sort grants
-    unique_grants = {
-        (entry['filer_ein'], entry['grant_ein'], entry['grant_amt'], entry['tax_year'], entry['filer_name']): entry
-        for entry in grant_entries
-    }
-    sorted_grants = sorted(unique_grants.values(), key=lambda x: (x['filer_ein'], x['grant_ein'], x['tax_year']))
-    log_error("Deduplicated grants from {} to {}", len(grant_entries), len(unique_grants))
+    # Write grants without de-duplication
     log_error("Opening TSV file: {}", grant_file)
     with open(grant_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(GRANT_COLUMNS)
-        for entry in sorted_grants:
+        for entry in grant_entries:
             writer.writerow([entry[col] for col in GRANT_COLUMNS])
         f.flush()
-    log_error("Wrote {} unique grant rows to {}", len(sorted_grants), grant_file)
+    log_error("Wrote {} grant rows to {}", len(grant_entries), grant_file)
 
     # Write address debug
     log_error("Opening TSV file: {}", debug_address_file)
@@ -1023,7 +1003,7 @@ def main():
         listener.stop()
         log_error("Queue summary: {} items put, {} tasks done", total_queue_puts, total_tasks_done)
 
-    print(f"Total addresses extracted: {len(address_entries)} (unique: {len(set((e['filer_ein'], e['filer_name'], e['canonical_address']) for e in address_entries))})")
+    print(f"Total addresses extracted: {len(address_entries)}")
     print(f"Total grants extracted: {total_grants}")
     print(f"Total 990PF rows processed: {total_990pf_rows}")
     print(f"Total address errors: {total_address_errors}")
