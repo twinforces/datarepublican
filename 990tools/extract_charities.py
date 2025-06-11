@@ -464,7 +464,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
                     filer_ein = f"{int(raw_ein):09d}"
                 except ValueError:
                     filer_ein = "Unknown"
-                 break                break
+                    break
         filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
         if filer_ein == "Unknown":
@@ -668,7 +668,7 @@ def main():
     parser.add_argument("--eins", type=str, help="Comma-separated list of EINs for extra logging")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--quiet", action="store_true", help="Disable all logging")
-    parser.add_argument("--write-buffer-size", type=int, default=5000, help="Number of rows to buffer before writing to TSV")
+    parser.add_argument("--write-buffer-size", type=int, default=10000, help="Number of rows to buffer before writing to TSV")
     parser.add_argument("--worker-threads", type=int, default=16, help="Number of worker threads for XML parsing")
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size for processing futures")
     parser.add_argument("--writer-threads", type=int, default=1, help="Number of TSV writer threads")
