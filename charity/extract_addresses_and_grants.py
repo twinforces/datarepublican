@@ -58,7 +58,7 @@ ADDRESS_COLUMNS = ["filer_ein", "filer_name", "canonical_address"]
 GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"]
 DEBUG_ADDRESS_COLUMNS = ["filer_ein", "filer_name", "xml_filename", "raw_components", "canonical_address", "raw_zip", "zip_code", "status", "reason"]
 DEBUG_GRANT_COLUMNS = ["filer_ein", "filer_name", "xml_filename", "grantee_name", "grant_ein", "grant_address", "grant_amt", "tax_year", "status", "heuristic_score", "reason"]
-INVALID_EIN_COLUMNS = ["tsv_ein", "xml_ein", "filer_name", "xml_filename", "zip_code", "reason"]
+INVALID_EIN_COLUMNS = ["tsv_ein", "xml_ein", "filer_name", "xml_filename", "reason"]
 PO_BOX_COLUMNS = ["po_box", "zip_code", "org_name", "ein", "type", "xml_filename"]
 ZIP_ERROR_COLUMNS = ["xml_filename", "filer_ein", "zip_code", "raw_zip", "address"]
 CSV_QUOTE_FIELDS = {
@@ -280,7 +280,6 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                     'xml_ein': '',
                     'filer_name': filer_name,
                     'xml_filename': xml_filename,
-                    'zip_code': '',
                     'reason': 'No EIN found in XML'
                 })
                 if not debug_limit or len(debug_address_entries) < debug_limit:
@@ -305,7 +304,6 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                     'xml_ein': xml_ein,
                     'filer_name': filer_name,
                     'xml_filename': xml_filename,
-                    'zip_code': '',
                     'reason': f"Invalid XML EIN format: {xml_ein}"
                 })
                 if not debug_limit or len(debug_address_entries) < debug_limit:
@@ -331,7 +329,6 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                     'xml_ein': xml_ein,
                     'filer_name': filer_name,
                     'xml_filename': xml_filename,
-                    'zip_code': '',
                     'reason': 'TSV EIN differs from XML EIN'
                 })
         
@@ -392,10 +389,11 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                         'status': 'success',
                         'reason': f"snippet: {address_snippet}"
                     })
-                if po_box and zip_code:
+                if po_box:
+                    log_error("Adding filer PO Box: po_box={} zip_code={} ein={} name={}", po_box, zip_code or '', filer_ein, filer_name)
                     po_box_entries.append({
                         'po_box': po_box,
-                        'zip_code': zip_code,
+                        'zip_code': zip_code or '',
                         'org_name': filer_name,
                         'ein': filer_ein,
                         'type': 'filer',
@@ -405,6 +403,7 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 total_addresses += 1
                 total_queue_puts += 1
         else:
+            log_error("Possible foreign address for EIN={} in XML {}: no USAddress found", filer_ein, xml_filename)
             with write_lock:
                 total_address_errors += 1
                 if not debug_limit or len(debug_address_entries) < debug_limit:
@@ -433,6 +432,7 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
         log_error("Active threads in parse_addresses: {}", threading.active_count())
         log_error("zip_code_index size: {}", len(zip_code_index))
         log_error("Unique ZIP codes indexed: {}", len(set(k for k in zip_code_index.keys() if k and k.isdigit() and len(k) == 5)))
+        log_error("po_box_zip_index size: {}", len(po_box_zip_index))
         for k in zip_code_index:
             if not (k and k.isdigit() and len(k) == 5):
                 log_error("Invalid zip_code_index key: {}", k)
@@ -463,6 +463,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
         root = tree.getroot()
         
         filer_name = row['filer_name'].strip()
+        status_counts = defaultdict(int)  # Track grant statuses
         
         # Parse grants for 990PF
         if row['form_type'] == '990PF':
@@ -540,6 +541,9 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                     status = 'skipped'
                                     log_error("Skipped grant for grantee {}: {}", grantee_name, "No valid EIN, address, or name")
                                 
+                                status_counts[status] += 1
+                                log_error("Grant status: {} (count={}) for grantee {} in XML {}", status, status_counts[status], grantee_name, xml_filename)
+                                
                                 if grant_ein != "Unknown":
                                     with write_lock:
                                         grant_entries.append({
@@ -589,7 +593,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                                 'grant_address': grant_address,
                                                 'grant_amt': grant_amt,
                                                 'tax_year': row['tax_year'],
-                                                'status': 'skipped',
+                                                'status': status,
                                                 'heuristic_score': best_score,
                                                 'reason': f"No valid EIN, address, or name for grantee {grantee_name}; XML snippet: {snippet}"
                                             })
@@ -630,6 +634,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                     'reason': f"No grant amount found for grantee {grantee_name}; XML snippet: {snippet}"
                                 })
         
+        log_error("Final grant status counts for XML {}: {}", xml_filename, dict(status_counts))
         log_error("Active threads in parse_grants: {}", threading.active_count())
         return True
     except Exception as e:
@@ -865,15 +870,21 @@ def write_outputs(output_dir):
         f.flush()
     log_error("Wrote {} unique address rows to {}", len(sorted_addresses), address_file)
 
-    # Write grants
+    # Deduplicate and sort grants
+    unique_grants = {
+        (entry['filer_ein'], entry['grant_ein'], entry['grant_amt'], entry['tax_year'], entry['filer_name']): entry
+        for entry in grant_entries
+    }
+    sorted_grants = sorted(unique_grants.values(), key=lambda x: (x['filer_ein'], x['grant_ein'], x['tax_year']))
+    log_error("Deduplicated grants from {} to {}", len(grant_entries), len(unique_grants))
     log_error("Opening TSV file: {}", grant_file)
     with open(grant_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(GRANT_COLUMNS)
-        for entry in grant_entries:
+        for entry in sorted_grants:
             writer.writerow([entry[col] for col in GRANT_COLUMNS])
         f.flush()
-    log_error("Wrote {} grant rows to {}", len(grant_entries), grant_file)
+    log_error("Wrote {} unique grant rows to {}", len(sorted_grants), grant_file)
 
     # Write address debug
     log_error("Opening TSV file: {}", debug_address_file)
@@ -895,41 +906,30 @@ def write_outputs(output_dir):
         f.flush()
     log_error("Wrote {} grant debug rows to {}", len(debug_grant_entries), debug_grant_file)
 
-    # Write invalid EINs
+    # Sort and write invalid EINs
+    sorted_invalid_eins = sorted(invalid_ein_entries, key=lambda x: (x['xml_ein'], x['tsv_ein'], x['filer_name'].lower()))
     log_error("Opening TSV file: {}", invalid_ein_file)
     with open(invalid_ein_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(INVALID_EIN_COLUMNS)
-        for entry in invalid_ein_entries:
+        for entry in sorted_invalid_eins:
             writer.writerow([entry[col] for col in INVALID_EIN_COLUMNS])
         f.flush()
-    log_error("Wrote {} invalid EIN rows to {}", len(invalid_ein_entries), invalid_ein_file)
+    log_error("Wrote {} invalid EIN rows to {}", len(sorted_invalid_eins), invalid_ein_file)
 
-    # Write PO Box matches and detect duplicates
-    po_box_groups = defaultdict(list)
-    for entry in po_box_entries:
-        key = (entry['po_box'], entry['zip_code'])
-        po_box_groups[key].append(entry)
-    
+    # Filter and sort PO Box matches for filers only
+    filer_po_boxes = [entry for entry in po_box_entries if entry['type'] == 'filer']
+    sorted_po_boxes = sorted(filer_po_boxes, key=lambda x: (x['zip_code'], x['po_box'], x['org_name'].lower()))
+    log_error("Filtered {} PO Box entries to {} filer entries", len(po_box_entries), len(filer_po_boxes))
     log_error("Opening TSV file: {}", po_box_file)
     with open(po_box_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(PO_BOX_COLUMNS)
-        for entry in po_box_entries:
+        for entry in sorted_po_boxes:
             writer.writerow([entry[col] for col in PO_BOX_COLUMNS])
         f.flush()
     
-    duplicates = [(key, group) for key, group in po_box_groups.items() if len(group) > 1]
-    if duplicates:
-        log_error("Found {} duplicate PO Box entries:", len(duplicates))
-        for (po_box, zip_code), group in duplicates[:10]:
-            log_error("PO Box {} ZIP {} shared by:", po_box, zip_code)
-            for entry in group:
-                log_error("  {} (EIN={}, Type={}, XML={})", entry['org_name'], entry['ein'], entry['type'], entry['xml_filename'])
-        if len(duplicates) > 10:
-            log_error("...and {} more duplicate PO Box entries", len(duplicates) - 10)
-    
-    log_error("Wrote {} PO Box rows to {}", len(po_box_entries), po_box_file)
+    log_error("Wrote {} filer PO Box rows to {}", len(sorted_po_boxes), po_box_file)
     log_error("Total unique EIN mismatches: {}", len(ein_mismatch_set))
 
 def signal_handler(sig, frame):
