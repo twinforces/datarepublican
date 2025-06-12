@@ -287,7 +287,7 @@ def tsv_writer_thread(tsv_files, writer_id, buffers, write_buffer_size):
                 for tsv_key, buffer in buffers.items():
                     if buffer:
                         tax_year, org_type = tsv_key
-                        tsv_path = f"charities_{clean_org_type(org_type, for_filename=True)}_{tax_year}.tsv"
+                        tsv_path = os.path.join(args.output_dir, f"charities_{clean_org_type(org_type, for_filename=True)}_{tax_year}.tsv")
                         # Ensure the TSV file exists
                         if tsv_key not in tsv_files:
                             file_exists = os.path.exists(tsv_path)
@@ -314,7 +314,7 @@ def tsv_writer_thread(tsv_files, writer_id, buffers, write_buffer_size):
                 for tsv_key, buffer in buffers.items():
                     if buffer:
                         tax_year, org_type = tsv_key
-                        tsv_path = f"charities_{clean_org_type(org_type, for_filename=True)}_{tax_year}.tsv"
+                        tsv_path = os.path.join(args.output_dir, f"charities_{clean_org_type(org_type, for_filename=True)}_{tax_year}.tsv")
                         # Ensure the TSV file exists
                         if tsv_key not in tsv_files:
                             file_exists = os.path.exists(tsv_path)
@@ -341,7 +341,7 @@ def tsv_writer_thread(tsv_files, writer_id, buffers, write_buffer_size):
                 buffers[tsv_key] = []
             buffers[tsv_key].append((row, xml_name))
             if len(buffers[tsv_key]) >= write_buffer_size:
-                tsv_path = f"charities_{clean_org_type(org_type, for_filename=True)}_{tax_year}.tsv"
+                tsv_path = os.path.join(args.output_dir, f"charities_{clean_org_type(org_type, for_filename=True)}_{tax_year}.tsv")
                 # Ensure the TSV file exists
                 if tsv_key not in tsv_files:
                     file_exists = os.path.exists(tsv_path)
@@ -414,7 +414,7 @@ def officer_writer_thread(writer_id):
     result["total"] = grand_total
     
     try:
-        with open(OFFICER_MAPPING_FILE, "w", encoding="utf-8") as f:
+        with open(os.path.join(args.output_dir, OFFICER_MAPPING_FILE), "w", encoding="utf-8") as f:
             json.dump(result, f, indent=4)
         log_error("Wrote officer mapping to {}", OFFICER_MAPPING_FILE)
     except Exception as e:
@@ -587,7 +587,7 @@ def process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size)
 
 def save_xpath_stats():
     log_error("Saving xpath_stats.json. Current xpath_match_stats: {}", dict(xpath_match_stats))
-    with open("xpath_stats.json", "w") as f:
+    with open(os.path.join(args.output_dir, "xpath_stats.json"), "w") as f:
         json.dump(dict(xpath_match_stats), f, indent=4)
 
 def reorder_xpaths():
@@ -599,7 +599,7 @@ def reorder_xpaths():
     reorder_dict(XPATHS_990, "990")
     reorder_dict(XPATHS_990EZ, "990EZ")
     reorder_dict(XPATHS_990PF, "990PF")
-    with open("xpaths_990_reordered.py", "w") as f:
+    with open(os.path.join(args.output_dir, "xpaths_990_reordered.py"), "w") as f:
         f.write("from lxml import etree\n\n")
         f.write("NAMESPACES = {'irs': 'http://www.irs.gov/efile'}\n\n")
         f.write("XPATHS_990 = {\n")
@@ -609,7 +609,7 @@ def reorder_xpaths():
                 f.write(f'        etree.XPath("{xpath}", namespaces=NAMESPACES),\n')
             f.write("    ],\n")
         f.write("}\n")
-    with open("xpaths_990ez_reordered.py", "w") as f:
+    with open(os.path.join(args.output_dir, "xpaths_990ez_reordered.py"), "w") as f:
         f.write("from lxml import etree\n\n")
         f.write("NAMESPACES = {'irs': 'http://www.irs.gov/efile'}\n\n")
         f.write("XPATHS_990EZ = {\n")
@@ -619,7 +619,7 @@ def reorder_xpaths():
                 f.write(f'        etree.XPath("{xpath}", namespaces=NAMESPACES),\n')
             f.write("    ],\n")
         f.write("}\n")
-    with open("xpaths_990pf_reordered.py", "w") as f:
+    with open(os.path.join(args.output_dir, "xpaths_990pf_reordered.py"), "w") as f:
         f.write("from lxml import etree\n\n")
         f.write("NAMESPACES = {'irs': 'http://www.irs.gov/efile'}\n\n")
         f.write("XPATHS_990PF = {\n")
@@ -641,7 +641,7 @@ def preallocate_tsv_files(start_year, end_year):
     for year in range(start_year - 3, end_year + 2):
         for org_type in org_types:
             tsv_key = (str(year), f"501(c)({org_type[4:]})" if org_type.startswith("501c") else org_type)
-            tsv_path = f"charities_{org_type}_{year}.tsv"
+            tsv_path = os.path.join(args.output_dir, f"charities_{org_type}_{year}.tsv")
             if os.path.exists(tsv_path):
                 os.remove(tsv_path)
             tsv_files[tsv_key] = open(tsv_path, mode='w', newline="", encoding="utf-8", buffering=8192)
@@ -653,7 +653,7 @@ def preallocate_tsv_files(start_year, end_year):
 
 def cleanup_empty_tsv_files():
     for tsv_path in glob.glob("charities_*.tsv"):
-        with open(tsv_path, 'r', encoding='utf-8') as f:
+        for tsv_path in glob.glob(os.path.join(args.output_dir, "charities_*.tsv")):
             line_count = sum(1 for _ in f)
         if line_count <= 1:
             os.remove(tsv_path)
@@ -662,9 +662,12 @@ def cleanup_empty_tsv_files():
 def main():
     global verbose, quiet, done_queuing, total_entries, DEBUG_EINS
     global officer_queue
+    global args
     parser = argparse.ArgumentParser(description="Extract charity data from IRS 990 XML files.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
+    parser.add_argument("--input-dir", type=str, default=".", help="Directory containing ZIP files")
+    parser.add_argument("--output-dir", type=str, default=".", help="Directory for output TSV and log files")
     parser.add_argument("--eins", type=str, help="Comma-separated list of EINs for extra logging")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--quiet", action="store_true", help="Disable all logging")
@@ -689,6 +692,11 @@ def main():
         raise ValueError("Batch size must be at least 1")
     if writer_threads < 1:
         raise ValueError("Number of writer threads must be at least 1")
+    if not os.path.isdir(args.input_dir):
+        raise ValueError(f"Input directory {args.input_dir} does not exist")
+    if not os.path.isdir(args.output_dir):
+        os.makedirs(args.output_dir, exist_ok=True)
+        log_error("Created output directory {}", args.output_dir)
     if args.eins:
         DEBUG_EINS = set(args.eins.split(','))
         log_error("Set DEBUG_EINS for extra logging: {}", ",".join(DEBUG_EINS))
@@ -697,9 +705,9 @@ def main():
     parse_990ez.set_logger(logger, log_error, verbose, DEBUG_EINS)
     parse_990pf.set_logger(logger, log_error, verbose, DEBUG_EINS)
     initialize_xpath_stats()
-    zip_files = sorted(glob.glob("*.zip"))
+    zip_files = sorted(glob.glob(os.path.join(args.input_dir, "*.zip")))
     if not zip_files:
-        print("No ZIP files found in the current directory")
+        print(f"No ZIP files found in {args.input_dir}")
         return
     tsv_files = preallocate_tsv_files(start_year, end_year)
     writer_threads_list = []

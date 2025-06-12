@@ -59,7 +59,7 @@ GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"
 DEBUG_ADDRESS_COLUMNS = ["filer_ein", "filer_name", "xml_filename", "raw_components", "canonical_address", "raw_zip", "zip_code", "status", "reason"]
 DEBUG_GRANT_COLUMNS = ["filer_ein", "filer_name", "xml_filename", "grantee_name", "grant_ein", "grant_address", "grant_amt", "tax_year", "status", "heuristic_score", "reason"]
 INVALID_EIN_COLUMNS = ["tsv_ein", "xml_ein", "filer_name", "xml_filename", "reason"]
-PO_BOX_COLUMNS = ["po_box", "zip_code", "org_name", "ein", "type", "xml_filename"]
+PO_BOX_COLUMNS = ["po_box", "zip_code", "ein", "org_name"]
 ZIP_ERROR_COLUMNS = ["xml_filename", "filer_ein", "zip_code", "raw_zip", "address"]
 CSV_QUOTE_FIELDS = {
     'addresses': ['filer_name', 'canonical_address'],
@@ -392,10 +392,8 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 thread_local.po_box_entries.append({
                     'po_box': po_box,
                     'zip_code': zip_code,
-                    'org_name': filer_name,
                     'ein': filer_ein,
-                    'type': 'filer',
-                    'xml_filename': xml_filename
+                    'org_name': filer_name
                 })
             thread_local.total_addresses += 1
             thread_local.total_queue_puts += 1
@@ -582,15 +580,6 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                             'status': status,
                                             'heuristic_score': best_score,
                                             'reason': "success"
-                                        })
-                                    if grant_po_box and grant_zip_code and ZIP_REGEX.match(grant_zip_code):
-                                        thread_local.po_box_entries_grants.append({
-                                            'po_box': grant_po_box,
-                                            'zip_code': grant_zip_code,
-                                            'org_name': grantee_name,
-                                            'ein': grant_ein,
-                                            'type': 'grantee',
-                                            'xml_filename': xml_filename
                                         })
                                     thread_local.total_queue_puts_grants += 1
                                     thread_local.total_grants += 1
@@ -967,9 +956,9 @@ def write_outputs(output_dir):
     log_error("Wrote {} invalid EIN rows to {}", len(sorted_invalid_eins), invalid_ein_file)
 
     # Filter and sort PO Box matches for filers only
-    filer_po_boxes = [entry for entry in po_box_entries if entry['type'] == 'filer']
+    filer_po_boxes = po_box_entries
     sorted_po_boxes = sorted(filer_po_boxes, key=lambda x: (x['zip_code'], x['po_box'], x['org_name'].lower()))
-    log_error("Filtered {} PO Box entries to {} filer entries", len(po_box_entries), len(filer_po_boxes))
+    log_error("Sorted {} PO Box entries", len(sorted_po_boxes))
     log_error("Opening TSV file: {}", po_box_file)
     with open(po_box_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
@@ -978,7 +967,7 @@ def write_outputs(output_dir):
             writer.writerow([entry[col] for col in PO_BOX_COLUMNS])
         f.flush()
     
-    log_error("Wrote {} filer PO Box rows to {}", len(sorted_po_boxes), po_box_file)
+    log_error("Wrote {} PO Box rows to {}", len(sorted_po_boxes), po_box_file)
     log_error("Total unique EIN mismatches: {}", len(ein_mismatch_set))
 
 def signal_handler(sig, frame):
