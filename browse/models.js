@@ -9,6 +9,8 @@ const MAX_NODES = 100;
 const CHUNK_SIZE = 1000;
 const MAX_KEYWORD_NODES = 15;
 
+import ORGANIZATION_TYPES from "./charityTypes.js";
+
 /* keep this around and export it mostly for debugging*/
 let GOV_NODE = null;
 
@@ -305,7 +307,7 @@ class BrowseViewModel {
     this.parseQueryParams(params);
     updateStatus("", "green", false);
     console.log("ShowList before processing:", this.getShowList());
-    Object.values(Charity.charityLookup).forEach((c) => {
+    Charity.visibleCharities.forEach((c) => {
       c.desiredVisible = false;
       c.impliedVisible = 0;
     });
@@ -353,7 +355,7 @@ class BrowseViewModel {
     console.log(
       "Visible Charities after matchURL:",
       Charity.visibleCharities.length,
-      Charity.visibleCharities.map((c) => c.id)
+      Array.from(Charity.visibleCharities).map((c) => c.id)
     );
     return Charity.visibleCharities.length;
   }
@@ -374,6 +376,7 @@ class BrowseViewModel {
       name: "US Government",
       xml_name: "The Beast",
       contrib_amt: 4.6e12, // aka 4.6T
+      row: { tax_year: "2025", org_type: "USG" },
     };
     const govChar = new Charity(gov_proto);
     let govGrants = 0;
@@ -447,6 +450,9 @@ class BrowseViewModel {
     let charitiesProcessed = 0;
 
     return; // now using circular sankey module
+    /*
+    DEADCODE
+    
     updateStatus(
       "<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>"
     );
@@ -547,7 +553,7 @@ class BrowseViewModel {
     console.log(`${cycleGrants.size} circular grants`);
     Object.values(Charity.charityLookup).forEach((c) => c.organize());
 
-    return cycleGrants;
+    return cycleGrants;*/
   }
 
   /**
@@ -557,10 +563,12 @@ class BrowseViewModel {
    * @returns
    */
   getRootCharities() {
-    return Object.values(Charity.charityLookup)
+    if (Charity.rootCharities) return Charity.rootCharities;
+    Charity.rootCharities = Object.values(Charity.charityLookup)
       .filter((c) => c.isRoot && !c.govt_amt && !c.isTerminal)
       .filter((c) => !this.shouldHide(c.id))
       .sort((a, b) => b.grantsTotal - a.grantsTotal);
+    return Charity.rootCharities;
   }
 
   /**
@@ -671,14 +679,10 @@ class BrowseViewModel {
     inflowsOnly = false,
     outflowsOnly = false
   ) {
-    Object.values(Charity.charityLookup).forEach((c) => {
-      if (c.desiredVisible) {
-        c.impliedVisible = 1;
-      } else {
-        c.impliedVisible = 0;
-      }
+    Charity.desiredCharities.forEach((c) => {
+      c.impliedVisible = 1;
     });
-    Object.values(Grant.grantLookup).forEach((g) => {
+    Grant.desiredGrants.forEach((g) => {
       g.impliedVisible = g.desiredVisible;
     });
 
@@ -762,7 +766,7 @@ class BrowseViewModel {
     this.renderData.links = Grant.visibleGrants.filter(
       (g) => !filterHiddenGrant(g)
     );
-    this.renderData.nodes = Charity.visibleCharities.filter(
+    this.renderData.nodes = Array.from(Charity.visibleCharities).filter(
       (node) => !this.shouldHide(node.ein)
     );
     const nodeSet = new Set();
@@ -820,17 +824,18 @@ class BrowseViewModel {
   async loadData() {
     updateStatus("Loading data...");
     this.dataReady = false;
-    const charitiesZipBuf = await fetch("../expose/charities.csv.zip").then(
-      (r) => r.arrayBuffer()
+    const charitiesZipBuf = await fetch("./charities.tsv.zip").then((r) =>
+      r.arrayBuffer()
     );
     const charitiesZip = await JSZip.loadAsync(charitiesZipBuf);
     const charitiesCsvString = await charitiesZip
-      .file("charities_truncated.csv")
+      .file("charity_latest.tsv")
       .async("string");
 
     await new Promise((resolve, reject) => {
       updateStatus("Parsing charities");
       Papa.parse(charitiesCsvString, {
+        delimiter: "\t", // Set delimiter to tab for .tsv
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
@@ -848,12 +853,12 @@ class BrowseViewModel {
     });
 
     await this.buildGovCharity();
-    const grantsZipBuf = await fetch("../expose/grants.csv.zip").then((r) =>
+    const grantsZipBuf = await fetch("./grants.tsv.zip").then((r) =>
       r.arrayBuffer()
     );
     const grantsZip = await JSZip.loadAsync(grantsZipBuf);
     const grantsCsvString = await grantsZip
-      .file("grants_truncated.csv")
+      .file("grants_latest.tsv")
       .async("string");
     let totalGrantsCount = 0;
     let totalGrantsRows = 0;
@@ -861,6 +866,7 @@ class BrowseViewModel {
     await new Promise((resolve, reject) => {
       updateStatus("Parsing grants");
       Papa.parse(grantsCsvString, {
+        delimiter: "\t", // Set delimiter to tab for .tsv
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
@@ -876,10 +882,9 @@ class BrowseViewModel {
       });
     });
 
-    updateStatus("Marking loopbacks");
-    await this.findCircularGrants();
     console.log(`Total Grants Rows ${totalGrantsRows}`);
     console.log(`Total Grants Loaded ${totalGrantsCount}`);
+    console.log("Missing Charities", Grant.missingValues);
     console.log(`Grants Net ${Object.keys(Grant.grantLookup).length}`);
     updateStatus("USG & NGOs & grants loaded", "black", false);
     this.dataReady = true;
@@ -924,6 +929,8 @@ class BrowseViewModel {
 class Charity {
   /** charities are stored in an object by EIN for quick lookup */
   static charityLookup = {};
+  static _desiredCharities = new Set();
+  static _visibleCharities = new Set();
 
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
@@ -938,7 +945,8 @@ class Charity {
 
   /** accessors are convenient */
   static get visibleCharities() {
-    return Object.values(Charity.charityLookup).filter((c) => c.isVisible);
+    return Charity._visibleCharities;
+    //return Object.values(Charity.charityLookup).filter((c) => c.isVisible);
   }
 
   static get invisibleCharities() {
@@ -952,7 +960,8 @@ class Charity {
   }
 
   static get desiredCharities() {
-    return Object.values(Charity.charityLookup).filter((c) => c.desiredVisible);
+    return Charity._desiredCharities;
+    //return Object.values(Charity.charityLookup).filter((c) => c.desiredVisible);
   }
 
   static get getCharityCount() {
@@ -963,9 +972,7 @@ class Charity {
    * Clear all caches
    */
   static disorganzeAll() {
-    Object.values(Charity.charityLookup).forEach(
-      (c) => (c.isOrganized = false)
-    );
+    Charity.organizedSet.forEach((c) => (c.isOrganized = false));
   }
 
   /**
@@ -974,20 +981,48 @@ class Charity {
    * @returns
    */
   static buildCharityFromRow(row) {
+    function titleCase(str) {
+      return str
+        .toLowerCase() // Make everything lowercase first
+        .split(" ") // Split into words
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize first letter, keep rest
+        .join(" "); // Join words back with spaces
+    }
     const ein = (row["filer_ein"] || "").trim();
     if (!ein) return;
     let rAmt = parseInt((row["receipt_amt"] || "0").trim(), 10);
     if (isNaN(rAmt)) rAmt = 0;
     return new Charity({
       ein,
-      name: (row["filer_name"] || "").trim(),
+      name: titleCase((row["filer_name"] || "").trim()),
       xml_name: row["xml_name"],
       receipt_amt: rAmt,
       govt_amt: parseInt((row["govt_amt"] || "0").trim(), 10) || 0,
       contrib_amt: parseInt((row["contrib_amt"] || "0").trim(), 10) || 0,
+      row: row,
     });
   }
-
+  static TSV_MANUAL_COLUMNS = [
+    "tax_year",
+    "org_type",
+    "comp_pct",
+    "comp_ptile",
+    "travel_pct",
+    "travel_ptile",
+    "conferences_pct",
+    "conferences_ptile",
+    "grants_pct",
+    "grants_ptile",
+    "foreign_expenses_pct",
+    "foreign_expenses_ptile",
+    "grift_ratio",
+    "total_assets",
+    "form_type",
+    "denominator",
+    "foreign_office",
+    "foreign_expenses",
+    "grift",
+  ];
   /** It is what it is. */
   constructor({
     ein,
@@ -998,10 +1033,9 @@ class Charity {
     receipt_amt = 0,
     grants = [],
     grantsIn = [],
-    loopbackgrants = [],
-    loopforwardgrants = [],
     desiredVisible = false,
     isOrganized = false,
+    row,
   }) {
     this.id = ein; // these 3 are interchangeable
     this.ein = ein;
@@ -1013,8 +1047,6 @@ class Charity {
     this.contrib_amt = contrib_amt;
     this.grants = grants;
     this.grantsIn = grantsIn;
-    this.loopbackgrants = loopbackgrants;
-    this.loopforwardgrants = loopforwardgrants;
     this._desiredVisible = desiredVisible;
     this._impliedVisible = 0;
     this.isOrganized = isOrganized;
@@ -1023,7 +1055,58 @@ class Charity {
     this._valueCache = {};
     this.sourceLinks = [];
     this.targetLinks = [];
+    Charity.loadExtraData(this, row);
     Charity.registerCharity(ein, this);
+  }
+
+  static loadExtraData(obj, raw_row) {
+    for (const mkey of Charity.TSV_MANUAL_COLUMNS) {
+      if (mkey in raw_row) {
+        // Convert numeric fields
+        if (
+          [
+            "tax_year",
+            "comp_pct",
+            "comp_ptile",
+            "travel_pct",
+            "travel_ptile",
+            "conferences_pct",
+            "conferences_ptile",
+            "grants_pct",
+            "grants_ptile",
+            "foreign_expenses_pct",
+            "foreign_expenses_ptile",
+            "grift_ratio",
+            "total_assets",
+            "denominator",
+            "foreign_expenses",
+            "grift",
+          ].includes(mkey)
+        ) {
+          const value = parseFloat(raw_row[mkey]);
+          obj[mkey] = isNaN(value) ? null : value;
+        }
+        // Convert boolean field
+        else if (mkey === "foreign_office") {
+          const value =
+            typeof raw_row[mkey] === "string"
+              ? raw_row[mkey].toLowerCase()
+              : raw_row[mkey];
+          obj[mkey] =
+            value === "true" ||
+            value === "yes" ||
+            value === "1" ||
+            value === true;
+        }
+        // Strings
+        else {
+          obj[mkey] = raw_row[mkey];
+        }
+      } else {
+        // Handle missing fields (default or error)
+        obj[mkey] = null; // Or throw new Error(`Missing field: ${mkey}`);
+      }
+    }
   }
 
   /**
@@ -1059,6 +1142,8 @@ class Charity {
     if (this._desiredVisible !== value) {
       this._desiredVisible = value;
       this.isOrganized = false;
+      if (value) Charity._desiredCharities.add(this);
+      else Charity._desiredCharities.delete(this);
     }
   }
 
@@ -1085,6 +1170,8 @@ class Charity {
         if (this.grantee) {
           this.grantee.impliedVisible++;
         }
+        if (value || this.desiredVisible) Charity._visibleCharities.add(this);
+        else Charity._visibleCharities.remove(this);
       }
       // Propagate organization state changes to connected charities
       if (this.filer) this.filer.isOrganized = false;
@@ -1096,8 +1183,12 @@ class Charity {
    * Canonically EIN form
    */
   get longEIN() {
-    const matches = this.ein.match(/(\d\d)-*(\d\d\d\d\d\d)/);
-    return matches ? `${matches[0]}${matches[1]}` : this.ein;
+    return `${this.ein.slice(0, 2)}-${this.ein.slice(2)}`;
+  }
+
+  get propublica990Id() {
+    const matches = this.xml_name.match(/(\d*)_public.xml/);
+    return matches ? `${matches[1]}` : "";
   }
 
   /** can only grow to the left if there are grants to show */
@@ -1217,24 +1308,6 @@ class Charity {
     const cacheKey = `invisibleGrantsTotal`;
     if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
     return (this._valueCache[cacheKey] = this.invisibleGrants.reduce(
-      (total, g) => total + g.amt,
-      0
-    ));
-  }
-
-  get loopbackTotal() {
-    const cacheKey = `loopbackTotal`;
-    if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
-    return (this._valueCache[cacheKey] = this.loopbackgrants.reduce(
-      (total, g) => total + g.amt,
-      0
-    ));
-  }
-
-  get loopForwardTotal() {
-    const cacheKey = `loopforwardTotal`;
-    if (this._valueCache[cacheKey]) return this._valueCache[cacheKey];
-    return (this._valueCache[cacheKey] = this.loopforwardgrants.reduce(
       (total, g) => total + g.amt,
       0
     ));
@@ -1383,21 +1456,6 @@ class Charity {
     g.grantee.circleGrant(g);
     g.filer.circleGrant(g);
     Grant.unregisterGrant(g);
-  }
-
-  /** we've been told, have to move the grant to the
-   * siding
-   */
-  circleGrant(g) {
-    if (g.filer === this) {
-      this.loopbackgrants.push(g);
-      this.removeGrant(g);
-    }
-    if (g.grantee === this) {
-      this.loopforwardgrants.push(g);
-      this.removeGrantIn(g);
-    }
-    this.isOrganized = false;
   }
 
   /** nice when debugging */
@@ -1571,6 +1629,13 @@ class Charity {
     );
   }
 
+  get orgShort() {
+    if (!this.org_type) return "n/a";
+    const orgLookup = ORGANIZATION_TYPES[this.org_type];
+    if (!orgLookup) return "???";
+
+    return orgLookup.shortDescription;
+  }
   /**
    * Technically a VM responsibility, but we just do it here.
    * @returns
@@ -1582,12 +1647,31 @@ class Charity {
     let inFlows = this.grantsInTotal
       ? `\ngrants in: $${formatNumber(this.grantsInTotal)}`
       : `\nin: N/A`;
-    let loopbacks = this.loopbackTotal
-      ? `\nLoop Backs: $${formatNumber(this.loopbackTotal)}`
-      : "";
-    if (this.loopForwardTotal)
-      loopbacks += `\nLoop Forwards: $${formatNumber(this.loopForwardTotal)}`;
-    return `${this.name}\n${this.ein}${inFlows}${outFlows}${loopbacks}`;
+    return `${this.name}\n${this.orgShort}\n${this.longEIN}${inFlows}${outFlows}`;
+  }
+
+  get griftRating() {
+    function griftGrade(ptile) {
+      if (ptile >= 95) return "F-";
+      if (ptile >= 90) return "F";
+      if (ptile >= 80) return "D";
+      if (ptile >= 70) return "C";
+      if (ptile >= 60) return "B";
+      if (ptile >= 50) return "A";
+      return "-";
+    }
+    const ptileFields = [
+      this.comp_ptile,
+      this.travel_ptile,
+      this.conferences_ptile,
+      this.grants_ptile,
+      this.foreign_expenses_ptile,
+      this.grift_ratio,
+    ];
+    const validPtiles = ptileFields.filter((val) => val != null && !isNaN(val));
+
+    const griftiest = validPtiles.length > 0 ? Math.max(...validPtiles) : null;
+    return `${griftGrade(griftiest)} - ${griftiest}%`;
   }
 
   /** links to elsewhere in the site */
@@ -1604,7 +1688,7 @@ class Charity {
   }
 
   propublicaLink(message) {
-    return `<a href="https://projects.propublica.org/nonprofits/organizations/${this.ein}/${this.xml_name}/full" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+    return `<a href="https://projects.propublica.org/nonprofits/organizations/${this.ein}/${this.propublica990Id}/full" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
   googleLink(message) {
     const params = new URLSearchParams();
@@ -1632,6 +1716,8 @@ class Charity {
 class Grant {
   /** so we can find a grant quickly */
   static grantLookup = {};
+  static missingValues = {};
+  static _desiredGrants = new Set();
 
   static getGrant(id) {
     return Grant.grantLookup[id];
@@ -1663,6 +1749,10 @@ class Grant {
       else console.log(`Couldn't find grant ${g} in visibleGrants`);
     }
     return result;
+  }
+
+  static get desiredGrants() {
+    return this._desiredGrants;
   }
 
   /** Commong pattern */
@@ -1703,8 +1793,11 @@ class Grant {
           amt: amt,
         });
       }
-    } else if (filer !== grantee) {
-      console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
+    } else if (filer !== grantee && grantee !== "Unknown") {
+      if (!Charity.getCharity(filer)) Grant.missingValues[filer] = "filer";
+      if (!Charity.getCharity(grantee))
+        Grant.missingValues[grantee] = `grantee-${amt}`;
+      //console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
     }
     return null;
   }
@@ -1787,6 +1880,8 @@ class Grant {
     if (this._desiredVisible !== value) {
       this._desiredVisible = value;
       this.disorganize();
+      if (value) Grant.desiredGrants.add(this);
+      else Grant.desiredGrants.delete(this);
     }
   }
 
@@ -1817,19 +1912,6 @@ class Grant {
       if (this.grantee) this.grantee.isOrganized = false;
     }
   }
-
-  /** this is mostly informative, as the Charity class moves them to the loopbacks */
-  get isCircular() {
-    return this._isCircular;
-  }
-
-  set isCircular(value) {
-    if (value !== this._isCircular && this.registered) {
-      Charity.circularGrant(this);
-    }
-    this._isCircular = value;
-  }
-
   /** accessors to match the sankey API */
   get source() {
     return this._source || this.filer_ein;
@@ -1927,9 +2009,7 @@ class Grant {
    * A version of tunneling for grants, show just the two nodes involved.
    */
   tunnelGrant() {
-    Object.values(Charity.charityLookup).forEach(
-      (c) => (c.desiredVisible = false)
-    );
+    Charity.desiredCharities.forEach((c) => (c.desiredVisible = false));
     Object.values(Grant.grantLookup).forEach((g) => (g.desiredVisible = false));
     this.desiredVisible = true;
     this.filer_ein.desiredVisible = true;

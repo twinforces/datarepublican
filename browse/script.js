@@ -11,6 +11,7 @@ import {
   adjustCircularLink,
   generateOctagonPath,
   generateTrapezoidPath,
+  generatePlusPath,
 } from "./d3-sankey-circular.js";
 
 let svg = null;
@@ -277,37 +278,6 @@ function calculateScale(graph, width, height) {
   const layoutWidth = Math.max(maxX - minX, 1);
   const layoutHeight = Math.max(maxY - minY, 1);
   return Math.min(width / layoutWidth, height / layoutHeight);
-}
-
-function generatePlusPath(d) {
-  const radius = OTHER_WIDTH / 2;
-  const armWidth = radius * 0.4;
-  let cx, circlePath;
-  const cy = (d.y0 + d.y1) / 2;
-
-  if (d.isTerminal) {
-    const inflowHeight = d.inflowHeight || OTHER_WIDTH;
-    cx = d.x0 - inflowHeight / 2;
-    circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy - radius
-    }`; // Bottom to top, left
-  } else if (d.isRight) {
-    cx = d.x1;
-    circlePath = `M${cx},${cy - radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy + radius
-    }`; // Top to bottom, right
-  } else {
-    cx = d.x0;
-    circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy - radius
-    }`; // Bottom to top, left
-  }
-
-  const plusPath = `
-    M${cx - armWidth},${cy} H${cx + armWidth}
-    M${cx},${cy - armWidth} V${cy + armWidth}
-  `;
-  return `${circlePath} ${plusPath}`;
 }
 
 function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
@@ -1322,7 +1292,6 @@ function showControlPanel(type, data, element) {
       return `
         <div class="bg-blue-500 text-white flex-col p-4 text-center">
           <h3>${node.name}</h3>
-          <p>EIN: ${node.ein}</p>
         </div>
         <div class="flex flex-row gap-4">
           <div class="flex-1 bg-gray-200 p-4">
@@ -1360,7 +1329,7 @@ function showControlPanel(type, data, element) {
     return `
       <div class="bg-blue-500 text-white flex-col p-4 text-center">
         <h3>${node.name}</h3>
-        <p>EIN: ${node.ein}</p>
+        <p>EIN: ${node.longEIN}</p>
       </div>
       <div class="flex flex-row gap-4">
         <div class="flex-1 bg-gray-200 p-4">
