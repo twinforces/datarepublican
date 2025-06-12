@@ -7,7 +7,7 @@ python download_IRS_990_zips.py 2017 2025 --test /Volumes/Data/irs_zips
 #cd /Volumes/Data/irs_zips; python recompress_irs_zips
 
 python extract_charities.py 2017 2025 --quiet --input-dir /Volumes/Data/irs_zips --output-dir /Volumes/Data/tsvs
-python analyze_charities.py --start-year 2017 --stop-year 2025 --quiet --input-dir /Volumes/Data/tsvs --output-dir /Volumes/Data/tsvs 
+python analyze_charities.py --start-year 2017 --stop-year 2025 --input-dir /Volumes/Data/tsvs --output-dir /Volumes/Data/tsvs 
 python get_latest.py 2017 2025 --zip-dir /Volumes/Data/irs_zips --source-dir /Volumes/Data/tsvs --output-dir ./latest
 cp latest/*.tsv /Volumes/Data/tsvs
 sh combine_grants.sh /Volumes/Data/tsvs/grants_latest.tsv /Volumes/Data/tsvs/grants_combined.tsv
