@@ -132,7 +132,6 @@
               subtitle="Browse the money flows"
               url="/browse"
               classes=""
-              label="New"
             %}
             {% include nav-link.html 
               title="Charity funding"
@@ -145,9 +144,15 @@
               subtitle="Analyze expenses & assets"
               url="/nonprofit/assets"
               classes=""
-              label="New"
             %}          </div>
         </div>
+        {% include nav-link.html
+          title="No Kings"
+          subtitle="Analyze protest financials"
+          url="/nokings"
+           classes="" 
+           label="New"
+            %}
         {% include nav-link.html
           title="NED Explorer"
           subtitle="Explore NED Journal of Democracy"

@@ -433,6 +433,8 @@ title: Charity graph - multi-root BFS & taxpayer totals
 
     // Update metadata based on URL parameters
     const metadataParams = new URLSearchParams();
+    const suppress_addendum = params.has('nk');
+
     if (params.has('custom_graph') && customTitle) {
       metadataParams.set('custom_graph', params.get('custom_graph'));
       metadataParams.set('title', customTitle);
@@ -482,7 +484,7 @@ title: Charity graph - multi-root BFS & taxpayer totals
       // Taxpayer controls are hidden
       $('#excluded-info').hide();
 
-const addendum = `
+let addendum = `
       <br/><br/>
       <p style="font-weight: bold; color: red; background: yellow; text-align: center; padding: 20px; border: 5px solid black;">
           🚨🚨🚨 <strong>WARNING! <a href="https://www.dictionary.com/browse/disclaimer" title="Link to definition if you don't know the word." style="color: inherit; text-decoration: underline;">DISCLAIMER</a>! PAY ATTENTION! HAVE SOME READING <a href="https://www.dictionary.com/browse/comprehension" title="Look it up if you must." style="color: inherit; text-decoration: underline;">COMPREHENSION</a>! 📢📢📢</strong> 🚨🚨🚨
@@ -516,8 +518,11 @@ const addendum = `
 `;
       // Show instructions
       if (customTitle) {
+        if (suppress_addendum)
+          addendum = '';
         $('#instructions').html('Displaying <strong>' + customTitle + `</strong>${addendum}`);
       } else {
+
         $('#instructions').text(`Displaying exact graph.${addendum}`);
       }
     } else {
