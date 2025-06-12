@@ -3,6 +3,7 @@ import { findCircuits } from "./circleMath.js";
 // Use global d3 from CDN
 const d3Array = window.d3;
 const d3Shape = window.d3;
+const OTHER_WIDTH = 30;
 
 // For a given link, return the target node's depth
 function targetDepth(d) {
