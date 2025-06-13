@@ -5,9 +5,9 @@ In order of application use —help with any script for additional params:
 
 `python recompress_irs_zips` one of the IRS zip files is in a format that can’t be read by python, so this recompresses it. 
 
-`python extract_charities.py 2017 2025` this will read all the XML files, and produce .tsv files by org type `—quiet` makes it go faster. Takes about an hour. This will also output an officer_mapping.json which is anticipating a future feature to find charities by person, it maps last/first/charity.  
+`python extract_charities.py 2017 2025 --input-dir /Volumes/Data/irs_zips --output-dir /Volumes/Data/tsvs` this will read all the XML files, and produce .tsv files by org type `—quiet` makes it go faster. Takes about an hour. This will also output an officer_mapping.json which is anticipating a future feature to find charities by person, it maps last/first/charity.  
 
-`python analyze_charities.py 2017 2025` this will read the previous set of .tsv files, fill in the percentile columns, and do some other analysis looking for grift (the grift part is mostly WIP)
+`python analyze_charities.py 2017 2025 --output-dir /Volumes/Data/tsvs --input-dir /Volumes/Data/tsvs` this will read the previous set of .tsv files, fill in the percentile columns, and do some other analysis looking for grift (the grift part is mostly WIP)
 
 `python get_latest.py 2017 2025 —minimumD 0 —source-dir analyzed —zip-dir irs_zips —output-dir output` go through the previous set of .tsv files, and find the most recent filing for every charity. These can be filtered by orgTypes you want, orgTypes you don’t want, and a minimum denominator (assets+income used for the percentages). This will write both .tsv and .csv files. After it extracts the latest tax files, it will go back to the zip files and get the grant data, and write that to a .tsv and .csv file. charity_latest and grants_latest will be the files. 
 

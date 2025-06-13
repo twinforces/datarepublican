@@ -89,7 +89,6 @@ total_queue_puts = 0
 total_tasks_done = 0
 tsv_write_queue = queue.Queue(maxsize=20000)
 done_queuing = False
-queue_lock = threading.Lock()
 zip_index_lock = threading.Lock()
 address_entries = []
 grant_entries = []
@@ -98,13 +97,12 @@ debug_grant_entries = []
 invalid_ein_entries = []
 debug_success_grants = False
 po_box_entries = []
-write_lock = threading.Lock()
 zip_index = {}  # filename -> (zip_path, internal_path)
 zip_code_index = {}  # zip_code -> set((filer_ein, filer_name))
 po_box_zip_index = {}  # (po_box, zip_code) -> set((filer_ein, filer_name))
 ein_mismatch_set = set()
 
-# Thread-local storage for indices
+# Thread-local storage
 thread_local = threading.local()
 
 # Logging setup
@@ -144,7 +142,6 @@ def initialize_thread_local_counters():
         file_counter_local.skipped = 0
 
 def build_zip_index(zip_dir, start_year, end_year):
-    """Build an index of XML filenames to ZIP paths with a progress bar."""
     index = {}
     zip_files = []
     zip_names = set()
@@ -211,7 +208,6 @@ def read_tsv_files(source_dir, start_year, end_year):
     return rows
 
 def compute_name_heuristic(grantee_name, filer_name):
-    """Compute heuristic score: 1 point per matching word (case-insensitive, excluding stop words)."""
     if not grantee_name or not filer_name:
         return 0
     words1 = {w.lower() for w in grantee_name.split() if w.lower() not in STOP_WORDS}
@@ -223,14 +219,11 @@ def canonicalize_address(address_components, output_dir):
         return "", None, None, ""
     address_str = " ".join(comp for comp in address_components if comp)
     try:
-        # Use pypostal to parse the address into components
         parsed = parse_address(address_str)
-        # Extract PO Box and ZIP code from parsed components
         po_box = None
         zip_code = None
         for component, label in parsed:
             if label == 'po_box':
-                # Extract the numeric part of the PO Box
                 match = PO_BOX_NUMBER_REGEX.search(component)
                 if match:
                     po_box = match.group(0)
@@ -241,7 +234,6 @@ def canonicalize_address(address_components, output_dir):
                 zip_code = component
                 log_error("Extracted ZIP code: {} from address: {}", zip_code, address_str)
         
-        # Process ZIP code to get the first 5 digits
         if zip_code:
             zip_code_digits = re.sub(r'\D', '', zip_code)
             if len(zip_code_digits) >= 5:
@@ -251,11 +243,9 @@ def canonicalize_address(address_components, output_dir):
                 log_error("Invalid zip_code: {} in address: {}", zip_code, address_str)
                 zip_code = None
         
-        # Use pypostal to expand and normalize the address
         normalized = expand_address(address_str)
         canonical = normalized[0] if normalized else address_str
         
-        # If PO Box was found, ensure it's included in the canonical address
         if po_box and 'po box' not in canonical.lower():
             canonical = f"PO Box {po_box} {canonical}"
         
@@ -266,20 +256,23 @@ def canonicalize_address(address_components, output_dir):
 
 def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
     global total_addresses, total_address_errors, total_queue_puts
+    # Initialize thread-local storage
+    if not hasattr(thread_local, 'result'):
+        thread_local.result = {
+            'address_entries': [],
+            'debug_address_entries': [],
+            'po_box_entries': [],
+            'invalid_ein_entries': [],
+            'ein_mismatch_set': set(),
+            'total_addresses': 0,
+            'total_queue_puts': 0,
+            'total_address_errors': 0,
+            'zip_code_index': {},
+            'po_box_zip_index': {},
+            'filer_eins': {}
+        }
+    result = thread_local.result
     try:
-        # Initialize thread-local storage
-        if not hasattr(thread_local, 'address_entries'):
-            thread_local.address_entries = []
-            thread_local.debug_address_entries = []
-            thread_local.po_box_entries = []
-            thread_local.invalid_ein_entries = []
-            thread_local.total_addresses = 0
-            thread_local.total_queue_puts = 0
-            thread_local.total_address_errors = 0
-            thread_local.zip_code_index = {}
-            thread_local.po_box_zip_index = {}
-            thread_local.ein_mismatch_set = set()
-
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
         root = tree.getroot()
@@ -295,37 +288,37 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 xml_ein = elem[0].text.strip()
                 break
         if not xml_ein:
-            thread_local.invalid_ein_entries.append({
+            result['invalid_ein_entries'].append({
                 'tsv_ein': tsv_ein,
                 'xml_ein': '',
                 'filer_name': filer_name,
                 'xml_filename': xml_filename,
                 'reason': 'No EIN found in XML'
-                 })
-            if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                thread_local.debug_address_entries.append({
-                        'filer_ein': tsv_ein,
-                        'filer_name': filer_name,
-                        'xml_filename': xml_filename,
-                        'raw_components': '',
-                        'canonical_address': '',
-                        'raw_zip': '',
-                        'zip_code': '',
-                        'status': 'skipped',
-                        'reason': "No EIN found in XML"
-                    })
+            })
+            if not debug_limit or len(result['debug_address_entries']) < debug_limit:
+                result['debug_address_entries'].append({
+                    'filer_ein': tsv_ein,
+                    'filer_name': filer_name,
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': "No EIN found in XML"
+                })
             return False, None
         # Validate XML EIN
         if not EIN_REGEX.match(xml_ein):
-            thread_local.invalid_ein_entries.append({
+            result['invalid_ein_entries'].append({
                 'tsv_ein': tsv_ein,
                 'xml_ein': xml_ein,
                 'filer_name': filer_name,
                 'xml_filename': xml_filename,
                 'reason': f"Invalid XML EIN format: {xml_ein or 'None'}"
-                })
-            if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                thread_local.debug_address_entries.append({
+            })
+            if not debug_limit or len(result['debug_address_entries']) < debug_limit:
+                result['debug_address_entries'].append({
                     'filer_ein': tsv_ein,
                     'filer_name': filer_name,
                     'xml_filename': xml_filename,
@@ -339,17 +332,15 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
             return False, None
         
         # Compare TSV and XML EINs
-        if tsv_ein != xml_ein and tsv_ein not in ein_mismatch_set:
-            thread_local.invalid_ein_entries.append({
+        if tsv_ein != xml_ein and tsv_ein not in result['ein_mismatch_set']:
+            result['invalid_ein_entries'].append({
                 'tsv_ein': tsv_ein,
                 'xml_ein': xml_ein,
                 'filer_name': filer_name,
                 'xml_filename': xml_filename,
                 'reason': 'TSV EIN differs from XML EIN'
-                })
-            thread_local.ein_mismatch_set.add(tsv_ein)
-        
-
+            })
+            result['ein_mismatch_set'].add(tsv_ein)
         
         filer_ein = xml_ein
         
@@ -368,15 +359,15 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
         
         if canonical_address:
-            thread_local.address_entries.append({
+            result['address_entries'].append({
                 'filer_ein': filer_ein,
                 'filer_name': filer_name,
                 'canonical_address': canonical_address,
                 'po_box': po_box,
                 'zip_code': zip_code
             })
-            if debug_success_grants and (not debug_limit or len(thread_local.debug_address_entries) < debug_limit):
-                thread_local.debug_address_entries.append({
+            if debug_success_grants and (not debug_limit or len(result['debug_address_entries']) < debug_limit):
+                result['debug_address_entries'].append({
                     'filer_ein': filer_ein,
                     'filer_name': filer_name,
                     'xml_filename': xml_filename,
@@ -389,36 +380,34 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 })
             if po_box and zip_code:
                 log_error("Adding filer PO Box: po_box={} zip_code={} ein={} name={}", po_box, zip_code, filer_ein, filer_name)
-                thread_local.po_box_entries.append({
+                result['po_box_entries'].append({
                     'po_box': po_box,
                     'zip_code': zip_code,
                     'ein': filer_ein,
                     'org_name': filer_name
                 })
-            thread_local.total_addresses += 1
-            thread_local.total_queue_puts += 1
-
+            result['total_addresses'] += 1
+            result['total_queue_puts'] += 1
             
-            # Update thread-local indices without locks
-            if zip_code and isinstance(zip_code, str) and ZIP_REGEX.match(zip_code) and zip_code.isdigit() and len(zip_code) == 5:
-                log_error("Attempting to index zip_code={} (type={}) for EIN={}", zip_code, type(zip_code), filer_ein)
-                if zip_code not in thread_local.zip_code_index:
-                    thread_local.zip_code_index[zip_code] = set()
-                thread_local.zip_code_index[zip_code].add((filer_ein, filer_name))
-                log_error("Indexed zip_code={} (type={}) for EIN={}", zip_code, type(zip_code), filer_ein)
+            # Update thread-local indices
+            if zip_code and isinstance(zip_code, str) and ZIP_REGEX.match(zip_code):
+                log_error("Indexing zip_code={} for EIN={}", zip_code, filer_ein)
+                if zip_code not in result['zip_code_index']:
+                    result['zip_code_index'][zip_code] = set()
+                result['zip_code_index'][zip_code].add((filer_ein, filer_name))
             else:
-                log_error("Skipping invalid zip_code={} (type={}) for EIN={}", zip_code, type(zip_code), filer_ein)
+                log_error("Skipping invalid zip_code={} for EIN={}", zip_code, filer_ein)
             
-            if po_box and zip_code and isinstance(zip_code, str) and ZIP_REGEX.match(zip_code) and zip_code.isdigit() and len(zip_code) == 5:
+            if po_box and zip_code and isinstance(zip_code, str) and ZIP_REGEX.match(zip_code):
                 po_box_key = (po_box, zip_code)
-                if po_box_key not in thread_local.po_box_zip_index:
-                    thread_local.po_box_zip_index[po_box_key] = set()
-                thread_local.po_box_zip_index[po_box_key].add((filer_ein, filer_name))
+                if po_box_key not in result['po_box_zip_index']:
+                    result['po_box_zip_index'][po_box_key] = set()
+                result['po_box_zip_index'][po_box_key].add((filer_ein, filer_name))
         else:
             log_error("Possible foreign address for EIN={} in XML {}: no USAddress found", filer_ein, xml_filename)
-            thread_local.total_address_errors += 1
-            if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                thread_local.debug_address_entries.append({
+            result['total_address_errors'] += 1
+            if not debug_limit or len(result['debug_address_entries']) < debug_limit:
+                result['debug_address_entries'].append({
                     'filer_ein': filer_ein,
                     'filer_name': filer_name,
                     'xml_filename': xml_filename,
@@ -436,18 +425,14 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
             if not skip_address_errors:
                 return False, None
         
-        log_error("Active threads in parse_addresses: {}", threading.active_count())
-        log_error("Thread-local zip_code_index size: {}", len(thread_local.zip_code_index))
-        log_error("Thread-local po_box_zip_index size: {}", len(thread_local.po_box_zip_index))
-        for k in thread_local.zip_code_index:
-            if not (k and k.isdigit() and len(k) == 5):
-                log_error("Invalid thread-local zip_code_index key: {}", k)
+        log_error("Thread-local result: addresses={}, errors={}", result['total_addresses'], result['total_address_errors'])
+        result['filer_eins'][xml_filename] = (filer_ein, row)
         return True, filer_ein
     except Exception as e:
         log_error("Error parsing XML {} for EIN={}: {}", xml_filename, row['filer_ein'], str(e), exc_info=True)
-        thread_local.total_address_errors += 1
-        if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-            thread_local.debug_address_entries.append({
+        result['total_address_errors'] += 1
+        if not debug_limit or len(result['debug_address_entries']) < debug_limit:
+            result['debug_address_entries'].append({
                 'filer_ein': row['filer_ein'],
                 'filer_name': row['filer_name'],
                 'xml_filename': xml_filename,
@@ -459,31 +444,29 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 'reason': str(e)
             })
         return False, None
-        
+
 def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
     global total_grants, total_990pf_rows, total_queue_puts
+    if not hasattr(thread_local, 'result'):
+        thread_local.result = {
+            'grant_entries': [],
+            'debug_grant_entries': [],
+            'po_box_entries': [],
+            'total_grants': 0,
+            'total_queue_puts': 0,
+            'total_990pf_rows': 0
+        }
+    result = thread_local.result
     try:
-        # Initialize thread-local storage for grants
-        if not hasattr(thread_local, 'grant_entries'):
-            thread_local.grant_entries = []
-            thread_local.debug_grant_entries = []
-            thread_local.po_box_entries_grants = []
-            thread_local.total_grants = 0
-            thread_local.total_queue_puts_grants = 0
-            thread_local.total_990pf_rows = 0
-
-
-
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
         root = tree.getroot()
         
         filer_name = row['filer_name'].strip()
-        status_counts = defaultdict(int)  # Track grant statuses
+        status_counts = defaultdict(int)
         
-        # Parse grants for 990PF
         if row['form_type'] == '990PF':
-            thread_local.total_990pf_rows += 1
+            result['total_990pf_rows'] += 1
             grant_count = 0
             xpath_matches = defaultdict(int)
             for xpath_grant in GRANT_XPATHS_990PF:
@@ -522,7 +505,6 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                         try:
                             grant_amt = int(float(amount_elem.text.strip()))
                             if grant_amt > 0:
-                                # Compute name heuristic using indices
                                 best_score = 0
                                 best_filer = None
                                 best_heuristic = None
@@ -560,15 +542,15 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                 snippet = etree.tostring(element, encoding='unicode', method='xml', pretty_print=True)[:500]
                                 
                                 if grant_ein != "Unknown":
-                                    thread_local.grant_entries.append({
+                                    result['grant_entries'].append({
                                         'filer_ein': filer_ein,
                                         'filer_name': filer_name,
                                         'grant_ein': grant_ein,
                                         'grant_amt': grant_amt,
                                         'tax_year': row['tax_year']
                                     })
-                                    if debug_success_grants and (not debug_limit or len(thread_local.debug_grant_entries) < debug_limit):
-                                        thread_local.debug_grant_entries.append({
+                                    if debug_success_grants and (not debug_limit or len(result['debug_grant_entries']) < debug_limit):
+                                        result['debug_grant_entries'].append({
                                             'filer_ein': filer_ein,
                                             'filer_name': filer_name,
                                             'xml_filename': xml_filename,
@@ -581,29 +563,27 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                             'heuristic_score': best_score,
                                             'reason': "success"
                                         })
-                                    thread_local.total_queue_puts_grants += 1
-                                    thread_local.total_grants += 1
+                                    result['total_queue_puts'] += 1
+                                    result['total_grants'] += 1
                                 else:
-                                    # Log XML snippet for debug
-                                    if not debug_limit or len(thread_local.debug_grant_entries) < debug_limit:
-                                        thread_local.debug_grant_entries.append({
-                                                'filer_ein': filer_ein,
-                                                'filer_name': filer_name,
-                                                'xml_filename': xml_filename,
-                                                'grantee_name': grantee_name,
-                                                'grant_ein': grant_ein,
-                                                'grant_address': grant_address,
-                                                'grant_amt': grant_amt,
-                                                'tax_year': row['tax_year'],
-                                                'status': status,
-                                                'heuristic_score': best_score,
-                                                'reason': "No valid EIN, address, or name"
+                                    if not debug_limit or len(result['debug_grant_entries']) < debug_limit:
+                                        result['debug_grant_entries'].append({
+                                            'filer_ein': filer_ein,
+                                            'filer_name': filer_name,
+                                            'xml_filename': xml_filename,
+                                            'grantee_name': grantee_name,
+                                            'grant_ein': grant_ein,
+                                            'grant_address': grant_address,
+                                            'grant_amt': grant_amt,
+                                            'tax_year': row['tax_year'],
+                                            'status': status,
+                                            'heuristic_score': best_score,
+                                            'reason': "No valid EIN, address, or name"
                                         })
                         except (ValueError, TypeError) as e:
-                            # Log XML snippet for debug
                             snippet = etree.tostring(element, encoding='unicode', method='xml', pretty_print=True)[:500]
-                            if not debug_limit or len(thread_local.debug_grant_entries) < debug_limit:
-                                thread_local.debug_grant_entries.append({
+                            if not debug_limit or len(result['debug_grant_entries']) < debug_limit:
+                                result['debug_grant_entries'].append({
                                     'filer_ein': filer_ein,
                                     'filer_name': filer_name,
                                     'xml_filename': xml_filename,
@@ -617,10 +597,9 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                     'reason': f"Invalid grant amount: {str(e)}; XML snippet: {snippet}"
                                 })
                     else:
-                        # Log XML snippet for debug
                         snippet = etree.tostring(element, encoding='unicode', method='xml', pretty_print=True)[:500]
-                        if not debug_limit or len(thread_local.debug_grant_entries) < debug_limit:
-                            thread_local.debug_grant_entries.append({
+                        if not debug_limit or len(result['debug_grant_entries']) < debug_limit:
+                            result['debug_grant_entries'].append({
                                 'filer_ein': filer_ein,
                                 'filer_name': filer_name,
                                 'xml_filename': xml_filename,
@@ -635,14 +614,13 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                             })
         
         log_error("Final grant status counts for XML {}: {}", xml_filename, dict(status_counts))
-        log_error("Active threads in parse_grants: {}", threading.active_count())
         return True
     except Exception as e:
         log_error("Error parsing grants in XML {} for EIN={}: {}", xml_filename, filer_ein, str(e), exc_info=True)
         return False
 
 def process_rows(rows, worker_threads, zip_index, start_year, end_year, output_dir):
-    global total_990pf_rows
+    global total_990pf_rows, total_addresses, total_address_errors, total_queue_puts, total_grants
     zip_cache = {}
     initialize_thread_local_counters()
     total_skipped = 0
@@ -657,168 +635,183 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year, output_d
     # First pass: Process addresses and build indices
     def process_address_row(row):
         nonlocal total_skipped
+        thread_local.result = {  # Reset thread_local.result for each row
+            'address_entries': [],
+            'debug_address_entries': [],
+            'po_box_entries': [],
+            'invalid_ein_entries': [],
+            'ein_mismatch_set': set(),
+            'total_addresses': 0,
+            'total_queue_puts': 0,
+            'total_address_errors': 0,
+            'zip_code_index': {},
+            'po_box_zip_index': {},
+            'filer_eins': {}
+        }
         xml_path = row.get('xml_name', '')
         if not xml_path:
             log_error("No xml_name for EIN={}, skipping", row['filer_ein'], ein=row['filer_ein'])
-            if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                thread_local.debug_address_entries.append({
-                        'filer_ein': row['filer_ein'],
-                        'filer_name': row['filer_name'],
-                        'xml_filename': '',
-                        'raw_components': '',
-                        'canonical_address': '',
-                        'raw_zip': '',
-                        'zip_code': '',
-                        'status': 'skipped',
-                        'reason': 'Missing xml_name'
-                    })
+            thread_local.result['debug_address_entries'].append({
+                'filer_ein': row['filer_ein'],
+                'filer_name': row['filer_name'],
+                'xml_filename': '',
+                'raw_components': '',
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'skipped',
+                'reason': 'Missing xml_name'
+            })
             file_counter_local.skipped += 1
             total_skipped += 1
-            return
+            return thread_local.result
         try:
             parts = xml_path.split('/')
             xml_filename = parts[-1]
             if xml_filename not in zip_index:
                 log_error("No file named {} found in ZIP index for EIN={}, skipping", xml_filename, row['filer_ein'], ein=row['filer_ein'])
-                if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                    thread_local.debug_address_entries.append({
-                            'filer_ein': row['filer_ein'],
-                            'filer_name': row['filer_name'],
-                            'xml_filename': xml_filename,
-                            'raw_components': '',
-                            'canonical_address': '',
-                            'raw_zip': '',
-                            'zip_code': '',
-                            'status': 'skipped',
-                            'reason': 'XML not found in ZIP index'
-                        })
+                thread_local.result['debug_address_entries'].append({
+                    'filer_ein': row['filer_ein'],
+                    'filer_name': row['filer_name'],
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': 'XML not found in ZIP index'
+                })
                 file_counter_local.skipped += 1
                 total_skipped += 1
-                return
+                return thread_local.result
             zip_path, internal_path = zip_index[xml_filename]
             zip_year_match = re.match(r'.*(\d{4})', os.path.basename(zip_path))
             if not zip_year_match:
                 log_error("Invalid ZIP path format {} for EIN={}, skipping", zip_path, row['filer_ein'], ein=row['filer_ein'])
-                if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                    thread_local.debug_address_entries.append({
-                            'filer_ein': row['filer_ein'],
-                            'filer_name': row['filer_name'],
-                            'xml_filename': xml_filename,
-                            'raw_components': '',
-                            'canonical_address': '',
-                            'raw_zip': '',
-                            'zip_code': '',
-                            'status': 'skipped',
-                            'reason': 'Invalid ZIP path format'
-                        })
+                thread_local.result['debug_address_entries'].append({
+                    'filer_ein': row['filer_ein'],
+                    'filer_name': row['filer_name'],
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': 'Invalid ZIP path format'
+                })
                 file_counter_local.skipped += 1
                 total_skipped += 1
-                return
+                return thread_local.result
             zip_year = int(zip_year_match.group(1))
             if zip_year < start_year or zip_year > end_year + 1:
                 log_error("ZIP year {} outside range {}-{} for xml_path {} and EIN={}, skipping", zip_year, start_year, end_year + 1, xml_path, row['filer_ein'], ein=row['filer_ein'])
-                if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                    thread_local.debug_address_entries.append({
-                            'filer_ein': row['filer_ein'],
-                            'filer_name': row['filer_name'],
-                            'xml_filename': xml_filename,
-                            'raw_components': '',
-                            'canonical_address': '',
-                            'raw_zip': '',
-                            'zip_code': '',
-                            'status': 'skipped',
-                            'reason': f"ZIP year {zip_year} outside range"
-                        })
+                thread_local.result['debug_address_entries'].append({
+                    'filer_ein': row['filer_ein'],
+                    'filer_name': row['filer_name'],
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': f"ZIP year {zip_year} outside range"
+                })
                 file_counter_local.skipped += 1
                 total_skipped += 1
-                return
+                return thread_local.result
             if zip_path not in zip_cache:
                 zip_cache[zip_path] = zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
                 success, filer_ein = parse_addresses(xml_content, xml_filename, row, zip_index, output_dir)
-                if success and filer_ein:
-                    thread_local.filer_eins = thread_local.__dict__.setdefault('filer_eins', {})
-                    thread_local.filer_eins[xml_filename] = (filer_ein, row)
+                if not success:
+                    file_counter_local.skipped += 1
+                    total_skipped += 1
+            return thread_local.result
         except Exception as e:
             log_error("Error processing row for XML {} and EIN={}: {}", xml_path, row['filer_ein'], str(e), exc_info=True)
-            if not debug_limit or len(thread_local.debug_address_entries) < debug_limit:
-                thread_local.debug_address_entries.append({
-                        'filer_ein': row['filer_ein'],
-                        'filer_name': row['filer_name'],
-                        'xml_filename': xml_path,
-                        'raw_components': '',
-                        'canonical_address': '',
-                        'raw_zip': '',
-                        'zip_code': '',
-                        'status': 'error',
-                        'reason': str(e)
-                    })
+            thread_local.result['debug_address_entries'].append({
+                'filer_ein': row['filer_ein'],
+                'filer_name': row['filer_name'],
+                'xml_filename': xml_path,
+                'raw_components': '',
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'error',
+                'reason': str(e)
+            })
             file_counter_local.skipped += 1
             total_skipped += 1
+            return thread_local.result
 
-# Address pass
+    # Address pass
     log_error("Found {} 990PF rows in {} total rows", sum(1 for row in rows if row['form_type'] == '990PF'), len(rows))
-    thread_local_data = []
     if args.no_threads:
         for row in tqdm(rows, desc="Processing addresses"):
-            process_address_row(row)
-            thread_local_data.append(thread_local.__dict__.copy())
+            result = process_address_row(row)
+            address_entries.extend(result['address_entries'])
+            debug_address_entries.extend(result['debug_address_entries'])
+            po_box_entries.extend(result['po_box_entries'])
+            invalid_ein_entries.extend(result['invalid_ein_entries'])
+            ein_mismatch_set.update(result['ein_mismatch_set'])
+            total_addresses += result['total_addresses']
+            total_queue_puts += result['total_queue_puts']
+            total_address_errors += result['total_address_errors']
+            for zip_code, entries in result['zip_code_index'].items():
+                if zip_code not in zip_code_index:
+                    zip_code_index[zip_code] = set()
+                zip_code_index[zip_code].update(entries)
+            for po_box_zip, entries in result['po_box_zip_index'].items():
+                if po_box_zip not in po_box_zip_index:
+                    po_box_zip_index[po_box_zip] = set()
+                po_box_zip_index[po_box_zip].update(entries)
+            filer_eins.update(result['filer_eins'])
     else:
         with ThreadPoolExecutor(max_workers=worker_threads) as executor:
             futures = [executor.submit(process_address_row, row) for row in rows]
             with tqdm(total=len(rows), desc="Processing addresses") as pbar:
                 for future in as_completed(futures):
                     try:
-                        future.result()
-                        # Collect thread-local data after each future completes
-                        thread_local_data.append(thread_local.__dict__.copy())
+                        result = future.result()
+                        with zip_index_lock:
+                            address_entries.extend(result['address_entries'])
+                            debug_address_entries.extend(result['debug_address_entries'])
+                            po_box_entries.extend(result['po_box_entries'])
+                            invalid_ein_entries.extend(result['invalid_ein_entries'])
+                            ein_mismatch_set.update(result['ein_mismatch_set'])
+                            total_addresses += result['total_addresses']
+                            total_queue_puts += result['total_queue_puts']
+                            total_address_errors += result['total_address_errors']
+                            for zip_code, entries in result['zip_code_index'].items():
+                                if zip_code not in zip_code_index:
+                                    zip_code_index[zip_code] = set()
+                                zip_code_index[zip_code].update(entries)
+                            for po_box_zip, entries in result['po_box_zip_index'].items():
+                                if po_box_zip not in po_box_zip_index:
+                                    po_box_zip_index[po_box_zip] = set()
+                                po_box_zip_index[po_box_zip].update(entries)
+                            filer_eins.update(result['filer_eins'])
                     except Exception as e:
                         log_error("Error in address future: {}", str(e), exc_info=True)
                     pbar.update(1)
     
-    # Merge thread-local indices into global indices
-    with zip_index_lock:
-        for data in thread_local_data:
-            if 'address_entries' in data:
-                address_entries.extend(data['address_entries'])
-            if 'debug_address_entries' in data:
-                debug_address_entries.extend(data['debug_address_entries'])
-            if 'po_box_entries' in data:
-                po_box_entries.extend(data['po_box_entries'])
-            if 'invalid_ein_entries' in data:
-                invalid_ein_entries.extend(data['invalid_ein_entries'])
-            if 'ein_mismatch_set' in data:
-                ein_mismatch_set.update(data['ein_mismatch_set'])
-            if 'filer_eins' in data:
-                filer_eins.update(data['filer_eins'])
-            if 'total_addresses' in data:
-                total_addresses += data['total_addresses']
-            if 'total_queue_puts' in data:
-                total_queue_puts += data['total_queue_puts']
-            if 'total_address_errors' in data:
-                total_address_errors += data['total_address_errors']
-            if 'zip_code_index' in data:
-                for zip_code, entries in data['zip_code_index'].items():
-                    if zip_code not in zip_code_index:
-                        zip_code_index[zip_code] = set()
-                    zip_code_index[zip_code].update(entries)
-            if 'po_box_zip_index' in data:
-                for po_box_zip, entries in data['po_box_zip_index'].items():
-                    if po_box_zip not in po_box_zip_index:
-                        po_box_zip_index[po_box_zip] = set()
-                    po_box_zip_index[po_box_zip].update(entries)
-
     log_error("Address pass complete: {} addresses, {} errors, zip_code_index size={}, active threads={}", total_addresses, total_address_errors, len(zip_code_index), threading.active_count())
         
     # Second pass: Process grants
-    thread_local_data = []  # Reset for grant pass
     def process_grant_row(xml_filename, filer_info):
+        nonlocal total_skipped
+        thread_local.result = {  # Reset thread_local.result for each row
+            'grant_entries': [],
+            'debug_grant_entries': [],
+            'po_box_entries': [],
+            'total_grants': 0,
+            'total_queue_puts': 0,
+            'total_990pf_rows': 0
+        }
         if not filer_eins:
             log_error("No filer_eins available for grant processing, skipping grant pass")
-            return
-        nonlocal total_skipped
-        initialize_thread_local_counters()
+            return thread_local.result
         log_error("Processing grant in thread: {}", threading.get_ident())
         filer_ein, row = filer_info
         xml_path = row.get('xml_name', '')
@@ -829,49 +822,47 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year, output_d
                 log_error("XML {} not in zip_index for EIN={}, skipping", xml_filename, filer_ein)
                 file_counter_local.skipped += 1
                 total_skipped += 1
-                return
+                return thread_local.result
             zip_path, internal_path = zip_index[xml_filename]
             if zip_path not in zip_cache:
                 zip_cache[zip_path] = zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
                 parse_grants(xml_content, xml_filename, row, filer_ein, output_dir)
-                thread_local_data.append(thread_local.__dict__.copy())
+            return thread_local.result
         except Exception as e:
             log_error("Error processing grant row for XML {} and EIN={}: {}", xml_path, filer_ein, str(e), exc_info=True)
             file_counter_local.skipped += 1
             total_skipped += 1
+            return thread_local.result
 
     if args.no_threads:
         for xml_filename, filer_info in tqdm(filer_eins.items(), desc="Processing grants"):
-            process_grant_row(xml_filename, filer_info)
-            thread_local_data.append(thread_local.__dict__.copy())
+            result = process_grant_row(xml_filename, filer_info)
+            grant_entries.extend(result['grant_entries'])
+            debug_grant_entries.extend(result['debug_grant_entries'])
+            po_box_entries.extend(result['po_box_entries'])
+            total_grants += result['total_grants']
+            total_queue_puts += result['total_queue_puts']
+            total_990pf_rows += result['total_990pf_rows']
     else:
         with ThreadPoolExecutor(max_workers=worker_threads) as executor:
             futures = [executor.submit(process_grant_row, xml_filename, filer_info) for xml_filename, filer_info in filer_eins.items()]
             with tqdm(total=len(filer_eins), desc="Processing grants") as pbar:
                 for future in as_completed(futures):
                     try:
-                        future.result()
+                        result = future.result()
+                        with zip_index_lock:
+                            grant_entries.extend(result['grant_entries'])
+                            debug_grant_entries.extend(result['debug_grant_entries'])
+                            po_box_entries.extend(result['po_box_entries'])
+                            total_grants += result['total_grants']
+                            total_queue_puts += result['total_queue_puts']
+                            total_990pf_rows += result['total_990pf_rows']
                     except Exception as e:
                         log_error("Error in grant future: {}", str(e), exc_info=True)
                     pbar.update(1)
     
-    # Merge thread-local data from grant pass
-    with zip_index_lock:
-        for data in thread_local_data:
-            if 'grant_entries' in data:
-                grant_entries.extend(data['grant_entries'])
-            if 'debug_grant_entries' in data:
-                debug_grant_entries.extend(data['debug_grant_entries'])
-            if 'po_box_entries_grants' in data:
-                po_box_entries.extend(data['po_box_entries_grants'])
-            if 'total_grants' in data:
-                total_grants += data['total_grants']
-            if 'total_queue_puts_grants' in data:
-                total_queue_puts += data['total_queue_puts_grants']
-            if 'total_990pf_rows' in data:
-                total_990pf_rows += data['total_990pf_rows']
     for zip_file in zip_cache.values():
         zip_file.close()
     
@@ -896,7 +887,7 @@ def write_outputs(output_dir):
     reason_counts = defaultdict(int)
     for entry in debug_address_entries:
         if entry['status'] == 'error':
-            reason = entry['reason'].split(';')[0]  # First part of reason
+            reason = entry['reason'].split(';')[0]
             reason_counts[reason] += 1
     log_error("Address error summary: {}", dict(reason_counts))
 
@@ -904,7 +895,7 @@ def write_outputs(output_dir):
               len(address_entries), len(grant_entries), len(debug_address_entries), len(debug_grant_entries),
               len(invalid_ein_entries), len(po_box_entries), total_990pf_rows, total_address_errors)
 
-    # Write addresses without de-duplication
+    # Write addresses
     log_error("Opening TSV file: {}", address_file)
     with open(address_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
@@ -914,7 +905,7 @@ def write_outputs(output_dir):
         f.flush()
     log_error("Wrote {} address rows to {}", len(address_entries), address_file)
 
-    # Write grants without de-duplication
+    # Write grants
     log_error("Opening TSV file: {}", grant_file)
     with open(grant_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
@@ -955,9 +946,8 @@ def write_outputs(output_dir):
         f.flush()
     log_error("Wrote {} invalid EIN rows to {}", len(sorted_invalid_eins), invalid_ein_file)
 
-    # Filter and sort PO Box matches for filers only
-    filer_po_boxes = po_box_entries
-    sorted_po_boxes = sorted(filer_po_boxes, key=lambda x: (x['zip_code'], x['po_box'], x['org_name'].lower()))
+    # Filter and sort PO Box matches
+    sorted_po_boxes = sorted(po_box_entries, key=lambda x: (x['zip_code'], x['po_box'], x['org_name'].lower()))
     log_error("Sorted {} PO Box entries", len(sorted_po_boxes))
     log_error("Opening TSV file: {}", po_box_file)
     with open(po_box_file, 'w', encoding='utf-8', newline='') as f:
@@ -988,7 +978,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--quiet", action="store_true", help="Disable all logging")
     parser.add_argument("--fast-interrupt", action="store_true", help="Exit immediately on interrupt without writing outputs")
-    parser.add_argument("--debug-limit", type=int, default=100000, help="Limit debug entries for testing (e.g., 100000)")
+    parser.add_argument("--debug-limit", type=int, default=100000, help="Limit debug entries for testing")
     parser.add_argument("--skip-address-errors", action="store_true", help="Continue processing grants despite address errors")
     parser.add_argument("--debug-success-grants", action="store_true", help="Include successful grants in debug output")
     parser.add_argument("--sample-xml", type=str, default=None, help="Directory to save failing XMLs for debugging")
@@ -1017,6 +1007,8 @@ def main():
     if args.no_threads:
         worker_threads = 1
 
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
     listener = setup_logging(output_dir)
     log_error("Logging initialized successfully")
     log_error("Starting with fast_interrupt={}, debug_limit={}, skip_address_errors={}, sample_xml={}, log_zip_errors={}, no_threads={}, worker_threads={}", 
@@ -1027,7 +1019,7 @@ def main():
     if not os.path.isdir(source_dir):
         raise ValueError(f"Source directory {source_dir} does not exist")
     if not os.path.isdir(zip_dir):
-        raise ValueValueError(f"ZIP directory {zip_dir} does not exist")
+        raise ValueError(f"ZIP directory {zip_dir} does not exist")
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
