@@ -55,7 +55,7 @@ ZIP_REGEX = re.compile(r'^\d{5}$')
 PO_BOX_NUMBER_REGEX = re.compile(r'\b\d+\b')  # Regex to extract PO Box number
 STOP_WORDS = {'and', 'the', 'of', 'for', 'in', 'to', 'a', 'an'}
 ADDRESS_COLUMNS = ["filer_ein", "filer_name", "canonical_address"]
-GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"]
+GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year", "grantee_name"]
 DEBUG_ADDRESS_COLUMNS = ["filer_ein", "filer_name", "xml_filename", "raw_components", "canonical_address", "raw_zip", "zip_code", "status", "reason"]
 DEBUG_GRANT_COLUMNS = ["filer_ein", "filer_name", "xml_filename", "grantee_name", "grant_ein", "grant_address", "grant_amt", "tax_year", "status", "heuristic_score", "reason"]
 INVALID_EIN_COLUMNS = ["tsv_ein", "xml_ein", "filer_name", "xml_filename", "reason"]
@@ -868,6 +868,27 @@ def process_rows(rows, worker_threads, zip_index, start_year, end_year, output_d
     
     log_error("Grant pass complete: {} grants, {} 990PF rows, total skipped: {}, active threads={}", total_grants, total_990pf_rows, total_skipped, threading.active_count())
 
+def deduplicate_sorted_dicts(entries, key_order):
+    """
+    De-duplicate a list of dictionaries, preserving sort order.
+    
+    Args:
+        entries: List of dictionaries to de-duplicate.
+        key_order: List of keys defining the sort order and uniqueness.
+    
+    Returns:
+        List of unique dictionaries in original sort order.
+    """
+    seen = set()
+    deduped = []
+    for entry in entries:
+        # Create a tuple of values for the specified keys to define uniqueness
+        key_tuple = tuple(str(entry.get(key, '')) for key in key_order)
+        if key_tuple not in seen:
+            seen.add(key_tuple)
+            deduped.append(entry)
+    return deduped
+
 def write_outputs(output_dir):
     global address_entries, grant_entries, debug_address_entries, debug_grant_entries, invalid_ein_entries, po_box_entries
     address_file = os.path.join(output_dir, "charity_addresses.tsv")
@@ -896,6 +917,7 @@ def write_outputs(output_dir):
               len(invalid_ein_entries), len(po_box_entries), total_990pf_rows, total_address_errors)
 
     # Write addresses
+    address_entries = deduplicate_sorted_dicts(address_entries, ['filer_ein', 'filer_name', 'canonical_address'])
     log_error("Opening TSV file: {}", address_file)
     with open(address_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
@@ -937,23 +959,25 @@ def write_outputs(output_dir):
 
     # Sort and write invalid EINs
     sorted_invalid_eins = sorted(invalid_ein_entries, key=lambda x: (x['xml_ein'], x['tsv_ein'], x['filer_name'].lower()))
+    filtered_invalid_ein_entries = deduplicate_sorted_dicts(sorted_invalid_eins, ['tsv_ein', 'xml_ein', 'filer_name'])
     log_error("Opening TSV file: {}", invalid_ein_file)
     with open(invalid_ein_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(INVALID_EIN_COLUMNS)
-        for entry in sorted_invalid_eins:
+        for entry in filtered_invalid_ein_entries:
             writer.writerow([entry[col] for col in INVALID_EIN_COLUMNS])
         f.flush()
     log_error("Wrote {} invalid EIN rows to {}", len(sorted_invalid_eins), invalid_ein_file)
 
     # Filter and sort PO Box matches
     sorted_po_boxes = sorted(po_box_entries, key=lambda x: (x['zip_code'], x['po_box'], x['org_name'].lower()))
+    filtered_po_box_entries = deduplicate_sorted_dicts(po_box_entries, ['po_box', 'zip_code', 'ein', 'org_name'])
     log_error("Sorted {} PO Box entries", len(sorted_po_boxes))
     log_error("Opening TSV file: {}", po_box_file)
     with open(po_box_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(PO_BOX_COLUMNS)
-        for entry in sorted_po_boxes:
+        for entry in filtered_po_box_entries:
             writer.writerow([entry[col] for col in PO_BOX_COLUMNS])
         f.flush()
     
