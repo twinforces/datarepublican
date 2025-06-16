@@ -27,6 +27,7 @@ import json
 import psutil
 import xml.etree.ElementTree as ET
 import traceback
+from countryCodes import iso3166_alpha2
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 ADDRESS_XPATHS = [
@@ -53,12 +54,12 @@ AMOUNT_XPATHS = [
     etree.XPath(".//Amt", namespaces={}),
 ]
 GRANTEE_ADDRESS_XPATHS = [
-    etree.XPath(".//irs:RecipientUSAddress/* | .//irs:RecipientForeignAddress/*", namespaces=NAMESPACES),
-    etree.XPath(".//RecipientUSAddress/* | .//RecipientForeignAddress/*", namespaces={}),
+    etree.XPath(".//irs:RecipientUSAddress/* | .//irs:RecipientForeignAddress/* | .//irs:RecipientForeignAddress/irs:CountryCd", namespaces=NAMESPACES),
+    etree.XPath(".//RecipientUSAddress/* | .//RecipientForeignAddress/* | .//RecipientForeignAddress/CountryCd", namespaces={}),
 ]
 ZIP_REGEX = re.compile(r'^\d{5}$')
-PO_BOX_REGEX = re.compile(r'P.*BOX\s+\w+', re.IGNORECASE)
-PO_BOX_NUMBER_REGEX = re.compile(r'\b\d+\b')
+PO_BOX_REGEX = re.compile(r'P.*BOX\s+(\w+)', re.IGNORECASE)
+PO_BOX_NUMBER_REGEX = re.compile(r'\b[\w\d]+\b')
 STOP_WORDS = {'and', 'the', 'of', 'for', 'in', 'to', 'a', 'an'}
 ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'canonical_address', 'tax_year', 'zip_code', 'po_box']
 GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
@@ -100,6 +101,7 @@ total_address_errors = 0
 total_queue_puts = 0
 total_tasks_done = 0
 duplicate_grant_count = 0
+duplicate_ein_counts = defaultdict(int)
 unique_grant_eins = set()
 grant_ein_counts = defaultdict(int)
 results_queue = None
@@ -394,7 +396,7 @@ def canonicalize_address(address_components, output_dir):
             match = PO_BOX_REGEX.search(address_line)
             if match:
                 po_box_str = match.group(0)
-                number_match = PO_BOX_NUMBER_REGEX.search(po_box_str)
+                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
                 if number_match:
                     po_box = number_match.group(0)
                 else:
@@ -645,7 +647,15 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                             break
                     is_foreign_address = any('RecipientForeignAddress' in elem.tag for elem in address_elems) if address_elems else False
                     if is_foreign_address:
-                        grant_ein = "002"
+                        country_elem = element.xpath(".//irs:CountryCd", namespaces=NAMESPACES)
+                        country_code = country_elem[0].text.strip() if country_elem and country_elem[0].text else None
+                        if country_code and country_code in iso3166_alpha2:
+                            grant_ein = iso3166_alpha2[country_code]["number"]
+                            log_error("Foreign address mapped to ISO 3166-1 number: {} for country: {}", grant_ein, country_code)
+                        else:
+                            grant_ein='999' # the unknown country code country
+                            grant_ein = f"Address:{grantee_canonical_address}" if grantee_canonical_address else "Unknown"
+                            log_error("Foreign address unmapped, using address-based EIN: {}, country: {}", grant_ein, country_code or "None")
                     else:
                         grant_ein = ein_elem[0].text.strip() if ein_elem and len(ein_elem) > 0 and ein_elem[0].text else "Unknown"
                     grantee_name = name_elem.text.strip() if name_elem is not None and name_elem.text and name_elem.text.strip().lower() != 'see attached schedule' else "Unknown"
@@ -657,7 +667,9 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                     if grantee_canonical_address or amount_elem is not None or name_elem is not None or len(ein_elem) > 0 or grant_ein != "Unknown":
                         try:
                             grant_amt = int(float(amount_elem.text.strip())) if amount_elem is not None and amount_elem.text else 0
-                            if grantee_canonical_address or grant_amt > 0 or grantee_name != "Unknown" or ein_elem:
+                            if is_foreign_address:
+                                status="success_foreign"
+                            elif grantee_canonical_address or grant_amt > 0 or grantee_name != "Unknown" or ein_elem:
                                 best_score = 0
                                 best_filer = None
                                 best_heuristic = None
@@ -700,6 +712,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                 seen_key = (filer_ein, grant_ein)
                                 if seen_key in grant_map_keys:
                                     duplicate_grant_count += 1
+                                    duplicate_ein_counts[grant_ein] += 1
                                     if skip_log_count < 10:
                                         log_error("Duplicate grant for filer_ein={}, grant_ein={} in XML {}, amount: {}, grantee_name={}, grant_address={}", filer_ein, grant_ein, xml_filename, grant_amt, grantee_name, grantee_canonical_address)
                                         skip_log_count += 1
@@ -1282,6 +1295,10 @@ def write_outputs(output_dir, addresses_cached):
     # Log top 5 most frequent grant_ein values
     top_eins = sorted(grant_ein_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     log_error("Top 5 frequent grant EINs: {}", [(ein, count) for ein, count in top_eins])	
+    if duplicate_grant_count > 0:
+        log_error("WARNING: {} duplicate grants detected; check 'Duplicate grant' logs for details", duplicate_grant_count)
+    top_duplicate_eins = sorted(duplicate_ein_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    log_error("Top 5 duplicated grant EINs: {}", [(ein, count) for ein, count in top_duplicate_eins])
 
 def deduplicate_sorted_dicts(entries, key_order):
     seen = set()

@@ -248,5 +248,6 @@ iso3166_alpha2 = {
     "AX": {"number": "246", "name": "Åland Islands"},
     "BQ": {"number": "247", "name": "Bonaire, Sint Eustatius and Saba"},
     "SS": {"number": "248", "name": "South Sudan"},
-    "XK": {"number": "249", "name": "Kosovo"}
+    "XK": {"number": "249", "name": "Kosovo"},
+    "ZZ": {"number": "999", "name": "Unknown Country Code"}
 }
