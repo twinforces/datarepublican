@@ -737,7 +737,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                     result['total_queue_puts'] += 1
                             else:
                                 if skip_log_count < 10:
-                                    raw_amount_text = amount_elem.text if amount_elem else "None"
+                                    raw_amount_text = amount_elem.text if amount_elem is not None else "None"
                                     log_error("Skipped grant in XML {}: grantee_name={}, grant_amt={}, grant_address={}, raw_amount_text={}, reason=No valid EIN, address, or name", xml_filename, grantee_name, grant_amt, grantee_canonical_address, raw_amount_text)
                                     skip_log_count += 1
                                 result['debug_grant_entries'].append({
