@@ -62,9 +62,9 @@ PO_BOX_REGEX = re.compile(r'P.*BOX\s+(\w+)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'\b[\w\d]+\b')
 STOP_WORDS = {'and', 'the', 'of', 'for', 'in', 'to', 'a', 'an'}
 ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'canonical_address', 'tax_year', 'zip_code', 'po_box']
-GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
+GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grantee_name', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
 DEBUG_ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'raw_zip', 'zip_code', 'status', 'reason']
-DEBUG_GRANT_COLUMNS = ['filer_ein', 'filer_name', 'xml_filename', 'grantee_name', 'grant_ein', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
+DEBUG_GRANT_COLUMNS = ['filer_ein', 'grant_ein', 'filer_name', 'grantee_name', 'xml_filename', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
 INVALID_EIN_COLUMNS = ['tsv_ein', 'xml_ein', 'filer_name', 'xml_filename', 'reason']
 PO_BOX_COLUMNS = ['po_box', 'zip_code', 'ein', 'org_name']
 ZIP_ERROR_COLUMNS = ['xml_filename', 'filer_ein', 'zip_code', 'raw_zip', 'address']
@@ -251,6 +251,7 @@ def setup_logging(output_dir):
 
 def compute_zip_checksums(zip_dir):
     checksums = {}
+    print("Computing Zip File Checksums...")
     try:
         result = subprocess.run(['sha256sum'] + glob.glob(os.path.join(zip_dir, '*.zip')), capture_output=True, text=True)
         for line in result.stdout.splitlines():
@@ -270,7 +271,7 @@ def load_caches(cache_dir, start_year, end_year, zip_dir):
     cache_valid = False
     cached_data = None
     checksum_file = os.path.join(cache_dir, f'zip_checksums_{start_year}_{end_year}.json')
-    print("loading caches")
+    print("loading caches...")
     if os.path.exists(checksum_file):
         try:
             with open(checksum_file, 'r') as f:
@@ -282,13 +283,13 @@ def load_caches(cache_dir, start_year, end_year, zip_dir):
                 mappings_file = os.path.join(cache_dir, f'cached_mappings_{start_year}_{end_year}.pkl')
                 if all(os.path.exists(f) for f in [zip_index_file, addresses_file, mappings_file]):
                     with open(zip_index_file, 'rb') as f:
-                        print("loading zip index caches")
+                        print("loading zip index caches...")
                         zip_index = pickle.load(f)
                     with open(addresses_file, 'rb') as f:
-                        print("loading address caches")
+                        print("loading address caches...")
                         address_entries, debug_address_entries = pickle.load(f)
                     with open(mappings_file, 'rb') as f:
-                        print("loading po box caches")
+                        print("loading po box caches...")
                         po_box_entries, zip_code_index, po_box_zip_index = pickle.load(f)
                     cached_data = (zip_index, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index)
                     cache_valid = True
@@ -298,6 +299,7 @@ def load_caches(cache_dir, start_year, end_year, zip_dir):
 
 def save_caches(cache_dir, start_year, end_year, checksums, zip_index, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index):
     try:
+        print("Saving Cache Files")
         os.makedirs(cache_dir, exist_ok=True)
         with open(os.path.join(cache_dir, f'zip_checksums_{start_year}_{end_year}.json'), 'w') as f:
             json.dump(checksums, f)
