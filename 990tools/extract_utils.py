@@ -13,6 +13,7 @@ import sys
 import pickle
 import json
 import xml.etree.ElementTree as ET
+from tqdm import tqdm
 from collections import defaultdict
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
@@ -32,6 +33,10 @@ GRANTEE_NAME_XPATHS = [
 FILER_EIN_XPATHS = [
     etree.XPath(".//irs:Filer/irs:EIN", namespaces=NAMESPACES),
     etree.XPath(".//Filer/EIN", namespaces=NAMESPACES),
+]
+FILER_NAME_XPATHS = [
+    etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt | .//Filer/BusinessName/BusinessNameLine1Txt", namespaces=NAMESPACES),
+    etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine2Txt | .//Filer/BusinessName/BusinessNameLine2Txt", namespaces=NAMESPACES),
 ]
 AMOUNT_XPATHS = [
     etree.XPath("./irs:Amt | .//*[local-name()='Amt']", namespaces=NAMESPACES),
@@ -55,7 +60,7 @@ USPS_FIXES = {
     'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Sq': 'Square'
 }
 VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
-ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'canonical_address', 'tax_year', 'zip_code', 'po_box']
+ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'canonical_address', 'zip_code', 'po_box']
 GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grantee_name', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
 DEBUG_ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'raw_zip', 'zip_code', 'status', 'reason']
 DEBUG_GRANT_COLUMNS = ['filer_ein', 'grant_ein', 'filer_name', 'grantee_name', 'xml_filename', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
@@ -215,9 +220,27 @@ def canonicalize_address(address_components, output_dir):
     state = ""
     zip_code = None
     po_box = None
+    STREET_FIXES = {
+        'St': 'Street', 'Saint': 'Street', 'Ave': 'Avenue', 'Av': 'Avenue',
+        'Blvd': 'Boulevard', 'Dr': 'Drive', 'Ln': 'Lane', 'Rd': 'Road',
+        'Cir': 'Circle', 'Ct': 'Court', 'Pl': 'Place', 'Ter': 'Terrace',
+        'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Sq': 'Square',
+        'Cres': 'Crescent', 'Plz': 'Plaza', 'Xing': 'Crossing', 'Way': 'Way',
+        'Aly': 'Alley', 'Loop': 'Loop', 'Rdg': 'Ridge', 'Trl': 'Trail'
+    }
+    UNIT_FIXES = {
+        'Ste': 'Suite', 'Apt': 'Apartment', 'Unit': 'Unit', 'Bldg': 'Building',
+        'Fl': 'Floor', 'Rm': 'Room', 'Dept': 'Department', 'Ofc': 'Office',
+        'SPC': 'Space', 'LOT': 'Lot', 'TRLR': 'Trailer', 'BSMT': 'Basement'
+    }
     for elem in address_components:
         if elem.tag.endswith('AddressLine1Txt') and elem.text:
-            address_line = elem.text.strip()
+            parts = [p.strip() for p in elem.text.split(',') if p.strip()]
+            address_line = parts[0] if parts else ""
+            if len(parts) > 1:
+                address_line2 = parts[1]
+            if len(parts) > 2:
+                address_line3 = parts[2]
             match = PO_BOX_REGEX.search(address_line)
             if match:
                 po_box_str = match.group(1)
@@ -236,17 +259,36 @@ def canonicalize_address(address_components, output_dir):
             state = elem.text.strip()
         elif elem.tag.endswith('ZIPCd') and elem.text:
             zip_code = elem.text.strip()
+    def expand_street(line):
+        if not line:
+            return line
+        words = line.split()
+        if not words:
+            return line
+        if words[-1] in STREET_FIXES:
+            words[-1] = STREET_FIXES[words[-1]]
+        return " ".join(words)
+    def expand_unit(line):
+        if not line:
+            return line
+        words = line.split()
+        if len(words) < 2:
+            return line
+        if words[-2] in UNIT_FIXES:
+            words[-2] = UNIT_FIXES[words[-2]]
+        return " ".join(words)
+    address_line = expand_street(address_line)
+    address_line2 = expand_unit(address_line2)
+    address_line3 = expand_unit(address_line3)
     address_parts = [comp for comp in [address_line, address_line2, address_line3, city, state, zip_code] if comp]
     if not address_parts:
         log_error("No valid address components: {}", address_components)
         return "", None, None, ""
     canonical = " ".join(address_parts).title()
-    for abbr, full in USPS_FIXES.items():
-        canonical = canonical.replace(f' {abbr} ', f' {full} ')
     if state and state.upper() not in VALID_STATES:
         log_error("Invalid state '{}' in address: {}; resetting state", state, canonical)
         state = None
-        canonical = " ".join(comp for comp in [address_line, address_line2, city, zip_code] if comp).title()
+        canonical = " ".join(comp for comp in [address_line, address_line2, address_line3, city, zip_code] if comp).title()
     if zip_code:
         zip_code_digits = re.sub(r'\D', '', zip_code)
         if len(zip_code_digits) >= 5:
