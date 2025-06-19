@@ -63,6 +63,7 @@ def main():
         raise ValueError(f"ZIP directory {args.zip_dir} does not exist")
     listener = cu.setup_logging(args.output_dir, 'extract_addresses_log.txt', verbose, quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
+    addr_cache_valid = True
     try:
         checksums = cu.compute_zip_checksums(args.zip_dir)
         zip_cache_valid, zip_cached_data = cu.load_zip_cache(args.cache_dir, args.start_year, args.end_year, args.zip_dir, checksums)
@@ -80,7 +81,7 @@ def main():
             address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index = addr_cached_data
             cu.log_error("Loaded address cache: {} addresses, {} PO boxes, {} ZIP index entries", len(address_entries), len(po_box_entries), len(zip_code_index))
         else:
-            process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir)
+            process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir, sample_xml, skip_address_errors)
             cu.save_address_cache(args.cache_dir, args.start_year, args.end_year, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index)
         write_outputs(args.output_dir, addr_cache_valid and not args.force_reprocess)
     except Exception as e:
@@ -97,7 +98,7 @@ def main():
     print(f"PO Boxes found: {len(po_box_entries)}")
     print(f"Output files in: {args.output_dir}")
 
-def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
+def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir,sample_xml, skip_address_errors):
     global total_addresses, total_address_errors, total_queue_puts
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -118,26 +119,29 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
         root = tree.getroot()
-        tsv_ein = row['filer_ein'].strip()
-        filer_name = row['filer_name'].strip()
-        tax_year = row['tax_year'].strip()
         xml_ein = None
         for xpath in cu.FILER_EIN_XPATHS:
             elem = xpath(root)
             if elem and elem[0].text:
                 xml_ein = elem[0].text.strip()
                 break
+        filer_name = None
+        for xpath in cu.FILER_NAME_XPATHS:
+            elem = xpath(root)
+            if elem and elem[0].text:
+                filer_name = elem[0].text.strip()
+                break
         if not xml_ein or not cu.EIN_REGEX.match(xml_ein):
             result['invalid_ein_entries'].append({
-                'tsv_ein': tsv_ein,
+                'tsv_ein': '',
                 'xml_ein': xml_ein or '',
-                'filer_name': filer_name,
+                'filer_name': filer_name or 'Unknown',
                 'xml_filename': xml_filename,
                 'reason': 'No or invalid EIN in XML'
             })
             result['debug_address_entries'].append({
-                'filer_ein': tsv_ein,
-                'filer_name': filer_name,
+                'filer_ein': xml_ein or '',
+                'filer_name': filer_name or 'Unknown',
                 'xml_filename': xml_filename,
                 'raw_components': '',
                 'canonical_address': '',
@@ -147,15 +151,20 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 'reason': f"No or invalid EIN: {xml_ein or 'None'}"
             })
             return False, None
-        if tsv_ein != xml_ein and tsv_ein not in result['ein_mismatch_set']:
-            result['invalid_ein_entries'].append({
-                'tsv_ein': tsv_ein,
-                'xml_ein': xml_ein,
+        if not filer_name:
+            filer_name = 'Unknown'
+            result['debug_address_entries'].append({
+                'filer_ein': xml_ein,
                 'filer_name': filer_name,
                 'xml_filename': xml_filename,
-                'reason': 'TSV EIN differs from XML EIN'
+                'raw_components': '',
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'skipped',
+                'reason': 'No filer name in XML'
             })
-            result['ein_mismatch_set'].add(tsv_ein)
+            return False, None
         filer_ein = xml_ein
         address_components = []
         for xpath in cu.ADDRESS_XPATHS:
@@ -175,7 +184,6 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
                 'filer_ein': filer_ein,
                 'filer_name': filer_name,
                 'canonical_address': canonical_address,
-                'tax_year': tax_year,
                 'po_box': po_box,
                 'zip_code': zip_code
             })
@@ -219,11 +227,11 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
             filer_eins[xml_filename] = (filer_ein, row, canonical_address)
         return True, filer_ein
     except Exception as e:
-        cu.log_error("Error parsing XML {} for EIN={}: {}", xml_filename, row['filer_ein'], str(e), exc_info=True)
+        cu.log_error("Error parsing XML {}: {}", xml_filename, str(e), exc_info=True)
         result['total_address_errors'] += 1
         result['debug_address_entries'].append({
-            'filer_ein': row['filer_ein'],
-            'filer_name': row['filer_name'],
+            'filer_ein': xml_ein or '',
+            'filer_name': filer_name or 'Unknown',
             'xml_filename': xml_filename,
             'raw_components': '',
             'canonical_address': '',
@@ -234,7 +242,7 @@ def parse_addresses(xml_content, xml_filename, row, zip_index, output_dir):
         })
         return False, None
 
-def process_all_xml_addresses(worker_threads, zip_index, output_dir):
+def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml, skip_address_errors):
     global total_addresses, total_address_errors, total_queue_puts, total_skipped, results_queue
     global address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     results_queue = queue.Queue(maxsize=20000)
@@ -258,25 +266,21 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir):
             'po_box_zip_index': {},
             'filer_eins': {}
         }
-        xml_path = row.get('xml_name', '')
-        if not xml_path:
-            cu.log_error("No xml_name, skipping")
-            thread_local.result['debug_address_entries'].append({
-                'filer_ein': row['filer_ein'], 'filer_name': row['filer_name'], 'xml_filename': '',
-                'raw_components': '', 'canonical_address': '', 'raw_zip': '', 'zip_code': '', 'status': 'skipped',
-                'reason': 'Missing xml_name'})
-            file_counter_local.skipped += 1
-            total_skipped += 1
-            return thread_local.result
+        xml_filename = row['xml_name']
         try:
-            parts = xml_path.split('/')
-            xml_filename = parts[-1]
             if xml_filename not in zip_index:
                 cu.log_error("No file {} in ZIP index, skipping (total missing: {})", xml_filename, total_skipped + 1)
                 thread_local.result['debug_address_entries'].append({
-                    'filer_ein': row['filer_ein'], 'filer_name': row['filer_name'], 'xml_filename': xml_filename,
-                    'raw_components': '', 'canonical_address': '', 'raw_zip': '', 'zip_code': '', 'status': 'skipped',
-                    'reason': 'XML not in ZIP index'})
+                    'filer_ein': '',
+                    'filer_name': 'Unknown',
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': 'XML not in ZIP index'
+                })
                 file_counter_local.skipped += 1
                 total_skipped += 1
                 return thread_local.result
@@ -285,24 +289,31 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir):
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                success, filer_ein = parse_addresses(xml_content, xml_filename, row, zip_index, output_dir)
+                success, filer_ein = parse_addresses(xml_content, xml_filename, row, zip_index, output_dir,sample_xml, skip_address_errors)
                 if not success:
                     file_counter_local.skipped += 1
                     total_skipped += 1
             return thread_local.result
         except Exception as e:
-            cu.log_error("Error processing address row for XML {} and EIN={}: {}", xml_path, row['filer_ein'], str(e))
+            cu.log_error("Error processing XML {}: {}", xml_filename, str(e))
             thread_local.result['debug_address_entries'].append({
-                'filer_ein': row['filer_ein'], 'filer_name': row['filer_name'], 'xml_filename': xml_path,
-                'raw_components': '', 'canonical_address': '', 'raw_zip': '', 'zip_code': '', 'status': 'error',
-                'reason': str(e)})
+                'filer_ein': '',
+                'filer_name': 'Unknown',
+                'xml_filename': xml_filename,
+                'raw_components': '',
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'error',
+                'reason': str(e)
+            })
             file_counter_local.skipped += 1
             total_skipped += 1
             return thread_local.result
     try:
         if args.no_threads:
             for xml_filename in tqdm(zip_index.keys(), desc="Processing addresses from all XMLs"):
-                result = process_address_row({'xml_name': xml_filename, 'filer_ein': 'UNKNOWN', 'filer_name': 'UNKNOWN', 'tax_year': 'UNKNOWN'})
+                result = process_address_row({'xml_name': xml_filename})
                 with zip_index_lock:
                     address_entries.extend(result['address_entries'])
                     debug_address_entries.extend(result['debug_address_entries'])
@@ -327,7 +338,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir):
                 batch = []
                 batch_size = args.merge_batch_size
                 for xml_filename in zip_index.keys():
-                    batch.append({'xml_name': xml_filename, 'filer_ein': 'UNKNOWN', 'filer_name': 'UNKNOWN', 'tax_year': 'UNKNOWN'})
+                    batch.append({'xml_name': xml_filename})
                     if len(batch) >= batch_size:
                         futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
                         batch = []
