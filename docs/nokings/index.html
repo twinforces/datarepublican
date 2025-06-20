@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1749707652">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1749707652">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1750438024">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1750438024">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -910,50 +910,75 @@ $(document).ready(function() {
       <script src="jquery.min.js"></script>
 <script src="papaparse.min.js"></script>
 
-<h1 id="pageTitle" class="mb-1">Nonprofits linked to the 14 June 2025 NoKings rally</h1>
+<h1 id="pageTitle" class="mb-1">
+  Nonprofits linked to the 14 June 2025 NoKings rally
+</h1>
 <p class="text-black/80 mb-4 text-[15px]">
-  This page lists every nonprofit for which we currently have a reconstructed flow of federal grant
-  money to entities involved in the NoKings demonstration of <strong>14&nbsp;June&nbsp;2025</strong>.
-  Click &ldquo;<em>See Federal Grant Flow</em>&rdquo; to view the full interactive Sankey diagram
-  for any organization.  
-  <br/>
-  <em>Note:</em> The list is not exhaustive; additional nonprofits will appear as more filings are processed.
+  This page lists every nonprofit for which we currently have a reconstructed
+  flow of federal grant money to entities involved in the NoKings demonstration
+  of <strong>14&nbsp;June&nbsp;2025</strong>. Click
+  &ldquo;<em>See Federal Grant Flow</em>&rdquo; to view the full interactive
+  graph diagram for any organization, click <em>Explore</em> to see a Sankey
+  diagram focused on that organization that lets you browse up and down the
+  grift tree. <span id="fullExplore"></span>
+  <br />
+  <em>Note:</em> The list is not exhaustive; additional nonprofits will appear
+  as more filings are processed.
 </p>
 
 <div id="resultsContainer" class="flex flex-col gap-2"></div>
 
 <script>
-/* ----------------------  Helpers  ----------------------- */
-function escapeHtml(str) {
-  if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+  /* ----------------------  Helpers  ----------------------- */
+  function escapeHtml(str) {
+    if (!str) return "";
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
 
-function formatMoney(x) {
-  const num = Number(x);
-  if (!isFinite(num)) return '';
-  return '$' + num.toLocaleString();
-}
+  function buildBrowseLink(eins, label = "Explore") {
+    // keep number of nodes under 25
+    // brose URL format is ein=<ein>~upNodes~downNodes per ein
+    const result = [];
+    let upDown = 3;
+    if (eins.length > 8) upDown = 1;
+    else if (eins.length > 6) upDown = 2;
+    for (const e of eins) {
+      result.push(`${e}~${upDown}~${upDown}`);
+    }
+    return `<a href="/browse/?ein=${result.join("&ein=")}">${label}</a>`;
+  }
 
-/* ----------------------  Row renderer  ------------------ */
-function buildResultItem(row) {
-  const filerName = row.filer_name || '';
-  const filerEin  = row.filer_ein  || '';
-  const taxYear   = row.tax_year   || '';
-  const graphPath = row.serialized_graph || '';
+  function formatMoney(x) {
+    const num = Number(x);
+    if (!isFinite(num)) return "";
+    return "$" + num.toLocaleString();
+  }
 
-  const exposeLink = graphPath
-    ? `<a href="../graphviz?nk=1&custom_graph=${encodeURIComponent(graphPath)}&title=${encodeURIComponent(filerName)}"
+  /* ----------------------  Row renderer  ------------------ */
+  function buildResultItem(row) {
+    const filerName = row.filer_name || "";
+    const filerEin = row.filer_ein || "";
+    const taxYear = row.tax_year || "";
+    const graphPath = row.serialized_graph || "";
+
+    const exposeLink = graphPath
+      ? `<a href="../graphviz?nk=1&custom_graph=${encodeURIComponent(
+          graphPath
+        )}&title=${encodeURIComponent(filerName)}"
            class="text-blue-700 underline">
          See Federal Grant Flow
        </a>`
-    : '';
+      : "";
+    const browseLink = buildBrowseLink(
+      [filerEin],
+      `Explore ${escapeHtml(filerName)}`
+    );
 
-  return `
+    return `
     <div class="bg-white border border-gray-200 rounded">
       <div class="grid grid-cols-2 @xl:grid-cols-12 gap-2 pt-4 px-4 pb-2">
         <div class="flex flex-col col-span-2 @xl:col-span-7 text-[15px]">
@@ -961,7 +986,10 @@ function buildResultItem(row) {
           <div class="flex gap-3">
             <div>
               <span class="text-xs opacity-60">EIN</span>
-              <span class="text-sm">${escapeHtml(filerEin).replace(/^(\d{2})/, '$1-')}</span>
+              <span class="text-sm">${escapeHtml(filerEin).replace(
+                /^(\d{2})/,
+                "$1-"
+              )}</span>
             </div>
             <div>
               <span class="text-xs opacity-60">Tax year</span>
@@ -980,44 +1008,64 @@ function buildResultItem(row) {
           <span class="text-xs opacity-60">Taxpayer Trace</span><br/>
           ${exposeLink}
         </div>
+               <div class="col-span-1 @xl:col-span-4">
+          <span class="text-xs opacity-60">Taxpayer Browse</span><br/>
+          ${browseLink}
+        </div>
+
       </div>
     </div>
   `;
-}
-
-/* ----------------------  Load & render  ----------------- */
-$(async function () {
-  try {
-    const resp = await fetch('complete_graph_data.csv');
-    if (!resp.ok) throw new Error('Could not fetch data file');
-    const csvText = await resp.text();
-
-    const parsed = Papa.parse(csvText, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: false
-    }).data;
-
-    // filter rows with a serialized_graph and sort by filer_name
-    const rows = parsed
-      .filter(r => r.serialized_graph && r.serialized_graph.trim().length)
-      .sort((a, b) => (a.filer_name || '').localeCompare(b.filer_name || '', 'en', { sensitivity: 'base' }));
-
-    if (!rows.length) {
-      $('#resultsContainer').html('<div class="p-4 text-center">No rows found.</div>');
-      return;
-    }
-
-    for (const row of rows) {
-      $('#resultsContainer').append(buildResultItem(row));
-    }
-  } catch (err) {
-    console.error(err);
-    $('#resultsContainer').html(
-      '<div class="p-4 text-center text-red-600">Error loading data: ' + err + '</div>'
-    );
   }
-});
+
+  /* ----------------------  Load & render  ----------------- */
+  $(async function () {
+    try {
+      const resp = await fetch("complete_graph_data.csv");
+      if (!resp.ok) throw new Error("Could not fetch data file");
+      const csvText = await resp.text();
+
+      const parsed = Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        dynamicTyping: false,
+      }).data;
+
+      // filter rows with a serialized_graph and sort by filer_name
+      const rows = parsed
+        .filter((r) => r.serialized_graph && r.serialized_graph.trim().length)
+        .sort((a, b) =>
+          (a.filer_name || "").localeCompare(b.filer_name || "", "en", {
+            sensitivity: "base",
+          })
+        );
+
+      const allEins = rows.map((a) => a.filer_ein);
+      const browseLink = buildBrowseLink(
+        allEins.slice(0, 25),
+        "Explore First 25"
+      );
+      $("#fullExplore").html(browseLink);
+
+      if (!rows.length) {
+        $("#resultsContainer").html(
+          '<div class="p-4 text-center">No rows found.</div>'
+        );
+        return;
+      }
+
+      for (const row of rows) {
+        $("#resultsContainer").append(buildResultItem(row));
+      }
+    } catch (err) {
+      console.error(err);
+      $("#resultsContainer").html(
+        '<div class="p-4 text-center text-red-600">Error loading data: ' +
+          err +
+          "</div>"
+      );
+    }
+  });
 </script>
 
     </main>
