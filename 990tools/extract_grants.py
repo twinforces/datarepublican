@@ -293,26 +293,24 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code
                                 if seen_key in grant_map_keys:
                                     duplicate_grant_count += 1
                                     duplicate_ein_counts[grant_ein] += 1
-                                    if skip_log_count < 10:
-                                        cu.log_error("Duplicate grant for filer_ein={}, grant_ein={} in XML {}, amount: {}, grantee_name={}, grant_address={}", filer_ein, grant_ein, xml_filename, grant_amt, grantee_name, grantee_canonical_address)
-                                        skip_log_count += 1
                                 else:
                                     grant_map_keys.add(seen_key)
                                     unique_grant_eins.add(grant_ein)
                                     grant_ein_counts[grant_ein] += 1
-                                    result['debug_grant_entries'].append({
-                                        'filer_ein': filer_ein,
-                                        'filer_name': filer_name,
-                                        'xml_filename': xml_filename,
-                                        'grantee_name': grantee_name,
-                                        'grant_ein': grant_ein,
-                                        'grant_address': grantee_canonical_address,
-                                        'grant_amt': grant_amt,
-                                        'tax_year': tax_year,
-                                        'status': status,
-                                        'heuristic_score': best_score,
-                                        'reason': status
-                                    })
+                                    if not status.startsWith("success")
+                                        result['debug_grant_entries'].append({
+                                            'filer_ein': filer_ein,
+                                            'filer_name': filer_name,
+                                            'xml_filename': xml_filename,
+                                            'grantee_name': grantee_name,
+                                            'grant_ein': grant_ein,
+                                            'grant_address': grantee_canonical_address,
+                                            'grant_amt': grant_amt,
+                                            'tax_year': tax_year,
+                                            'status': status,
+                                            'heuristic_score': best_score,
+                                            'reason': status
+                                        })
                                     result['total_grants'] += 1
                                     result['total_queue_puts'] += 1
                             else:
