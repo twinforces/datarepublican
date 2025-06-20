@@ -14,8 +14,9 @@ title: NoKings → Federal‑Grant Links
   flow of federal grant money to entities involved in the NoKings demonstration
   of <strong>14&nbsp;June&nbsp;2025</strong>. Click
   &ldquo;<em>See Federal Grant Flow</em>&rdquo; to view the full interactive
-  graph diagram for any organization, click Explore to see a Sankey diagram
-  focused on that organization.
+  graph diagram for any organization, click <em>Explore</em> to see a Sankey
+  diagram focused on that organization that lets you browse up and down the
+  grift tree. <span id="fullExplore"></span>
   <br />
   <em>Note:</em> The list is not exhaustive; additional nonprofits will appear
   as more filings are processed.
@@ -34,7 +35,7 @@ title: NoKings → Federal‑Grant Links
       .replace(/"/g, "&quot;");
   }
 
-  function buildBrowseLink(eins) {
+  function buildBrowseLink(eins, label = "Explore") {
     // keep number of nodes under 25
     // brose URL format is ein=<ein>~upNodes~downNodes per ein
     const result = [];
@@ -44,7 +45,7 @@ title: NoKings → Federal‑Grant Links
     for (const e of eins) {
       result.push(`${e}~${upDown}~${upDown}`);
     }
-    return `<a href="/browse/?ein=${result.join("&ein=")}">Explore</a>`;
+    return `<a href="/browse/?ein=${result.join("&ein=")}">${label}</a>`;
   }
 
   function formatMoney(x) {
@@ -68,7 +69,10 @@ title: NoKings → Federal‑Grant Links
          See Federal Grant Flow
        </a>`
       : "";
-    const browseLink = buildBrowseLink([filerEin]);
+    const browseLink = buildBrowseLink(
+      [filerEin],
+      `Explore ${escapeHtml(filerName)}`
+    );
 
     return `
     <div class="bg-white border border-gray-200 rounded">
@@ -131,6 +135,13 @@ title: NoKings → Federal‑Grant Links
             sensitivity: "base",
           })
         );
+
+      const allEins = rows.map((a) => a.filer_ein);
+      const browseLink = buildBrowseLink(
+        allEins.slice(0, 25),
+        "Explore First 25"
+      );
+      $("#fullExplore").html(browseLink);
 
       if (!rows.length) {
         $("#resultsContainer").html(
