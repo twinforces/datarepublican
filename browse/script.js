@@ -1040,7 +1040,17 @@ function renderFocusedSankey(
 
   viewModel.cleanAfterRender();
   $("#downloadBtn").show();
-
+  const post = encodeURIComponent(
+    `Hey, @twinforces @datarepublican, Check this out because:`
+  );
+  const url = encodeURIComponent(window.location.href);
+  const hashtags = encodeURIComponent("DRBadNGOs");
+  $("#PostBox").html(
+    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&via=twinforces" 
+    target="_blank"  
+    title="Share on X" 
+    class="x-share-button">&#x1D54F;</a>`
+  );
   return currentData;
 }
 
