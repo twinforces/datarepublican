@@ -9,6 +9,7 @@ from io import BytesIO
 import sys
 import extract_utils as cu
 from countryCodes import iso3166_alpha2
+import re
 
 logger = None
 verbose = False
@@ -107,11 +108,53 @@ def main():
     print(f"- Grants skipped: {status_counts.get('skipped', 0)}")
     print(f"- Output files in: {args.output_dir}")
 
-def compute_name_heuristic(grantee_name, filer_name):
-    if not grantee_name or not filer_name:
+stateCodePattern = re.compile(r'\b[A-Za-z]{2}\b')
+def expand_state_codes(text):
+    """
+    Expands 2-letter U.S. state codes in a string to their full state names.
+    Args:
+        text (str): Input string containing state codes.
+    Returns:
+        str: String with state codes expanded to full names.
+    """
+
+
+    state_map = {
+        'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+        'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+        'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+        'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+        'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi', 'MO': 'Missouri',
+        'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire', 'NJ': 'New Jersey',
+        'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio',
+        'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+        'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont',
+        'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming'
+    }
+
+    import re
+
+    def replace_state(match):
+        code = match.group(0).upper()
+        return state_map.get(code, match.group(0))
+
+    # Match 2-letter codes as standalone words (case-insensitive)
+    return stateCodePattern.sub(replace_state, text.upper())
+
+# Example usage:
+# text = "I live in CA, work in UT, and was born in NY."
+# print(expand_state_codes(text))
+# Output: "I live in California, work in Utah, and was born in New York."
+def compute_name_heuristic(grantee_name_in, filer_name_in):
+    if not grantee_name_in or not filer_name_in:
         return 0
-    words1 = {w.lower() for w in grantee_name.split() if w.lower() not in cu.STOP_WORDS}
-    words2 = {w.lower() for w in filer_name.split() if w.lower() not in cu.STOP_WORDS}
+    
+    filer_name = expand_state_codes(filer_name_in)
+    grantee_name = expand_state_codes(grantee_name_in)
+    
+    
+    words1 = {w.lower() for w in grantee_name.split() if w not in cu.STOP_WORDS}
+    words2 = {w.lower() for w in filer_name.split() if w not in cu.STOP_WORDS}
     common_words = len(words1 & words2)
     total_grantee_words = len(words1)
     if total_grantee_words == 0:
@@ -200,6 +243,8 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code
                         try:
                             grant_amt = int(float(amount_elem.text.strip())) if amount_elem is not None and amount_elem.text else 0
                             if is_foreign_address:
+                                status='success_foreign'
+                                best_score = 1000
                                 pass                            
                             else:
                                 best_score = 0
@@ -266,7 +311,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code
                                         'tax_year': tax_year,
                                         'status': status,
                                         'heuristic_score': best_score,
-                                        'reason': 'success_foreign'
+                                        'reason': status
                                     })
                                     result['total_grants'] += 1
                                     result['total_queue_puts'] += 1

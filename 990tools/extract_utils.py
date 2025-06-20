@@ -56,7 +56,7 @@ GRANTEE_ADDRESS_XPATHS = [
 ZIP_REGEX = re.compile(r'^\d{5}$')
 PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
-STOP_WORDS = {'and', 'the', 'of', 'for', 'in', 'to', 'a', 'an'}
+STOP_WORDS = {'AND', 'THE', 'OF', 'FOR', 'IN', 'TO', 'A', 'AN'}
 USPS_FIXES = {
     'Saint': 'Street', 'St': 'Street', 'Ave': 'Avenue', 'Av': 'Avenue',
     'Blvd': 'Boulevard', 'Dr': 'Drive', 'Ln': 'Lane', 'Rd': 'Road',
