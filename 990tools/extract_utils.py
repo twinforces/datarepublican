@@ -13,8 +13,12 @@ import sys
 import pickle
 import json
 import xml.etree.ElementTree as ET
+import threading
 from tqdm import tqdm
 from collections import defaultdict
+import hashlib
+import threading
+from io import BytesIO
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 ADDRESS_XPATHS = [
@@ -41,7 +45,7 @@ FILER_NAME_XPATHS = [
 AMOUNT_XPATHS = [
     etree.XPath("./irs:Amt | .//*[local-name()='Amt']", namespaces=NAMESPACES),
     etree.XPath("./irs:GrantOrContributionAmt | ./irs:ContributionAmt", namespaces=NAMESPACES),
-    etree.XPath("./irs:TotalGrantOrContriPdDurYrAmt", namespaces=NAMESPACES),
+    etree.XPath(".//irs:TotalGrantOrContriPdDurYrAmt", namespaces=NAMESPACES),
     etree.XPath(".//Amt", namespaces={}),
 ]
 GRANTEE_ADDRESS_XPATHS = [
@@ -78,6 +82,7 @@ EIN_REGEX = re.compile(r'^\d{9}$')
 
 logger = None
 quiet = False
+thread_local = threading.local()
 
 def log_error(msg_format, *args, ein=None, exc_info=False):
     if logger and not quiet:
@@ -291,15 +296,206 @@ def canonicalize_address(address_components, output_dir):
         canonical = " ".join(comp for comp in [address_line, address_line2, address_line3, city, zip_code] if comp).title()
     if zip_code:
         zip_code_digits = re.sub(r'\D', '', zip_code)
-        if len(zip_code_digits) >= 5:
+        if len(zip_code_digits) > 5:
             zip_code = zip_code_digits[:5]
-        else:
-            log_error("Invalid zip_code: {} in address: {}", zip_code, canonical)
-            zip_code = None
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
     return canonical, po_box, zip_code, ""
 
+def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer"):
+    global thread_local
+    if not hasattr(thread_local, 'result'):
+        thread_local.result = {
+            'address_entries': [],
+            'debug_address_entries': [],
+            'po_box_entries': [],
+            'invalid_ein_entries': [],
+            'ein_mismatch_set': set(),
+            'total_addresses': 0,
+            'total_queue_puts': 0,
+            'total_address_errors': 0,
+            'zip_code_index': {},
+            'po_box_zip_index': {},
+            'filer_eins': {}
+        }
+    result = thread_local.result
+    try:
+        parser = etree.XMLParser(recover=True)
+        tree = etree.parse(BytesIO(xml_content), parser)
+        root = tree.getroot()
+        xml_ein = None
+        for xpath in FILER_EIN_XPATHS:
+            elem = xpath(root)
+            if elem and elem[0].text:
+                xml_ein = elem[0].text.strip()
+                break
+        filer_name = None
+        for xpath in FILER_NAME_XPATHS:
+            elem = xpath(root)
+            if elem and elem[0].text:
+                filer_name = elem[0].text.strip()
+                break
+        if not xml_ein or not EIN_REGEX.match(xml_ein):            
+            result['invalid_ein_entries'].append({
+                'tsv_ein': '',
+                'xml_ein': xml_ein or '',
+                'filer_name': filer_name or 'Unknown',
+                'xml_filename': xml_filename,
+                'reason': 'No or invalid EIN in XML'
+            })
+            result['debug_address_entries'].append({
+                'filer_ein': xml_ein or '',
+                'filer_name': filer_name or 'Unknown',
+                'xml_filename': xml_filename,
+                'raw_components': '',
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'skipped',
+                'reason': f"No or invalid EIN: {xml_ein or 'None'}"
+            })
+            return False, None
+        if not filer_name:
+            filer_name = 'Unknown'
+            result['debug_address_entries'].append({
+                'filer_ein': xml_ein,
+                'filer_name': filer_name,
+                'xml_filename': xml_filename,
+                'raw_components': '',
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'skipped',
+                'reason': 'No filer name in XML'
+            })
+            return False, None
+        address_components = []
+        xpaths = ADDRESS_XPATHS
+        for xpath in xpaths:
+            elements = xpath(root)
+            for elem in elements:
+                if elem.text:
+                    address_components.append(elem)
+        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
+        us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
+        address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
+        if canonical_address:
+            result['address_entries'].append({
+                'filer_ein': xml_ein,
+                'filer_name': filer_name,
+                'canonical_address': canonical_address,
+                'po_box': po_box,
+                'zip_code': zip_code
+            })
+            if po_box and zip_code and ZIP_REGEX.match(zip_code):
+                result['po_box_entries'].append({
+                    'po_box': po_box,
+                    'zip_code': zip_code,
+                    'ein': xml_ein,
+                    'org_name': filer_name
+                })
+                po_box_key = (po_box, zip_code)
+                if po_box_key not in result['po_box_zip_index']:
+                    result['po_box_zip_index'][po_box_key] = set()
+                result['po_box_zip_index'][po_box_key].add((xml_ein, filer_name))
+            if zip_code and ZIP_REGEX.match(zip_code):
+                if zip_code not in result['zip_code_index']:
+                    result['zip_code_index'][zip_code] = set()
+                result['zip_code_index'][zip_code].add((xml_ein, filer_name))
+            result['total_addresses'] += 1
+            result['total_queue_puts'] += 1
+        else:
+            result['total_address_errors'] += 1
+            result['debug_address_entries'].append({
+                'filer_ein': xml_ein or '',
+                'filer_name': filer_name or 'Unknown',
+                'xml_filename': xml_filename,
+                'raw_components': raw_components_str,
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'error',
+                'reason': f"Invalid address; components={address_components}; snippet={address_snippet}"
+            })
+            if sample_xml:
+                os.makedirs(sample_xml, exist_ok=True)
+                with open(os.path.join(sample_xml, xml_filename), 'wb') as f:
+                    f.write(xml_content)
+            if not args.skip_address_errors:
+                return False, None
+            with threading.Lock():
+                result['filer_eins'][xml_filename] = (xml_ein, row, canonical_address)
+        return True, xml_ein
+    except Exception as e:
+        log_error("Error parsing XML {}: {}", xml_filename, str(e), exc_info=True)
+        result['total_address_errors'] += 1
+        result['debug_address_entries'].append({
+            'filer_ein': xml_ein or '',
+            'filer_name': filer_name or 'Unknown',
+            'xml_filename': xml_filename,
+            'raw_components': '',
+            'canonical_address': '',
+            'raw_zip': '',
+            'zip_code': '',
+            'status': 'error',
+            'reason': str(e)
+        })
+        return False, None
+def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipient_name, output_dir):
+    if not hasattr(thread_local, 'result'):
+        thread_local.result = {
+            'address_entries': [],
+            'debug_address_entries': [],
+            'po_box_entries': [],
+            'total_addresses': 0,
+            'total_address_errors': 0,
+            'zip_code_index': {},
+            'po_box_zip_index': {}
+        }
+    result = thread_local.result
+    try:
+        address_components = []
+        for xpath in GRANTEE_ADDRESS_XPATHS:
+            elements = xpath(grant_element)
+            for elem in elements:
+                if elem.text:
+                    address_components.append(elem)
+        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
+        address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]
+        if not canonical_address:
+            result['total_address_errors'] += 1
+            result['debug_address_entries'].append({
+                'filer_ein': recipient_ein or 'Unknown',
+                'filer_name': recipient_name or 'Unknown',
+                'xml_filename': xml_filename,
+                'raw_components': raw_components_str,
+                'canonical_address': '',
+                'raw_zip': '',
+                'zip_code': '',
+                'status': 'error',
+                'reason': f"Invalid recipient address; components={address_components}; snippet={address_snippet}"
+            })
+            return "", None, None
+
+        return canonical_address, po_box, zip_code
+    except Exception as e:
+        log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
+        result['total_address_errors'] += 1
+        result['debug_address_entries'].append({
+            'filer_ein': recipient_ein or 'Unknown',
+            'filer_name': recipient_name or 'Unknown',
+            'xml_filename': xml_filename,
+            'raw_components': '',
+            'canonical_address': '',
+            'raw_zip': '',
+            'zip_code': '',
+            'status': 'error',
+            'reason': str(e)
+        })
+        return "", None, None
+    
 def write_tsv(file_path, entries, columns, quote_key, sort_keys=None):
     if sort_keys:
         entries = deduplicate_sorted_dicts(entries, sort_keys)

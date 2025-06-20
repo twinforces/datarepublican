@@ -8,6 +8,7 @@ from lxml import etree
 from io import BytesIO
 import sys
 import extract_utils as cu
+from countryCodes import iso3166_alpha2
 
 logger = None
 verbose = False
@@ -28,14 +29,16 @@ zip_index_lock = threading.Lock()
 filer_eins = {}
 status_counts = cu.defaultdict(int)
 po_box_entries = []
+zip_index = {}
 zip_code_index = {}
 po_box_zip_index = {}
 thread_local = threading.local()
 file_counter_local = threading.local()
+thread_local = threading.local()
 
 def main():
     global verbose, quiet, total_grants, total_990pf_rows, total_queue_puts, total_tasks_done, total_skipped
-    global args, filer_eins, results_queue, grants_queue, po_box_entries, zip_code_index, po_box_zip_index
+    global args, filer_eins, results_queue, grants_queue, po_box_entries, zip_code_index, po_box_zip_index, zip_index
     parser = argparse.ArgumentParser(description="Extract grants from IRS 990 XML files using address mappings.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
@@ -64,11 +67,18 @@ def main():
     listener = cu.setup_logging(args.output_dir, 'extract_grants_log.txt', verbose, quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
     try:
+        checksums = cu.compute_zip_checksums(args.zip_dir)
+        zip_cache_valid, zip_cached_data = cu.load_zip_cache(args.cache_dir, args.start_year, args.end_year, args.zip_dir, checksums)
+        if not zip_cache_valid:
+            cu.log_error("ZIP index cache not found in {}. Run extract_addresses.py first.", args.cache_dir)
+            return
+        zip_index = zip_cached_data
+        cu.log_error("Loaded ZIP index cache: {} XML files", len(zip_index))
         addr_cache_valid, addr_cached_data = cu.load_address_cache(args.cache_dir, args.start_year, args.end_year, args.zip_dir)
         if not addr_cache_valid:
-            cu.log_error("Address cache not found in {}. Run extract_addresses.py first.", args.cache_dir)
-            return
-        po_box_entries, zip_code_index, po_box_zip_index = addr_cached_data[2:5]
+             cu.log_error("Address cache not found in {}. Run extract_addresses.py first.", args.cache_dir)
+             return
+        address_entries, _, po_box_entries, zip_code_index, po_box_zip_index = addr_cached_data
         cu.log_error("Loaded address cache: {} PO boxes, {} ZIP index entries", len(po_box_entries), len(zip_code_index))
         rows = cu.read_tsv_files(args.charity_source, args.start_year, args.end_year)
         if not rows:
@@ -76,7 +86,7 @@ def main():
             cu.log_error("No rows in {}. Ensure {} exists.", args.charity_source, args.charity_source)
             return
         cu.log_error("Processing {} rows from {}", len(rows), args.charity_source)
-        process_charity_rows(rows, args.worker_threads, zip_index, args.start_year, args.end_year, args.output_dir)
+        process_charity_rows(address_entries,rows, args.worker_threads, args.start_year, args.end_year, args.output_dir)
         write_outputs(args.output_dir)
     except Exception as e:
         cu.log_error("Error during processing: {}", str(e), exc_info=True)
@@ -109,7 +119,7 @@ def compute_name_heuristic(grantee_name, filer_name):
     proportion = (common_words / total_grantee_words) * 100
     return round(proportion / 10) * 10
 
-def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
+def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code_index, po_box_zip_index):
     global total_grants, total_990pf_rows, total_queue_puts, duplicate_grant_count, unique_grant_eins, grant_ein_counts
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -165,52 +175,33 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                         cu.log_error("Grant element #{}, name_elem: {}, amount_elem: {}, xpath_name_index: {}, raw_names: {}, raw_amounts: {}, raw_amount_text: {}", element_count, name_elem is not None, amount_elem is not None, i if name_elem is not None else -1, [n.text.strip() if n.text else '' for n in xpath_name(element)], [a.text.strip() if a.text else '' for a in xpath_amount(element)], raw_amount_text)
                     if element_count == len(grant_elements):
                         cu.log_error("Processed {} grant elements for XML {}, skipped: {}", element_count, xml_filename, status_counts.get('skipped', 0))
-                    address_elems = None
-                    possibly_foreign = False
-                    for xpath_address in cu.GRANTEE_ADDRESS_XPATHS:
-                        addrs = xpath_address(element)
-                        if addrs:
-                            address_elems = addrs
-                            if not any('RecipientForeignAddress' in elem.tag for elem in address_elems):
-                                cu.log_error("No RecipientForeignAddress in address elements for XML {}, trying next XPath", xml_filename)
-                            if b"Foreign" in xml_content:
-                                cu.log_error("Found 'Foreign' in XML {}: {}", xml_filename, xml_content[:500].decode('utf-8', errors='ignore'))
-                                possibly_foreign = True
-                            break
-                    is_foreign_address = any('RecipientForeignAddress' in elem.tag for elem in address_elems) if address_elems else False
-                    if is_foreign_address or (possibly_foreign and address_elems and any('PR' in elem.text.upper() for elem in address_elems if elem.text)):
+                    grantee_name = name_elem.text.strip() if name_elem is not None and name_elem.text and name_elem.text.strip().lower() != 'see attached schedule' else "Unknown"
+                    grant_ein = ein_elem[0].text.strip() if ein_elem and len(ein_elem) > 0 and ein_elem[0].text else "Unknown"
+                    # Check for foreign address
+                    is_foreign_address = element.xpath(".//irs:RecipientForeignAddress", namespaces=cu.NAMESPACES)
+                    if is_foreign_address:
                         country_elem = element.xpath(".//irs:CountryCd", namespaces=cu.NAMESPACES)
                         country_code = country_elem[0].text.strip() if country_elem and country_elem[0].text else None
-                        if country_code == 'RQ':
-                            country_code = 'PR'
-                        if country_code == 'PR':
-                            grant_ein = ein_elem[0].text.strip() if ein_elem and len(ein_elem) > 0 and ein_elem[0].text else "Unknown"
-                            grantee_canonical_address, grant_po_box, grant_zip_code, _ = cu.canonicalize_address(address_elems, output_dir)
-                            cu.log_error("Puerto Rico address detected, treated as U.S. territory: EIN={}, address={}", grant_ein, grantee_canonical_address)
-                        elif country_code and country_code in cu.iso3166_alpha2:
-                            grant_ein = cu.iso3166_alpha2[country_code]["number"]
-                            grantee_canonical_address = cu.iso3166_alpha2[country_code]["name"]
+                        if country_code and country_code in iso3166_alpha2:
+                            grant_ein = iso3166_alpha2[country_code]["number"]
+                            grantee_canonical_address = iso3166_alpha2[country_code]["name"]
                             cu.log_error("Foreign address mapped to ISO 3166-1 number: {} for country: {}", grant_ein, country_code)
                         else:
-                            grantee_canonical_address = "Foreign_" + (country_code or "None")
-                            grant_ein = '999'
+                            grantee_canonical_address = "Foreign_"+country_code
+                            grant_ein='999' # the unknown country code country
+                            #grant_ein = f"Address:{grantee_canonical_address}" if grantee_canonical_address else "Unknown"
                             cu.log_error("Foreign address unmapped, using address-based EIN: {}, country: {}", grant_ein, country_code or "None")
                     else:
-                        if possibly_foreign and address_elems:
-                            cu.log_error("Foreign address no tag? {}", [elem.tag for elem in address_elems])
-                        grant_ein = ein_elem[0].text.strip() if ein_elem and len(ein_elem) > 0 and ein_elem[0].text else "Unknown"
-                    grantee_name = name_elem.text.strip() if name_elem is not None and name_elem.text and name_elem.text.strip().lower() != 'see attached schedule' else "Unknown"
-                    grant_address_components = [elem for elem in address_elems if elem.text] if address_elems else []
-                    grantee_canonical_address, grant_po_box, grant_zip_code, _ = cu.canonicalize_address(grant_address_components, output_dir)
-                    if grantee_canonical_address:
-                        for abbr, full in cu.USPS_FIXES.items():
-                            grantee_canonical_address = grantee_canonical_address.replace(f'{abbr} ', f'{full} ')
-                    if grantee_canonical_address or amount_elem is not None or name_elem is not None or len(ein_elem) > 0 or grant_ein != "Unknown":
+                        # Parse recipient address
+                        grantee_canonical_address, grant_po_box, grant_zip_code = cu.parse_recipient_address(element, xml_filename, grant_ein, grantee_name, output_dir)
+                        
+                        # Address matching
+                    if grantee_canonical_address or amount_elem is not None or name_elem is not None or grant_ein != "Unknown":
                         try:
                             grant_amt = int(float(amount_elem.text.strip())) if amount_elem is not None and amount_elem.text else 0
                             if is_foreign_address:
-                                status = "success_foreign"
-                            elif grantee_canonical_address or grant_amt > 0 or grantee_name != "Unknown" or ein_elem:
+                                pass                            
+                            else:
                                 best_score = 0
                                 best_filer = None
                                 best_heuristic = None
@@ -275,7 +266,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
                                         'tax_year': tax_year,
                                         'status': status,
                                         'heuristic_score': best_score,
-                                        'reason': status
+                                        'reason': 'success_foreign'
                                     })
                                     result['total_grants'] += 1
                                     result['total_queue_puts'] += 1
@@ -329,9 +320,9 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir):
         cu.log_error("Error parsing grants in XML {} for EIN={}: {}", xml_filename, filer_ein, str(e), exc_info=True)
         return False
 
-def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, output_dir):
-    global total_addresses, total_address_errors, total_queue_puts, total_grants, total_990pf_rows
-    global results_queue, grants_queue, total_tasks_done
+def process_charity_rows(address_entries, rows, worker_threads, start_year, end_year, output_dir):
+    global total_grants, total_990pf_rows, total_queue_puts, total_tasks_done, total_skipped
+    global results_queue, grants_queue, filer_eins
     zip_cache = {}
     total_skipped = 0
     results_queue = queue.Queue(maxsize=20000)
@@ -365,68 +356,8 @@ def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, 
     grant_writer = threading.Thread(target=write_grants)
     grant_writer.start()
     cu.log_error("Grants queue size before processing: {}", grants_queue.qsize())
-    def process_address_row(row):
-        nonlocal total_skipped
-        if not hasattr(file_counter_local, 'value'):
-            file_counter_local.value = 0
-        if not hasattr(file_counter_local, 'skipped'):
-            file_counter_local.skipped = 0
-        thread_local.result = {
-            'address_entries': [],
-            'debug_address_entries': [],
-            'po_box_entries': [],
-            'invalid_ein_entries': [],
-            'ein_mismatch_set': set(),
-            'total_addresses': 0,
-            'total_queue_puts': 0,
-            'total_address_errors': 0,
-            'zip_code_index': {},
-            'po_box_zip_index': {},
-            'filer_eins': {}
-        }
-        xml_path = row.get('xml_name', '')
-        if not xml_path:
-            cu.log_error("No xml_name for EIN={}, skipping", row['filer_ein'])
-            thread_local.result['debug_address_entries'].append({
-                'filer_ein': row['filer_ein'], 'filer_name': row['filer_name'], 'xml_filename': '',
-                'raw_components': '', 'canonical_address': '', 'raw_zip': '', 'zip_code': '', 'status': 'skipped',
-                'reason': 'Missing xml_name'})
-            file_counter_local.skipped += 1
-            total_skipped += 1
-            return thread_local.result
-        try:
-            parts = xml_path.split('/')
-            xml_filename = parts[-1]
-            if xml_filename not in zip_index:
-                cu.log_error("No file {} in ZIP index for EIN={}, skipping (total missing: {})", xml_filename, row['filer_ein'], total_skipped + 1)
-                thread_local.result['debug_address_entries'].append({
-                    'filer_ein': row['filer_ein'], 'filer_name': row['filer_name'], 'xml_filename': xml_filename,
-                    'raw_components': '', 'canonical_address': '', 'raw_zip': '', 'zip_code': '', 'status': 'skipped',
-                    'reason': 'XML not in ZIP index'})
-                file_counter_local.skipped += 1
-                total_skipped += 1
-                return thread_local.result
-            zip_path, internal_path = zip_index[xml_filename]
-            if zip_path not in zip_cache:
-                zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
-            with zip_cache[zip_path].open(internal_path) as xml_file:
-                xml_content = xml_file.read()
-                success, filer_ein = parse_addresses(xml_content, xml_filename, row, zip_index, output_dir)
-                if not success:
-                    file_counter_local.skipped += 1
-                    total_skipped += 1
-            return thread_local.result
-        except Exception as e:
-            cu.log_error("Error processing address row for XML {} and EIN={}: {}", xml_path, row['filer_ein'], str(e))
-            thread_local.result['debug_address_entries'].append({
-                'filer_ein': row['filer_ein'], 'filer_name': row['filer_name'], 'xml_filename': xml_path,
-                'raw_components': '', 'canonical_address': '', 'raw_zip': '', 'zip_code': '', 'status': 'error',
-                'reason': str(e)})
-            file_counter_local.skipped += 1
-            total_skipped += 1
-            return thread_local.result
     def process_grant_row(xml_filename, filer_info):
-        nonlocal total_skipped
+        global total_skipped
         if not hasattr(file_counter_local, 'value'):
             file_counter_local.value = 0
         if not hasattr(file_counter_local, 'skipped'):
@@ -444,7 +375,7 @@ def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, 
             file_counter_local.skipped += 1
             total_skipped += 1
             return thread_local.result
-        filer_ein, row, _ = filer_info
+        filer_ein, row, filer_canonical_address = filer_info
         xml_path = row.get('xml_name', '')
         try:
             parts = xml_path.split('/')
@@ -459,7 +390,7 @@ def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, 
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                parse_grants(xml_content, xml_filename, row, filer_ein, output_dir)
+                parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code_index, po_box_zip_index)
             return thread_local.result
         except Exception as e:
             cu.log_error("Error processing grant row for XML {} and EIN={}: {}", xml_path, filer_ein, str(e))
@@ -467,29 +398,22 @@ def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, 
             total_skipped += 1
             return thread_local.result
     try:
+        # Populate filer_eins from TSV rows
+        address_map = {entry['filer_ein']: entry['canonical_address'] for entry in address_entries}
+        for row in rows:
+            xml_path = row.get('xml_name', '')
+            if not xml_path:
+                cu.log_error("No xml_name for EIN={}, skipping", row['filer_ein'])
+                continue
+            parts = xml_path.split('/')
+            xml_filename = parts[-1]
+            filer_ein = row['filer_ein'].strip()
+            filer_canonical_address = address_map.get(filer_ein, '')
+            with zip_index_lock:
+                filer_eins[xml_filename] = (filer_ein, row, filer_canonical_address)
         cu.log_error("Found {} 990PF rows in {} total rows", sum(1 for row in rows if row['form_type'] == '990PF'), len(rows))
         batch_size = args.merge_batch_size
         if args.no_threads:
-            for row in tqdm(rows, desc="Processing charity addresses"):
-                result = process_address_row(row)
-                with zip_index_lock:
-                    address_entries.extend(result['address_entries'])
-                    debug_address_entries.extend(result['debug_address_entries'])
-                    po_box_entries.extend(result['po_box_entries'])
-                    invalid_ein_entries.extend(result['invalid_ein_entries'])
-                    ein_mismatch_set.update(result['ein_mismatch_set'])
-                    total_addresses += result['total_addresses']
-                    total_queue_puts += result['total_queue_puts']
-                    total_address_errors += result['total_address_errors']
-                    for zip_code, entries in result['zip_code_index'].items():
-                        if zip_code not in zip_code_index:
-                            zip_code_index[zip_code] = set()
-                        zip_code_index[zip_code].update(entries)
-                    for po_box_zip, entries in result['po_box_zip_index'].items():
-                        if po_box_zip not in po_box_zip_index:
-                            po_box_zip_index[po_box_zip] = set()
-                        po_box_zip_index[po_box_zip].update(entries)
-                results_queue.put([result])
             for xml_filename, filer_info in tqdm(filer_eins.items(), desc="Processing grants"):
                 if not filer_info[1]['form_type'] == '990PF':
                     continue
@@ -504,38 +428,6 @@ def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, 
                 results_queue.put([result])
         else:
             with ThreadPoolExecutor(max_workers=worker_threads) as executor:
-                futures = []
-                batch = []
-                for row in rows:
-                    batch.append(row)
-                    if len(batch) >= batch_size:
-                        futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
-                        batch = []
-                if batch:
-                    futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
-                with tqdm(total=len(rows), desc="Processing charity addresses") as pbar:
-                    for future in as_completed(futures):
-                        results = future.result()
-                        with zip_index_lock:
-                            for result in results:
-                                address_entries.extend(result['address_entries'])
-                                debug_address_entries.extend(result['debug_address_entries'])
-                                po_box_entries.extend(result['po_box_entries'])
-                                invalid_ein_entries.extend(result['invalid_ein_entries'])
-                                ein_mismatch_set.update(result['ein_mismatch_set'])
-                                total_addresses += result['total_addresses']
-                                total_queue_puts += result['total_queue_puts']
-                                total_address_errors += result['total_address_errors']
-                                for zip_code, entries in result['zip_code_index'].items():
-                                    if zip_code not in zip_code_index:
-                                        zip_code_index[zip_code] = set()
-                                    zip_code_index[zip_code].update(entries)
-                                for po_box_zip, entries in result['po_box_zip_index'].items():
-                                    if po_box_zip not in po_box_zip_index:
-                                        po_box_zip_index[po_box_zip] = set()
-                                    po_box_zip_index[po_box_zip].update(entries)
-                        results_queue.put(results)
-                        pbar.update(min(batch_size, len(rows) - pbar.n))
                 futures = []
                 batch = []
                 for xml_filename, filer_info in [(k, v) for k, v in filer_eins.items() if v[1]['form_type'] == '990PF']:
@@ -563,11 +455,13 @@ def process_charity_rows(rows, worker_threads, zip_index, start_year, end_year, 
         cu.log_error("Error in process_charity_rows: {}", str(e), exc_info=True)
         raise
     finally:
+        executor.shutdown(wait=True)
         cu.log_error("Grant pass complete: {} grants, {} 990PF rows, total skipped: {}", total_grants, total_990pf_rows, total_skipped)
         results_queue.put(None)
         grants_queue.put(None)
         for zip_file in zip_cache.values():
             zip_file.close()
+        executor.shutdown(wait=True)
         while not grants_queue.empty():
             grants_queue.get()
             grants_queue.task_done()
