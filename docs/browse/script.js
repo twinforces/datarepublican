@@ -130,8 +130,8 @@ function renderActiveEINs() {
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>'
     );
     const $text = $(
-      `<span title="EIN: ${ein.split(":")[0].slice(0, 2)}-${ein
-        .split(":")[0]
+      `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
+        .split(/[:~]/)[0]
         .slice(2)}"></span>`
     ).text(name);
     const $rm = $(
@@ -159,8 +159,8 @@ function renderHideEINs() {
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-red bg-red/10 text-red rounded-md px-2 py-1 text-xs"></div>'
     );
     const $text = $(
-      `<span title="EIN: ${ein.split(":")[0].slice(0, 2)}-${ein
-        .split(":")[0]
+      `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
+        .split(/[:~]/)[0]
         .slice(2)}"></span>`
     ).text(name);
     const $rm = $(
