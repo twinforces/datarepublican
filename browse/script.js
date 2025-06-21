@@ -4,6 +4,7 @@ import {
   formatNumber,
   viewModel,
   BrowseViewModel,
+  getColorForEIN,
 } from "./models.js";
 
 import {
@@ -21,8 +22,6 @@ const NODE_WIDTH = 50;
 const OTHER_WIDTH = 30;
 const NODE_PADDING = 25;
 const MIN_LINK_HEIGHT = 5;
-
-const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
 
 function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
@@ -709,48 +708,6 @@ function renderFocusedSankey(
     svg.selectAll("*").remove();
   }
 
-  const defs = svg.selectAll("defs").data([0]).join("defs");
-  graph.links.forEach((link) => {
-    link.gradientId = link.gradientId || generateUniqueId("gradient", link);
-  });
-
-  const gradients = defs
-    .selectAll("linearGradient.dynamic")
-    .data(graph.links, (d) => d.gradientId);
-
-  gradients.exit().remove();
-
-  const gradientEnter = gradients
-    .enter()
-    .append("linearGradient")
-    .attr("class", "dynamic")
-    .attr("id", (d) => d.gradientId)
-    .attr("gradientUnits", "objectBoundingBox")
-    .attr("x1", "0")
-    .attr("y1", "0.5")
-    .attr("x2", "1")
-    .attr("y2", "0.5");
-
-  gradientEnter
-    .append("stop")
-    .attr("offset", "0%")
-    .attr("stop-color", (d) => colorScale(d.source.id));
-  gradientEnter
-    .append("stop")
-    .attr("offset", "100%")
-    .attr("stop-color", (d) => colorScale(d.target.id));
-
-  gradients
-    .merge(gradientEnter)
-    .selectAll("stop")
-    .data((d) => [
-      { offset: "0%", color: colorScale(d.source.id) },
-      { offset: "100%", color: colorScale(d.target.id) },
-    ])
-    .join("stop")
-    .attr("offset", (d) => d.offset)
-    .attr("stop-color", (d) => d.color);
-
   g = svg
     .selectAll("g.main")
     .data([0])
@@ -786,7 +743,7 @@ function renderFocusedSankey(
     .append("path")
     .attr("class", "link")
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => colorScale(d.source.id))
+    .attr("stroke", (d) => getColorForEIN(d.source.id))
     .style("stroke-opacity", "0.3")
     .attr("stroke-width", 0);
 
@@ -795,7 +752,7 @@ function renderFocusedSankey(
     .transition()
     .duration(ANIM_LINK)
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => colorScale(d.source.id))
+    .attr("stroke", (d) => getColorForEIN(d.source.id))
     .attr("stroke-width", (d) => d.width || 1);
 
   linkEnter
@@ -952,7 +909,7 @@ function renderFocusedSankey(
               y1: d.previousY1 || d.y1,
             })
       )
-      .attr("fill", colorScale(d.id))
+      .attr("fill", getColorForEIN(d.id))
       .style("cursor", d.isTerminal ? "zoom-out" : "grab")
       .append("title")
       .text((d) => d.toolTipText());
