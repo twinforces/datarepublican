@@ -1363,6 +1363,9 @@ body > div#main-content {
 .order-2 {
   order: 2;
 }
+.col-span-1 {
+  grid-column: span 1 / span 1;
+}
 .col-span-12 {
   grid-column: span 12 / span 12;
 }
@@ -1540,6 +1543,10 @@ body > div#main-content {
 }
 .aspect-square {
   aspect-ratio: 1 / 1;
+}
+.size-12 {
+  width: 3rem;
+  height: 3rem;
 }
 .size-2 {
   width: 0.5rem;
@@ -3317,6 +3324,11 @@ body > div#main-content {
   .md\:text-base {
     font-size: 1rem;
     line-height: 1.5rem;
+  }
+
+  .md\:text-lg {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
   }
 
   .md\:text-sm {

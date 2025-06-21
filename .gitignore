@@ -37,4 +37,5 @@ Thumbs.db
 
 # If using docs/ as build directory (uncomment if needed)
 # !docs/ 
-charity/__pycache__
+__pycache__
+test-results
