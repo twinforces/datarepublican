@@ -127,7 +127,7 @@ class BrowseViewModel {
   addToShowList(ein) {
     const c = Charity.getCharity(ein);
     if (c) {
-      this.showList[c.ein] = ein.split(":").slice(1) || [
+      this.showList[c.ein] = ein.split(/[:~]/).slice(1) || [
         START_REVEAL,
         START_REVEAL,
       ];
@@ -136,7 +136,7 @@ class BrowseViewModel {
   }
 
   removeFromShowList(ein) {
-    const id = ein.split(":")[0];
+    const id = ein.split(/[:~]/)[0];
     delete this.showList[id];
     const c = Charity.getCharity(id);
     if (c) c.desiredVisible = false;
@@ -147,7 +147,7 @@ class BrowseViewModel {
       .sort((a, b) => a[0] - b[0]) // sort by key
       .map(
         ([key, value]) =>
-          `${key}:${value[0] || START_REVEAL}:${value[1] || START_REVEAL}`
+          `${key}~${value[0] || START_REVEAL}~${value[1] || START_REVEAL}`
       );
     return result;
   }
@@ -271,6 +271,12 @@ class BrowseViewModel {
     return params;
   }
 
+  computeAndSaveURLParams() {
+    const params = this.computeURLParams();
+    const newUrl = window.location.pathname + "?" + params.toString();
+    window.history.replaceState({}, "", newUrl);
+  }
+
   /** given a URL, parse it into our relevant pieces */
   parseQueryParams(params = new URLSearchParams(window.location.search)) {
     this.showList = {};
@@ -310,7 +316,7 @@ class BrowseViewModel {
       c.impliedVisible = 0;
     });
     this.getShowList().forEach((ein) => {
-      const parts = ein.split(":");
+      const parts = ein.split(/[:~]/);
       const id = parts[0];
       const ups = parts[1] || START_REVEAL;
       const downs = parts[2] || START_REVEAL;
@@ -571,7 +577,9 @@ class BrowseViewModel {
    */
   clickNode(event, charity, refreshCallback) {
     console.log(`Clicked node ${charity.id} ${charity.name}`);
-    charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
+    //charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
+    charity.expandOutflows(NEXT_REVEAL);
+    charity.expandInflows(NEXT_REVEAL);
     this.computeImpliedVisibility(charity, true, true); // Compute connected visibility
     this.buildSankeyData(); // Update the graph data
     if (refreshCallback) refreshCallback(); // Always refresh
@@ -639,7 +647,7 @@ class BrowseViewModel {
     console.log(`Expanding inflows for ${charity.id} ${charity.name}`);
     charity.desiredVisible = true;
     charity.expandInflows(NEXT_REVEAL);
-    this.computeImpliedVisibility(charity, true, false);
+    this.computeImpliedVisibility(charity, true, true);
     this.buildSankeyData();
     if (refreshCallback) refreshCallback();
   }
@@ -648,7 +656,7 @@ class BrowseViewModel {
     console.log(`Expanding outflows for ${charity.id} ${charity.name}`);
     charity.desiredVisible = true;
     charity.expandOutflows(NEXT_REVEAL);
-    this.computeImpliedVisibility(charity, false, true);
+    this.computeImpliedVisibility(charity, true, true);
     this.buildSankeyData();
     if (refreshCallback) refreshCallback();
   }
@@ -744,6 +752,7 @@ class BrowseViewModel {
         }
       }
     }
+    this.computeAndSaveURLParams();
   }
 
   /**
@@ -924,7 +933,8 @@ class Charity {
 
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
-    const parts = ein.split(":");
+    if (!ein) return null;
+    const parts = ein.split(/[:~]/);
     return Charity.charityLookup[parts[0]];
   }
 
@@ -1463,7 +1473,7 @@ class Charity {
     let newCount = this.visibleGrantsIn.length - count;
     if (newCount < 0) newCount = 0;
     viewModel.addToShowList(
-      `${this.ein}:${newCount}:${this.visibleGrants.length}}`
+      `${this.ein}~${newCount}~${this.visibleGrants.length}}`
     ); // match URL will do this for us.
   }
 
@@ -1496,7 +1506,7 @@ class Charity {
     let newCount = this.visibleGrants.length - count;
     if (newCount < 0) newCount = 0;
     viewModel.addToShowList(
-      `${this.ein}:${this.visibleGrantsIn.length}:${newCount}`
+      `${this.ein}~${this.visibleGrantsIn.length}~${newCount}`
     ); // match URL will do this for us.
   }
 
@@ -1524,7 +1534,7 @@ class Charity {
    */
   URLPiece() {
     if (!this.desiredVisible) return null;
-    return `${this.ein}:${this.visibleGrantsIn.length}:${this.visibleGrants.length}`;
+    return `${this.ein}~${this.visibleGrantsIn.length}~${this.visibleGrants.length}`;
   }
 
   /**

@@ -50,6 +50,33 @@ function formatNumber(num) {
  */
 let viewModel = null;
 
+// Hash function
+function hashEIN(ein) {
+  let hash = 0;
+  for (let i = 0; i < ein.length; i++) {
+    hash = (hash * 31 + ein.charCodeAt(i)) % 1000000;
+  }
+  return hash / 1000000;
+}
+
+// Sinebow function
+function sinebow(t) {
+  t = t * 2 * Math.PI;
+  const offset = Math.PI / 2;
+  const r = Math.sin(t + offset);
+  const g = Math.sin(t + offset + (2 * Math.PI) / 3);
+  const b = Math.sin(t + offset + (4 * Math.PI) / 3);
+  return d3.rgb(
+    Math.floor((0.2 + 0.6 * r * r) * 255),
+    Math.floor((0.2 + 0.6 * g * g) * 255),
+    Math.floor((0.2 + 0.6 * b * b) * 255)
+  );
+}
+
+// Color function
+export function getColorForEIN(ein) {
+  return sinebow((hashEIN(ein) * 5) % 1);
+}
 /**
  * So this is an M-V-VM architecture.
  * M - Model, deals with the data
@@ -129,7 +156,7 @@ class BrowseViewModel {
   addToShowList(ein) {
     const c = Charity.getCharity(ein);
     if (c) {
-      this.showList[c.ein] = ein.split(":").slice(1) || [
+      this.showList[c.ein] = ein.split(/[:~]/).slice(1) || [
         START_REVEAL,
         START_REVEAL,
       ];
@@ -138,7 +165,7 @@ class BrowseViewModel {
   }
 
   removeFromShowList(ein) {
-    const id = ein.split(":")[0];
+    const id = ein.split(/[:~]/)[0];
     delete this.showList[id];
     const c = Charity.getCharity(id);
     if (c) c.desiredVisible = false;
@@ -149,7 +176,7 @@ class BrowseViewModel {
       .sort((a, b) => a[0] - b[0]) // sort by key
       .map(
         ([key, value]) =>
-          `${key}:${value[0] || START_REVEAL}:${value[1] || START_REVEAL}`
+          `${key}~${value[0] || START_REVEAL}~${value[1] || START_REVEAL}`
       );
     return result;
   }
@@ -273,6 +300,12 @@ class BrowseViewModel {
     return params;
   }
 
+  computeAndSaveURLParams() {
+    const params = this.computeURLParams();
+    const newUrl = window.location.pathname + "?" + params.toString();
+    window.history.replaceState({}, "", newUrl);
+  }
+
   /** given a URL, parse it into our relevant pieces */
   parseQueryParams(params = new URLSearchParams(window.location.search)) {
     this.showList = {};
@@ -312,7 +345,7 @@ class BrowseViewModel {
       c.impliedVisible = 0;
     });
     this.getShowList().forEach((ein) => {
-      const parts = ein.split(":");
+      const parts = ein.split(/[:~]/);
       const id = parts[0];
       const ups = parts[1] || START_REVEAL;
       const downs = parts[2] || START_REVEAL;
@@ -650,7 +683,7 @@ class BrowseViewModel {
     console.log(`Expanding inflows for ${charity.id} ${charity.name}`);
     charity.desiredVisible = true;
     charity.expandInflows(NEXT_REVEAL);
-    this.computeImpliedVisibility(charity, true, false);
+    this.computeImpliedVisibility(charity, true, true);
     this.buildSankeyData();
     if (refreshCallback) refreshCallback();
   }
@@ -659,7 +692,7 @@ class BrowseViewModel {
     console.log(`Expanding outflows for ${charity.id} ${charity.name}`);
     charity.desiredVisible = true;
     charity.expandOutflows(NEXT_REVEAL);
-    this.computeImpliedVisibility(charity, false, true);
+    this.computeImpliedVisibility(charity, true, true);
     this.buildSankeyData();
     if (refreshCallback) refreshCallback();
   }
@@ -751,6 +784,7 @@ class BrowseViewModel {
         }
       }
     }
+    this.computeAndSaveURLParams();
   }
 
   /**
@@ -935,7 +969,7 @@ class Charity {
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
     if (!ein) return null;
-    const parts = ein.split(":");
+    const parts = ein.split(/[:~]/);
     return Charity.charityLookup[parts[0]];
   }
 
@@ -1525,7 +1559,7 @@ class Charity {
     let newCount = this.visibleGrantsIn.length - count;
     if (newCount < 0) newCount = 0;
     viewModel.addToShowList(
-      `${this.ein}:${newCount}:${this.visibleGrants.length}}`
+      `${this.ein}~${newCount}~${this.visibleGrants.length}}`
     ); // match URL will do this for us.
   }
 
@@ -1558,7 +1592,7 @@ class Charity {
     let newCount = this.visibleGrants.length - count;
     if (newCount < 0) newCount = 0;
     viewModel.addToShowList(
-      `${this.ein}:${this.visibleGrantsIn.length}:${newCount}`
+      `${this.ein}~${this.visibleGrantsIn.length}~${newCount}`
     ); // match URL will do this for us.
   }
 
@@ -1586,7 +1620,7 @@ class Charity {
    */
   URLPiece() {
     if (!this.desiredVisible) return null;
-    return `${this.ein}:${this.visibleGrantsIn.length}:${this.visibleGrants.length}`;
+    return `${this.ein}~${this.visibleGrantsIn.length}~${this.visibleGrants.length}`;
   }
 
   /**

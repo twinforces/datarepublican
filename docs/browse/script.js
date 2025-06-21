@@ -114,7 +114,7 @@ function addEINFromInput() {
   viewModel.addToShowList(val);
   $("#einShowInput").val("");
   renderActiveEINs();
-  Charity.placeNode(val);
+  charity.place();
   updateQueryParams();
   generateGraph();
 }
@@ -130,8 +130,8 @@ function renderActiveEINs() {
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>'
     );
     const $text = $(
-      `<span title="EIN: ${ein.split(":")[0].slice(0, 2)}-${ein
-        .split(":")[0]
+      `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
+        .split(/[:~]/)[0]
         .slice(2)}"></span>`
     ).text(name);
     const $rm = $(
@@ -159,8 +159,8 @@ function renderHideEINs() {
       '<div class="filter-tag flex items-center gap-0.5 rounded border border-red bg-red/10 text-red rounded-md px-2 py-1 text-xs"></div>'
     );
     const $text = $(
-      `<span title="EIN: ${ein.split(":")[0].slice(0, 2)}-${ein
-        .split(":")[0]
+      `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
+        .split(/[:~]/)[0]
         .slice(2)}"></span>`
     ).text(name);
     const $rm = $(
@@ -1040,7 +1040,17 @@ function renderFocusedSankey(
 
   viewModel.cleanAfterRender();
   $("#downloadBtn").show();
-
+  const post = encodeURIComponent(
+    `Hey, @twinforces @datarepublican, Check this out because:`
+  );
+  const url = encodeURIComponent(window.location.href);
+  const hashtags = encodeURIComponent("DRBadNGOs");
+  $("#PostBox").html(
+    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&via=twinforces" 
+    target="_blank"  
+    title="Share on X" 
+    class="x-share-button">&#x1D54F;</a>`
+  );
   return currentData;
 }
 

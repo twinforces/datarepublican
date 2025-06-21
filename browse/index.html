@@ -92,7 +92,27 @@ title: Charity explorer - Sankey chart of NGOs and their flows
   color:red;
 }
 
-
+.x-share-button {
+      display: inline-block;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      font-size: 24px; /* Adjusts the size of the 𝕏 character */
+      line-height: 1;
+      width: 24px;
+      height: 24px;
+      color: #fff; /* Black for light mode */
+      text-decoration: none; /* Removes underline from link */
+      font-family: "Segoe UI Symbol", "Noto Sans Math", "DejaVu Sans", sans-serif;
+    }
+    .x-share-button:hover {
+      opacity: 0.8;
+    }
+    /* Optional: Dark mode support */
+    @media (prefers-color-scheme: dark) {
+      .x-share-button {
+        color: #000; /* White for dark mode */
+      }
+    }
 </style>
 
 <div id="topbar" class="">
@@ -111,7 +131,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     </script>
     
     <!-- "How it works" toggle is BFS-only -->
-    <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works (and Why)</button>
+    <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works (and Why)</button>      <button id="PostBox"></button>
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
