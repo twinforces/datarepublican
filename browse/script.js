@@ -1046,7 +1046,7 @@ function renderFocusedSankey(
   const url = encodeURIComponent(window.location.href);
   const hashtags = encodeURIComponent("DRBadNGOs");
   $("#PostBox").html(
-    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&via=twinforces" 
+    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&hashtags=${hashtags}&via=twinforces" 
     target="_blank"  
     title="Share on X" 
     class="x-share-button">&#x1D54F;</a>`
