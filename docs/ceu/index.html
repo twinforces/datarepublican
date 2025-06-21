@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1750446276">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1750446276">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1750543721">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1750543721">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -290,13 +290,13 @@ $(document).ready(function() {
 >
   
   <strong class="md:text-sm">
-    Early CEU Documents
+    Historical Documents
     
       <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">New</span>
     
   </strong>
   
-    <span class="opacity-70 text-sm font-normal md:text-[13px]">Explore Soros Foundation early years</span>
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Explore Soros early years and download tax returns</span>
   
   
 </a> 
@@ -913,11 +913,11 @@ $(document).ready(function() {
 <script src="papaparse.min.js"></script>
 
 <!-- Page Header -->
-<h1 class="mb-1">CEU Documents Search</h1>
+<h1 class="mb-1">Tax and CEU Documents Search</h1>
 <p class="opacity-80 mb-0 text-[15px]">
-  View cross-referenced AI-generated and AI-translated summaries of Central European University documents. These include the early years of Hungarian Soros Foundation annual reports. 
+  View cross-referenced AI-generated and AI-translated summaries of Open Society tax returns, early NED documents, and CEU documents. These include the early years of Hungarian Soros Foundation annual reports. 
 </p>
-
+      
 <!-- Warning Box (same style as in OLD_JEKYLL_FILE) -->
 <div class="my-4 p-4 border border-yellow-400 bg-yellow-100 rounded-md text-sm" style="background-color:#FEF9C3; border:1px solid #FACC15;">
   <strong>Warning:</strong> The contents are AI-generated and may contain incorrect or incomplete information.
@@ -1215,6 +1215,12 @@ function renderSearchResults(keywords, prefix) {
 
     // date formatting: just show doc.date as-is
     let dateLine = "";
+    const isTax = doc.catalog_id.endsWith('_ascii');
+    let taxLink = "";
+    if (isTax) {
+      taxLink = ` <i>Download original: <a href="https://a2-west.americancloud.com/objects3243%3Asorostaxreturns/${doc.id}.pdf" download>PDF Link</a></i>`;
+    }
+
     if (doc.date) {
       dateLine = `<div class="text-sm"><i>Publication date: ${escapeHtml(doc.date)}</i></div>`;
     }
@@ -1222,8 +1228,9 @@ function renderSearchResults(keywords, prefix) {
     html += `
       <div class="mb-3">
         <div class="font-semibold">
-          <a href="?${linkQuery}">${escapeHtml(doc.title)}</a>
+          <a href="?${linkQuery}">${escapeHtml(doc.title)}</a> 
         </div>
+        ${taxLink}        
         <div>${escapeHtml(doc.short_summary)}</div>
         ${dateLine}
       </div>
@@ -1247,6 +1254,16 @@ function renderDocument(docId) {
 
   const container = document.createElement("div");
   container.className = "border border-gray-200 rounded bg-white p-4 mb-2";
+  const isTax = docData.catalog_id.endsWith('_ascii');
+  const ftTitle = isTax ? 'PDF Link' : 'Full Text (CEU)';
+  const dlLink = isTax ? `          <a href="https://a2-west.americancloud.com/objects3243%3Asorostaxreturns/${docData.id}.pdf"
+             target="_blank">
+            ${escapeHtml(docData.id || "")}
+          </a>` : `          <a href="https://catalog.archivum.org/catalog/${escapeAttr(docData.catalog_id || "")}"
+             target="_blank">
+            ${escapeHtml(docData.catalog_id || "")}
+          </a>
+`;
 
   // Top row => "Article" label as per instructions
   const topHTML = `
@@ -1256,12 +1273,9 @@ function renderDocument(docId) {
         <div class="font-semibold">${escapeHtml(docData.title || "")}</div>
       </div>
       <div>
-        <span class="text-sm opacity-80">Full Text (CEU)</span>
+        <span class="text-sm opacity-80">${ftTitle}</span>
         <div>
-          <a href="https://catalog.archivum.org/catalog/${escapeAttr(docData.catalog_id || "")}"
-             target="_blank">
-            ${escapeHtml(docData.catalog_id || "")}
-          </a>
+        ${dlLink}
         </div>
       </div>
     </div>
