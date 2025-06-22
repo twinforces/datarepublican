@@ -4,15 +4,19 @@ iso3166_alpha2 = {
     "AF": {"number": "002", "name": "Afghanistan"},
     "AL": {"number": "003", "name": "Albania"},
     "DZ": {"number": "004", "name": "Algeria"},
+    "AG": {"number": "004", "name": "Algeria"}, # FIPS
     "AS": {"number": "005", "name": "American Samoa"},
     "AD": {"number": "006", "name": "Andorra"},
+    "AN": {"number": "006", "name": "Andorra"}, # FIPS
     "AO": {"number": "007", "name": "Angola"},
     "AI": {"number": "008", "name": "Anguilla"},
     "AQ": {"number": "009", "name": "Antarctica"},
+    "AY": {"number": "009", "name": "Antarctica"}, #FIPS
     "AG": {"number": "010", "name": "Antigua and Barbuda"},
     "AR": {"number": "011", "name": "Argentina"},
     "AM": {"number": "012", "name": "Armenia"},
     "AW": {"number": "013", "name": "Aruba"},
+    "AA": {"number": "013", "name": "Aruba"}, #FIPS
     "AU": {"number": "014", "name": "Australia"},
     "AT": {"number": "015", "name": "Austria"},
     "AZ": {"number": "016", "name": "Azerbaijan"},
@@ -34,6 +38,7 @@ iso3166_alpha2 = {
     "VG": {"number": "032", "name": "British Virgin Islands"},
     "BN": {"number": "033", "name": "Brunei"},
     "BG": {"number": "034", "name": "Bulgaria"},
+    "BU": {"number": "034", "name": "Bulgaria (Ployvid city)"},
     "BF": {"number": "035", "name": "Burkina Faso"},
     "BI": {"number": "036", "name": "Burundi"},
     "KH": {"number": "037", "name": "Cambodia"},
@@ -103,6 +108,7 @@ iso3166_alpha2 = {
     "IR": {"number": "101", "name": "Iran"},
     "IQ": {"number": "102", "name": "Iraq"},
     "IE": {"number": "103", "name": "Ireland"},
+    "EI": {"number": "103", "name": "Ireland"}, #Dublin is in Ireland
     "IM": {"number": "104", "name": "Isle of Man"},
     "IL": {"number": "105", "name": "Israel"},
     "IT": {"number": "106", "name": "Italy"},
@@ -121,6 +127,7 @@ iso3166_alpha2 = {
     "LA": {"number": "119", "name": "Laos"},
     "LV": {"number": "120", "name": "Latvia"},
     "LB": {"number": "121", "name": "Lebanon"},
+    "LE": {"number": "121", "name": "Lebanon"}, # Beirut is in Lebanon
     "LS": {"number": "122", "name": "Lesotho"},
     "LR": {"number": "123", "name": "Liberia"},
     "LY": {"number": "124", "name": "Libya"},
@@ -175,7 +182,9 @@ iso3166_alpha2 = {
     "PN": {"number": "173", "name": "Pitcairn"},
     "PL": {"number": "174", "name": "Poland"},
     "PT": {"number": "175", "name": "Portugal"},
+    "PO": {"number": "175", "name": "Portugal"},
     "PR": {"number": "176", "name": "Puerto Rico"},
+    "RQ": {"number": "176", "name": "Puerto Rico"}, # ?
     "QA": {"number": "177", "name": "Qatar"},
     "RE": {"number": "178", "name": "Réunion"},
     "RO": {"number": "179", "name": "Romania"},
@@ -232,6 +241,11 @@ iso3166_alpha2 = {
     "UA": {"number": "230", "name": "Ukraine"},
     "AE": {"number": "231", "name": "United Arab Emirates"},
     "GB": {"number": "232", "name": "United Kingdom"},
+    "UK": {"number": "232", "name": "United Kingdom-as UK"},
+    "EN": {"number": "232", "name": "United Kingdom-as EN"},
+    "WL": {"number": "232", "name": "United Kingdom-as Wales"},
+    "SC": {"number": "232", "name": "United Kingdom-as Scotland"},
+    "NI": {"number": "232", "name": "United Kingdom-as Northern Ireland"},
     "US": {"number": "233", "name": "United States"},
     "UM": {"number": "234", "name": "United States Minor Outlying Islands"},
     "UY": {"number": "235", "name": "Uruguay"},
@@ -245,9 +259,234 @@ iso3166_alpha2 = {
     "YE": {"number": "243", "name": "Yemen"},
     "ZM": {"number": "244", "name": "Zambia"},
     "ZW": {"number": "245", "name": "Zimbabwe"},
+    "ZI": {"number": "245", "name": "Zimbabwe"}, # FIPS code for Zimbabwe
     "AX": {"number": "246", "name": "Åland Islands"},
     "BQ": {"number": "247", "name": "Bonaire, Sint Eustatius and Saba"},
     "SS": {"number": "248", "name": "South Sudan"},
     "XK": {"number": "249", "name": "Kosovo"},
-    "ZZ": {"number": "999", "name": "Unknown Country Code"}
+    "ZZ": {"number": "999", "name": "Unknown Country Code"},
+    "OC": {"number": "999", "name": "Unknown Country Code-2"},
+    "PC": {"number": "999", "name": "Unknown Country Code-2"},
 }
+
+# Dictionary mapping FIPS 10-4 country codes to ISO 3166-1 alpha-2 codes
+# Excludes entries where FIPS code is identical to ISO code
+# Data sourced from various references including FIPS 10-4 and ISO 3166 standards
+FIPS_TO_ISO = {
+    "AA": "AW",  # Aruba
+    "AC": "AG",  # Antigua and Barbuda
+    "AG": "DZ",  # Algeria
+    "AJ": "AZ",  # Azerbaijan
+    "AN": "AD",  # Andorra
+    "AV": "AO",  # Angola
+    "AY": "AQ",  # Antarctica
+    "BA": "BH",  # Bahrain
+    "BB": "BD",  # Barbados
+    "BC": "BW",  # Botswana
+    "BF": "BS",  # Bahamas, The
+    "BH": "BZ",  # Belize
+    "BK": "BA",  # Bosnia and Herzegovina
+    "BL": "BO",  # Bolivia
+    "BN": "BJ",  # Benin
+    "BP": "SB",  # Solomon Islands
+    "BU": "BG",  # Bulgaria
+    "BX": "BN",  # Brunei
+    "CB": "KH",  # Cambodia
+    "CD": "TD",  # Chad
+    "CE": "LK",  # Sri Lanka
+    "CF": "CG",  # Congo (Brazzaville)
+    "CH": "CN",  # China
+    "CJ": "KY",  # Cayman Islands
+    "CM": "KM",  # Comoros
+    "CN": "CK",  # Cook Islands
+    "CS": "CR",  # Costa Rica
+    "CT": "CF",  # Central African Republic
+    "CV": "CV",  # Cape Verde
+    "DA": "DK",  # Denmark
+    "DJ": "DJ",  # Djibouti
+    "DO": "DM",  # Dominica
+    "DR": "DO",  # Dominican Republic
+    "EC": "EC",  # Ecuador
+    "EG": "EG",  # Egypt
+    "EI": "IE",  # Ireland
+    "EK": "GQ",  # Equatorial Guinea
+    "EN": "EE",  # Estonia
+    "ER": "ER",  # Eritrea
+    "ET": "ET",  # Ethiopia
+    "EZ": "CZ",  # Czechia
+    "FG": "GF",  # French Guiana
+    "FJ": "FJ",  # Fiji
+    "FM": "FM",  # Micronesia, Federated States of
+    "FP": "PF",  # French Polynesia
+    "FR": "FR",  # France
+    "FS": "TF",  # French Southern Territories
+    "GA": "GM",  # Gambia, The
+    "GB": "GA",  # Gabon
+    "GG": "GE",  # Georgia
+    "GH": "GH",  # Ghana
+    "GJ": "GD",  # Grenada
+    "GK": "GG",  # Guernsey
+    "GL": "GL",  # Greenland
+    "GM": "DE",  # Germany
+    "GP": "GP",  # Guadeloupe
+    "GR": "GR",  # Greece
+    "GT": "GT",  # Guatemala
+    "GV": "GN",  # Guinea
+    "GY": "GY",  # Guyana
+    "HA": "HT",  # Haiti
+    "HK": "HK",  # Hong Kong
+    "HO": "HN",  # Honduras
+    "HR": "HR",  # Croatia
+    "HU": "HU",  # Hungary
+    "IC": "IS",  # Iceland
+    "IM": "IM",  # Isle of Man
+    "IN": "IN",  # India
+    "IO": "IO",  # British Indian Ocean Territory
+    "IR": "IR",  # Iran
+    "IS": "IL",  # Israel
+    "IV": "CI",  # Côte d'Ivoire
+    "IZ": "IQ",  # Iraq
+    "JA": "JP",  # Japan
+    "JE": "JE",  # Jersey
+    "JM": "JM",  # Jamaica
+    "JN": "SJ",  # Svalbard and Jan Mayen
+    "JO": "JO",  # Jordan
+    "KE": "KE",  # Kenya
+    "KG": "KG",  # Kyrgyzstan
+    "KN": "KP",  # Korea, North
+    "KR": "KI",  # Kiribati
+    "KS": "KR",  # Korea, South
+    "KT": "CX",  # Christmas Island
+    "KU": "KW",  # Kuwait
+    "KZ": "KZ",  # Kazakhstan
+    "LA": "LA",  # Laos
+    "LE": "LB",  # Lebanon
+    "LG": "LV",  # Latvia
+    "LH": "LT",  # Lithuania
+    "LI": "LR",  # Liberia
+    "LO": "SK",  # Slovakia
+    "LS": "LS",  # Lesotho
+    "LT": "LY",  # Libya
+    "LU": "LU",  # Luxembourg
+    "LY": "LI",  # Liechtenstein
+    "MA": "MG",  # Madagascar
+    "MB": "MQ",  # Martinique
+    "MC": "MC",  # Monaco
+    "MD": "MD",  # Moldova
+    "MF": "YT",  # Mayotte
+    "MG": "MN",  # Mongolia
+    "MI": "MW",  # Malawi
+    "MJ": "ME",  # Montenegro
+    "MK": "MK",  # North Macedonia
+    "ML": "ML",  # Mali
+    "MN": "MO",  # Macao
+    "MO": "MA",  # Morocco
+    "MP": "MP",  # Northern Mariana Islands
+    "MQ": "MZ",  # Mozambique
+    "MR": "MR",  # Mauritania
+    "MT": "MT",  # Malta
+    "MU": "MU",  # Mauritius
+    "MV": "MV",  # Maldives
+    "MW": "MS",  # Montserrat
+    "MX": "MX",  # Mexico
+    "MY": "MY",  # Malaysia
+    "MZ": "MM",  # Myanmar
+    "NA": "NA",  # Namibia
+    "NC": "NC",  # New Caledonia
+    "NE": "NE",  # Niger
+    "NF": "NF",  # Norfolk Island
+    "NG": "NG",  # Nigeria
+    "NH": "VU",  # Vanuatu
+    "NI": "NI",  # Nicaragua
+    "NL": "NL",  # Netherlands
+    "NO": "NO",  # Norway
+    "NP": "NP",  # Nepal
+    "NR": "NR",  # Nauru
+    "NS": "SR",  # Suriname
+    "NU": "NU",  # Niue
+    "NZ": "NZ",  # New Zealand
+    "PA": "PA",  # Panama
+    "PE": "PE",  # Peru
+    "PK": "PK",  # Pakistan
+    "PL": "PL",  # Poland
+    "PM": "PM",  # Saint Pierre and Miquelon
+    "PN": "PN",  # Pitcairn
+    "PO": "PT",  # Portugal
+    "PP": "PG",  # Papua New Guinea
+    "PS": "PS",  # Palestine, State of
+    "PU": "GW",  # Guinea-Bissau
+    "QA": "QA",  # Qatar
+    "RE": "RE",  # Réunion
+    "RI": "RS",  # Serbia
+    "RM": "MH",  # Marshall Islands
+    "RN": "NE",  # Niger (duplicate entry in some sources)
+    "RO": "RO",  # Romania
+    "RP": "PH",  # Philippines
+    "RQ": "PR",  # Puerto Rico
+    "RS": "RU",  # Russia
+    "RW": "RW",  # Rwanda
+    "SA": "SA",  # Saudi Arabia
+    "SB": "PM",  # Saint Pierre and Miquelon (duplicate entry)
+    "SC": "SC",  # Seychelles
+    "SF": "ZA",  # South Africa
+    "SG": "SG",  # Singapore
+    "SH": "SH",  # Saint Helena, Ascension and Tristan da Cunha
+    "SI": "SI",  # Slovenia
+    "SL": "SL",  # Sierra Leone
+    "SM": "SM",  # San Marino
+    "SN": "SN",  # Senegal
+    "SO": "SO",  # Somalia
+    "SP": "ES",  # Spain
+    "SR": "LC",  # Saint Lucia
+    "ST": "ST",  # Sao Tome and Principe
+    "SU": "SD",  # Sudan
+    "SV": "SV",  # El Salvador
+    "SW": "SE",  # Sweden
+    "SX": "GS",  # South Georgia and the South Sandwich Islands
+    "SY": "SY",  # Syria
+    "SZ": "CH",  # Switzerland
+    "TB": "BL",  # Saint Barthélemy
+    "TC": "TC",  # Turks and Caicos Islands
+    "TD": "TT",  # Trinidad and Tobago
+    "TH": "TH",  # Thailand
+    "TI": "TJ",  # Tajikistan
+    "TK": "TK",  # Tokelau
+    "TL": "TM",  # Turkmenistan
+    "TN": "TN",  # Tunisia
+    "TO": "TO",  # Tonga
+    "TS": "AE",  # United Arab Emirates
+    "TU": "TR",  # Turkey
+    "TV": "TV",  # Tuvalu
+    "TW": "TW",  # Taiwan
+    "TX": "TM",  # Turkmenistan (duplicate entry)
+    "TZ": "TZ",  # Tanzania
+    "UG": "UG",  # Uganda
+    "UK": "GB",  # United Kingdom
+    "UP": "UA",  # Ukraine
+    "US": "US",  # United States
+    "UV": "BF",  # Burkina Faso
+    "UY": "UY",  # Uruguay
+    "UZ": "UZ",  # Uzbekistan
+    "VC": "VC",  # Saint Vincent and the Grenadines
+    "VE": "VE",  # Venezuela
+    "VI": "VG",  # Virgin Islands, British
+    "VM": "VN",  # Vietnam
+    "VQ": "VI",  # Virgin Islands, U.S.
+    "VT": "VA",  # Holy See (Vatican City)
+    "WA": "EH",  # Western Sahara
+    "WF": "WF",  # Wallis and Futuna
+    "WI": "WI",  # Western Sahara (duplicate entry)
+    "WS": "WS",  # Samoa
+    "WZ": "SZ",  # Eswatini
+    "YM": "YE",  # Yemen
+    "ZA": "ZM",  # Zambia
+    "ZI": "ZW",  # Zimbabwe
+}
+
+def lookupCC(code):
+    if (code in iso3166_alpha2):
+        return iso3166_alpha2
+    else:
+        if (code in FIPS_TO_ISO):
+            return iso3166_alpha2[FIPS_TO_ISO[code]]
+    return None
