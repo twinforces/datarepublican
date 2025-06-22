@@ -8,7 +8,7 @@ from lxml import etree
 from io import BytesIO
 import sys
 import extract_utils as cu
-from countryCodes import iso3166_alpha2
+from countryCodes import lookupCC
 import re
 
 logger = None
@@ -222,18 +222,23 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code
                     grant_ein = ein_elem[0].text.strip() if ein_elem and len(ein_elem) > 0 and ein_elem[0].text else "Unknown"
                     # Check for foreign address
                     is_foreign_address = element.xpath(".//irs:RecipientForeignAddress", namespaces=cu.NAMESPACES)
+                    city_elem = element.xpath(".//irs:CityNm", namespaces=cu.NAMESPACES)
+                    province_elem = element.xpath(".//irs:ProvinceOrStateNm", namespaces=cu.NAMESPACES)
+                    city = city_elem[0].text.strip() if city_elem and city_elem[0].text else None
+                    province = province_elem[0].text.strip() if province_elem and province_elem[0].text else None
                     if is_foreign_address:
                         country_elem = element.xpath(".//irs:CountryCd", namespaces=cu.NAMESPACES)
                         country_code = country_elem[0].text.strip() if country_elem and country_elem[0].text else None
-                        if country_code and country_code in iso3166_alpha2:
-                            grant_ein = iso3166_alpha2[country_code]["number"]
-                            grantee_canonical_address = iso3166_alpha2[country_code]["name"]
+                        if country_code and lookupCC(country_code):
+                            country = lookupCC(country_code)
+                            grant_ein = country["number"]
+                            grantee_canonical_address = country["name"]
                             cu.log_error("Foreign address mapped to ISO 3166-1 number: {} for country: {}", grant_ein, country_code)
                         else:
                             grantee_canonical_address = "Foreign_"+country_code
                             grant_ein='999' # the unknown country code country
                             #grant_ein = f"Address:{grantee_canonical_address}" if grantee_canonical_address else "Unknown"
-                            cu.log_error("Foreign address unmapped, using address-based EIN: {}, country: {}", grant_ein, country_code or "None")
+                            cu.log_error("Foreign address unmapped, using address-based EIN: {}, country: {}, city: {}, province: {}", grant_ein, country_code or "None", city or "None", province or "None")
                     else:
                         # Parse recipient address
                         grantee_canonical_address, grant_po_box, grant_zip_code = cu.parse_recipient_address(element, xml_filename, grant_ein, grantee_name, output_dir)
@@ -297,7 +302,7 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code
                                     grant_map_keys.add(seen_key)
                                     unique_grant_eins.add(grant_ein)
                                     grant_ein_counts[grant_ein] += 1
-                                    if not status.startsWith("success")
+                                    if not status.startswith("success"):
                                         result['debug_grant_entries'].append({
                                             'filer_ein': filer_ein,
                                             'filer_name': filer_name,
