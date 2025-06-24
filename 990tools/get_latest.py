@@ -337,7 +337,7 @@ def print_summary_table(summary, total_mismatches, total_missing_xmls, total_pot
 
     print("\n### TSV Processing Summary\n")
     print("| Org Type | Year | Total Rows | Filtered Rows (≥ MinimumD) | Selected Rows (Latest) | xml_name Mismatches | Mismatch % | Missing XMLs | Potential Mismatches |")
-    print("|----------|------|------------|---------------------------|-----------------------|--------------------|-----------|-------------|---------------------|")
+    print("|----------|-----:|-----------:|--------------------------:|-----------------------:|--------------------:|-----------:|-------------:|---------------------:|")
     total_rows_sum = 0
     filtered_rows_sum = 0
     selected_rows_sum = 0
@@ -354,7 +354,7 @@ def print_summary_table(summary, total_mismatches, total_missing_xmls, total_pot
         missing_xmls_sum += missing_xmls
         potential_mismatches_sum += potential_mismatches
     total_mismatch_pct = (mismatches_sum / selected_rows_sum * 100) if selected_rows_sum > 0 else 0
-    print("|----------|------|------------|---------------------------|-----------------------|--------------------|-----------|-------------|---------------------|")
+    #print("|----------|------|------------|---------------------------|-----------------------|--------------------|-----------|-------------|---------------------|")
     print(f"| **Total**|      | **{total_rows_sum:<10}** | **{filtered_rows_sum:<25}** | **{selected_rows_sum:<21}** | **{mismatches_sum:<18}** | **{total_mismatch_pct:<9.2f}%** | **{missing_xmls_sum:<11}** | **{potential_mismatches_sum:<19}** |")
     print(f"\nTotal xml_name mismatches across all files: {total_mismatches}")
     print(f"Total missing XMLs across all files: {total_missing_xmls}")

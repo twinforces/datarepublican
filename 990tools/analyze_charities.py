@@ -177,7 +177,8 @@ def process_file(file_path, output_dir, histograms, top_bottom, lock):
 
     logger.info(f"Processing {file_path} ({line_count} lines)")
     try:
-        df = pd.read_csv(file_path, sep='\t', low_memory=False)
+        # Read filer_ein as string to preserve leading zeros
+        df = pd.read_csv(file_path, sep='\t', low_memory=False, dtype={'filer_ein': str})
     except Exception as e:
         logger.error(f"Error reading {file_path}: {e}")
         return
@@ -262,6 +263,9 @@ def process_file(file_path, output_dir, histograms, top_bottom, lock):
     df['foreign_expenses_pct'] = df['foreign_expenses_pct'].apply(clamp_value)
     df['grift_ratio'] = df['grift_ratio'].apply(clamp_value)
 
+    # Ensure filer_ein is a 9-digit string with leading zeros
+    df['filer_ein'] = df['filer_ein'].astype(str).str.zfill(9)
+
     try:
         df.to_csv(output_path, sep='\t', index=False)
         logger.info(f"Written output to {output_path}")
@@ -270,7 +274,7 @@ def process_file(file_path, output_dir, histograms, top_bottom, lock):
 
     del df
     gc.collect()
-
+    
 def generate_histogram_report(histograms, output_dir):
     template_path = "histogram_template.mako"
     try:
