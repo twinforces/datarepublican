@@ -9,10 +9,43 @@ const MAX_NODES = 100;
 const CHUNK_SIZE = 1000;
 const MAX_KEYWORD_NODES = 15;
 
-import ORGANIZATION_TYPES from "./charityTypes.js";
+const DB_NAME = "CharityDatabase";
+const DB_VERSION = 1;
+const CHARITY_STORE = "charities";
+const GRANT_STORE = "grants";
+const METADATA_STORE = "metadata";
+const DATA_VERSION = "2025-06-25"; // Update when TSVs change
 
-/* keep this around and export it mostly for debugging*/
-let GOV_NODE = null;
+// Data URLs
+const DATA_FILES = [
+  {
+    status: "Loading Charities",
+    zipFile: "./charities.tsv.zip",
+    tsvFile: "charity_latest.tsv",
+    type: "charities",
+  },
+  {
+    status: "Loading 501 Grants",
+    zipFile: "./grants_final.tsv.zip",
+    tsvFile: "grants_final.tsv",
+    type: "grants",
+    grantType: "regular",
+  },
+  {
+    status: "Loading Private Foundation Grants",
+    zipFile: "./grants.pf.tsv.zip",
+    tsvFile: "grants_pf.tsv",
+    type: "grants",
+    grantType: "private",
+  },
+];
+
+import ORGANIZATION_TYPES from "./charityTypes.js";
+import { iso3166_alpha2 } from "./countryCodes.js";
+import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
+import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
+
+let GOV_NODE = null; // I use this when debugging.
 
 /**
  * Tried logarithmic scaling, but it was too drastic 1M vs. 1B was 3. 
@@ -28,7 +61,7 @@ let GOV_NODE = null;
  * @param {*} amt 
  * @returns 
  */
-function scaleValue(amt) {
+export function scaleValue(amt) {
   return Math.pow(amt, 1 / viewModel.POWER_LAW);
 }
 
@@ -37,7 +70,7 @@ function scaleValue(amt) {
  * @param {*} num
  * @returns
  */
-function formatNumber(num) {
+export function formatNumber(num) {
   if (num >= 1e12) return (num / 1e12).toFixed(1) + "T";
   if (num >= 1e9) return (num / 1e9).toFixed(1) + "B";
   if (num >= 1e6) return (num / 1e6).toFixed(1) + "M";
@@ -77,6 +110,233 @@ function sinebow(t) {
 export function getColorForEIN(ein) {
   return sinebow((hashEIN(ein) * 5) % 1);
 }
+
+// Initialize IndexedDB
+async function initDB() {
+  try {
+    return await openDB(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains(CHARITY_STORE)) {
+          db.createObjectStore(CHARITY_STORE, { keyPath: "filer_ein" });
+        }
+        if (!db.objectStoreNames.contains(GRANT_STORE)) {
+          const store = db.createObjectStore(GRANT_STORE, { keyPath: "id" });
+          store.createIndex("filer_ein", "filer_ein");
+          store.createIndex("grantee_ein", "grantee_ein");
+        }
+        if (!db.objectStoreNames.contains(METADATA_STORE)) {
+          db.createObjectStore(METADATA_STORE, { keyPath: "id" });
+        }
+      },
+    });
+  } catch (err) {
+    console.error("Error initializing IndexedDB:", err);
+    updateStatus(`Error initializing database: ${err.message}`, "red", false);
+    throw err;
+  }
+}
+
+async function clearStorage() {
+  try {
+    const db = await initDB();
+    const tx = db.transaction(
+      [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
+      "readwrite"
+    );
+    await tx.objectStore(CHARITY_STORE).clear();
+    await tx.objectStore(GRANT_STORE).clear();
+    await tx.objectStore(METADATA_STORE).clear();
+    await tx.done;
+    Charity.charityLookup = {};
+    Grant.grantLookup = {};
+    updateStatus("Local storage cleared, reloading data...", "black", true);
+    await viewModel.loadData();
+  } catch (err) {
+    console.error("Error clearing storage:", err);
+    updateStatus(`Error clearing storage: ${err.message}`, "red", false);
+    throw err;
+  }
+}
+
+// Check if data exists and is up-to-date
+async function hasValidData(db) {
+  try {
+    const tx = db.transaction(
+      [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
+      "readonly"
+    );
+    const charityCount = await tx.objectStore(CHARITY_STORE).count();
+    const grantCount = await tx.objectStore(GRANT_STORE).count();
+    const version = await tx.objectStore(METADATA_STORE).get("version");
+    await tx.done;
+    return (
+      charityCount > 0 && grantCount > 0 && version?.value === DATA_VERSION
+    );
+  } catch (err) {
+    console.error("Error checking data validity:", err);
+    return false;
+  }
+}
+
+// Fetch data from IndexedDB
+async function fetchLocalData(db, storeName) {
+  try {
+    const tx = db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
+    const records = await store.getAll();
+    await tx.done;
+    return records;
+  } catch (err) {
+    console.error(`Error fetching data from ${storeName}:`, err);
+    updateStatus(
+      `Error loading ${storeName} from local storage: ${err.message}`,
+      "red",
+      false
+    );
+    throw err;
+  }
+}
+
+// Store data in IndexedDB
+async function storeData(db, storeName, records) {
+  try {
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      for (const record of chunk) {
+        await store.put(record);
+      }
+      await tx.done;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  } catch (err) {
+    console.error(`Error storing data in ${storeName}:`, err);
+    updateStatus(`Error storing ${storeName}: ${err.message}`, "red", false);
+    throw err;
+  }
+}
+
+// Fetch and parse TSV data
+async function fetchAndStoreTSV(
+  db,
+  { zipFile, tsvFile, type, grantType, status }
+) {
+  try {
+    updateStatus(status);
+    const response = await fetch(zipFile);
+    if (!response.ok)
+      throw new Error(`HTTP error ${response.status} for ${zipFile}`);
+    const zipBlob = await response.blob();
+    const zip = await JSZip.loadAsync(zipBlob);
+    const tsvText = await zip.file(tsvFile).async("text");
+
+    return new Promise((resolve, reject) => {
+      const records = [];
+      let rowsProcessed = 0;
+      const BATCH_SIZE = CHUNK_SIZE;
+      const lines = tsvText.split("\n").filter((line) => line.trim());
+      if (lines.length < 1) throw new Error(`Empty TSV: ${tsvFile}`);
+      const headers = lines[0].split("\t").map((header) => header.trim());
+
+      const headerCounts = {};
+      const uniqueHeaders = headers.map((header) => {
+        headerCounts[header] = (headerCounts[header] || 0) + 1;
+        return headerCounts[header] > 1
+          ? `${header}_${headerCounts[header]}`
+          : header;
+      });
+
+      function processBatch(startIndex) {
+        const endIndex = Math.min(startIndex + BATCH_SIZE, lines.length);
+        let row;
+        try {
+          for (let index = startIndex; index < endIndex; index++) {
+            const values = lines[index]
+              .split("\t")
+              .map((value) => (value ? value.trim() : ""));
+            row = {};
+            uniqueHeaders.forEach((header, i) => {
+              row[header] = values[i] || "";
+            });
+
+            if (type === "charities") {
+              const charity = {
+                filer_ein: row.filer_ein,
+                filer_name: row.filer_name,
+                xml_name: row.xml_name,
+                receipt_amt: parseInt(row.receipt_amt || "0", 10) || 0,
+                govt_amt: parseInt(row.govt_amt || "0", 10) || 0,
+                contrib_amt: parseInt(row.contrib_amt || "0", 10) || 0,
+                row,
+              };
+              if (!charity.filer_ein) {
+                console.warn(
+                  `Skipping charity row ${index}: missing filer_ein`,
+                  row
+                );
+                continue;
+              }
+              if (!charity.filer_name) {
+                console.warn(
+                  `Missing filer_name for charity row ${index}:`,
+                  row
+                );
+                charity.filer_name = "Unknown Charity";
+              }
+              records.push(charity);
+            } else if (type === "grants") {
+              let grantee = row.grant_ein;
+              if (grantee?.length === 7) grantee = "0" + grantee;
+              const grant = {
+                id: `${row.filer_ein}~${grantee}`,
+                filer_ein: row.filer_ein,
+                grantee_ein: grantee,
+                amt: parseInt(row.grant_amt || "0", 10) || 0,
+                grantType,
+              };
+              if (
+                grant.filer_ein &&
+                grant.grantee_ein &&
+                grant.filer_ein !== grant.grantee_ein
+              ) {
+                records.push(grant);
+              } else {
+                console.warn(`Skipping grant row ${index}: invalid EINs`, row);
+              }
+            }
+
+            rowsProcessed++;
+            if (rowsProcessed % CHUNK_SIZE === 0) {
+              updateStatus(
+                `${status}: ${formatNumber(rowsProcessed)} rows processed`
+              );
+            }
+          }
+
+          if (endIndex < lines.length) {
+            setTimeout(() => processBatch(endIndex), 0);
+          } else {
+            resolve(records);
+          }
+        } catch (err) {
+          console.error(
+            `Error in batch for ${tsvFile} at row ${rowsProcessed}:`,
+            err,
+            row
+          );
+          reject(err);
+        }
+      }
+
+      processBatch(1);
+    });
+  } catch (error) {
+    console.error(`Error processing ${zipFile}:`, error);
+    updateStatus(`Error loading ${tsvFile}: ${error.message}`, "red", false);
+    throw error;
+  }
+}
 /**
  * So this is an M-V-VM architecture.
  * M - Model, deals with the data
@@ -85,7 +345,7 @@ export function getColorForEIN(ein) {
  *
  * I've tried MVC, didn't work. MVVM does.
  */
-class BrowseViewModel {
+export class BrowseViewModel {
   constructor({ POWER_LAW = POWER_LAW_RESET, GOV_EIN = "001" } = {}) {
     this.POWER_LAW = POWER_LAW; /** Users can change the scaling on the fly */
     this.GOV_EIN =
@@ -115,6 +375,85 @@ class BrowseViewModel {
     this.dataReady = false;
     viewModel = this;
     this.resetAll();
+  }
+
+  presets() {
+    return [
+      {
+        title: "NED Hydra!",
+        eins: [
+          "521344831",
+          "521943638",
+          "521527835",
+          "521338892",
+          "521398742",
+          "521340267",
+          "943027761",
+        ],
+        url: "/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761",
+      },
+      {
+        title: "Root of all Evil!",
+        eins: ["001"],
+        url: "/browse/?ein=001",
+      },
+      {
+        title: "Fidelity Aid",
+        eins: ["110303001", "223195349"],
+        url: "/browse/?ein=110303001&ein=223195349",
+      },
+      {
+        title: "Turning Point",
+        eins: ["800835023"],
+        url: "/browse/?ein=800835023",
+      },
+      {
+        title: "Bill Kriston's NGO",
+        eins: ["831567380"],
+        url: "/browse/?ein=831567380",
+      },
+      {
+        title: "AIDS VACCINE ADVOCACY COALITION INC.",
+        eins: ["943240841"],
+        url: "/browse/?ein=943240841",
+      },
+      {
+        title: "Folks who paid for COVID for Fauci.",
+        eins: ["311726494"],
+        url: "/browse/?ein=311726494",
+      },
+      {
+        title: "2 Planned Parenthoods with the most taxpayer Funding",
+        eins: ["132621497", "221643997"],
+        url: "/browse/?ein=132621497&ein=221643997",
+      },
+      {
+        title: "AARP and fellow traveler",
+        eins: ["520794300", "521194741"],
+        url: "/browse/?ein=520794300&ein=521194741",
+      },
+      {
+        title: "DEBUG: Clear Local Storage",
+        eins: ["-86"],
+      },
+    ];
+  }
+
+  loadPreset(index) {
+    const presets = this.presets();
+    if (index < presets.length) {
+      const eins = this.presets()[index].eins;
+      for (const e of eins) {
+        if (e === "-86") {
+          // quick hack.
+          clearStorage();
+          return;
+        }
+        this.addToShowList(e);
+      }
+    } else {
+      console.error("bad preset index", index);
+    }
   }
 
   /**Called when we focus on just one node*/
@@ -168,7 +507,9 @@ class BrowseViewModel {
     const id = ein.split(/[:~]/)[0];
     delete this.showList[id];
     const c = Charity.getCharity(id);
-    if (c) c.desiredVisible = false;
+    if (c) {
+      c.clearVisibility();
+    }
   }
 
   getShowList() {
@@ -322,7 +663,7 @@ class BrowseViewModel {
    */
   processBreadCrumbs() {
     if (Charity.visibleCharities.length === 0) {
-      this.loadDefaultData();
+      randomPreset();
     }
   }
 
@@ -347,10 +688,10 @@ class BrowseViewModel {
     this.getShowList().forEach((ein) => {
       const parts = ein.split(/[:~]/);
       const id = parts[0];
-      const ups = parts[1] || START_REVEAL;
-      const downs = parts[2] || START_REVEAL;
+      const ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
+      const downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
       const charity = Charity.getCharity(id);
-      if (charity && !this.shouldHide(id) && !charity.desiredVisible) {
+      if (charity && !this.shouldHide(id)) {
         charity.place(ups, downs);
         console.log(
           `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
@@ -402,13 +743,13 @@ class BrowseViewModel {
    */
   async buildGovCharity() {
     updateStatus(`Building US Govt from ${Charity.getCharityCount}`);
+    const db = await initDB();
     const gov_ein = this.GOV_EIN;
     const gov_proto = {
-      ein: gov_ein,
       filer_ein: gov_ein,
       name: "US Government",
       xml_name: "The Beast",
-      contrib_amt: 4.6e12, // aka 4.6T
+      contrib_amt: 4.6e12,
       row: { tax_year: "2025", org_type: "USG" },
     };
     const govChar = new Charity(gov_proto);
@@ -419,6 +760,7 @@ class BrowseViewModel {
     const govCount = processList.length;
     let govTotal = 0;
     const totalGrants = processList.reduce((sum, c) => sum + c.govt_amt, 0);
+    const grantRecords = [];
 
     let chunk = processList.slice(0, CHUNK_SIZE);
     processList = processList.slice(CHUNK_SIZE);
@@ -430,10 +772,18 @@ class BrowseViewModel {
           let amt = c.govt_amt;
           if (isNaN(amt)) amt = 0;
           govGrants++;
-          new Grant({
+          const grant = new Grant({
             filer_ein: filer,
-            amt: amt,
             grantee_ein: grantee,
+            amt: amt,
+            grantType: "gov",
+          });
+          grantRecords.push({
+            id: grant.id,
+            filer_ein: filer,
+            grantee_ein: grantee,
+            amt: amt,
+            grantType: "gov",
           });
           govTotal += amt;
         }
@@ -452,6 +802,8 @@ class BrowseViewModel {
       processList = processList.slice(CHUNK_SIZE);
     }
 
+    await storeData(db, CHARITY_STORE, [gov_proto]);
+    await storeData(db, GRANT_STORE, grantRecords);
     updateStatus(
       `<span>Gov charity complete</span><span class="text-[13px] opacity-60">${
         govChar.grants.length
@@ -465,128 +817,28 @@ class BrowseViewModel {
     return govChar;
   }
 
-  /**
-   * NGOs throw money around between each other. Sometimes that's money laundering, sometimes its
-   * just how universiies work. But that would confuse the sankey.
-   * So we have to scan for circular grants, which we move to the side.
-   * Again, a model function.
-   * @returns
-   */
-  async findCircularGrants() {
-    const visited = new Set();
-    const onStack = new Set();
-    const cycleGrants = new Set();
-    let badTotal = 0;
-    let charitiesWithBadGrants = 0;
-    let obviousCirclesCount = 0;
-    const charitiesTotal = Object.values(Charity.charityLookup).length;
-    let charitiesProcessed = 0;
-
-    return; // now using circular sankey module
-    /*
-    DEADCODE
-    
+  async buildTheWorld() {
     updateStatus(
-      "<span>Marking circular grants</span><span class='text-[13px] opacity-60'>(A->B->A)</span>"
+      `Building World from ${Object.keys(iso3166_alpha2).length} countries`
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    for (let charity of Object.values(Charity.charityLookup)) {
-      const obviousCircles = charity.simpleCircular();
-      obviousCirclesCount += obviousCircles.length;
-      if (obviousCircles.length) charitiesWithBadGrants++;
-      if (!(charitiesProcessed++ % CHUNK_SIZE)) {
-        updateStatus(
-          `${Math.round(
-            (charitiesProcessed / charitiesTotal) * 100
-          )}% charities scanned`
-        );
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      obviousCircles.forEach((grant) => {
-        grant.isCircular = true;
-        cycleGrants.add(grant);
-        Charity.circularGrant(grant);
-      });
+    const db = await initDB();
+    const countryRecords = [];
+    for (const [fake_ein, data] of Object.entries(iso3166_alpha2)) {
+      const country_pro = {
+        filer_ein: fake_ein,
+        name: data.name,
+        xml_name: `The World${data.code}`,
+        contrib_amt: 1,
+        row: { tax_year: "2025", org_type: "Foreign Country" },
+      };
+      new Charity(country_pro);
+      countryRecords.push(country_pro);
     }
-    console.log(`${obviousCirclesCount} obvious circular grants found`);
-    updateStatus(`${obviousCirclesCount} obvious circular grants found`);
-
-    updateStatus(
-      "<span>Finding deeper loopback grants</span><span class='text-[13px] opacity-60'>(A->B->C->A)</span>"
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const totalGrants = Object.values(Charity.charityLookup).reduce(
-      (sum, c) => sum + c.grants.length,
-      0
-    );
-    let processedGrants = 0;
-
-    for (const [startId, startCharity] of Object.entries(
-      Charity.charityLookup
-    )) {
-      if (visited.has(startId)) continue;
-      let stack = [{ charity: startCharity, grantIndex: 0 }];
-      while (stack.length > 0) {
-        let grantCounter = 0;
-        while (stack.length > 0 && grantCounter < CHUNK_SIZE) {
-          const top = stack.pop();
-          const { charity, grantIndex } = top;
-          const grants = charity.grants || [];
-          if (grantIndex < grants.length) {
-            const grant = grants[grantIndex];
-            const granteeId = grant.grantee.id;
-            top.grantIndex++;
-            stack.push(top);
-            if (onStack.has(granteeId)) {
-              cycleGrants.add(grant);
-              grant.isCircular = true;
-              Charity.circularGrant(grant);
-            } else if (!visited.has(granteeId)) {
-              visited.add(granteeId);
-              onStack.add(granteeId);
-              stack.push({ charity: grant.grantee, grantIndex: 0 });
-            }
-          } else {
-            onStack.delete(charity.id);
-          }
-          grantCounter++;
-          processedGrants++;
-        }
-        if (stack.length > 0) {
-          updateStatus(
-            `<span>Circular processing</span><span class="text-[13px] opacity-60">${Math.round(
-              (processedGrants / totalGrants) * 100
-            )}% complete</span>`
-          );
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      }
-    }
-
-    Object.values(Charity.charityLookup).forEach((charity) => {
-      let hasBadGrants = false;
-      charity.grants.forEach((grant) => {
-        if (cycleGrants.has(grant)) {
-          hasBadGrants = true;
-          badTotal += grant.amt;
-        }
-      });
-      if (hasBadGrants) charitiesWithBadGrants++;
-    });
-
-    updateStatus(
-      `<span>$${formatNumber(
-        badTotal
-      )} of loopbacks removed</span><span class="text-[13px] opacity-60">${
-        cycleGrants.size
-      } in ${charitiesWithBadGrants} charities</span>`
-    );
-    console.log(`${charitiesWithBadGrants} charities had circular grants`);
-    console.log(`${cycleGrants.size} circular grants`);
-    Object.values(Charity.charityLookup).forEach((c) => c.organize());
-
-    return cycleGrants;*/
+    await storeData(db, CHARITY_STORE, countryRecords);
+    await db
+      .transaction(METADATA_STORE, "readwrite")
+      .objectStore(METADATA_STORE)
+      .put({ id: "generated", value: true });
   }
 
   /**
@@ -848,81 +1100,154 @@ class BrowseViewModel {
     );
     return this.renderData;
   }
+  async processGrantsZipFile({ status, zipFile, tsvFile, grantType }) {
+    try {
+      console.log(`Starting ${zipFile} at ${new Date().toISOString()}`);
+      const db = await initDB();
+      const records = await fetchAndStoreTSV(db, {
+        zipFile,
+        tsvFile,
+        type: "grants",
+        grantType,
+        status,
+      });
+      await storeData(db, GRANT_STORE, records);
+      let totalGrantsRows = records.length;
 
-  /**
-   *  Loads our datafile, builds the model esentially.
-   * Also builds the virtual NGO for the USG, and
-   * prunes the circular grants.
-   * @returns
-   */
+      for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+        const chunk = records.slice(i, i + CHUNK_SIZE);
+        for (const row of chunk) {
+          Grant.loadGrantRow(row, grantType);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateStatus(
+          `${status}: ${formatNumber(totalGrantsRows)} grants processed`
+        );
+      }
+
+      console.log(`Finished ${zipFile}, totalGrantsRows: ${totalGrantsRows}`);
+      updateStatus(
+        `Processed ${formatNumber(totalGrantsRows)} grants for ${tsvFile}`,
+        "green",
+        false
+      );
+      return { rows: totalGrantsRows, grantType };
+    } catch (err) {
+      console.error(`Error processing ${zipFile}:`, err);
+      updateStatus(`Error processing ${tsvFile}: ${err.message}`, "red", false);
+      throw err;
+    }
+  }
+
   async loadData() {
+    console.log(`Starting loadData at ${new Date().toISOString()}`);
     updateStatus("Loading data...");
     this.dataReady = false;
-    const charitiesZipBuf = await fetch("./charities.tsv.zip").then((r) =>
-      r.arrayBuffer()
-    );
-    const charitiesZip = await JSZip.loadAsync(charitiesZipBuf);
-    const charitiesCsvString = await charitiesZip
-      .file("charity_latest.tsv")
-      .async("string");
+    Charity.charityLookup = {};
+    Grant.grantLookup = {};
 
-    await new Promise((resolve, reject) => {
-      updateStatus("Parsing charities");
-      Papa.parse(charitiesCsvString, {
-        delimiter: "\t", // Set delimiter to tab for .tsv
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          let counter = 0;
-          results.data.forEach((row) => {
+    try {
+      const db = await initDB();
+      if (await hasValidData(db)) {
+        updateStatus("Loading from local storage...");
+        const charities = await fetchLocalData(db, CHARITY_STORE);
+        const grants = await fetchLocalData(db, GRANT_STORE);
+
+        for (let i = 0; i < charities.length; i += CHUNK_SIZE) {
+          const chunk = charities.slice(i, i + CHUNK_SIZE);
+          for (const row of chunk) {
             Charity.buildCharityFromRow(row);
-            counter++;
-            if (!(counter % CHUNK_SIZE))
-              updateStatus(`Building NGO List ${counter}`);
-          });
-          resolve();
-        },
-        error: (err) => reject(err),
-      });
-    });
+          }
+          updateStatus(
+            `Loading charities: ${formatNumber(i + CHUNK_SIZE)} processed`
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
 
-    await this.buildGovCharity();
-    const grantsZipBuf = await fetch("./grants.tsv.zip").then((r) =>
-      r.arrayBuffer()
-    );
-    const grantsZip = await JSZip.loadAsync(grantsZipBuf);
-    const grantsCsvString = await grantsZip
-      .file("grants_latest.tsv")
-      .async("string");
-    let totalGrantsCount = 0;
-    let totalGrantsRows = 0;
+        for (let i = 0; i < grants.length; i += CHUNK_SIZE) {
+          const chunk = grants.slice(i, i + CHUNK_SIZE);
+          for (const row of chunk) {
+            Grant.loadGrantRow(row, row.grantType);
+          }
+          updateStatus(
+            `Loading grants: ${formatNumber(i + CHUNK_SIZE)} processed`
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
 
-    await new Promise((resolve, reject) => {
-      updateStatus("Parsing grants");
-      Papa.parse(grantsCsvString, {
-        delimiter: "\t", // Set delimiter to tab for .tsv
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          results.data.forEach((row) => {
-            totalGrantsRows++;
-            if (Grant.loadGrantRow(row)) totalGrantsCount++;
-            if (!(totalGrantsRows % CHUNK_SIZE))
-              updateStatus(`Building Grant List ${totalGrantsCount}`);
-          });
-          resolve();
-        },
-        error: (err) => reject(err),
-      });
-    });
+        updateStatus(
+          `Loaded ${formatNumber(charities.length)} charities, ${formatNumber(
+            grants.length
+          )} grants from local storage`,
+          "green",
+          false
+        );
+      } else {
+        updateStatus("Fetching data from server...");
+        const tx = db.transaction(
+          [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
+          "readwrite"
+        );
+        await tx.objectStore(CHARITY_STORE).clear();
+        await tx.objectStore(GRANT_STORE).clear();
+        await tx
+          .objectStore(METADATA_STORE)
+          .put({ id: "version", value: DATA_VERSION });
+        await tx.done;
 
-    console.log(`Total Grants Rows ${totalGrantsRows}`);
-    console.log(`Total Grants Loaded ${totalGrantsCount}`);
-    console.log("Missing Charities", Grant.missingValues);
-    console.log(`Grants Net ${Object.keys(Grant.grantLookup).length}`);
-    updateStatus("USG & NGOs & grants loaded", "black", false);
-    this.dataReady = true;
-    return { totalGrantsCount };
+        for (const file of DATA_FILES) {
+          const records = await fetchAndStoreTSV(db, file, file.status);
+          await storeData(
+            db,
+            file.type === "charities" ? CHARITY_STORE : GRANT_STORE,
+            records
+          );
+          for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+            const chunk = records.slice(i, i + CHUNK_SIZE);
+            for (const row of chunk) {
+              if (file.type === "charities") {
+                Charity.buildCharityFromRow(row);
+              } else {
+                Grant.loadGrantRow(row, file.grantType);
+              }
+            }
+            updateStatus(
+              `Loading ${file.type}: ${formatNumber(i + CHUNK_SIZE)} processed`
+            );
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+          updateStatus(
+            `Loaded ${formatNumber(records.length)} ${file.type} from ${
+              file.tsvFile
+            }`,
+            "green",
+            false
+          );
+        }
+
+        console.time("buildGovCharity");
+        await this.buildGovCharity();
+        console.timeEnd("buildGovCharity");
+
+        console.time("buildTheWorld");
+        await this.buildTheWorld();
+        console.timeEnd("buildTheWorld");
+      }
+
+      console.log("Missing Charities", Grant.missingValues);
+      console.log(
+        `Grants Net ${formatNumber(Object.keys(Grant.grantLookup).length)}`
+      );
+      updateStatus("USG & NGOs & grants loaded", "black", false);
+      this.dataReady = true;
+      console.log(`loadData completed at ${new Date().toISOString()}`);
+      return Object.keys(Grant.grantLookup).length;
+    } catch (err) {
+      console.error("Error in loadData:", err);
+      updateStatus(`Error loading data: ${err.message}`, "red", false);
+      this.dataReady = false;
+      throw err;
+    }
   }
 
   /**
@@ -960,7 +1285,7 @@ class BrowseViewModel {
 /**
  * Class to hold an NGO.
  */
-class Charity {
+export class Charity {
   /** charities are stored in an object by EIN for quick lookup */
   static charityLookup = {};
   static _desiredCharities = new Set();
@@ -1014,32 +1339,42 @@ class Charity {
    * @param {} row
    * @returns
    */
+
   static buildCharityFromRow(row) {
     function titleCase(str) {
       return str
-        .toLowerCase() // Make everything lowercase first
-        .split(" ") // Split into words
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize first letter, keep rest
-        .join(" "); // Join words back with spaces
+        .toLowerCase()
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
     }
-    const ein = (row["filer_ein"] || "").trim();
-    if (!ein) return;
-    let rAmt = parseInt((row["receipt_amt"] || "0").trim(), 10);
-    if (isNaN(rAmt)) rAmt = 0;
+    const ein = row.filer_ein;
+    if (!ein) {
+      console.warn(`Skipping charity row: missing filer_ein`, row);
+      return;
+    }
+    let filer_name = row.filer_name || "Unknown Charity";
+    if (filer_name === "Unknown Charity") {
+      console.warn(`Using default filer_name for charity EIN ${ein}:`, row);
+    }
+    let rAmt = parseInt(row.receipt_amt || "0", 10) || 0;
+    let gAmt = parseInt(row.govt_amt || "0", 10) || 0;
+    let cAmt = parseInt(row.contrib_amt || "0", 10) || 0;
     return new Charity({
       ein,
-      name: titleCase((row["filer_name"] || "").trim()),
-      xml_name: row["xml_name"],
+      name: titleCase(filer_name),
+      xml_name: row.xml_name,
       receipt_amt: rAmt,
-      govt_amt: parseInt((row["govt_amt"] || "0").trim(), 10) || 0,
-      contrib_amt: parseInt((row["contrib_amt"] || "0").trim(), 10) || 0,
-      row: row,
+      govt_amt: gAmt,
+      contrib_amt: cAmt,
+      row,
     });
   }
+
   static TSV_MANUAL_COLUMNS = [
     "tax_year",
     "org_type",
-    "comp_pct",
+    /*"comp_pct",
     "comp_ptile",
     "travel_pct",
     "travel_ptile",
@@ -1049,13 +1384,13 @@ class Charity {
     "grants_ptile",
     "foreign_expenses_pct",
     "foreign_expenses_ptile",
-    "grift_ratio",
+    "grift_ratio",*/
     "total_assets",
     "form_type",
     "denominator",
-    "foreign_office",
+    /*"foreign_office",
     "foreign_expenses",
-    "grift",
+    "grift",*/
   ];
   /** It is what it is. */
   constructor({
@@ -1665,10 +2000,12 @@ class Charity {
 
   get orgShort() {
     if (!this.org_type) return "n/a";
+    if (this.ein === "001") return "US Government";
+    if (this.ein.length == 3) return "Country";
     const orgLookup = ORGANIZATION_TYPES[this.org_type];
     if (!orgLookup) return "???";
 
-    return orgLookup.shortDescription;
+    return `${orgLookup.shortDescription} ${this.org_type.replace("501", "")}`;
   }
   /**
    * Technically a VM responsibility, but we just do it here.
@@ -1747,7 +2084,7 @@ class Charity {
  *
  * aliases for source and target for sankey
  */
-class Grant {
+export class Grant {
   /** so we can find a grant quickly */
   static grantLookup = {};
   static missingValues = {};
@@ -1809,11 +2146,19 @@ class Grant {
   }
 
   /** factory for the file read */
-  static loadGrantRow(row) {
-    const filer = (row["filer_ein"] || "").trim();
-    const grantee = (row["grant_ein"] || "").trim();
-    let amt = parseInt((row["grant_amt"] || "0").trim(), 10);
-    if (isNaN(amt)) amt = 0;
+  static loadGrantRow(row, grantType) {
+    const filer = row.filer_ein;
+    let grantee = row.grantee_ein || row.grant_ein;
+    if (grantee?.length === 7) grantee = "0" + grantee;
+    let amt = parseInt(row.grant_amt || row.amt || "0", 10);
+    if (isNaN(amt) || amt === 0) {
+      console.warn(`Invalid or zero grant_amt for grant row:`, {
+        filer,
+        grantee,
+        grant_amt: row.grant_amt,
+      });
+      amt = 0;
+    }
     if (Grant.checkGrantMatch(filer, grantee)) {
       const id = Grant.grantIDBuilder(filer, grantee);
       const g = Grant.getGrant(id);
@@ -1825,17 +2170,17 @@ class Grant {
           filer_ein: filer,
           grantee_ein: grantee,
           amt: amt,
+          grantType,
         });
       }
     } else if (filer !== grantee && grantee !== "Unknown") {
       if (!Charity.getCharity(filer)) Grant.missingValues[filer] = "filer";
       if (!Charity.getCharity(grantee))
         Grant.missingValues[grantee] = `grantee-${amt}`;
-      //console.warn(`Missing charity for EIN: ${filer} or ${grantee}`);
+      console.warn(`Skipping grant: invalid EINs`, { filer, grantee, amt });
     }
     return null;
   }
-
   /** it is what it is */
   constructor({
     filer_ein,
@@ -1843,6 +2188,7 @@ class Grant {
     amt = 0,
     isCircular = false,
     desiredVisible = false,
+    grantType = "regular",
   }) {
     this.registered = false;
     this.amt = amt;
@@ -1859,6 +2205,7 @@ class Grant {
     this._target = null;
     Charity.addGrant(this);
     this.registered = true;
+    this.grantType = grantType;
     this.buildId();
   }
 
@@ -2059,10 +2406,10 @@ class Grant {
  */
 function updateStatus(message, color = "black", loading = true) {
   $("#status").html(`<span class="flex flex-col items-end text-sm">
-    ${loading ? "" : ""}
+    ${loading ? "<span>Loading...</span>" : ""}
     ${message}</span>`);
 }
 
 viewModel = new BrowseViewModel();
 
-export { formatNumber, Charity, Grant, scaleValue, BrowseViewModel, viewModel };
+export { viewModel };

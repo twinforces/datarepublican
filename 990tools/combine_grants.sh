@@ -42,17 +42,16 @@ fi
 # Write header to output file
 echo "$header" > "$OUTPUT_FILE"
 
-# Sort and combine grants
-sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} -k${tax_year_idx},${tax_year_idx} "$INPUT_FILE" | awk -v filer_ein_idx="$filer_ein_idx" \
+# Sort and combine grants, excluding the header from sort
+tail -n +2 "$INPUT_FILE" | sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} -k${tax_year_idx},${tax_year_idx} | awk -v filer_ein_idx="$filer_ein_idx" \
     -v filer_name_idx="$filer_name_idx" -v grant_ein_idx="$grant_ein_idx" \
     -v grant_amt_idx="$grant_amt_idx" -v tax_year_idx="$tax_year_idx" '
     BEGIN { FS="\t"; OFS="\t" }
-    NR==1 { next }  # Skip header
     {
         if ($filer_ein_idx == prev_filer && $grant_ein_idx == prev_grant && $tax_year_idx == prev_year) {
             sum += $grant_amt_idx
         } else {
-            if (NR > 2) print prev_filer, prev_name, prev_grant, sum, prev_year
+            if (NR > 1) print prev_filer, prev_name, prev_grant, sum, prev_year
             prev_filer = $filer_ein_idx
             prev_name = $filer_name_idx
             prev_grant = $grant_ein_idx
@@ -60,7 +59,7 @@ sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} -k$
             prev_year = $tax_year_idx
         }
     }
-    END { if (NR > 1) print prev_filer, prev_name, prev_grant, sum, prev_year }
+    END { if (NR > 0) print prev_filer, prev_name, prev_grant, sum, prev_year }
 ' >> "$OUTPUT_FILE"
 
 echo "Combined grants written to '$OUTPUT_FILE'."

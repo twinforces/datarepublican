@@ -9,10 +9,8 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 <script src="../expose/svg-pan-zoom.min.js"></script>
 
 <!-- JSZip for reading the zipped CSVs -->
-<script src="../expose/jszip.min.js"></script>
+<!--idb for the local store-->
 
-<!-- Papa Parse for CSV parsing -->
-<script src="../expose/papaparse.min.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script type="module" src="./circleMath.js"></script>
 <script type="module" src="./d3-sankey-circular.js"></script>
@@ -113,7 +111,21 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         color: #000; /* White for dark mode */
       }
     }
-</style>
+    .preset-select {
+      padding: 8px;
+      width: 200px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 10px;
+    }
+    .separator {
+      background: #ccc;
+      color: #666;
+      text-align: center;
+      pointer-events: none;
+      font-style: italic;
+    }
+    </style>
 
 <div id="topbar" class="">
   <div id="explanation">
@@ -130,8 +142,24 @@ title: Charity explorer - Sankey chart of NGOs and their flows
       }
     </script>
     
+    <div id="controls" class="mt-2 mb-4 flex flex-col @xl:items-start @xl:justify-between @xl:flex-row gap-4 bfs-only">
+      <!-- EIN Input & Add Button -->
+       <div class="relative flex flex-col gap-2 max-w-lg">
+  
     <!-- "How it works" toggle is BFS-only -->
-    <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works (and Why)</button>      <button id="PostBox"></button>
+        <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works (and Why)</button>   
+       </div>   
+       <div class="relative flex flex-col gap-2 max-w-lg">
+        <b class="text-xs ">Presets:</b><select id="preset-select" class="preset-select" onchange="loadPreset(this.value)">
+          </select>
+          </div><div class="relative flex flex-col gap-2 max-w-lg">
+      
+
+          </div>
+          <div class="relative flex flex-col gap-2 max-w-lg">
+            <button id="PostBox"></button>
+            </div>
+            </div>
     <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
       <div class="p-4 border border-gray-200 rounded-md bg-white">
         <h3 class="mt-0">How it works</h3>
@@ -149,24 +177,13 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         <li>We show NGOs and the money that flows between them. Money comes in from the left, 
           goes out to the right. The NGOs are drawn with trapezoids so the left side is proporitional to the incoming grants
         while the right side is proportional to the grants going out to other NGOs, think of them like funnels.</li>
-        <li>US Government is treated as the ultimate donor. Default shows the 5 largest "root" donors.</li>
+        <li>US Government is treated as the ultimate donor. You can select a preset to add known interesting NGOs.</li>
         <li>Money flows are scaled so large flows don't dwarf small ones, you can adjust scaling up or down with the buttons to the left of the zoom controls.</li>
         <li>Octogons (aka stop sign) are NGOs that don't have any outflows to other NGOs, presumably spend it all.</li>
-        <li>Gray "plus" circles roll up grants to keep the graph from being overwhelming. Click the pimples to see 3 more from that side, or click the NGO to see 3 more from both sides.</li>
+        <li>Gray "plus" grift pimples hold hidden grants to keep the graph from being overwhelming. Click the pimples to see 3 more from that side, or click the NGO to see 3 more from both sides.</li>
         <li>Command/Windows click on a node to bring up a control panel with more controls and cross links.</li>
         <li>In the control panel, Focus will remove all the other NGOs, Remove will remove just that NGO.</li>
-        <li>Choose any of the starting points below and click away.</li>
-        <li>Default: <a href ="/browse/">USG and the next four largest <i>NGOs that don't have any inflows</i>.</a> The chart will reset to this if there are no nodes to show.</li>
-        <li> <B>Preset</B> <a href="/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761">NED Hydra!</a></a>
-       <li> <B>Preset</B> <a href="/browse/?ein=001">Root of all Evil!</a></li>
-       <li> <B>Preset</B> <a href="/browse/?ein=110303001&ein=223195349">Fidelity Aid</a> <a href="https://x.com/i/grok/share/4XyDQBB2Hn4araFIFR87wPZa5">why</a></li>
-       <li> <B>Preset</B> <a href="/browse/?ein=800835023">Turning Point</a></li>
-       <li> <B>Preset</B> <a href="/browse/?ein=831567380">Bill Kriston's NGO</a></li>
-       <li> <B>Preset</B> <a href="/browse/?ein=943240841">AIDS VACCINE ADVOCACY COALITION INC.</a></li>
-       <li> <B>Preset</B> <a href="/browse/?ein=311726494">Folks who paid for COVID for Fauci.</a></li>
-        <li> <B>Preset</B> <a href="/browse/?ein=132621497&ein=221643997">2 Planned Parenthoods with the most taxpayer Funding (Searching for PP brings up an overwhelming number of nodes.)</a></li>
-        <li> <B>Preset</B> <a href="/browse/?ein=520794300&ein=521194741">AARP and fellow traveler</a></li>
-       </ul>
+        </ul>
       </div>
     </div>
   </div>
@@ -207,6 +224,10 @@ title: Charity explorer - Sankey chart of NGOs and their flows
       %}
 
       <div id="activeFilters"></div>
+    </div>
+    <div class="relative flex flex-col gap-2 max-w-lg">
+      
+
     </div>
 
     <div class="flex-1 text-right flex flex-row-reverse md:flex-col items-end justify-between md:justify-end gap-1 md:self-end">
