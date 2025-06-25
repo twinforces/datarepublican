@@ -27,10 +27,50 @@ function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
 }
 
+window.loadPreset = function (value) {
+  const index = parseInt(value);
+  viewModel.loadPreset(index);
+  refresh();
+};
+
+window.randomPreset = function () {
+  const select = document.getElementById("preset-select");
+  const randomIndex = Math.floor(Math.random() * viewModel.presets().length);
+  select.value = randomIndex; // Match <option> values
+  loadPreset(randomIndex); // Pass value that aligns with loadPreset logic
+};
+
+function populatePresetSelect() {
+  const select = document.getElementById("preset-select");
+
+  // Add prompt as a separate, non-selectable option
+  select.innerHTML =
+    '<option value="" disabled selected>Select a Preset</option>';
+
+  const separator = document.createElement("option");
+  separator.disabled = true;
+  separator.className = "separator";
+  separator.value = "separator";
+  separator.textContent = "──────────";
+  select.appendChild(separator);
+
+  // Populate dropdown with presets, adding a separator after the 3rd preset
+  viewModel.presets().forEach((preset, index) => {
+    const option = document.createElement("option");
+    option.value = index; // Offset by 2 for prompt and separator
+    option.textContent = preset.title;
+    select.appendChild(option);
+  });
+}
+
 $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
   updateStatus("Loading Data...");
+
+  // Initialize the select on page load
+  populatePresetSelect();
+
   viewModel
     .loadData()
     .then(() => {
@@ -562,7 +602,7 @@ function generateGraph() {
     .size([width - 100, height - 100]);
 
   viewModel.parseQueryParams();
-  if (!viewModel.matchURL()) viewModel.loadDefaultData();
+  if (viewModel.matchURL() === 0) randomPreset();
 
   viewModel.previousData = renderFocusedSankey(
     g,

@@ -37,17 +37,26 @@ python charity_filter.py  --input-file $FINAL_DIR/charity_latest.tsv --output-fi
 python extract_grants.py 2017 2025 --zip-dir /Volumes/Data/irs_zips --cache-dir $ANAL_DIR/_cache/ --output-dir $FINAL_DIR --charity-source $FINAL_DIR/charites_1M.tsv
 #python grant_filters.py --input-file $FINAL_DIR/inferred_grants.tsv --output-file $FINAL_DIR/grants_pf.tsv
 
+
 # this will aggregate grants by the same filer to the same grantee in the same tax year, which usually cuts the file by a half to a third.
-./combine_grants.sh $FINAL_DIR/grants_latest.tsv $FINAL_DIR/grants_final.tsv
-./combine_grants.sh $FINAL_DIR/inferred_grants.tsv $FINAL_DIR/grants_pf.tsv
+./combine_grants.sh $FINAL_DIR/grants_latest.tsv $FINAL_DIR/grants_combined.tsv
+./combine_grants.sh head  $FINAL_DIR/grants_pf_combined.tsv
+
+#there are EINs that have gotten money that don't file 990s, (state/local govt i.e. state unis, churches, etc)
+python grant_check.py --index-file $FINAL_DIR/charity_latest.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file filter_pf.md
+python grant_check.py --index-file $FINAL_DIR/charity_latest.tsv --input-file  $FINAL_DIR/grants_pf_combined.tsv --output-file $FINAL_DIR/grants_pf.tsv --report-file filter_pf.md
+
+
 ./grant_report.py --input-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/final_report.md 
 ./grant_report.py --input-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/pf_report.md
 
 # so all that work to filtered out the charities by size? guess what? We over filtered have to copy some charities back so the grants have a destination to go to! Need to do that for both sets of grants, thanks for playing!
 
 ./unfilter_from_grants.py --master $FINAL_DIR/charity_latest.tsv --filtered $FINAL_DIR/charites_1M.tsv --grants $FINAL_DIR/grants_pf.tsv --output $FINAL_DIR/charity_semifinal.tsv
+#sed script to put them back
 ./extract_rows.sh 
 ./unfilter_from_grants.py --master $FINAL_DIR/charity_latest.tsv --filtered $FINAL_DIR/charity_semifinal.tsv --grants $FINAL_DIR/grants_final.tsv --output $FINAL_DIR/charity_final.tsv
+#sed script to put them back
 ./extract_rows.sh 
 wc -l $FINAL_DIR/*.tsv 
 
