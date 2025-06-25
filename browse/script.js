@@ -161,7 +161,7 @@ function addEINFromInput() {
   viewModel.addToShowList(val);
   $("#einShowInput").val("");
   renderActiveEINs();
-  charity.place();
+  charity.place(charity.ein);
   updateQueryParams();
   generateGraph();
 }
