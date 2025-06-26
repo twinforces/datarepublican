@@ -20,7 +20,6 @@ filer_ein_idx=0
 filer_name_idx=0
 grant_ein_idx=0
 grant_amt_idx=0
-tax_year_idx=0
 
 for i in "${!cols[@]}"; do
     case "${cols[i]}" in
@@ -28,38 +27,48 @@ for i in "${!cols[@]}"; do
         "filer_name") filer_name_idx=$((i+1));;
         "grant_ein") grant_ein_idx=$((i+1));;
         "grant_amt") grant_amt_idx=$((i+1));;
-        "tax_year") tax_year_idx=$((i+1));;
     esac
 done
 
 # Check if all required columns were found
 if [ $filer_ein_idx -eq 0 ] || [ $filer_name_idx -eq 0 ] || [ $grant_ein_idx -eq 0 ] || \
-   [ $grant_amt_idx -eq 0 ] || [ $tax_year_idx -eq 0 ]; then
+   [ $grant_amt_idx -eq 0 ]; then
     echo "Error: Missing required columns in header"
     exit 1
 fi
 
-# Write header to output file
-echo "$header" > "$OUTPUT_FILE"
+# Write reduced header to output file
+echo -e "filer_ein\tfiler_name\tgrant_ein\tgrant_amt" > "$OUTPUT_FILE"
 
-# Sort and combine grants, excluding the header from sort
-tail -n +2 "$INPUT_FILE" | sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} -k${tax_year_idx},${tax_year_idx} | awk -v filer_ein_idx="$filer_ein_idx" \
+# Filter out rows where grant_ein starts with "Address:" or is "Unknown", sort, and combine grants
+tail -n +2 "$INPUT_FILE" | awk -v grant_ein_idx="$grant_ein_idx" -F'\t' '$grant_ein_idx !~ /^Address:/ && $grant_ein_idx != "Unknown"' | \
+sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} | awk -v filer_ein_idx="$filer_ein_idx" \
     -v filer_name_idx="$filer_name_idx" -v grant_ein_idx="$grant_ein_idx" \
-    -v grant_amt_idx="$grant_amt_idx" -v tax_year_idx="$tax_year_idx" '
+    -v grant_amt_idx="$grant_amt_idx" '
     BEGIN { FS="\t"; OFS="\t" }
     {
-        if ($filer_ein_idx == prev_filer && $grant_ein_idx == prev_grant && $tax_year_idx == prev_year) {
+        # Validate grant_amt is numeric
+        if ($grant_amt_idx !~ /^[0-9]+(\.[0-9]+)?$/) {
+            print "Warning: Skipping row with non-numeric grant_amt: " $0 > "/dev/stderr"
+            next
+        }
+        if ($filer_ein_idx == prev_filer && $grant_ein_idx == prev_grant) {
             sum += $grant_amt_idx
         } else {
-            if (NR > 1) print prev_filer, prev_name, prev_grant, sum, prev_year
+            if (NR > 1 && prev_filer != "") {
+                print prev_filer, prev_name, prev_grant, sum
+            }
             prev_filer = $filer_ein_idx
             prev_name = $filer_name_idx
             prev_grant = $grant_ein_idx
             sum = $grant_amt_idx
-            prev_year = $tax_year_idx
         }
     }
-    END { if (NR > 0) print prev_filer, prev_name, prev_grant, sum, prev_year }
+    END {
+        if (NR > 0 && prev_filer != "") {
+            print prev_filer, prev_name, prev_grant, sum
+        }
+    }
 ' >> "$OUTPUT_FILE"
 
 echo "Combined grants written to '$OUTPUT_FILE'."
