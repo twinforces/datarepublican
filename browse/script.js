@@ -152,8 +152,10 @@ $(document).ready(function () {
 
 function addEINFromInput() {
   let val = $("#einShowInput").val().trim().replace(/[-\s]/g, "");
-  if (!/^\d{9}$/.test(val) && val !== "001") {
-    alert("EIN must be 9 digits after removing dashes/spaces or 001.");
+  if (!/^\d{3,9}$/.test(val)) {
+    alert(
+      "EIN must be 9 digits after removing dashes/spaces or 3 for countries."
+    );
     return;
   }
   const charity = Charity.getCharity(val);
@@ -161,7 +163,7 @@ function addEINFromInput() {
   viewModel.addToShowList(val);
   $("#einShowInput").val("");
   renderActiveEINs();
-  charity.place(charity.ein);
+  if (charity) charity.place(charity.ein);
   updateQueryParams();
   generateGraph();
 }

@@ -6,7 +6,7 @@ const NEXT_REVEAL = 3;
 const NEXT_REVEAL_MAX = 15;
 const GOV_EIN = "001";
 const MAX_NODES = 100;
-const CHUNK_SIZE = 1000;
+const CHUNK_SIZE = 10000;
 const MAX_KEYWORD_NODES = 15;
 
 const DB_NAME = "CharityDatabase";
@@ -122,7 +122,7 @@ async function initDB() {
         if (!db.objectStoreNames.contains(GRANT_STORE)) {
           const store = db.createObjectStore(GRANT_STORE, { keyPath: "id" });
           store.createIndex("filer_ein", "filer_ein");
-          store.createIndex("grantee_ein", "grantee_ein");
+          store.createIndex("grant_ein", "grant_ein");
         }
         if (!db.objectStoreNames.contains(METADATA_STORE)) {
           db.createObjectStore(METADATA_STORE, { keyPath: "id" });
@@ -224,7 +224,9 @@ async function fetchAndStoreTSV(
 ) {
   try {
     updateStatus(status);
+    console.time("Starting zip fetch" + zipFile);
     const response = await fetch(zipFile);
+    console.timeEnd("Starting zip fetch" + zipFile);
     if (!response.ok)
       throw new Error(`HTTP error ${response.status} for ${zipFile}`);
     const zipBlob = await response.blob();
@@ -277,28 +279,21 @@ async function fetchAndStoreTSV(
                 );
                 continue;
               }
-              if (!charity.filer_name) {
-                console.warn(
-                  `Missing filer_name for charity row ${index}:`,
-                  row
-                );
-                charity.filer_name = "Unknown Charity";
-              }
               records.push(charity);
             } else if (type === "grants") {
-              let grantee = row.grant_ein;
-              if (grantee?.length === 7) grantee = "0" + grantee;
+              let grant_ein = row.grant_ein;
+              if (grant_ein?.length === 7) grant_ein = "0" + grant_ein;
               const grant = {
-                id: `${row.filer_ein}~${grantee}`,
+                id: `${row.filer_ein}~${grant_ein}`,
                 filer_ein: row.filer_ein,
-                grantee_ein: grantee,
-                amt: parseInt(row.grant_amt || "0", 10) || 0,
+                grant_ein: grant_ein,
+                amt: parseInt(row.grant_amt || row.amt || "0", 10) || 0,
                 grantType,
               };
               if (
                 grant.filer_ein &&
-                grant.grantee_ein &&
-                grant.filer_ein !== grant.grantee_ein
+                grant.grant_ein &&
+                grant.filer_ein !== grant.grant_ein
               ) {
                 records.push(grant);
               } else {
@@ -398,8 +393,8 @@ export class BrowseViewModel {
         url: "/browse/?ein=001",
       },
       {
-        title: "Fidelity Aid",
-        eins: ["110303001", "223195349"],
+        title: "The crazy world of donor-directed funds",
+        eins: ["110303001", "223195349", "262048480", "237825575", "232888152"],
         url: "/browse/?ein=110303001&ein=223195349",
       },
       {
@@ -731,7 +726,7 @@ export class BrowseViewModel {
       Charity.visibleCharities.length,
       Array.from(Charity.visibleCharities).map((c) => c.id)
     );
-    return Charity.visibleCharities.length;
+    return Charity.visibleCharities.size;
   }
 
   /**
@@ -774,14 +769,14 @@ export class BrowseViewModel {
           govGrants++;
           const grant = new Grant({
             filer_ein: filer,
-            grantee_ein: grantee,
+            grant_ein: grantee,
             amt: amt,
             grantType: "gov",
           });
           grantRecords.push({
             id: grant.id,
             filer_ein: filer,
-            grantee_ein: grantee,
+            grant_ein: grantee,
             amt: amt,
             grantType: "gov",
           });
@@ -1104,6 +1099,8 @@ export class BrowseViewModel {
     try {
       console.log(`Starting ${zipFile} at ${new Date().toISOString()}`);
       const db = await initDB();
+      console.time("Starting grant fetch" + zipFile);
+
       const records = await fetchAndStoreTSV(db, {
         zipFile,
         tsvFile,
@@ -1111,7 +1108,11 @@ export class BrowseViewModel {
         grantType,
         status,
       });
+      console.timeEnd("Starting grant fetch" + zipFile);
+
+      console.time("Starting grant store" + zipFile);
       await storeData(db, GRANT_STORE, records);
+      console.timeEnd("Starting grant store" + zipFile);
       let totalGrantsRows = records.length;
 
       for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -1150,8 +1151,9 @@ export class BrowseViewModel {
       const db = await initDB();
       if (await hasValidData(db)) {
         updateStatus("Loading from local storage...");
+        console.time("Starting DB Load-C");
         const charities = await fetchLocalData(db, CHARITY_STORE);
-        const grants = await fetchLocalData(db, GRANT_STORE);
+        console.timeEnd("Starting DB Load-C");
 
         for (let i = 0; i < charities.length; i += CHUNK_SIZE) {
           const chunk = charities.slice(i, i + CHUNK_SIZE);
@@ -1163,6 +1165,9 @@ export class BrowseViewModel {
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
+        console.time("Starting DB Load-G");
+        const grants = await fetchLocalData(db, GRANT_STORE);
+        console.timeEnd("Starting DB Load-G");
 
         for (let i = 0; i < grants.length; i += CHUNK_SIZE) {
           const chunk = grants.slice(i, i + CHUNK_SIZE);
@@ -1353,10 +1358,7 @@ export class Charity {
       console.warn(`Skipping charity row: missing filer_ein`, row);
       return;
     }
-    let filer_name = row.filer_name || "Unknown Charity";
-    if (filer_name === "Unknown Charity") {
-      console.warn(`Using default filer_name for charity EIN ${ein}:`, row);
-    }
+    const filer_name = row.filer_name || "Unknown Charity";
     let rAmt = parseInt(row.receipt_amt || "0", 10) || 0;
     let gAmt = parseInt(row.govt_amt || "0", 10) || 0;
     let cAmt = parseInt(row.contrib_amt || "0", 10) || 0;
@@ -1522,29 +1524,11 @@ export class Charity {
   }
 
   set impliedVisible(value) {
-    if (this._impliedVisible != value) {
+    if (this._impliedVisible !== value) {
       this._impliedVisible = value;
       this.isOrganized = false;
-      if (!value) {
-        if (this.filer) {
-          this.filer.impliedVisible--;
-        }
-        if (this.grantee) {
-          this.grantee.impliedVisible--;
-        }
-      } else {
-        if (this.filer) {
-          this.filer.impliedVisible++;
-        }
-        if (this.grantee) {
-          this.grantee.impliedVisible++;
-        }
-        if (value || this.desiredVisible) Charity._visibleCharities.add(this);
-        else Charity._visibleCharities.remove(this);
-      }
-      // Propagate organization state changes to connected charities
-      if (this.filer) this.filer.isOrganized = false;
-      if (this.grantee) this.grantee.isOrganized = false;
+      if (value || this.desiredVisible) Charity._visibleCharities.add(this);
+      else Charity._visibleCharities.delete(this);
     }
   }
 
@@ -1782,7 +1766,7 @@ export class Charity {
 
   static addGrant(g) {
     const filer = Charity.charityLookup[g.filer_ein];
-    const grantee = Charity.charityLookup[g.grantee_ein];
+    const grantee = Charity.charityLookup[g.grant_ein];
     if (filer && grantee) {
       filer.addGrant(g);
       grantee.addGrantIn(g);
@@ -1842,7 +1826,7 @@ export class Charity {
    */
   simpleCircular() {
     return this.grants.filter((g1) =>
-      g1.grantee.grants.some((g2) => g2.grantee_ein === this.ein)
+      g1.grantee.grants.some((g2) => g2.grant_ein === this.ein)
     );
   }
 
@@ -2132,59 +2116,64 @@ export class Grant {
   }
 
   /** used when reading from the file */
-  static checkGrantMatch(filer_ein, grantee_ein) {
+  static checkGrantMatch(filer_ein, grant_ein) {
     return (
-      filer_ein !== grantee_ein &&
+      filer_ein !== grant_ein &&
       Charity.getCharity(filer_ein) &&
-      Charity.getCharity(grantee_ein)
+      Charity.getCharity(grant_ein)
     );
   }
 
   /** grants are unique by filer/grantee */
-  static grantIDBuilder(filer_ein, grantee_ein) {
-    return `${filer_ein}~${grantee_ein}`;
+  static grantIDBuilder(filer_ein, grant_ein) {
+    return `${filer_ein}~${grant_ein}`;
   }
 
   /** factory for the file read */
   static loadGrantRow(row, grantType) {
-    const filer = row.filer_ein;
-    let grantee = row.grantee_ein || row.grant_ein;
-    if (grantee?.length === 7) grantee = "0" + grantee;
+    const filer_ein = row.filer_ein;
+    let grant_ein = row.grant_ein;
+    if (grant_ein?.length === 7) grant_ein = "0" + grant_ein;
     let amt = parseInt(row.grant_amt || row.amt || "0", 10);
     if (isNaN(amt) || amt === 0) {
       console.warn(`Invalid or zero grant_amt for grant row:`, {
-        filer,
-        grantee,
-        grant_amt: row.grant_amt,
+        filer_ein,
+        grant_ein,
+        grant_amt: row.grant_amt || row.amt,
       });
       amt = 0;
     }
-    if (Grant.checkGrantMatch(filer, grantee)) {
-      const id = Grant.grantIDBuilder(filer, grantee);
+    if (Grant.checkGrantMatch(filer_ein, grant_ein)) {
+      const id = Grant.grantIDBuilder(filer_ein, grant_ein);
       const g = Grant.getGrant(id);
       if (g) {
         g.addAmt(amt);
         return g;
       } else {
         return new Grant({
-          filer_ein: filer,
-          grantee_ein: grantee,
-          amt: amt,
+          filer_ein,
+          grant_ein,
+          amt,
           grantType,
         });
       }
-    } else if (filer !== grantee && grantee !== "Unknown") {
-      if (!Charity.getCharity(filer)) Grant.missingValues[filer] = "filer";
-      if (!Charity.getCharity(grantee))
-        Grant.missingValues[grantee] = `grantee-${amt}`;
-      console.warn(`Skipping grant: invalid EINs`, { filer, grantee, amt });
+    } else if (filer_ein !== grant_ein && grant_ein !== "Unknown") {
+      if (!Charity.getCharity(filer_ein))
+        Grant.missingValues[filer_ein] = "filer";
+      if (!Charity.getCharity(grant_ein))
+        Grant.missingValues[grant_ein] = `grantee-${amt}`;
+      console.warn(`Skipping grant: invalid EINs`, {
+        filer_ein,
+        grant_ein,
+        amt,
+      });
     }
     return null;
   }
   /** it is what it is */
   constructor({
     filer_ein,
-    grantee_ein,
+    grant_ein,
     amt = 0,
     isCircular = false,
     desiredVisible = false,
@@ -2193,9 +2182,9 @@ export class Grant {
     this.registered = false;
     this.amt = amt;
     this.filer_ein = filer_ein;
-    this.grantee_ein = grantee_ein;
+    this.grant_ein = grant_ein;
     this.filer = Charity.getCharity(filer_ein);
-    this.grantee = Charity.getCharity(grantee_ein);
+    this.grantee = Charity.getCharity(grant_ein);
     this._desiredVisible = desiredVisible;
     this._impliedVisible = false;
     this._isCircular = isCircular;
@@ -2261,8 +2250,8 @@ export class Grant {
     if (this._desiredVisible !== value) {
       this._desiredVisible = value;
       this.disorganize();
-      if (value) Grant.desiredGrants.add(this);
-      else Grant.desiredGrants.delete(this);
+      if (value) Grant._desiredGrants.add(this);
+      else Grant._desiredGrants.delete(this);
     }
   }
 
@@ -2303,7 +2292,7 @@ export class Grant {
   }
 
   get target() {
-    return this._target || this.grantee_ein;
+    return this._target || this.grant_ein;
   }
 
   set target(t) {
@@ -2341,7 +2330,7 @@ export class Grant {
   shouldHide() {
     return (
       viewModel.shouldHide(this.filer_ein) ||
-      viewModel.shouldHide(this.grantee_ein)
+      viewModel.shouldHide(this.grant_ein)
     );
   }
 
@@ -2357,7 +2346,7 @@ export class Grant {
    * @returns
    */
   buildId() {
-    this.id = Grant.grantIDBuilder(this.filer_ein, this.grantee_ein);
+    this.id = Grant.grantIDBuilder(this.filer_ein, this.grant_ein);
     Grant.registerGrant(this);
     return this.id;
   }
@@ -2394,7 +2383,7 @@ export class Grant {
     Object.values(Grant.grantLookup).forEach((g) => (g.desiredVisible = false));
     this.desiredVisible = true;
     this.filer_ein.desiredVisible = true;
-    this.grantee_ein.desiredVisible = true;
+    this.grant_ein.desiredVisible = true;
   }
 }
 
