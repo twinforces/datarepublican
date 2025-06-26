@@ -40,8 +40,8 @@ fi
 # Write reduced header to output file
 echo -e "filer_ein\tfiler_name\tgrant_ein\tgrant_amt" > "$OUTPUT_FILE"
 
-# Filter out rows where grant_ein starts with "Address:" or is "Unknown", sort, and combine grants
-tail -n +2 "$INPUT_FILE" | awk -v grant_ein_idx="$grant_ein_idx" -F'\t' '$grant_ein_idx !~ /^Address:/ && $grant_ein_idx != "Unknown"' | \
+# Filter out rows where grant_ein starts with "Address:" or contains "Unknown", sort, and combine grants
+tail -n +2 "$INPUT_FILE" | awk -v grant_ein_idx="$grant_ein_idx" -F'\t' '$grant_ein_idx !~ /^Address:/ && $grant_ein_idx !~ /Unknown/' | \
 sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} | awk -v filer_ein_idx="$filer_ein_idx" \
     -v filer_name_idx="$filer_name_idx" -v grant_ein_idx="$grant_ein_idx" \
     -v grant_amt_idx="$grant_amt_idx" '

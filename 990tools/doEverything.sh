@@ -7,7 +7,7 @@ export ZIPS_DIR="/Volumes/Data/irs_zips"
 export OUT_DIR="/Volumes/Data/tsvs"
 export ANAL_DIR="/Volumes/Data/atsvs"
 export FINAL_DIR="/Volumes/Data/final"
-export DR_ROOT="~/Development/datarepublican/"
+export DR_ROOT="$HOME/Development/datarepublican"
 
 # will download all the zip files from the IRS website the rest of the tools can work directly from the zips, saving a lot of disk spaces and clutter. This is safe to re-run, as it will skip files it already has. 
 python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR
