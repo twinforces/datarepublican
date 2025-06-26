@@ -200,6 +200,8 @@ async function fetchLocalData(db, storeName) {
 // Store data in IndexedDB
 async function storeData(db, storeName, records) {
   try {
+    updateStatus(`Storing ${storeName}: ${records.length} records`);
+
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
       const tx = db.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
@@ -266,6 +268,7 @@ async function fetchAndStoreTSV(
               const charity = {
                 filer_ein: row.filer_ein,
                 filer_name: row.filer_name,
+                name: row.filer_name,
                 xml_name: row.xml_name,
                 receipt_amt: parseInt(row.receipt_amt || "0", 10) || 0,
                 govt_amt: parseInt(row.govt_amt || "0", 10) || 0,
@@ -433,6 +436,55 @@ export class BrowseViewModel {
       {
         title: "AARP and fellow traveler",
         eins: ["520794300", "521194741"],
+        url: "/browse/?ein=520794300&ein=521194741",
+      },
+      {
+        title: "DOGE On the Ground",
+        eins: ["060726487", "941156365", "141368361", "201824454"],
+      },
+      {
+        title: "LA Riots",
+        eins: ["954421521", "822355901", "814944067."],
+      },
+      {
+        title: "Soros",
+        eins: [
+          "522028955",
+          "510198509",
+          "264486735",
+          "943153687",
+          "264351242",
+          "453133937",
+          "13-3863344",
+          "13-3956444",
+          "14-1713034",
+          "20-2412662",
+          "32-0105791",
+          "52-1516692",
+          "52-5170039",
+          "81-0623035",
+        ],
+        url: "/browse/?ein=520794300&ein=521194741",
+      },
+      {
+        title: "Zuck",
+        eins: ["81-3742328", "45-5002209", "81-1669175"],
+        url: "/browse/?ein=520794300&ein=521194741",
+      },
+      {
+        title: "Musk",
+        eins: [
+          "85-2133087",
+          "47-1480453",
+          "76-0013720",
+          "27-0360389",
+          "76-0013720",
+        ],
+        url: "/browse/?ein=520794300&ein=521194741",
+      },
+      {
+        title: "PF -> Countries",
+        eins: ["230", "203", "172", "109", "053", "126", "094"],
         url: "/browse/?ein=520794300&ein=521194741",
       },
     ];
@@ -826,6 +878,7 @@ export class BrowseViewModel {
       const country_pro = {
         filer_ein: fake_ein,
         name: data.name,
+        filer_name: data.name,
         xml_name: `The World${data.code}`,
         contrib_amt: 1,
         row: { tax_year: "2025", org_type: "Foreign Country" },
@@ -1362,7 +1415,7 @@ export class Charity {
       console.warn(`Skipping charity row: missing filer_ein`, row);
       return;
     }
-    const filer_name = row.filer_name || "Unknown Charity";
+    const filer_name = row.filer_name || row.name || "Unknown Charity";
     let rAmt = parseInt(row.receipt_amt || "0", 10) || 0;
     let gAmt = parseInt(row.govt_amt || "0", 10) || 0;
     let cAmt = parseInt(row.contrib_amt || "0", 10) || 0;
