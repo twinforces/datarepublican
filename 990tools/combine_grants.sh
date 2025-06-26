@@ -47,9 +47,13 @@ sort -k${filer_ein_idx},${filer_ein_idx} -k${grant_ein_idx},${grant_ein_idx} | a
     -v grant_amt_idx="$grant_amt_idx" '
     BEGIN { FS="\t"; OFS="\t" }
     {
-        # Validate grant_amt is numeric
+        # Validate grant_amt is non-negative numeric
         if ($grant_amt_idx !~ /^[0-9]+(\.[0-9]+)?$/) {
-            print "Warning: Skipping row with non-numeric grant_amt: " $0 > "/dev/stderr"
+            if ($grant_amt_idx ~ /^-/) {
+                print "Warning: Skipping row with negative grant_amt: " $0 > "/dev/stderr"
+            } else {
+                print "Warning: Skipping row with non-numeric grant_amt: " $0 > "/dev/stderr"
+            }
             next
         }
         if ($filer_ein_idx == prev_filer && $grant_ein_idx == prev_grant) {
