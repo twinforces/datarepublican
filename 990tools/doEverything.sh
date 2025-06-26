@@ -6,7 +6,7 @@
 export ZIPS_DIR="/Volumes/Data/irs_zips"
 export OUT_DIR="/Volumes/Data/tsvs"
 export ANAL_DIR="/Volumes/Data/atsvs"
-export FINAL_DIR= "/Volumes/Data/final"
+export FINAL_DIR="/Volumes/Data/final"
 export DR_ROOT="~/Development/datarepublican/"
 
 # will download all the zip files from the IRS website the rest of the tools can work directly from the zips, saving a lot of disk spaces and clutter. This is safe to re-run, as it will skip files it already has. 
@@ -40,7 +40,7 @@ python extract_grants.py 2017 2025 --zip-dir /Volumes/Data/irs_zips --cache-dir 
 
 # this will aggregate grants by the same filer to the same grantee in the same tax year, which usually cuts the file by a half to a third.
 ./combine_grants.sh $FINAL_DIR/grants_latest.tsv $FINAL_DIR/grants_combined.tsv
-./combine_grants.sh head  $FINAL_DIR/grants_pf_combined.tsv
+./combine_grants.sh $FINAL_DIR/inferred_grants.tsv  $FINAL_DIR/grants_pf_combined.tsv
 
 #there are EINs that have gotten money that don't file 990s, (state/local govt i.e. state unis, churches, etc)
 python grant_check.py --index-file $FINAL_DIR/charity_latest.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file filter_pf.md

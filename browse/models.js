@@ -270,7 +270,15 @@ async function fetchAndStoreTSV(
                 receipt_amt: parseInt(row.receipt_amt || "0", 10) || 0,
                 govt_amt: parseInt(row.govt_amt || "0", 10) || 0,
                 contrib_amt: parseInt(row.contrib_amt || "0", 10) || 0,
-                row,
+                tax_year: row.tax_year ? parseInt(row.tax_year, 10) : null,
+                org_type: row.org_type || null,
+                total_assets: row.total_assets
+                  ? parseFloat(row.total_assets)
+                  : null,
+                form_type: row.form_type || null,
+                denominator: row.denominator
+                  ? parseFloat(row.denominator)
+                  : null,
               };
               if (!charity.filer_ein) {
                 console.warn(
@@ -426,10 +434,6 @@ export class BrowseViewModel {
         title: "AARP and fellow traveler",
         eins: ["520794300", "521194741"],
         url: "/browse/?ein=520794300&ein=521194741",
-      },
-      {
-        title: "DEBUG: Clear Local Storage",
-        eins: ["-86"],
       },
     ];
   }
