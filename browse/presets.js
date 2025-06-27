@@ -47,19 +47,19 @@ export default [
     eins: ["132621497", "941583439"],
     url: "/browse/?ein=132621497&ein=941583439",
     description:
-      "Planned Parenthood affiliates receiving significant taxpayer funding, controversial for reproductive health advocacy",
+      "Planned Parenthood affiliates receiving significant taxpayer funding, controversial for non-reproductive health advocacy",
     type: "501(c)(3)",
   },
   {
-    title: "AARP c3, c4 and fellow traveler",
-    eins: ["520794300", "951985500", "521194741"],
+    title: "AARP c3, c4",
+    eins: ["520794300", "951985500"],
     url: "/browse/?ein=520794300&ein=951985500&ein=521194741",
     description:
-      "AARP and its foundations, advocating for senior issues, criticized for political influence",
+      "AARP in both c3 and c4 flavors, criticized for political influence",
     type: "Mixed",
   },
   {
-    title: "DOGE On the Ground, requests from the DOGE community",
+    title: "DOGE On the Ground",
     eins: ["060726487", "941156365", "141368361", "201824454"],
     url: "/browse/?ein=060726487&ein=941156365&ein=141368361&ein=201824454",
     description:
@@ -87,7 +87,24 @@ export default [
     subcategories: [
       {
         title: "Climate Grift",
-        eins: ["116107128", "132654926"],
+        eins: [
+          "391906848",
+          "521351786",
+          "814765797",
+          "822943030",
+          "941730465",
+          "842041352",
+          "850480506",
+          "263525255",
+          "521693387",
+          "132654926",
+          "116107128",
+          "946069890",
+          "941153307",
+          "953317319",
+          "952709294",
+          "262255459",
+        ],
         url: "/browse/?ein=116107128&ein=132654926",
         description:
           "Environmental NGOs criticized for corporate ties and high budgets",
@@ -95,7 +112,18 @@ export default [
       },
       {
         title: "Dark Money",
-        eins: ["264486735", "474112088"],
+        eins: [
+          "264486345",
+          "521527294",
+          "271477360",
+          "474178003",
+          "474384908",
+          "932283345",
+          "873717405",
+          "541560719",
+          "360725240",
+          "530045720",
+        ],
         url: "/browse/?ein=264486735&ein=474112088",
         description:
           "501(c)(4) groups spending on elections with undisclosed donors",
@@ -103,15 +131,26 @@ export default [
       },
       {
         title: "Global Health",
-        eins: ["911157127", "986038021"],
+        eins: ["911157127", "986038021", "980593375"],
         url: "/browse/?ein=911157127&ein=986038021",
-        description:
-          "Global health nonprofits, often Gates-funded, criticized for influence",
+        description: "Global health nonprofits, criticized for influence",
         type: "501(c)(3)",
       },
       {
         title: "Health & Policy",
-        eins: ["815099982", "311726494", "943240841"],
+        eins: [
+          "311726494",
+          "943240841",
+          "980593375",
+          "954112121",
+          "943001797",
+          "521706646",
+          "131644147",
+          "941693872",
+          "133582071",
+          "133163817",
+          "582034855",
+        ],
         url: "/browse/?ein=815099982&ein=311726494&ein=943240841",
         description:
           "Groups tied to health policy and controversies, e.g., COVID research",
@@ -119,21 +158,50 @@ export default [
       },
       {
         title: "Religious Advocacy",
-        eins: ["521792772", "237380554"],
+        eins: [
+          "391302520",
+          "742467307",
+          "946174066",
+          "541660459",
+          "521792772",
+          "943040594",
+          "203831167",
+          "953188150",
+        ],
         url: "/browse/?ein=521792772&ein=237380554",
         description: "Conservative and progressive religious advocacy groups",
         type: "501(c)(3)",
       },
       {
         title: "Media Influence",
-        eins: ["391771340", "470926008"],
+        eins: [
+          "470926008",
+          "263040659",
+          "391906848",
+          "510198509",
+          "943150669",
+          "391774839",
+          "853068374",
+          "273339966",
+          "453205669",
+          "800896688",
+        ],
         url: "/browse/?ein=391771340&ein=470926008",
         description: "Progressive media advocacy groups, criticized for bias",
         type: "501(c)(3)",
       },
       {
         title: "Education Advocacy",
-        eins: ["133541913", "943230971"],
+        eins: [
+          "530115260",
+          "360725240",
+          "941361609",
+          "366174602",
+          "133541913",
+          "133856575",
+          "222882549",
+          "943135962",
+        ],
         url: "/browse/?ein=133541913&ein=943230971",
         description:
           "Education reform groups, often funded by billionaires like Powell Jobs",
@@ -141,7 +209,16 @@ export default [
       },
       {
         title: "Immigration Advocacy",
-        eins: ["521549400"],
+        eins: [
+          "741156258",
+          "742647019",
+          "521136126",
+          "521449368",
+          "521549711",
+          "954537976",
+          "462216565",
+          "470865426",
+        ],
         url: "/browse/?ein=521549400",
         description:
           "Groups advocating immigration reform, often Soros/Powell Jobs-funded",
@@ -149,7 +226,19 @@ export default [
       },
       {
         title: "Gun Policy",
-        eins: ["208822834"],
+        eins: [
+          "261598353",
+          "208802884",
+          "521287017",
+          "521287017",
+          "463185441",
+          "463185441",
+          "461659102",
+          "471087135",
+          "521797339",
+          "521710886",
+          "521710886",
+        ],
         url: "/browse/?ein=208822834",
         description: "Groups advocating gun control, often Bloomberg-funded",
         type: "501(c)(4)",
@@ -161,7 +250,16 @@ export default [
   },
   {
     title: "Major Unions",
-    eins: ["364193332", "530237789"],
+    eins: [
+      "530115260",
+      "360857395",
+      "440162512",
+      "350413075",
+      "530227074",
+      "360725240",
+      "380679110",
+      "530088380",
+    ],
     url: "/browse/?ein=364193332&ein=530237789",
     description:
       "Major labor unions with significant political influence ($50M+ spending)",
@@ -204,7 +302,7 @@ export default [
       },
       {
         title: "Gore",
-        eins: ["870745620"],
+        eins: ["870745629"],
         url: "/browse/?ein=870745620",
         description:
           "Al Gore’s Climate Reality Project, advocating environmental policies",
@@ -212,7 +310,7 @@ export default [
       },
       {
         title: "Obama",
-        eins: ["311580204", "300046638", "131275970", "133137461", "271414646"],
+        eins: ["464950751"],
         url: "/browse/?ein=311580204&ein=300046638&ein=131275970&ein=133137461&ein=271414646",
         description:
           "Obama Foundation, focused on civic engagement and leadership",
@@ -236,43 +334,49 @@ export default [
     subcategories: [
       {
         title: "Adelson",
-        eins: ["990628460"],
+        eins: [
+          "223885162",
+          "047023433",
+          "880401489",
+          "880463073",
+          "047024330",
+          "134092050",
+        ],
         url: "/browse/?ein=990628460",
         description:
           "Sheldon Adelson’s foundation, funding conservative and pro-Israel causes",
         type: "501(c)(3)",
       },
-      {
+      /*{
         title: "Bezos",
-        eins: ["853287115", "831515159"],
+        eins: ["851414020", "912100384", "853287115", "831515159"],
         url: "/browse/?ein=853287115&ein=831515159",
-        description:
-          "Jeff Bezos’s foundations, focused on climate and education",
+        description: "Jeff Bezos’s Directorship",
         type: "501(c)(3)",
-      },
+      },*/
       {
         title: "Bloomberg",
-        eins: ["133800011", "454354103"],
+        eins: ["205602463", "261596691"],
         url: "/browse/?ein=133800011&ein=454354103",
         description:
           "Michael Bloomberg’s philanthropies, funding gun control and civic issues",
         type: "Mixed",
       },
-      {
+      /* no grants{
         title: "Google Billionaires",
-        eins: ["204896283", "943375661"],
+        eins: ["472107200", "912054189"],
         url: "/browse/?ein=204896283&ein=943375661",
         description:
           "Sergey Brin and Larry Page’s foundations, funding tech and social impact",
         type: "501(c)(3)",
       },
-      {
+      {  no public grants
         title: "Ellison",
-        eins: ["453182978"],
+        eins: ["943269827"],
         url: "/browse/?ein=453182978",
         description: "Larry Ellison’s foundation, focused on medical research",
         type: "501(c)(3)",
-      },
+      },*/
       {
         title: "Gates",
         eins: ["911663695", "821871237", "980593375", "812874450"],
@@ -283,7 +387,21 @@ export default [
       },
       {
         title: "Hoffman",
-        eins: ["943375661"],
+        eins: [
+          "710992446",
+          "131773640",
+          "813214432",
+          "882763460",
+          "831589303",
+          "833181719",
+          "522096845",
+          "464347021",
+          "811669175",
+          "133931449",
+          "814822818",
+          "833044655",
+          "845005410",
+        ],
         url: "/browse/?ein=943375661",
         description: "Reid Hoffman’s foundation, funding progressive advocacy",
         type: "501(c)(3)",
@@ -312,7 +430,15 @@ export default [
       },
       {
         title: "Musk",
-        eins: ["852133087", "471480453", "760013720", "270360389", "760013720"],
+        eins: [
+          "27-5083595",
+          "45-2638273",
+          "852133087",
+          "471480453",
+          "760013720",
+          "270360389",
+          "760013720",
+        ],
         url: "/browse/?ein=852133087&ein=471480453&ein=760013720&ein=270360389&ein=760013720",
         description:
           "Elon Musk’s foundation and officer roles, tied to tech and innovation",
@@ -328,15 +454,26 @@ export default [
       },
       {
         title: "Powell Jobs",
-        eins: ["814073768"],
+        eins: [
+          "821949563",
+          "943278918",
+          "813242506",
+          "131628168",
+          "474422640",
+          "813130448",
+          "131684331",
+          "521497470",
+          "845024713",
+          "821112859",
+          "94-1156365",
+        ],
         url: "/browse/?ein=814073768",
-        description:
-          "Laurene Powell Jobs’s foundation, focused on education and immigration",
+        description: "Laurene Powell Jobs’s foundations and board memberships",
         type: "501(c)(3)",
       },
       {
         title: "Scott",
-        eins: ["851513453"],
+        eins: ["463383293"],
         url: "/browse/?ein=851513453",
         description:
           "MacKenzie Scott’s foundation, funding diverse social causes",
