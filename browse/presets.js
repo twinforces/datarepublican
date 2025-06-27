@@ -218,6 +218,7 @@ export default [
           "954537976",
           "462216565",
           "470865426",
+          "954421521",
         ],
         url: "/browse/?ein=521549400",
         description:
@@ -353,7 +354,7 @@ export default [
         url: "/browse/?ein=853287115&ein=831515159",
         description: "Jeff Bezos’s Directorship",
         type: "501(c)(3)",
-      },*/
+      },
       {
         title: "Bloomberg",
         eins: ["205602463", "261596691"],
@@ -361,7 +362,7 @@ export default [
         description:
           "Michael Bloomberg’s philanthropies, funding gun control and civic issues",
         type: "Mixed",
-      },
+      },*/
       /* no grants{
         title: "Google Billionaires",
         eins: ["472107200", "912054189"],
@@ -482,6 +483,14 @@ export default [
       {
         title: "Soros",
         eins: [
+          "264486345",
+          "260845652",
+          "510198509",
+          "943213100",
+          "521833896",
+          "263750801",
+          "300126510",
+          "132875808",
           "133095829",
           "137029285",
           "472782466",
