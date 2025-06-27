@@ -44,7 +44,7 @@ import ORGANIZATION_TYPES from "./charityTypes.js";
 import { iso3166_alpha2 } from "./countryCodes.js";
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
-
+import presetsData from "./presets.js";
 let GOV_NODE = null; // I use this when debugging.
 
 /**
@@ -352,6 +352,8 @@ async function fetchAndStoreTSV(
  * I've tried MVC, didn't work. MVVM does.
  */
 export class BrowseViewModel {
+  #_presetsData = presetsData; // Private field initialized with imported presets
+
   constructor({ POWER_LAW = POWER_LAW_RESET, GOV_EIN = "001" } = {}) {
     this.POWER_LAW = POWER_LAW; /** Users can change the scaling on the fly */
     this.GOV_EIN =
@@ -383,111 +385,21 @@ export class BrowseViewModel {
     this.resetAll();
   }
 
-  presets() {
-    return [
-      {
-        title: "NED Hydra!",
-        eins: [
-          "521344831",
-          "521943638",
-          "521527835",
-          "521338892",
-          "521398742",
-          "521340267",
-          "943027961",
-        ],
-        url: "/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=943027761",
-      },
-      {
-        title: "Root of all Evil!",
-        eins: ["001"],
-        url: "/browse/?ein=001",
-      },
-      {
-        title: "The crazy world of donor-directed funds",
-        eins: ["110303001", "223195349", "262048480", "237825575", "232888152"],
-        url: "/browse/?ein=110303001&ein=223195349",
-      },
-      {
-        title: "Turning Point",
-        eins: ["800835023"],
-        url: "/browse/?ein=800835023",
-      },
-      {
-        title: "Bill Kriston's NGO",
-        eins: ["831567380"],
-        url: "/browse/?ein=831567380",
-      },
-      {
-        title: "AIDS VACCINE ADVOCACY COALITION INC.",
-        eins: ["943240841"],
-        url: "/browse/?ein=943240841",
-      },
-      {
-        title: "Folks who paid for COVID for Fauci.",
-        eins: ["311726494"],
-        url: "/browse/?ein=311726494",
-      },
-      {
-        title: "2 Planned Parenthoods with the most taxpayer Funding",
-        eins: ["132621497", "221643997"],
-        url: "/browse/?ein=132621497&ein=221643997",
-      },
-      {
-        title: "AARP and fellow traveler",
-        eins: ["520794300", "521194741"],
-        url: "/browse/?ein=520794300&ein=521194741",
-      },
-      {
-        title: "DOGE On the Ground",
-        eins: ["060726487", "941156365", "141368361", "201824454"],
-      },
-      {
-        title: "LA Riots",
-        eins: ["954421521", "822355901", "814944067."],
-      },
-      {
-        title: "Soros",
-        eins: [
-          "522028955",
-          "510198509",
-          "264486735",
-          "943153687",
-          "264351242",
-          "453133937",
-          "133863344",
-          "133956444",
-          "141713034",
-          "202412662",
-          "320105791",
-          "521516692",
-          "525170039",
-          "810623035",
-        ],
-        url: "/browse/?ein=520794300&ein=521194741",
-      },
-      {
-        title: "Zuck",
-        eins: ["813742328", "455002209", "811669175"],
-        url: "/browse/?ein=520794300&ein=521194741",
-      },
-      {
-        title: "Musk",
-        eins: ["852133087", "471480453", "760013720", "270360389", "760013720"],
-        url: "/browse/?ein=520794300&ein=521194741",
-      },
-      {
-        title: "PF -> Countries",
-        eins: ["230", "203", "172", "109", "053", "126", "094"],
-        url: "/browse/?ein=520794300&ein=521194741",
-      },
-    ];
+  clearAll() {
+    for (const c of Charity.visibleCharities) c.clearVisibility();
   }
 
-  loadPreset(index) {
-    const presets = this.presets();
-    if (index < presets.length) {
-      const eins = this.presets()[index].eins;
+  presets() {
+    return this.#_presetsData;
+  }
+
+  loadPreset(preset, mode) {
+    const eins = preset.eins;
+    if (mode === "replace") {
+      this.clearAll();
+      this.setShowList(eins);
+      this.computeAndSaveURLParams();
+    } else {
       for (const e of eins) {
         if (e === "-86") {
           // quick hack.
@@ -496,8 +408,6 @@ export class BrowseViewModel {
         }
         this.addToShowList(e);
       }
-    } else {
-      console.error("bad preset index", index);
     }
   }
 

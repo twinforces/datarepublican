@@ -16,232 +16,486 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 <script type="module" src="./d3-sankey-circular.js"></script>
     <script type="module" src="script.js"></script>
 
-
-<style>
-  #activeEINs, #activeFilters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5em;
-  }
-
-  #graph-container {
-    overflow: hidden; /* Hide scrollbars */
-  }
-#control-panel {
-    background: #f9f9f9;
-    border: 1px solid #ddd;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    padding: 15px;
-    width: 500px;
-    font-family: Arial, sans-serif;
-}
-
-#control-panel h3 {
-    margin-top: 0;
-      font-size: 0.8rem;
-;
-}
-
-#control-panel p {
-    margin: 5px 0;
-      font-size: 0.75rem;
-
-}
-
-#control-panel button {
-    margin-right: 5px;
-    margin-top: 5px;
-    padding: 5px 10px;
-    background: #007bff;
-    color: white;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-}
-
-.disabled button {
-    margin-right: 5px;
-    margin-top: 5px;
-    padding: 5px 10px;
-    background: #007bff;
-    color: red;
-    border: red;
-    border-radius: 3px;
-    cursor: pointer;
-}
-
-
-#control-panel button:hover {
-    background: #0056b3;
-}
-
-.node.selected path {
-    stroke: #ff0000;
-    stroke-width: 2px;
-}
-
-.link.selected {
-    stroke: #ff0000 !important;
-    stroke-width: 3px !important;
-}
-
-#control-panel .disabled {
-
-  color:red;
-}
-
-.x-share-button {
-      display: inline-block;
-      cursor: pointer;
-      transition: opacity 0.2s;
-      font-size: 24px; /* Adjusts the size of the 𝕏 character */
-      line-height: 1;
-      width: 24px;
-      height: 24px;
-      color: #fff; /* Black for light mode */
-      text-decoration: none; /* Removes underline from link */
-      font-family: "Segoe UI Symbol", "Noto Sans Math", "DejaVu Sans", sans-serif;
-    }
-    .x-share-button:hover {
-      opacity: 0.8;
-    }
-    /* Optional: Dark mode support */
-    @media (prefers-color-scheme: dark) {
-      .x-share-button {
-        color: #000; /* White for dark mode */
+    <style>
+      /* Existing styles */
+      #activeEINs, #activeFilters, #hideEINs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5em;
       }
-    }
-    .preset-select {
-      padding: 8px;
-      width: 200px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-size: 10px;
-    }
-    .separator {
-      background: #ccc;
-      color: #666;
-      text-align: center;
-      pointer-events: none;
-      font-style: italic;
-    }
+    
+      #graph-container {
+        overflow: hidden;
+      }
+    
+      #control-panel {
+        background: #f9f9f9;
+        border: 1px solid #ddd;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        padding: 15px;
+        width: 500px;
+        font-family: Arial, sans-serif;
+      }
+    
+      #control-panel h3 {
+        margin-top: 0;
+        font-size: 0.8rem;
+      }
+    
+      #control-panel p {
+        margin: 5px 0;
+        font-size: 0.75rem;
+      }
+    
+      #control-panel button {
+        margin-right: 5px;
+        margin-top: 5px;
+        padding: 0.3rem 0.6rem;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1rem;
+      }
+    
+      #control-panel button:hover {
+        background: #0056b3;
+      }
+    
+      .disabled button {
+        margin-right: 5px;
+        margin-top: 5px;
+        padding: 0.3rem 0.6rem;
+        background: #007bff;
+        color: red;
+        border: 1px solid red;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1rem;
+      }
+    
+      .node.selected path {
+        stroke: #ff0000;
+        stroke-width: 2px;
+      }
+    
+      .link.selected {
+        stroke: #ff0000 !important;
+        stroke-width: 3px !important;
+      }
+    
+      #control-panel .disabled {
+        color: red;
+      }
+    
+      .x-share-button {
+        display: inline-block;
+        cursor: pointer;
+        transition: opacity 0.2s;
+        font-size: 24px;
+        line-height: 1;
+        width: 24px;
+        height: 24px;
+        color: white;
+        background: #000;
+        text-decoration: none;
+        font-family: "Segoe UI Symbol", "Noto Sans Math", "DejaVu Sans", sans-serif;
+        text-align: center;
+        border: none;
+        padding: 0;
+      }
+    
+      .x-share-button:hover {
+        background: #333;
+        opacity: 0.8;
+      }
+    
+      #PostBox {
+        height: 32px;
+      }
+    
+      @media (prefers-color-scheme: dark) {
+        .x-share-button {
+          color: #fff;
+        }
+      }
+    
+      /* Updated styles */
+      :root {
+        --panel-shown: none;
+        --panel-hidden: block;
+      }
+    
+      #topbar {
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+    
+      #explanation {
+        padding: 0.5rem 0;
+      }
+    
+      #top-buttons {
+        padding: 0.5rem 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+    
+      #top-buttons .flex {
+        gap: 1rem;
+      }
+    
+      #top-buttons button,
+      #top-buttons #ngo-popup {
+        height: 32px;
+        padding: 0.25rem 0.75rem;
+        font-size: 11px;
+        line-height: 1rem;
+      }
+    
+      #ngopreset-toggle,
+      #showPresetsBtn {
+        background: #10b981;
+        color: white;
+        border-radius: 0.2rem;
+        transition: background 0.2s;
+      }
+    
+      #ngopreset-toggle:hover,
+      #showPresetsBtn:hover {
+        background: #059669;
+      }
+    
+      #presets-panel {
+        margin-top: 1rem;
+      }
+    
+      #controls {
+        padding: 0.5rem 0;
+      }
+    
+      #controls .flex-col {
+        min-width: 0;
+      }
+    
+      #controls input {
+        padding: 0.3rem;
+        font-size: 11px;
+        border: 1px solid #ddd;
+        border-radius: 0.25rem;
+      }
+    
+      #controls button {
+        padding: 0.3rem 0.6rem;
+        font-size: 11px;
+      }
+    
+      #downloadBtn {
+        font-size: 14px;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.2rem;
+        line-height: 1rem;
+        background: none;
+        color: #4b5563;
+      }
+    
+      #downloadBtn:hover {
+        color: #2563eb;
+      }
+    
+      #howItWorksList {
+        margin-top: 1rem;
+        display: none;
+      }
+    
+      #howItWorksList.visible {
+        display: block;
+      }
+    
+      #howItWorksList h3 {
+        font-size: 0.875rem;
+        font-weight: 600;
+      }
+    
+      #howItWorksList p,
+      #howItWorksList ul {
+        font-size: 0.75rem;
+      }
+    
+      #howItWorksList a {
+        color: #3b82f6;
+        text-decoration: underline;
+      }
+    
+      #howItWorksList a:hover {
+        color: #2563eb;
+      }
+    
+      .ngopreset-container {
+        padding: 0.5rem;
+        max-width: 1200px;
+        margin: 0 auto;
+        border: 2px solid #e5e7eb;
+        background: #ddd;
+        border-radius: 0.4rem;
+        box-sizing: border-box;
+      }
+    
+      .ngopreset-columns {
+        display: flex;
+        flex-direction: column;
+      }
+    
+      .ngopreset-columns .toggle-row {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+        background: white;
+        padding: 0.25rem;
+      }
+    
+      .ngopreset-columns .toggle-row .button-group-column {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+      }
+    
+      .ngopreset-columns .filler-column {
+        flex: 1;
+        background: #ddd;
+        min-height: 20px;
+      }
+    
+      .ngopreset-columns .grid-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+      }
+    
+      .ngopreset-column {
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.4rem;
+        padding: 0.5rem;
+      }
+    
+      .ngopreset-column-title {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: #1f2937;
+      }
+    
+      .ngopreset-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.3rem;
+      }
+    
+      .ngopreset-btn {
+        background: #3b82f6;
+        color: white;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.2rem;
+        text-align: center;
+        font-size: 11px;
+        line-height: 1rem;
+        font-weight: 500;
+        transition: background 0.2s;
+        white-space: nowrap; /* Prevent label wrapping */
+      }
+    
+      .ngopreset-btn:hover {
+        background: #2563eb;
+      }
+    
+      #controls button:not(.x-share-button):not(.frameless),
+      #howItWorksBtn,
+      #addEinBtn,
+      #hideEinBtn,
+      #addFilterBtn {
+        font-size: 11px;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.2rem;
+        line-height: 1rem;
+        background: #3b82f6;
+        color: white;
+      }
+    
+      #controls button:not(.x-share-button):not(.frameless):hover,
+      #howItWorksBtn:hover,
+      #addEinBtn:hover,
+      #hideEinBtn:hover,
+      #addFilterBtn:hover {
+        background: #2563eb;
+      }
+    
+      .frameless {
+        font-size: 11px;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.2rem;
+        line-height: 1rem;
+        color: #3b82f6;
+        background: none;
+      }
+    
+      .frameless:hover {
+        color: #2563eb;
+      }
+    
+      .show-when-panel-hidden {
+        display: var(--panel-hidden, block);
+      }
+    
+      .show-when-panel-shown {
+        display: var(--panel-shown, none);
+      }
+    
+      .toggle-switch {
+        display: inline-block;
+        position: relative;
+        width: 40px;
+        height: 20px;
+      }
+    
+      .toggle-switch input[type="checkbox"] {
+        display: none;
+      }
+    
+      .toggle-switch label {
+        display: block;
+        background: #e5e7eb;
+        border-radius: 0.75rem;
+        padding: 0.2rem;
+        cursor: pointer;
+        width: 40px;
+        height: 20px;
+      }
+    
+      .toggle-switch label::before {
+        content: '';
+        position: absolute;
+        width: 50%;
+        height: 16px;
+        background: #3b82f6;
+        border-radius: 0.5rem;
+        transition: transform 0.2s;
+      }
+    
+      .toggle-switch input:checked + label::before {
+        transform: translateX(100%);
+      }
+    
+      .toggle-switch input:not(:checked) + label::before {
+        transform: translateX(0);
+      }
+    
+      .ngopreset-container .ngopreset-mode-switch .toggle-label {
+        font-size: 11px !important;
+        font-weight: bold !important;
+        color: #4b5563;
+        display: inline-block;
+        vertical-align: middle;
+      }
+    
+      .toggle-label-add {
+        margin-right: 0.5rem;
+      }
+    
+      .toggle-label-replace {
+        margin-left: 0.5rem;
+      }
+    
+      @media (max-width: 768px) {
+        .ngopreset-columns .grid-row {
+          grid-template-columns: 1fr;
+        }
+        #top-buttons {
+          flex-direction: column;
+          gap: 1rem;
+        }
+        #top-buttons .flex {
+          flex-direction: column;
+          gap: 1rem;
+        }
+      }
     </style>
 
-<div id="topbar" class="">
-  <div id="explanation">
-    <h1 id="pageTitle" class="mb-1">Charity explorer</h1>
-    <!-- If custom_graph is present, we show "title" or "Displaying exact graph." below -->
-    <p id="instructions" class="opacity-80 mb-0 text-[15px]">
-      <!-- Will be dynamically set in parseQueryParams() -->
-    </p>
-    <script>
-      const urlParams = new URLSearchParams(window.location.search);
-      const returnUrl = urlParams.get('return_url');
-      if (returnUrl) {
-        document.write(`<div class="mt-1 mb-2"><button class="frameless" onclick="window.location.href='${returnUrl}'">&larr; Back to officer search</button></div>`);
-      }
-    </script>
+    <div id="topbar" class="container mx-auto p-4 bg-white shadow-md rounded-lg">
+      <!-- Top Buttons Row -->
+      <div id="top-buttons" class="flex justify-between items-center mb-6">
+        <div class="flex items-center gap-4">
+          <button id="howItWorksBtn" class="frameless text-blue-600 hover:text-blue-800 text-sm font-medium h-8 px-3">How it works (and Why)</button>
+          <button id="showPresetsBtn" class="ngopreset-toggle-btn h-8 px-3 show-when-panel-hidden">Show Presets</button>
+        </div>
+        <button id="PostBox" class="x-share-button h-8"></button>
+      </div>
     
-    <div id="controls" class="mt-2 mb-4 flex flex-col @xl:items-start @xl:justify-between @xl:flex-row gap-4 bfs-only">
-      <!-- EIN Input & Add Button -->
-       <div class="relative flex flex-col gap-2 max-w-lg">
-  
-    <!-- "How it works" toggle is BFS-only -->
-        <button class="frameless mb-2 text-base bfs-only" id="howItWorksBtn">How it works (and Why)</button>   
-       </div>   
-       <div class="relative flex flex-col gap-2 max-w-lg">
-        <b class="text-xs ">Presets:</b><select id="preset-select" class="preset-select" onchange="loadPreset(this.value)">
-          </select>
-          </div><div class="relative flex flex-col gap-2 max-w-lg">
-      
-
-          </div>
-          <div class="relative flex flex-col gap-2 max-w-lg">
-            <button id="PostBox"></button>
-            </div>
-            </div>
-    <div class="h-[0px] overflow-hidden transition-all duration-200 bfs-only" id="howItWorksList">
-      <div class="p-4 border border-gray-200 rounded-md bg-white">
-        <h3 class="mt-0">How it works</h3>
-        <p class="text-sm">Unlike the <a href="/expose">other tool</a>, this tool is designed for browsing. It's not perfect, but it lets you see
-          what's going on directly.
-        </p>
-       <h3 class="mt-0">Why you should use it</h3>
-        <p class="text-sm">There are 140,000 charities this site is tracking with 600,000 grants. If 5% of them are corrupt, that's still 7,000
-          to research. We need to get a little barn raising here if we're going to reclaim our country, only you know the suspect charities in your area.
-          So you can start at any charity you can find, and then explore where are they getting their money, and who
-          are they giving their money to? If you know the EIN, start there. If you don't you can try the keyword search.
-          Find a suspicious set? Post the URL to X under #DRBadNGOs. Suggestions/feedback? Verified can DM <a href="https://x.com/twinforces">@twinforces</a>. 
-        </p>
-        <ul class="!list-decimal space-y-1 text-sm pl-4">
-        <li>We show NGOs and the money that flows between them. Money comes in from the left, 
-          goes out to the right. The NGOs are drawn with trapezoids so the left side is proporitional to the incoming grants
-        while the right side is proportional to the grants going out to other NGOs, think of them like funnels.</li>
-        <li>US Government is treated as the ultimate donor. You can select a preset to add known interesting NGOs.</li>
-        <li>Money flows are scaled so large flows don't dwarf small ones, you can adjust scaling up or down with the buttons to the left of the zoom controls.</li>
-        <li>Octogons (aka stop sign) are NGOs that don't have any outflows to other NGOs, presumably spend it all.</li>
-        <li>Gray "plus" grift pimples hold hidden grants to keep the graph from being overwhelming. Click the pimples to see 3 more from that side, or click the NGO to see 3 more from both sides.</li>
-        <li>Command/Windows click on a node to bring up a control panel with more controls and cross links.</li>
-        <li>In the control panel, Focus will remove all the other NGOs, Remove will remove just that NGO.</li>
-        </ul>
+      <!-- Presets Panel Row -->
+      <div id="presets-panel">
+        <div id="ngo-popup"></div>
+      </div>
+    
+      <!-- Input Sections -->
+      <div id="controls" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
+        <!-- Add EIN(s) -->
+        <div class="flex flex-col gap-2">
+          {% include input.html 
+            label="Add EIN(s)" 
+            id="einShowInput" 
+            placeholder="XX-XXXXXXX or 9 digits" 
+            buttonLabel="Add EIN" 
+            buttonId="addEinBtn" 
+            actions="<button id='clearEINsBtnShow' class='frameless'>Reset</button>"
+          %}
+          <div id="activeEINs" class="flex flex-wrap gap-2"></div>
+        </div>
+    
+        <!-- Block EIN(s) -->
+        <div class="flex flex-col gap-2">
+          {% include input.html 
+            label="Block EIN(s)" 
+            id="einHideInput" 
+            placeholder="XX-XXXXXXX or 9 digits" 
+            buttonLabel="Block EIN" 
+            buttonId="hideEinBtn" 
+            actions="<button id='clearEINsBtnHide' class='frameless'>Unblock All EINs</button>"
+          %}
+          <div id="hideEINs" class="flex flex-wrap gap-2"></div>
+        </div>
+    
+        <!-- Bulk Add by Keyword -->
+        <div class="flex flex-col gap-2">
+          {% include input.html 
+            label="Bulk add orgs by keyword" 
+            id="keywordInput" 
+            placeholder="Keyword or phrase..." 
+            buttonLabel="Add" 
+            buttonId="addFilterBtn"
+          %}
+          <div id="activeFilters" class="flex flex-wrap gap-2"></div>
+        </div>
+    
+        <!-- Placeholder for future controls -->
+        <div class="flex flex-col gap-2"></div>
+    
+        <!-- Download and Status -->
+        <div class="md:col-span-2 lg:col-span-3 flex justify-end items-end gap-2 mt-2">
+          <button id="downloadBtn" class="frameless text-gray-500 hover:text-blue-600 flex items-center gap-1 text-base" style="font-size: 14px;">
+            <img src="/assets/images/download.svg" class="w-4 h-4" alt="Download SVG">
+            Download SVG
+          </button>
+          <div id="status" class="text-sm"></div>
+        </div>
       </div>
     </div>
-  </div>
-   <!-- BFS controls are BFS-only -->
-  <div id="controls" class="mt-2 mb-4 flex flex-col @xl:items-start @xl:justify-between @xl:flex-row gap-4 bfs-only">
-    <!-- EIN Input & Add Button -->
-     <div class="relative flex flex-col gap-2 max-w-lg">
-      {% include input.html 
-        label="Add EIN(s)" 
-        id="einShowInput" 
-        placeholder="XX-XXXXXXX or 9 digits" 
-        buttonLabel="Add EIN" 
-        buttonId="addEinBtn" 
-        actions="<button id='clearEINsBtnShow' class='frameless'>Reset</button>"
-      %}
-
-      <div id="activeEINs"></div>
-    </div>
-    <div class="relative flex flex-col gap-2 max-w-lg">
-      {% include input.html 
-        label="Block EIN(s)" 
-        id="einHideInput" 
-        placeholder="XX-XXXXXXX or 9 digits" 
-        buttonLabel="Block EIN" 
-        buttonId="hideEinBtn" 
-        actions="<button id='clearEINsBtnHide' class='frameless'>Unblock All EINs</button>"
-      %}
-
-      <div id="hideEINs"></div>
-    </div>
-    <div class="relative flex flex-col gap-2 max-w-lg">
-      {% include input.html 
-        label="Bulk add orgs by keyword" 
-        id="keywordInput" 
-        placeholder="Keyword or phrase..." 
-        buttonLabel="Add" 
-        buttonId="addFilterBtn"
-      %}
-
-      <div id="activeFilters"></div>
-    </div>
-    <div class="relative flex flex-col gap-2 max-w-lg">
-      
-
-    </div>
-
-    <div class="flex-1 text-right flex flex-row-reverse md:flex-col items-end justify-between md:justify-end gap-1 md:self-end">
-      <!-- <button id="generateBtn">Generate Graph</button> -->
-      <button id="downloadBtn" class="frameless" style="display: none;">
-        <span class="flex items-center gap-1 text-sm text-gray-500 font-semibold">
-          <img src="/assets/images/download.svg" class="size-5" alt="Download SVG">
-          Download SVG
-        </span>
-      </button>
-      <div id="status" class=""></div>
-    </div>
-  </div>
-</div>
 
 <div id="excluded-info" class="-mx-4 md:mx-0 mb-4 px-3 pt-3 pb-2 flex gap-4 md:gap-8 md:rounded border-y md:border-x border-gray-200 bg-white" style="display: none;">
   {% include stat.html label="501(c)(3)s <em>not</em> displayed" valueId="excluded501" %}

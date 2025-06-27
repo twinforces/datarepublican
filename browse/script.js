@@ -27,41 +27,168 @@ function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
 }
 
-window.loadPreset = function (value) {
-  const index = parseInt(value);
-  viewModel.loadPreset(index);
+window.loadPreset = function (value, mode) {
+  viewModel.loadPreset(value, mode);
+  hidePresets(); // our work here is done.
   refresh();
 };
 
-window.randomPreset = function () {
-  const select = document.getElementById("preset-select");
-  const randomIndex = Math.floor(Math.random() * viewModel.presets().length);
-  select.value = randomIndex; // Match <option> values
-  loadPreset(randomIndex); // Pass value that aligns with loadPreset logic
-};
+function renderPopup() {
+  const popup = document.getElementById("ngo-popup");
+  const presets = viewModel.presets();
+  popup.innerHTML = `
+    <div class="ngopreset-container show-when-panel-shown">
+      <div class="ngopreset-columns">
+        <div class="toggle-row">
+          <div class="button-group-column">
+            <button id="ngopreset-toggle" class="ngopreset-toggle-btn " style="font-size: 11px;">Hide Presets</button>
+            <div class="ngopreset-mode-switch">
+              <span class="toggle-label toggle-label-add">Preset will add</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="preset-mode" value="add">
+                <label for="preset-mode"></label>
+              </div>
+              <span class="toggle-label toggle-label-replace">Preset will replace</span>
+            </div>
+          </div>
+          <div class="filler-column"></div>
+        </div>
+        <div class="grid-row">
+          <!-- General Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">General</h2>
+            <div class="ngopreset-grid">
+              ${presets
+                .filter((item) => !item.subcategories)
+                .map(
+                  (item) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(item.eins)}' 
+                          data-title="${item.title}"
+                          title="${item.description || ""}">
+                    ${item.title}
+                  </button>
+                `
+                )
+                .join("")}
+            </div>
+          </div>
+          <!-- Controversies Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Controversies</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find((item) => item.title === "Controversies")
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+          <!-- Politicians Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Politicians</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find((item) => item.title === "Politicians")
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+          <!-- Billionaires Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Billionaires</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find(
+                    (item) =>
+                      item.title === "Friendly Neighborhood Billionaires"
+                  )
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 
-function populatePresetSelect() {
-  const select = document.getElementById("preset-select");
+  // Add event listeners for preset buttons
+  const presetButtons = document.querySelectorAll(".ngopreset-btn");
+  presetButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const eins = JSON.parse(btn.dataset.eins);
+      const title = btn.dataset.title;
+      const mode = document.getElementById("preset-mode").checked
+        ? "replace"
+        : "add";
+      console.log(
+        `${mode === "add" ? "Adding" : "Replacing"} ${title}: ${eins}`
+      );
+      loadPreset({ eins, title }, mode);
+    });
+  });
 
-  // Add prompt as a separate, non-selectable option
-  select.innerHTML =
-    '<option value="" disabled selected>Select a Preset</option>';
+  // Wire up the toggle buttons
+  const showBtn = document.getElementById("showPresetsBtn");
+  const hideBtn = document.getElementById("ngopreset-toggle");
+  if (showBtn) {
+    showBtn.addEventListener("click", showPresets);
+  }
+  if (hideBtn) {
+    hideBtn.addEventListener("click", hidePresets);
+  }
 
-  const separator = document.createElement("option");
-  separator.disabled = true;
-  separator.className = "separator";
-  separator.value = "separator";
-  separator.textContent = "──────────";
-  select.appendChild(separator);
-
-  // Populate dropdown with presets, adding a separator after the 3rd preset
-  viewModel.presets().forEach((preset, index) => {
-    const option = document.createElement("option");
-    option.value = index; // Offset by 2 for prompt and separator
-    option.textContent = preset.title;
-    select.appendChild(option);
+  // Toggle How It Works
+  document.getElementById("howItWorksBtn").addEventListener("click", () => {
+    const list = document.getElementById("howItWorksList");
+    list.classList.toggle("visible");
   });
 }
+
+// Show Presets and Hide Presets implementations
+window.showPresets = function () {
+  document.documentElement.style.setProperty("--panel-shown", "block");
+  document.documentElement.style.setProperty("--panel-hidden", "none");
+  console.log("Panel shown");
+};
+
+window.hidePresets = function () {
+  document.documentElement.style.setProperty("--panel-shown", "none");
+  document.documentElement.style.setProperty("--panel-hidden", "block");
+  console.log("Panel hidden");
+};
 
 $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
@@ -69,7 +196,7 @@ $(document).ready(function () {
   updateStatus("Loading Data...");
 
   // Initialize the select on page load
-  populatePresetSelect();
+  renderPopup();
 
   viewModel
     .loadData()
@@ -604,7 +731,10 @@ function generateGraph() {
     .size([width - 100, height - 100]);
 
   viewModel.parseQueryParams();
-  if (viewModel.matchURL() === 0) randomPreset();
+  if (viewModel.matchURL() === 0) {
+    showPresets();
+    return;
+  }
 
   viewModel.previousData = renderFocusedSankey(
     g,
@@ -690,6 +820,7 @@ function generateGraph() {
   zoomToFit();
   renderActiveEINs();
   renderActiveKeywords();
+  renderActiveEINs();
   renderHideEINs();
   $("#loading").hide();
 }
@@ -1248,8 +1379,9 @@ function handleSearchResultHover(index) {
 }
 
 function refresh() {
-  renderHideEINs();
   updateQueryParams();
+  renderActiveEINs;
+  renderHideEINs();
   generateGraph();
 }
 
