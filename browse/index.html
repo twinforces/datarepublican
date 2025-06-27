@@ -201,6 +201,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         line-height: 1rem;
         background: none;
         color: #4b5563;
+        display:none;
       }
     
       #downloadBtn:hover {
@@ -257,20 +258,21 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         gap: 0.5rem;
         margin-bottom: 0.5rem;
         background: white;
-        padding: 0.25rem;
+        /*padding: 0.25rem;*/
       }
     
       .ngopreset-columns .toggle-row .button-group-column {
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         align-items: flex-start;
         gap: 0.5rem;
+        padding: 0.25rem;
       }
     
       .ngopreset-columns .filler-column {
         flex: 1;
         background: #ddd;
-        min-height: 20px;
+        min-height: 36px;
       }
     
       .ngopreset-columns .grid-row {
@@ -363,6 +365,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         position: relative;
         width: 40px;
         height: 20px;
+        padding-top: 5px;
       }
     
       .toggle-switch input[type="checkbox"] {
@@ -488,11 +491,11 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     
         <!-- Download and Status -->
         <div class="md:col-span-2 lg:col-span-3 flex justify-end items-end gap-2 mt-2">
+          <div id="status" class="text-sm"></div>
           <button id="downloadBtn" class="frameless text-gray-500 hover:text-blue-600 flex items-center gap-1 text-base" style="font-size: 14px;">
             <img src="/assets/images/download.svg" class="w-4 h-4" alt="Download SVG">
             Download SVG
           </button>
-          <div id="status" class="text-sm"></div>
         </div>
       </div>
     </div>
