@@ -6,7 +6,10 @@ const NEXT_REVEAL = 3;
 const NEXT_REVEAL_MAX = 15;
 const GOV_EIN = "001";
 const MAX_NODES = 100;
+const STORE_CHUNK_SIZE = 50000;
+const PROCESS_CHUNK_SIZE = 10000;
 const CHUNK_SIZE = 10000;
+
 const MAX_KEYWORD_NODES = 15;
 
 const DB_NAME = "CharityDatabase";
@@ -14,9 +17,8 @@ const DB_VERSION = 1;
 const CHARITY_STORE = "charities";
 const GRANT_STORE = "grants";
 const METADATA_STORE = "metadata";
-const DATA_VERSION = "2025-06-25"; // Update when TSVs change
+const DATA_VERSION = "2025-06-25";
 
-// Data URLs
 const DATA_FILES = [
   {
     status: "Loading Charities",
@@ -197,21 +199,22 @@ async function fetchLocalData(db, storeName) {
   }
 }
 
-// Store data in IndexedDB
 async function storeData(db, storeName, records) {
   try {
-    updateStatus(`Storing ${storeName}: ${records.length} records`);
-
-    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+    console.time(`Storing ${storeName}`);
+    for (let i = 0; i < records.length; i += STORE_CHUNK_SIZE) {
+      console.time(`Storing ${storeName} ${i}`);
       const tx = db.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
-      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const chunk = records.slice(i, i + STORE_CHUNK_SIZE);
       for (const record of chunk) {
         await store.put(record);
       }
       await tx.done;
+      console.timeEnd(`Storing ${storeName} ${i}`);
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    console.timeEnd(`Storing ${storeName}`);
   } catch (err) {
     console.error(`Error storing data in ${storeName}:`, err);
     updateStatus(`Error storing ${storeName}: ${err.message}`, "red", false);
@@ -219,7 +222,113 @@ async function storeData(db, storeName, records) {
   }
 }
 
-// Fetch and parse TSV data
+async function exportDB() {
+  try {
+    const db = await initDB();
+    const tx = db.transaction(
+      [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
+      "readonly"
+    );
+    const charities = await tx.objectStore(CHARITY_STORE).getAll();
+    const grants = await tx.objectStore(GRANT_STORE).getAll();
+    const metadata = await tx.objectStore(METADATA_STORE).getAll();
+    await tx.done;
+
+    // Export charities
+    const charitiesBlob = new Blob([JSON.stringify({ charities })], {
+      type: "application/json",
+    });
+    const charitiesUrl = URL.createObjectURL(charitiesBlob);
+    const charitiesA = document.createElement("a");
+    charitiesA.href = charitiesUrl;
+    charitiesA.download = "charities_db.json";
+    charitiesA.click();
+    URL.revokeObjectURL(charitiesUrl);
+
+    // Export grants
+    const grantsBlob = new Blob([JSON.stringify({ grants })], {
+      type: "application/json",
+    });
+    const grantsUrl = URL.createObjectURL(grantsBlob);
+    const grantsA = document.createElement("a");
+    grantsA.href = grantsUrl;
+    grantsA.download = "grants_db.json";
+    grantsA.click();
+    URL.revokeObjectURL(grantsUrl);
+
+    // Export metadata
+    const metadataBlob = new Blob([JSON.stringify({ metadata })], {
+      type: "application/json",
+    });
+    const metadataUrl = URL.createObjectURL(metadataBlob);
+    const metadataA = document.createElement("a");
+    metadataA.href = metadataUrl;
+    metadataA.download = "metadata_db.json";
+    metadataA.click();
+    URL.revokeObjectURL(metadataUrl);
+
+    updateStatus("Database exported successfully", "green", false);
+  } catch (err) {
+    console.error("Error exporting database:", err);
+    updateStatus(`Error exporting database: ${err.message}`, "red", false);
+    throw err;
+  }
+}
+
+async function importDB() {
+  try {
+    const db = await initDB();
+    const stores = [
+      {
+        file: "./charities_db.json.zip",
+        store: CHARITY_STORE,
+        key: "charities",
+      },
+      { file: "./grants_db.json.zip", store: GRANT_STORE, key: "grants" },
+      {
+        file: "./metadata_db.json.zip",
+        store: METADATA_STORE,
+        key: "metadata",
+      },
+    ];
+
+    for (const { file, store, key } of stores) {
+      const response = await fetch(file);
+      if (!response.ok)
+        throw new Error(`HTTP error ${response.status} for ${file}`);
+      const zipBlob = await response.blob();
+      const zip = await JSZip.loadAsync(zipBlob);
+      const jsonText = await zip.file(`${key}_db.json`).async("text");
+      const dbData = JSON.parse(jsonText)[key];
+
+      for (let i = 0; i < dbData.length; i += STORE_CHUNK_SIZE) {
+        const tx = db.transaction(store, "readwrite");
+        const storeObj = tx.objectStore(store);
+        const chunk = dbData.slice(i, i + STORE_CHUNK_SIZE);
+        for (const record of chunk) {
+          await storeObj.put(record);
+        }
+        await tx.done;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateStatus(
+          `Importing ${key}: ${formatNumber(i + STORE_CHUNK_SIZE)} processed`
+        );
+      }
+    }
+
+    console.timeEnd("Importing database");
+    updateStatus(
+      "Database imported successfully, reloading...",
+      "green",
+      false
+    );
+    await viewModel.loadData();
+  } catch (err) {
+    console.error("Error importing database:", err);
+    updateStatus(`Error importing database: ${err.message}`, "red", false);
+    throw err;
+  }
+}
 async function fetchAndStoreTSV(
   db,
   { zipFile, tsvFile, type, grantType, status }
@@ -238,7 +347,7 @@ async function fetchAndStoreTSV(
     return new Promise((resolve, reject) => {
       const records = [];
       let rowsProcessed = 0;
-      const BATCH_SIZE = CHUNK_SIZE;
+      const BATCH_SIZE = STORE_CHUNK_SIZE;
       const lines = tsvText.split("\n").filter((line) => line.trim());
       if (lines.length < 1) throw new Error(`Empty TSV: ${tsvFile}`);
       const headers = lines[0].split("\t").map((header) => header.trim());
@@ -251,7 +360,9 @@ async function fetchAndStoreTSV(
           : header;
       });
 
+      let grantFetchPromise = null;
       function processBatch(startIndex) {
+        console.time(`Fetch Process Time ${zipFile} ${startIndex}`);
         const endIndex = Math.min(startIndex + BATCH_SIZE, lines.length);
         let row;
         try {
@@ -313,10 +424,23 @@ async function fetchAndStoreTSV(
             }
 
             rowsProcessed++;
-            if (rowsProcessed % CHUNK_SIZE === 0) {
+            if (rowsProcessed % BATCH_SIZE === 0) {
               updateStatus(
                 `${status}: ${formatNumber(rowsProcessed)} rows processed`
               );
+              // Start grant fetch after ~50% of charities
+              if (
+                type === "charities" &&
+                rowsProcessed >= 400000 &&
+                !grantFetchPromise
+              ) {
+                const grantFile = DATA_FILES.find(
+                  (f) => f.type === "grants" && f.grantType === "regular"
+                );
+                if (grantFile) {
+                  grantFetchPromise = fetch(grantFile.zipFile);
+                }
+              }
             }
           }
 
@@ -325,6 +449,7 @@ async function fetchAndStoreTSV(
           } else {
             resolve(records);
           }
+          console.timeEnd(`Fetch Process Time ${zipFile} ${startIndex}`);
         } catch (err) {
           console.error(
             `Error in batch for ${tsvFile} at row ${rowsProcessed}:`,
@@ -383,6 +508,10 @@ export class BrowseViewModel {
     this.dataReady = false;
     viewModel = this;
     this.resetAll();
+  }
+
+  exportDB() {
+    exportDB();
   }
 
   clearAll() {
@@ -1113,30 +1242,35 @@ export class BrowseViewModel {
       if (await hasValidData(db)) {
         updateStatus("Loading from local storage...");
         console.time("Starting DB Load-C");
-        const charities = await fetchLocalData(db, CHARITY_STORE);
+        const charityPromise = fetchLocalData(db, CHARITY_STORE);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const charities = await charityPromise;
         console.timeEnd("Starting DB Load-C");
 
-        for (let i = 0; i < charities.length; i += CHUNK_SIZE) {
-          const chunk = charities.slice(i, i + CHUNK_SIZE);
+        for (let i = 0; i < charities.length; i += PROCESS_CHUNK_SIZE) {
+          const chunk = charities.slice(i, i + PROCESS_CHUNK_SIZE);
           for (const row of chunk) {
             Charity.buildCharityFromRow(row);
           }
           updateStatus(
-            `Loading charities: ${formatNumber(i + CHUNK_SIZE)} processed`
+            `Loading charities: ${formatNumber(
+              i + PROCESS_CHUNK_SIZE
+            )} processed`
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
+
         console.time("Starting DB Load-G");
         const grants = await fetchLocalData(db, GRANT_STORE);
         console.timeEnd("Starting DB Load-G");
 
-        for (let i = 0; i < grants.length; i += CHUNK_SIZE) {
-          const chunk = grants.slice(i, i + CHUNK_SIZE);
+        for (let i = 0; i < grants.length; i += PROCESS_CHUNK_SIZE) {
+          const chunk = grants.slice(i, i + PROCESS_CHUNK_SIZE);
           for (const row of chunk) {
             Grant.loadGrantRow(row, row.grantType);
           }
           updateStatus(
-            `Loading grants: ${formatNumber(i + CHUNK_SIZE)} processed`
+            `Loading grants: ${formatNumber(i + PROCESS_CHUNK_SIZE)} processed`
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
@@ -1149,6 +1283,21 @@ export class BrowseViewModel {
           false
         );
       } else {
+        updateStatus("Checking for prebuilt database...");
+        try {
+          const response = await fetch("./charities_db.json.zip");
+          if (response.ok) {
+            console.time("Importing database");
+            await importDB();
+            return Object.keys(Grant.grantLookup).length;
+          }
+        } catch (err) {
+          console.log(
+            "Prebuilt database not found or invalid, fetching TSVs:",
+            err
+          );
+        }
+
         updateStatus("Fetching data from server...");
         const tx = db.transaction(
           [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
@@ -1168,8 +1317,8 @@ export class BrowseViewModel {
             file.type === "charities" ? CHARITY_STORE : GRANT_STORE,
             records
           );
-          for (let i = 0; i < records.length; i += CHUNK_SIZE) {
-            const chunk = records.slice(i, i + CHUNK_SIZE);
+          for (let i = 0; i < records.length; i += PROCESS_CHUNK_SIZE) {
+            const chunk = records.slice(i, i + PROCESS_CHUNK_SIZE);
             for (const row of chunk) {
               if (file.type === "charities") {
                 Charity.buildCharityFromRow(row);
@@ -1178,7 +1327,9 @@ export class BrowseViewModel {
               }
             }
             updateStatus(
-              `Loading ${file.type}: ${formatNumber(i + CHUNK_SIZE)} processed`
+              `Loading ${file.type}: ${formatNumber(
+                i + PROCESS_CHUNK_SIZE
+              )} processed`
             );
             await new Promise((resolve) => setTimeout(resolve, 0));
           }
