@@ -6,11 +6,11 @@ const NEXT_REVEAL = 3;
 const NEXT_REVEAL_MAX = 15;
 const GOV_EIN = "001";
 const MAX_NODES = 100;
-const STORE_CHUNK_SIZE = 50000;
+const STORE_CHUNK_SIZE = 100000;
 const PROCESS_CHUNK_SIZE = 10000;
 const CHUNK_SIZE = 10000;
 
-const MAX_KEYWORD_NODES = 15;
+const MAX_KEYWORD_NODES = 25;
 
 const DB_NAME = "CharityDatabase";
 const DB_VERSION = 1;
@@ -278,6 +278,46 @@ async function exportDB() {
 async function importDB() {
   try {
     const db = await initDB();
+    console.time("Importing database");
+
+    // Fetch and check metadata
+    console.time("Fetching ./metadata_db.json.zip");
+    const metaResponse = await fetch("./metadata_db.json.zip");
+    console.timeEnd("Fetching ./metadata_db.json.zip");
+    if (!metaResponse.ok)
+      throw new Error(
+        `HTTP error ${metaResponse.status} for ./metadata_db.json.zip`
+      );
+
+    console.time("Decompressing ./metadata_db.json.zip");
+    const metaZipBlob = await metaResponse.blob();
+    const metaZip = await JSZip.loadAsync(metaZipBlob);
+    const metaJsonText = await metaZip.file("metadata_db.json").async("text");
+    console.timeEnd("Decompressing ./metadata_db.json.zip");
+
+    console.time("Parsing ./metadata_db.json.zip");
+    const metadata = JSON.parse(metaJsonText).metadata;
+    console.timeEnd("Parsing ./metadata_db.json.zip");
+
+    const version = metadata.find((m) => m.id === "version")?.value;
+    const generated = metadata.find((m) => m.id === "generated")?.value;
+    if (version !== DATA_VERSION || generated !== true) {
+      throw new Error(
+        `Invalid metadata: version=${version}, generated=${generated}`
+      );
+    }
+
+    // Import metadata
+    console.time("Writing metadata");
+    const metaTx = db.transaction(METADATA_STORE, "readwrite");
+    const metaStore = metaTx.objectStore(METADATA_STORE);
+    for (const record of metadata) {
+      await metaStore.put(record);
+    }
+    await metaTx.done;
+    console.timeEnd("Writing metadata");
+
+    // Import charities and grants
     const stores = [
       {
         file: "./charities_db.json.zip",
@@ -285,23 +325,28 @@ async function importDB() {
         key: "charities",
       },
       { file: "./grants_db.json.zip", store: GRANT_STORE, key: "grants" },
-      {
-        file: "./metadata_db.json.zip",
-        store: METADATA_STORE,
-        key: "metadata",
-      },
     ];
 
     for (const { file, store, key } of stores) {
+      console.time(`Fetching ${file}`);
       const response = await fetch(file);
+      console.timeEnd(`Fetching ${file}`);
       if (!response.ok)
         throw new Error(`HTTP error ${response.status} for ${file}`);
+
+      console.time(`Decompressing ${file}`);
       const zipBlob = await response.blob();
       const zip = await JSZip.loadAsync(zipBlob);
       const jsonText = await zip.file(`${key}_db.json`).async("text");
-      const dbData = JSON.parse(jsonText)[key];
+      console.timeEnd(`Decompressing ${file}`);
 
+      console.time(`Parsing ${file}`);
+      const dbData = JSON.parse(jsonText)[key];
+      console.timeEnd(`Parsing ${file}`);
+
+      console.time(`Writing ${key}`);
       for (let i = 0; i < dbData.length; i += STORE_CHUNK_SIZE) {
+        console.time(`Writing ${key} ${i}`);
         const tx = db.transaction(store, "readwrite");
         const storeObj = tx.objectStore(store);
         const chunk = dbData.slice(i, i + STORE_CHUNK_SIZE);
@@ -309,11 +354,13 @@ async function importDB() {
           await storeObj.put(record);
         }
         await tx.done;
+        console.timeEnd(`Writing ${key} ${i}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
         updateStatus(
           `Importing ${key}: ${formatNumber(i + STORE_CHUNK_SIZE)} processed`
         );
       }
+      console.timeEnd(`Writing ${key}`);
     }
 
     console.timeEnd("Importing database");
@@ -362,10 +409,10 @@ async function fetchAndStoreTSV(
 
       let grantFetchPromise = null;
       function processBatch(startIndex) {
-        console.time(`Fetch Process Time ${zipFile} ${startIndex}`);
         const endIndex = Math.min(startIndex + BATCH_SIZE, lines.length);
         let row;
         try {
+          console.time(`Fetch Process Time ${zipFile} ${startIndex}`);
           for (let index = startIndex; index < endIndex; index++) {
             const values = lines[index]
               .split("\t")
@@ -408,8 +455,8 @@ async function fetchAndStoreTSV(
               const grant = {
                 id: `${row.filer_ein}~${grant_ein}`,
                 filer_ein: row.filer_ein,
-                grant_ein: grant_ein,
-                amt: parseInt(row.grant_amt || row.amt || "0", 10) || 0,
+                grant_ein,
+                amt: parseInt(row.grant_amt || "0", 10) || 0,
                 grantType,
               };
               if (
@@ -428,7 +475,6 @@ async function fetchAndStoreTSV(
               updateStatus(
                 `${status}: ${formatNumber(rowsProcessed)} rows processed`
               );
-              // Start grant fetch after ~50% of charities
               if (
                 type === "charities" &&
                 rowsProcessed >= 400000 &&
@@ -443,13 +489,13 @@ async function fetchAndStoreTSV(
               }
             }
           }
+          console.timeEnd(`Fetch Process Time ${zipFile} ${startIndex}`);
 
           if (endIndex < lines.length) {
             setTimeout(() => processBatch(endIndex), 0);
           } else {
             resolve(records);
           }
-          console.timeEnd(`Fetch Process Time ${zipFile} ${startIndex}`);
         } catch (err) {
           console.error(
             `Error in batch for ${tsvFile} at row ${rowsProcessed}:`,
@@ -1248,10 +1294,12 @@ export class BrowseViewModel {
         console.timeEnd("Starting DB Load-C");
 
         for (let i = 0; i < charities.length; i += PROCESS_CHUNK_SIZE) {
+          console.time(`Processing charities ${i}`);
           const chunk = charities.slice(i, i + PROCESS_CHUNK_SIZE);
           for (const row of chunk) {
             Charity.buildCharityFromRow(row);
           }
+          console.timeEnd(`Processing charities ${i}`);
           updateStatus(
             `Loading charities: ${formatNumber(
               i + PROCESS_CHUNK_SIZE
@@ -1265,10 +1313,12 @@ export class BrowseViewModel {
         console.timeEnd("Starting DB Load-G");
 
         for (let i = 0; i < grants.length; i += PROCESS_CHUNK_SIZE) {
+          console.time(`Processing grants ${i}`);
           const chunk = grants.slice(i, i + PROCESS_CHUNK_SIZE);
           for (const row of chunk) {
             Grant.loadGrantRow(row, row.grantType);
           }
+          console.timeEnd(`Processing grants ${i}`);
           updateStatus(
             `Loading grants: ${formatNumber(i + PROCESS_CHUNK_SIZE)} processed`
           );
@@ -1285,70 +1335,74 @@ export class BrowseViewModel {
       } else {
         updateStatus("Checking for prebuilt database...");
         try {
-          const response = await fetch("./charities_db.json.zip");
+          const response = await fetch("./metadata_db.json.zip");
           if (response.ok) {
             console.time("Importing database");
             await importDB();
+            console.timeEnd("Importing database");
             return Object.keys(Grant.grantLookup).length;
+          } else {
+            throw new Error("Prebuilt database not found");
           }
         } catch (err) {
           console.log(
             "Prebuilt database not found or invalid, fetching TSVs:",
             err
           );
-        }
-
-        updateStatus("Fetching data from server...");
-        const tx = db.transaction(
-          [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
-          "readwrite"
-        );
-        await tx.objectStore(CHARITY_STORE).clear();
-        await tx.objectStore(GRANT_STORE).clear();
-        await tx
-          .objectStore(METADATA_STORE)
-          .put({ id: "version", value: DATA_VERSION });
-        await tx.done;
-
-        for (const file of DATA_FILES) {
-          const records = await fetchAndStoreTSV(db, file, file.status);
-          await storeData(
-            db,
-            file.type === "charities" ? CHARITY_STORE : GRANT_STORE,
-            records
+          updateStatus("Fetching data from server...");
+          const tx = db.transaction(
+            [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
+            "readwrite"
           );
-          for (let i = 0; i < records.length; i += PROCESS_CHUNK_SIZE) {
-            const chunk = records.slice(i, i + PROCESS_CHUNK_SIZE);
-            for (const row of chunk) {
-              if (file.type === "charities") {
-                Charity.buildCharityFromRow(row);
-              } else {
-                Grant.loadGrantRow(row, file.grantType);
+          await tx.objectStore(CHARITY_STORE).clear();
+          await tx.objectStore(GRANT_STORE).clear();
+          await tx
+            .objectStore(METADATA_STORE)
+            .put({ id: "version", value: DATA_VERSION });
+          await tx.done;
+
+          for (const file of DATA_FILES) {
+            const records = await fetchAndStoreTSV(db, file, file.status);
+            await storeData(
+              db,
+              file.type === "charities" ? CHARITY_STORE : GRANT_STORE,
+              records
+            );
+            for (let i = 0; i < records.length; i += PROCESS_CHUNK_SIZE) {
+              console.time(`Processing ${file.type} ${i}`);
+              const chunk = records.slice(i, i + PROCESS_CHUNK_SIZE);
+              for (const row of chunk) {
+                if (file.type === "charities") {
+                  Charity.buildCharityFromRow(row);
+                } else {
+                  Grant.loadGrantRow(row, file.grantType);
+                }
               }
+              console.timeEnd(`Processing ${file.type} ${i}`);
+              updateStatus(
+                `Loading ${file.type}: ${formatNumber(
+                  i + PROCESS_CHUNK_SIZE
+                )} processed`
+              );
+              await new Promise((resolve) => setTimeout(resolve, 0));
             }
             updateStatus(
-              `Loading ${file.type}: ${formatNumber(
-                i + PROCESS_CHUNK_SIZE
-              )} processed`
+              `Loaded ${formatNumber(records.length)} ${file.type} from ${
+                file.tsvFile
+              }`,
+              "green",
+              false
             );
-            await new Promise((resolve) => setTimeout(resolve, 0));
           }
-          updateStatus(
-            `Loaded ${formatNumber(records.length)} ${file.type} from ${
-              file.tsvFile
-            }`,
-            "green",
-            false
-          );
+
+          console.time("buildGovCharity");
+          await this.buildGovCharity();
+          console.timeEnd("buildGovCharity");
+
+          console.time("buildTheWorld");
+          await this.buildTheWorld();
+          console.timeEnd("buildTheWorld");
         }
-
-        console.time("buildGovCharity");
-        await this.buildGovCharity();
-        console.timeEnd("buildGovCharity");
-
-        console.time("buildTheWorld");
-        await this.buildTheWorld();
-        console.timeEnd("buildTheWorld");
       }
 
       console.log("Missing Charities", Grant.missingValues);
@@ -1470,17 +1524,22 @@ export class Charity {
       console.warn(`Skipping charity row: missing filer_ein`, row);
       return;
     }
-    const filer_name = row.filer_name || row.name || "Unknown Charity";
+    const name = row.name || row.filer_name || "Unknown Charity";
     let rAmt = parseInt(row.receipt_amt || "0", 10) || 0;
     let gAmt = parseInt(row.govt_amt || "0", 10) || 0;
     let cAmt = parseInt(row.contrib_amt || "0", 10) || 0;
     return new Charity({
       ein,
-      name: titleCase(filer_name),
+      name: titleCase(name),
       xml_name: row.xml_name,
       receipt_amt: rAmt,
       govt_amt: gAmt,
       contrib_amt: cAmt,
+      tax_year: row.tax_year || null,
+      org_type: row.org_type || null,
+      total_assets: row.total_assets || null,
+      form_type: row.form_type || null,
+      denominator: row.denominator || null,
       row,
     });
   }
