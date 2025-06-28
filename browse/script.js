@@ -27,6 +27,10 @@ function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
 }
 
+window.exportDB = function () {
+  viewModel.exportDB();
+};
+
 window.loadPreset = function (value, mode) {
   viewModel.loadPreset(value, mode);
   hidePresets(); // our work here is done.
