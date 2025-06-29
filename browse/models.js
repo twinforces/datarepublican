@@ -198,17 +198,28 @@ async function fetchLocalData(db, storeName) {
   try {
     const tx = db.transaction(storeName, "readonly");
     const store = tx.objectStore(storeName);
-    const records = await store.getAll();
+    const records = [];
+    const cursorRequest = store.openCursor();
+
+    await new Promise((resolve, reject) => {
+      cursorRequest.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          records.push(cursor.value);
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      cursorRequest.onerror = () => reject(cursorRequest.error);
+    });
+
     await tx.done;
+    console.log(`Retrieved ${records.length} records from ${storeName}`);
     return records;
-  } catch (err) {
-    console.error(`Error fetching data from ${storeName}:`, err);
-    updateStatus(
-      `Error loading ${storeName} from local storage: ${err.message}`,
-      "red",
-      false
-    );
-    throw err;
+  } catch (error) {
+    console.error(`Error fetching data from ${storeName}:`, error);
+    throw error;
   }
 }
 
@@ -1379,7 +1390,7 @@ export class BrowseViewModel {
               Charity.buildCharityFromRow(row);
               processedCharities++;
             } catch (error) {
-              console.error(`Error processing charity row ${i}:`, error);
+              console.error(`Error processing charity row ${i}:`, error, row);
               continue;
             }
           }
@@ -1405,6 +1416,11 @@ export class BrowseViewModel {
           }
           i += chunk.length;
         }
+        console.log(
+          `Processed ${processedCharities} charities, lookup size: ${
+            Object.keys(Charity.charityLookup).length
+          }`
+        );
 
         console.time("loadGrantsFromDB");
         const grants = await fetchLocalData(this.db, GRANT_STORE);
@@ -1417,13 +1433,13 @@ export class BrowseViewModel {
         while (i < grants.length) {
           const startTime = performance.now();
           console.time(`processGrants-${i}`);
-          const chunk = charities.slice(i, i + chunkSize);
+          const chunk = grants.slice(i, i + chunkSize);
           for (const row of chunk) {
             try {
               Grant.loadGrantRow(row, row.grantType);
               processedGrants++;
             } catch (error) {
-              console.error(`Error processing grant row ${i}:`, error);
+              console.error(`Error processing grant row ${i}:`, error, row);
               continue;
             }
           }
@@ -1449,6 +1465,11 @@ export class BrowseViewModel {
           }
           i += chunk.length;
         }
+        console.log(
+          `Processed ${processedGrants} grants, lookup size: ${
+            Object.keys(Grant.grantLookup).length
+          }`
+        );
 
         updateStatus(
           `Loaded ${formatNumber(
