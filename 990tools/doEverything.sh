@@ -8,6 +8,8 @@ export OUT_DIR="/Volumes/Data/tsvs"
 export ANAL_DIR="/Volumes/Data/atsvs"
 export FINAL_DIR="/Volumes/Data/final"
 export DR_ROOT="$HOME/Development/datarepublican"
+export TOOLS=$DR_ROOT/990tools
+export BROWSE=$DR_ROOT/browse
 
 # will download all the zip files from the IRS website the rest of the tools can work directly from the zips, saving a lot of disk spaces and clutter. This is safe to re-run, as it will skip files it already has. 
 python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR
@@ -43,7 +45,7 @@ python extract_grants.py 2017 2025 --zip-dir /Volumes/Data/irs_zips --cache-dir 
 ./combine_grants.sh $FINAL_DIR/inferred_grants.tsv  $FINAL_DIR/grants_pf_combined.tsv
 
 #there are EINs that have gotten money that don't file 990s, (state/local govt i.e. state unis, churches, etc)
-python grant_check.py --index-file $FINAL_DIR/charity_latest.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file filter_pf.md
+python grant_check.py --index-file $FINAL_DIR/charity_latest.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file filter_501.md
 python grant_check.py --index-file $FINAL_DIR/charity_latest.tsv --input-file  $FINAL_DIR/grants_pf_combined.tsv --output-file $FINAL_DIR/grants_pf.tsv --report-file filter_pf.md
 
 
@@ -62,12 +64,10 @@ wc -l $FINAL_DIR/*.tsv
 
 # zip everything and move it into place
 
-cd $FINAL_DIR
-zip -o grants_final.tsv.zip grants_final.tsv
-zip -o grants.pf.tsv.zip grants_pf.tsv
-zip -o charities.tsv.zip charity_final.tsv
-
-mv grants_final.tsv.zip grants.pf.tsv.zip charities.tsv.zip $DR_ROOT/browse/
+cp $FINAL_DIR/grants_final.tsv $BROWSE
+cp $FINAL_DIR/grants_pf.tsv $BROWSE/grants.pf.tsv
+cp $FINAL_DIR/charity_latest.tsv $$BROWSE/charities.tsv
+pushd $BROWSE; $TOOLS/split_tsvs.sh
 
 
 

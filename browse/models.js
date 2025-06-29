@@ -19,28 +19,7 @@ const GRANT_STORE = "grants";
 const METADATA_STORE = "metadata";
 const DATA_VERSION = "2025-06-25";
 
-const DATA_FILES = [
-  {
-    status: "Loading Charities",
-    baseFile: "./tsv_chunks/charities_chunk_",
-    tsvFilePrefix: "charities_chunk_",
-    type: "charities",
-  },
-  {
-    status: "Loading 501 Grants",
-    baseFile: "./tsv_chunks/grants_final_chunk_",
-    tsvFilePrefix: "grants_final_chunk_",
-    type: "grants",
-    grantType: "regular",
-  },
-  {
-    status: "Loading Private Foundation Grants",
-    baseFile: "./tsv_chunks/grants.pf_chunk_",
-    tsvFilePrefix: "grants.pf_chunk_",
-    type: "grants",
-    grantType: "private",
-  },
-];
+import { DATA_FILES } from "./data_files.js"; // Adjust path if needed
 
 import ORGANIZATION_TYPES from "./charityTypes.js";
 import { iso3166_alpha2 } from "./countryCodes.js";
@@ -114,28 +93,57 @@ export function getColorForEIN(ein) {
 }
 
 // Initialize IndexedDB
+
 async function initDB() {
-  try {
-    return await openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains(CHARITY_STORE)) {
-          db.createObjectStore(CHARITY_STORE, { keyPath: "filer_ein" });
-        }
-        if (!db.objectStoreNames.contains(GRANT_STORE)) {
-          const store = db.createObjectStore(GRANT_STORE, { keyPath: "id" });
-          store.createIndex("filer_ein", "filer_ein");
-          store.createIndex("grant_ein", "grant_ein");
-        }
-        if (!db.objectStoreNames.contains(METADATA_STORE)) {
-          db.createObjectStore(METADATA_STORE, { keyPath: "id" });
-        }
-      },
-    });
-  } catch (err) {
-    console.error("Error initializing IndexedDB:", err);
-    updateStatus(`Error initializing database: ${err.message}`, "red", false);
-    throw err;
+  console.log("Opening IndexedDB: CharityDatabase");
+  // Close any existing connections
+  const existingDBs = indexedDB.databases ? await indexedDB.databases() : [];
+  for (const dbInfo of existingDBs) {
+    if (dbInfo.name === "CharityDatabase") {
+      console.log("Closing existing CharityDatabase connection");
+      await new Promise((resolve) => {
+        const request = indexedDB.open(dbInfo.name);
+        request.onsuccess = () => {
+          request.result.close();
+          resolve();
+        };
+      });
+    }
   }
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("CharityDatabase", 1);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      console.log("Creating or upgrading IndexedDB stores...");
+      if (db.objectStoreNames.contains(CHARITY_STORE)) {
+        db.deleteObjectStore(CHARITY_STORE);
+        console.log(`Deleted existing ${CHARITY_STORE} store`);
+      }
+      if (db.objectStoreNames.contains(GRANT_STORE)) {
+        db.deleteObjectStore(GRANT_STORE);
+        console.log(`Deleted existing ${GRANT_STORE} store`);
+      }
+      if (db.objectStoreNames.contains(METADATA_STORE)) {
+        db.deleteObjectStore(METADATA_STORE);
+        console.log(`Deleted existing ${METADATA_STORE} store`);
+      }
+      db.createObjectStore(CHARITY_STORE, { keyPath: "filer_ein" });
+      console.log(`Created ${CHARITY_STORE} store with keyPath: filer_ein`);
+      db.createObjectStore(GRANT_STORE, { keyPath: "id" });
+      console.log(`Created ${GRANT_STORE} store with keyPath: id`);
+      db.createObjectStore(METADATA_STORE, { keyPath: "id" });
+      console.log(`Created ${METADATA_STORE} store with keyPath: id`);
+    };
+    request.onsuccess = () => {
+      console.log("IndexedDB opened successfully");
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      console.error("Failed to open IndexedDB:", request.error);
+      reject(request.error);
+    };
+  });
 }
 
 async function clearStorage() {
@@ -160,22 +168,27 @@ async function clearStorage() {
   }
 }
 
-// Check if data exists and is up-to-date
 async function hasValidData(db) {
   try {
-    const tx = db.transaction(
-      [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
-      "readonly"
-    );
-    const charityCount = await tx.objectStore(CHARITY_STORE).count();
-    const grantCount = await tx.objectStore(GRANT_STORE).count();
-    const version = await tx.objectStore(METADATA_STORE).get("version");
+    const tx = db.transaction(METADATA_STORE, "readonly");
+    const store = tx.objectStore(METADATA_STORE);
+    const versionRequest = await new Promise((resolve, reject) => {
+      const request = store.get("version");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const generatedRequest = await new Promise((resolve, reject) => {
+      const request = store.get("generated");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
     await tx.done;
     return (
-      charityCount > 0 && grantCount > 0 && version?.value === DATA_VERSION
+      versionRequest?.value === DATA_FILES.dbVersion &&
+      generatedRequest?.value === true
     );
-  } catch (err) {
-    console.error("Error checking data validity:", err);
+  } catch (error) {
+    console.error("Error checking hasValidData:", error);
     return false;
   }
 }
@@ -200,21 +213,55 @@ async function fetchLocalData(db, storeName) {
 }
 
 async function storeData(db, storeName, records) {
+  if (!db) {
+    throw new Error(`Database is undefined in storeData for ${storeName}`);
+  }
+  if (!storeName) {
+    throw new Error(`storeName is undefined in storeData`);
+  }
+  if (!Array.isArray(records)) {
+    throw new Error(
+      `Records is not an array in storeData for ${storeName}: ${JSON.stringify(
+        records
+      )}`
+    );
+  }
+  if (!db.objectStoreNames.contains(storeName)) {
+    throw new Error(`Store ${storeName} does not exist in database`);
+  }
+
   try {
-    console.time(`Storing ${storeName}`);
-    for (let i = 0; i < records.length; i += STORE_CHUNK_SIZE) {
-      console.time(`Storing ${storeName} ${i}`);
-      const tx = db.transaction(storeName, "readwrite");
-      const store = tx.objectStore(storeName);
-      const chunk = records.slice(i, i + STORE_CHUNK_SIZE);
-      for (const record of chunk) {
-        await store.put(record);
-      }
-      await tx.done;
-      console.timeEnd(`Storing ${storeName} ${i}`);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    console.time(`storeD-${storeName}`);
+    const tx = db.transaction(storeName, "readwrite");
+    const store = tx.objectStore(storeName);
+    let storedRecords = 0;
+
+    for (const record of records) {
+      await new Promise((resolve, reject) => {
+        const request = store.put(record);
+        request.onsuccess = () => {
+          storedRecords++;
+          resolve();
+        };
+        request.onerror = () => {
+          console.error(
+            `Failed to store record in ${storeName} with filer_ein ${record.filer_ein}:`,
+            request.error
+          );
+          reject(request.error);
+        };
+      });
     }
-    console.timeEnd(`Storing ${storeName}`);
+
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onabort = () =>
+        reject(new Error(`Transaction aborted for ${storeName}`));
+      tx.onerror = () => reject(tx.error);
+    });
+
+    console.timeEnd(`storeD-${storeName}`);
+    return storedRecords;
   } catch (err) {
     console.error(`Error storing data in ${storeName}:`, err);
     updateStatus(`Error storing ${storeName}: ${err.message}`, "red", false);
@@ -275,76 +322,96 @@ async function exportDB() {
   }
 }
 
-async function fetchAndStoreTSV(
-  db,
-  { baseFile, tsvFilePrefix, type, grantType, status }
-) {
+async function fetchAndStoreTSV(db, files) {
   try {
-    updateStatus(status);
-    let rowsProcessed = 0;
+    if (!Array.isArray(files)) {
+      throw new Error(
+        `files parameter is not an array: ${JSON.stringify(files)}`
+      );
+    }
+    updateStatus(`Fetching charities and grants...`);
+    let charityRowsProcessed = 0;
+    let charityRowsSkipped = 0;
+    let grantRowsProcessed = 0;
+    let grantRowsSkipped = 0;
     const BATCH_SIZE = STORE_CHUNK_SIZE;
-    const records = [];
-    let chunkIndex = 0;
+    const MAX_CONCURRENT = 5;
 
-    let grantFetchPromise = null;
-    while (true) {
-      const zipFile = `${baseFile}${chunkIndex}.tsv.zip`;
-      const tsvFile = `${tsvFilePrefix}${chunkIndex}.tsv`;
-      console.time(`Starting zip fetch ${zipFile}`);
-      const response = await fetch(zipFile);
-      console.timeEnd(`Starting zip fetch ${zipFile}`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.log(
-            `No more chunks for ${tsvFilePrefix} at index ${chunkIndex}`
-          );
-          break;
-        }
-        throw new Error(`HTTP error ${response.status} for ${zipFile}`);
-      }
-      const zipBlob = await response.blob();
-      console.time(`Decompressing ${zipFile}`);
-      const zip = await JSZip.loadAsync(zipBlob);
-      console.timeEnd(`Decompressing ${zipFile}`);
-      const tsv = zip.file(tsvFile);
-      if (!tsv) {
-        console.log(`No file ${tsvFile} in ${zipFile}`);
-        break;
-      }
-      const tsvText = await tsv.async("text");
-
+    async function processChunk({
+      tsvText,
+      tsvFile,
+      chunkIndex,
+      type,
+      grantType,
+    }) {
       const lines = tsvText.split("\n").filter((line) => line.trim());
-      if (lines.length < 1) throw new Error(`Empty TSV: ${tsvFile}`);
+      if (lines.length < 1) {
+        return { processed: 0, skipped: 0 };
+      }
       const headers = lines[0].split("\t").map((header) => header.trim());
-
-      const headerCounts = {};
-      const uniqueHeaders = headers.map((header) => {
-        headerCounts[header] = (headerCounts[header] || 0) + 1;
-        return headerCounts[header] > 1
-          ? `${header}_${headerCounts[header]}`
-          : header;
+      const expectedColumns =
+        type === "charities"
+          ? [
+              "filer_ein",
+              "filer_name",
+              "xml_name",
+              "receipt_amt",
+              "govt_amt",
+              "contrib_amt",
+              "tax_year",
+              "org_type",
+              "total_assets",
+              "form_type",
+              "denominator",
+            ]
+          : ["filer_ein", "grant_ein", "grant_amt"];
+      const columnMap = {};
+      headers.forEach((header, i) => {
+        columnMap[header] = i;
       });
 
-      async function processBatch(startIndex) {
+      const missingColumns = expectedColumns.filter(
+        (col) => !(col in columnMap)
+      );
+      if (missingColumns.length > 0) {
+        return { processed: 0, skipped: 0 };
+      }
+
+      const records = [];
+      let rowsProcessed = 0;
+      let rowsSkipped = 0;
+
+      for (
+        let startIndex = 1;
+        startIndex < lines.length;
+        startIndex += BATCH_SIZE
+      ) {
         const endIndex = Math.min(startIndex + BATCH_SIZE, lines.length);
         let row;
         try {
-          console.time(`Fetch Process Time ${zipFile} ${startIndex}`);
+          console.time(`processTSV-${tsvFile}-${startIndex}`);
           for (let index = startIndex; index < endIndex; index++) {
             const values = lines[index]
               .split("\t")
               .map((value) => (value ? value.trim() : ""));
+            if (values.length != expectedColumns.length) {
+              rowsSkipped++;
+              continue;
+            }
             row = {};
-            uniqueHeaders.forEach((header, i) => {
-              row[header] = values[i] || "";
+            expectedColumns.forEach((header) => {
+              row[header] =
+                columnMap[header] < values.length
+                  ? values[columnMap[header]]
+                  : "";
             });
 
             if (type === "charities") {
               const charity = {
                 filer_ein: row.filer_ein,
-                filer_name: row.filer_name,
-                name: row.filer_name,
-                xml_name: row.xml_name,
+                filer_name: row.filer_name || "",
+                name: row.filer_name || "",
+                xml_name: row.xml_name || "",
                 receipt_amt: parseInt(row.receipt_amt || "0", 10) || 0,
                 govt_amt: parseInt(row.govt_amt || "0", 10) || 0,
                 contrib_amt: parseInt(row.contrib_amt || "0", 10) || 0,
@@ -358,93 +425,179 @@ async function fetchAndStoreTSV(
                   ? parseFloat(row.denominator)
                   : null,
               };
-              if (!charity.filer_ein) {
-                console.warn(
-                  `Skipping charity row ${index}: missing filer_ein`,
-                  row
-                );
+              if (
+                !charity.filer_ein ||
+                !/^[0-9]{3,9}$/.test(charity.filer_ein)
+              ) {
+                rowsSkipped++;
+                continue;
+              }
+              if (charity.xml_name && !/.*\.xml$/.test(charity.xml_name)) {
+                rowsSkipped++;
                 continue;
               }
               records.push(charity);
-            } else if (type === "grants") {
+              try {
+                Charity.buildCharityFromRow(charity);
+              } catch (buildError) {
+                rowsSkipped++;
+                continue;
+              }
+              rowsProcessed++;
+            } else {
               let grant_ein = row.grant_ein;
+              let filer_ein = row.filer_ein;
               if (grant_ein?.length === 7) grant_ein = "0" + grant_ein;
+              if (filer_ein?.length === 7) filer_ein = "0" + filer_ein;
               const grant = {
-                id: `${row.filer_ein}~${grant_ein}`,
-                filer_ein: row.filer_ein,
+                id: `${filer_ein}~${grant_ein}`,
+                filer_ein,
                 grant_ein,
-                amt: parseInt(row.grant_amt || "0", 10) || 0,
+                amt: parseInt(row.grant_amt || row.amt || "0", 10) || 0,
                 grantType,
               };
               if (
                 grant.filer_ein &&
                 grant.grant_ein &&
-                grant.filer_ein !== grant.grant_ein
+                grant.filer_ein !== grant.grant_ein &&
+                /^[0-9]{3,9}$/.test(grant.grant_ein)
               ) {
                 records.push(grant);
+                Grant.loadGrantRow(grant, grantType);
+                rowsProcessed++;
               } else {
-                console.warn(`Skipping grant row ${index}: invalid EINs`, row);
+                rowsSkipped++;
               }
             }
+          }
+          console.timeEnd(`processTSV-${tsvFile}-${startIndex}`);
 
-            rowsProcessed++;
-            if (rowsProcessed % BATCH_SIZE === 0) {
-              updateStatus(
-                `${status}: ${formatNumber(rowsProcessed)} rows processed`
+          if (records.length > 0) {
+            console.time(`storeTSV-${tsvFile}-${startIndex}`);
+            try {
+              await storeData(
+                db,
+                type === "charities" ? CHARITY_STORE : GRANT_STORE,
+                records.splice(0, records.length)
               );
-              if (
-                type === "charities" &&
-                rowsProcessed >= 400000 &&
-                !grantFetchPromise
-              ) {
-                const grantFile = DATA_FILES.find(
-                  (f) => f.type === "grants" && f.grantType === "regular"
-                );
-                if (grantFile) {
-                  grantFetchPromise = fetch(`${grantFile.baseFile}0.tsv.zip`);
-                }
-              }
+            } catch (storeError) {
+              console.error(
+                `Failed to store ${type} for chunk ${chunkIndex}:`,
+                storeError
+              );
+              throw storeError;
             }
+            console.timeEnd(`storeTSV-${tsvFile}-${startIndex}`);
           }
-          console.timeEnd(`Fetch Process Time ${zipFile} ${startIndex}`);
-
-          if (records.length >= BATCH_SIZE || endIndex >= lines.length) {
-            console.time(`Storing ${type} ${rowsProcessed - records.length}`);
-            await storeData(
-              db,
-              type === "charities" ? CHARITY_STORE : GRANT_STORE,
-              records.splice(0, records.length)
-            );
-            console.timeEnd(
-              `Storing ${type} ${rowsProcessed - records.length}`
-            );
-          }
-
-          if (endIndex < lines.length) {
-            setTimeout(() => processBatch(endIndex), 0);
-          }
+          updateStatus(
+            `Loaded ${formatNumber(
+              Object.keys(Charity.charityLookup).length
+            )} charities, ${formatNumber(
+              Object.keys(Grant.grantLookup).length
+            )} grants`
+          );
         } catch (err) {
           console.error(
             `Error in batch for ${tsvFile} at row ${rowsProcessed}:`,
-            err,
-            row
+            err
           );
           throw err;
         }
       }
-
-      await processBatch(1);
-      chunkIndex++;
+      return { processed: rowsProcessed, skipped: rowsSkipped };
     }
 
-    return records;
+    async function fetchAndProcessChunk(file, type, grantType, chunkIndex) {
+      const zipFile = `${file.baseFile}${chunkIndex}.tsv.zip`;
+      const tsvFile = `${file.tsvFilePrefix}${chunkIndex}.tsv`;
+      try {
+        const response = await fetch(zipFile);
+        if (!response.ok) {
+          if (response.status === 404) {
+            return null;
+          }
+          throw new Error(`HTTP error ${response.status} for ${zipFile}`);
+        }
+        const zipBlob = await response.blob();
+        const zip = await JSZip.loadAsync(zipBlob);
+        const tsv = zip.file(tsvFile);
+        if (!tsv) {
+          return null;
+        }
+        const tsvText = await tsv.async("text");
+        return await processChunk({
+          tsvText,
+          tsvFile,
+          chunkIndex,
+          type,
+          grantType,
+        });
+      } catch (error) {
+        console.error(`Error fetching ${zipFile}:`, error);
+        return null;
+      }
+    }
+
+    async function fetchWithLimit(tasks) {
+      const results = [];
+      const executing = new Set();
+
+      for (let i = 0; i < tasks.length; i++) {
+        if (executing.size >= MAX_CONCURRENT) {
+          await Promise.race(executing);
+          const completed = [...executing].find(
+            (p) =>
+              p[Symbol.toStringTag] === "Promise" && p.status === "fulfilled"
+          );
+          if (completed) {
+            results.push(await completed);
+            executing.delete(completed);
+          }
+        }
+        const promise = tasks[i]().then((result) => {
+          executing.delete(promise);
+          return result;
+        });
+        executing.add(promise);
+        results.push(promise);
+      }
+
+      return Promise.all(results);
+    }
+
+    for (const file of files) {
+      updateStatus(
+        `Processing ${file.tsvFilePrefix}: ${formatNumber(
+          Object.keys(Charity.charityLookup).length
+        )} charities, ${formatNumber(
+          Object.keys(Grant.grantLookup).length
+        )} grants`
+      );
+      const tasks = [];
+      const maxChunks = file.chunkCount;
+      for (let chunkIndex = 0; chunkIndex < maxChunks; chunkIndex++) {
+        tasks.push(() =>
+          fetchAndProcessChunk(file, file.type, file.grantType, chunkIndex)
+        );
+      }
+      const results = await fetchWithLimit(tasks);
+      for (const result of results) {
+        if (result) {
+          if (file.type === "charities") {
+            charityRowsProcessed += result.processed;
+            charityRowsSkipped += result.skipped;
+          } else {
+            grantRowsProcessed += result.processed;
+            grantRowsSkipped += result.skipped;
+          }
+        }
+      }
+    }
+
+    return [];
   } catch (error) {
-    console.error(`Error processing ${tsvFilePrefix}:`, error);
-    updateStatus(
-      `Error loading ${tsvFilePrefix}X.tsv: ${error.message}`,
-      "red",
-      false
-    );
+    console.error(`Error processing files:`, error);
+    updateStatus(`Error loading data: ${error.message}`, "red", false);
     throw error;
   }
 }
@@ -798,112 +951,91 @@ export class BrowseViewModel {
     return Charity.visibleCharities.size;
   }
 
-  /**
-   * So the NGO data we're parsing calls out how much money each NGO is getting from the Government.
-   * That's treated as an implied grant from a virtual NGO, so we generate that by scanning all the
-   * NGOs and creating that data. This is technically a model function, but its here now and I'm
-   * not religious about any kind of code architecture enough to bother moving it.
-   * @returns
-   */
-  async buildGovCharity() {
-    updateStatus(`Building US Govt from ${Charity.getCharityCount}`);
-    const db = await initDB();
-    const gov_ein = this.GOV_EIN;
-    const gov_proto = {
-      filer_ein: gov_ein,
-      name: "US Government",
-      xml_name: "The Beast",
-      contrib_amt: 4.6e12,
-      row: { tax_year: "2025", org_type: "USG" },
-    };
-    const govChar = new Charity(gov_proto);
-    let govGrants = 0;
-    let processList = Object.values(Charity.charityLookup)
-      .filter((c) => c.govt_amt)
-      .sort((a, b) => b.govt_amt - a.govt_amt);
-    const govCount = processList.length;
-    let govTotal = 0;
-    const totalGrants = processList.reduce((sum, c) => sum + c.govt_amt, 0);
-    const grantRecords = [];
-
-    let chunk = processList.slice(0, CHUNK_SIZE);
-    processList = processList.slice(CHUNK_SIZE);
-    while (chunk.length) {
-      chunk.forEach((c) => {
-        if (c.govt_amt > 0) {
-          const filer = gov_ein;
-          const grantee = c.id;
-          let amt = c.govt_amt;
-          if (isNaN(amt)) amt = 0;
-          govGrants++;
-          const grant = new Grant({
-            filer_ein: filer,
-            grant_ein: grantee,
-            amt: amt,
-            grantType: "gov",
-          });
-          grantRecords.push({
-            id: grant.id,
-            filer_ein: filer,
-            grant_ein: grantee,
-            amt: amt,
-            grantType: "gov",
-          });
-          govTotal += amt;
-        }
-      });
-      updateStatus(
-        `<span>Gov processing</span><span class="text-[13px] opacity-60">${Math.round(
-          (govGrants / govCount) * 100
-        )}% ${Math.round(
-          (govTotal / totalGrants) * 100
-        )}% ${govGrants}/${govCount} ${formatNumber(govTotal)}/${formatNumber(
-          totalGrants
-        )} complete</span>`
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      chunk = processList.slice(0, CHUNK_SIZE);
-      processList = processList.slice(CHUNK_SIZE);
+  async buildTheWorld(db) {
+    if (!db) {
+      throw new Error("Database not provided to buildTheWorld");
+    }
+    if (!db.objectStoreNames.contains(CHARITY_STORE)) {
+      throw new Error(`CHARITY_STORE does not exist in database`);
+    }
+    if (!db.objectStoreNames.contains(METADATA_STORE)) {
+      throw new Error(`METADATA_STORE does not exist in database`);
     }
 
-    await storeData(db, CHARITY_STORE, [gov_proto]);
-    await storeData(db, GRANT_STORE, grantRecords);
-    updateStatus(
-      `<span>Gov charity complete</span><span class="text-[13px] opacity-60">${
-        govChar.grants.length
-      } generated, ${formatNumber(govTotal)}</span>`
-    );
-    govChar.isGov = true;
-    console.log(`${govGrants} Implied Government Grants Generated`);
-    console.log(`Gov Total: ${formatNumber(govTotal)}`);
-    this.GOV_NODE = govChar;
-    GOV_NODE = govChar;
-    return govChar;
-  }
-
-  async buildTheWorld() {
     updateStatus(
       `Building World from ${Object.keys(iso3166_alpha2).length} countries`
     );
-    const db = await initDB();
     const countryRecords = [];
+    let countriesProcessed = 0;
+
     for (const [fake_ein, data] of Object.entries(iso3166_alpha2)) {
-      const country_pro = {
-        filer_ein: fake_ein,
-        name: data.name,
-        filer_name: data.name,
-        xml_name: `The World${data.code}`,
-        contrib_amt: 1,
-        row: { tax_year: "2025", org_type: "Foreign Country" },
-      };
-      new Charity(country_pro);
-      countryRecords.push(country_pro);
+      try {
+        if (!fake_ein || !data || !data.name || !data.code) {
+          continue;
+        }
+        const country_pro = {
+          filer_ein: fake_ein,
+          filer_name: data.name,
+          name: data.name,
+          xml_name: `The World${data.code}`,
+          receipt_amt: 0,
+          govt_amt: 0,
+          contrib_amt: 1,
+          tax_year: "2025",
+          org_type: "Foreign Country",
+          total_assets: null,
+          form_type: null,
+          denominator: null,
+        };
+        Charity.buildCharityFromRow(country_pro);
+        countryRecords.push(country_pro);
+        countriesProcessed++;
+      } catch (error) {
+        console.error(`Error processing country ${fake_ein}:`, error);
+        continue;
+      }
     }
-    await storeData(db, CHARITY_STORE, countryRecords);
-    await db
-      .transaction(METADATA_STORE, "readwrite")
-      .objectStore(METADATA_STORE)
-      .put({ id: "generated", value: true });
+
+    updateStatus(`Storing ${countriesProcessed} country records`);
+    try {
+      console.time("storeCountries");
+      const storedCount = await storeData(db, CHARITY_STORE, countryRecords);
+      console.timeEnd("storeCountries");
+      if (storedCount !== countryRecords.length) {
+        console.warn(
+          `Storage mismatch: Prepared ${countryRecords.length} countries, stored ${storedCount}`
+        );
+      }
+    } catch (error) {
+      console.error(`Failed to store countries in IndexedDB:`, error);
+      console.log("Continuing despite storage error");
+    }
+
+    try {
+      console.time("storeMetadata");
+      const tx = db.transaction(METADATA_STORE, "readwrite");
+      const store = tx.objectStore(METADATA_STORE);
+      await Promise.all([
+        new Promise((resolve, reject) => {
+          const request = store.put({ id: "generated", value: true });
+          request.onsuccess = resolve;
+          request.onerror = () => reject(request.error);
+        }),
+        new Promise((resolve, reject) => {
+          const request = store.put({
+            id: "version",
+            value: DATA_FILES.dbVersion,
+          });
+          request.onsuccess = resolve;
+          request.onerror = () => reject(request.error);
+        }),
+      ]);
+      await tx.done;
+      console.timeEnd("storeMetadata");
+    } catch (error) {
+      console.error(`Failed to store metadata:`, error);
+      console.log("Continuing despite metadata error");
+    }
   }
 
   /**
@@ -1209,7 +1341,6 @@ export class BrowseViewModel {
       throw err;
     }
   }
-
   async loadData() {
     console.log(`Starting loadData at ${new Date().toISOString()}`);
     updateStatus("Loading data...");
@@ -1218,106 +1349,174 @@ export class BrowseViewModel {
     Grant.grantLookup = {};
 
     try {
-      const db = await initDB();
-      if (await hasValidData(db)) {
-        updateStatus("Loading from local storage...");
-        console.time("Starting DB Load-C");
-        const charityPromise = fetchLocalData(db, CHARITY_STORE);
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const charities = await charityPromise;
-        console.timeEnd("Starting DB Load-C");
+      console.log("Initializing IndexedDB...");
+      this.db = await initDB();
+      console.log("IndexedDB initialized");
+      console.log(
+        `Database stores: ${Array.from(this.db.objectStoreNames).join(", ")}`
+      );
 
-        for (let i = 0; i < charities.length; i += PROCESS_CHUNK_SIZE) {
-          console.time(`Processing charities ${i}`);
-          const chunk = charities.slice(i, i + PROCESS_CHUNK_SIZE);
+      if (await hasValidData(this.db)) {
+        updateStatus("Loading from local storage...");
+        console.time("loadCharitiesFromDB");
+        const charities = await fetchLocalData(this.db, CHARITY_STORE);
+        console.timeEnd("loadCharitiesFromDB");
+        console.log(`Fetched ${charities.length} charities from IndexedDB`);
+
+        let chunkSize = 10000;
+        const TARGET_CYCLE_TIME = 500;
+        const MIN_CHUNK_SIZE = 2500;
+        const MAX_CHUNK_SIZE = 40000;
+        let processedCharities = 0;
+
+        let i = 0;
+        while (i < charities.length) {
+          const startTime = performance.now();
+          console.time(`processCharities-${i}`);
+          const chunk = charities.slice(i, i + chunkSize);
           for (const row of chunk) {
-            Charity.buildCharityFromRow(row);
+            try {
+              Charity.buildCharityFromRow(row);
+              processedCharities++;
+            } catch (error) {
+              console.error(`Error processing charity row ${i}:`, error);
+              continue;
+            }
           }
-          console.timeEnd(`Processing charities ${i}`);
+          console.timeEnd(`processCharities-${i}`);
           updateStatus(
             `Loading charities: ${formatNumber(
-              i + PROCESS_CHUNK_SIZE
+              Object.keys(Charity.charityLookup).length
             )} processed`
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
+
+          const cycleTime = performance.now() - startTime;
+          if (
+            cycleTime < TARGET_CYCLE_TIME * 0.5 &&
+            chunkSize < MAX_CHUNK_SIZE
+          ) {
+            chunkSize = Math.min(chunkSize * 2, MAX_CHUNK_SIZE);
+          } else if (
+            cycleTime > TARGET_CYCLE_TIME * 2 &&
+            chunkSize > MIN_CHUNK_SIZE
+          ) {
+            chunkSize = Math.max(Math.floor(chunkSize / 2), MIN_CHUNK_SIZE);
+          }
+          i += chunk.length;
         }
 
-        console.time("Starting DB Load-G");
-        const grants = await fetchLocalData(db, GRANT_STORE);
-        console.timeEnd("Starting DB Load-G");
+        console.time("loadGrantsFromDB");
+        const grants = await fetchLocalData(this.db, GRANT_STORE);
+        console.timeEnd("loadGrantsFromDB");
+        console.log(`Fetched ${grants.length} grants from IndexedDB`);
 
-        for (let i = 0; i < grants.length; i += PROCESS_CHUNK_SIZE) {
-          console.time(`Processing grants ${i}`);
-          const chunk = grants.slice(i, i + PROCESS_CHUNK_SIZE);
+        chunkSize = 10000;
+        let processedGrants = 0;
+        i = 0;
+        while (i < grants.length) {
+          const startTime = performance.now();
+          console.time(`processGrants-${i}`);
+          const chunk = charities.slice(i, i + chunkSize);
           for (const row of chunk) {
-            Grant.loadGrantRow(row, row.grantType);
+            try {
+              Grant.loadGrantRow(row, row.grantType);
+              processedGrants++;
+            } catch (error) {
+              console.error(`Error processing grant row ${i}:`, error);
+              continue;
+            }
           }
-          console.timeEnd(`Processing grants ${i}`);
+          console.timeEnd(`processGrants-${i}`);
           updateStatus(
-            `Loading grants: ${formatNumber(i + PROCESS_CHUNK_SIZE)} processed`
+            `Loading grants: ${formatNumber(
+              Object.keys(Grant.grantLookup).length
+            )} processed`
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
+
+          const cycleTime = performance.now() - startTime;
+          if (
+            cycleTime < TARGET_CYCLE_TIME * 0.5 &&
+            chunkSize < MAX_CHUNK_SIZE
+          ) {
+            chunkSize = Math.min(chunkSize * 2, MAX_CHUNK_SIZE);
+          } else if (
+            cycleTime > TARGET_CYCLE_TIME * 2 &&
+            chunkSize > MIN_CHUNK_SIZE
+          ) {
+            chunkSize = Math.max(Math.floor(chunkSize / 2), MIN_CHUNK_SIZE);
+          }
+          i += chunk.length;
         }
 
         updateStatus(
-          `Loaded ${formatNumber(charities.length)} charities, ${formatNumber(
-            grants.length
+          `Loaded ${formatNumber(
+            Object.keys(Charity.charityLookup).length
+          )} charities, ${formatNumber(
+            Object.keys(Grant.grantLookup).length
           )} grants from local storage`,
           "green",
           false
         );
       } else {
         updateStatus("Fetching data from server...");
-        const tx = db.transaction(
-          [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
-          "readwrite"
-        );
-        await tx.objectStore(CHARITY_STORE).clear();
-        await tx.objectStore(GRANT_STORE).clear();
-        await tx
-          .objectStore(METADATA_STORE)
-          .put({ id: "version", value: DATA_VERSION });
-        await tx.done;
+        try {
+          console.time("buildTheWorld");
+          await this.buildTheWorld(this.db);
+          console.timeEnd("buildTheWorld");
 
-        for (const file of DATA_FILES) {
-          const records = await fetchAndStoreTSV(db, file, file.status);
-          for (let i = 0; i < records.length; i += PROCESS_CHUNK_SIZE) {
-            console.time(`Processing ${file.type} ${i}`);
-            const chunk = records.slice(i, i + PROCESS_CHUNK_SIZE);
-            for (const row of chunk) {
-              if (file.type === "charities") {
-                Charity.buildCharityFromRow(row);
-              } else {
-                Grant.loadGrantRow(row, file.grantType);
-              }
-            }
-            console.timeEnd(`Processing ${file.type} ${i}`);
-            updateStatus(
-              `Loading ${file.type}: ${formatNumber(
-                i + PROCESS_CHUNK_SIZE
-              )} processed`
-            );
-            await new Promise((resolve) => setTimeout(resolve, 0));
-          }
+          console.time("loadTSVFiles");
+          await fetchAndStoreTSV(this.db, DATA_FILES.files);
+          console.timeEnd("loadTSVFiles");
+
+          console.time("buildGovCharity");
+          await this.buildGovCharity(this.db);
+          console.timeEnd("buildGovCharity");
+
+          console.time("storeMetadata");
+          const tx = this.db.transaction(METADATA_STORE, "readwrite");
+          const store = tx.objectStore(METADATA_STORE);
+          await Promise.all([
+            new Promise((resolve, reject) => {
+              const request = store.put({ id: "generated", value: true });
+              request.onsuccess = resolve;
+              request.onerror = () => reject(request.error);
+            }),
+            new Promise((resolve, reject) => {
+              const request = store.put({
+                id: "version",
+                value: DATA_FILES.dbVersion,
+              });
+              request.onsuccess = resolve;
+              request.onerror = () => reject(request.error);
+            }),
+          ]);
+          await tx.done;
+          console.timeEnd("storeMetadata");
+
           updateStatus(
-            `Loaded ${formatNumber(records.length)} ${file.type} from ${
-              file.tsvFilePrefix
-            }X.tsv`,
+            `Loaded ${formatNumber(
+              Object.keys(Charity.charityLookup).length
+            )} charities, ${formatNumber(
+              Object.keys(Grant.grantLookup).length
+            )} grants from server`,
             "green",
             false
           );
+
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        } catch (error) {
+          console.error("Error during server fetch:", error);
+          updateStatus(
+            `Error during server fetch: ${error.message}`,
+            "red",
+            false
+          );
+          throw error;
         }
-
-        console.time("buildGovCharity");
-        await this.buildGovCharity();
-        console.timeEnd("buildGovCharity");
-
-        console.time("buildTheWorld");
-        await this.buildTheWorld();
-        console.timeEnd("buildTheWorld");
       }
 
-      console.log("Missing Charities", Grant.missingValues);
       console.log(
         `Grants Net ${formatNumber(Object.keys(Grant.grantLookup).length)}`
       );
@@ -1329,8 +1528,133 @@ export class BrowseViewModel {
       console.error("Error in loadData:", err);
       updateStatus(`Error loading data: ${err.message}`, "red", false);
       this.dataReady = false;
-      throw err;
+      return Object.keys(Grant.grantLookup).length;
     }
+  }
+  /*
+   * So the NGO data we're parsing calls out how much money each NGO is getting from the Government.
+   * That's treated as an implied grant from a virtual NGO, so we generate that by scanning all the
+   * NGOs and creating that data. This is technically a model function, but its here now and I'm
+   * not religious about any kind of code architecture enough to bother moving it.
+   * @returns
+   */
+  async buildGovCharity(db) {
+    if (!db) {
+      throw new Error("Database not provided to buildGovCharity");
+    }
+    updateStatus(
+      `Building US Govt from ${
+        Object.keys(Charity.charityLookup).length
+      } charities`
+    );
+    const gov_ein = this.GOV_EIN;
+    const gov_proto = {
+      filer_ein: gov_ein,
+      filer_name: "US Government",
+      name: "US Government",
+      xml_name: "The Beast",
+      contrib_amt: 4.6e12,
+      tax_year: "2025",
+      org_type: "USG",
+      receipt_amt: 0,
+      govt_amt: 0,
+      total_assets: null,
+      form_type: null,
+      denominator: null,
+    };
+
+    // Register US Government charity in lookup first
+    try {
+      Charity.buildCharityFromRow(gov_proto);
+    } catch (error) {
+      console.error(
+        `Failed to register US Government charity in lookup:`,
+        error
+      );
+      throw error;
+    }
+
+    const govChar = Charity.getCharity(gov_ein);
+    let govGrants = 0;
+    let processList = Object.values(Charity.charityLookup)
+      .filter((c) => c.govt_amt)
+      .sort((a, b) => b.govt_amt - a.govt_amt);
+    const govCount = processList.length;
+    let govTotal = 0;
+    const totalGrants = processList.reduce((sum, c) => sum + c.govt_amt, 0);
+    const grantRecords = [];
+
+    let chunk = processList.slice(0, CHUNK_SIZE);
+    processList = processList.slice(CHUNK_SIZE);
+    while (chunk.length) {
+      chunk.forEach((c) => {
+        if (c.govt_amt > 0) {
+          const filer = gov_ein;
+          const grantee = c.id;
+          let amt = c.govt_amt;
+          if (isNaN(amt)) amt = 0;
+          govGrants++;
+          const grant = {
+            id: `${filer}~${grantee}`,
+            filer_ein: filer,
+            grant_ein: grantee,
+            amt: amt,
+            grantType: "gov",
+          };
+          Grant.loadGrantRow(grant, "gov");
+          grantRecords.push(grant);
+          govTotal += amt;
+        }
+      });
+      updateStatus(
+        `<span>Gov processing: ${formatNumber(
+          Object.keys(Charity.charityLookup).length
+        )} charities, ${formatNumber(
+          Object.keys(Grant.grantLookup).length
+        )} grants</span><span class="text-[13px] opacity-60">${Math.round(
+          (govGrants / govCount) * 100
+        )}% ${Math.round(
+          (govTotal / totalGrants) * 100
+        )}% ${govGrants}/${govCount} ${formatNumber(govTotal)}/${formatNumber(
+          totalGrants
+        )} complete</span>`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      chunk = processList.slice(0, CHUNK_SIZE);
+      processList = processList.slice(CHUNK_SIZE);
+    }
+
+    try {
+      console.time("storeGovCharity");
+      await storeData(db, CHARITY_STORE, [gov_proto]);
+      console.timeEnd("storeGovCharity");
+    } catch (error) {
+      console.error(`Failed to store government charity:`, error);
+      throw error;
+    }
+
+    try {
+      console.time("storeGovGrants");
+      await storeData(db, GRANT_STORE, grantRecords);
+      console.timeEnd("storeGovGrants");
+    } catch (error) {
+      console.error(`Failed to store government grants:`, error);
+      throw error;
+    }
+
+    updateStatus(
+      `<span>Gov charity complete: ${formatNumber(
+        Object.keys(Charity.charityLookup).length
+      )} charities, ${formatNumber(
+        Object.keys(Grant.grantLookup).length
+      )} grants</span><span class="text-[13px] opacity-60">${
+        govChar.grants.length
+      } generated, ${formatNumber(govTotal)}</span>`
+    );
+    govChar.isGov = true;
+    this.GOV_NODE = govChar;
+    GOV_NODE = govChar;
+    return govChar;
   }
 
   /**
@@ -2214,45 +2538,60 @@ export class Grant {
 
   /** factory for the file read */
   static loadGrantRow(row, grantType) {
-    const filer_ein = row.filer_ein;
+    let filer_ein = row.filer_ein;
     let grant_ein = row.grant_ein;
+    if (filer_ein?.length === 7) filer_ein = "0" + filer_ein;
     if (grant_ein?.length === 7) grant_ein = "0" + grant_ein;
     let amt = parseInt(row.grant_amt || row.amt || "0", 10);
     if (isNaN(amt) || amt === 0) {
-      console.warn(`Invalid or zero grant_amt for grant row:`, {
+      console.warn(`Invalid or zero grant_amt/amt for grant row:`, {
         filer_ein,
         grant_ein,
-        grant_amt: row.grant_amt || row.amt,
+        grant_amt: row.grant_amt,
+        amt: row.amt,
       });
       amt = 0;
     }
-    if (Grant.checkGrantMatch(filer_ein, grant_ein)) {
-      const id = Grant.grantIDBuilder(filer_ein, grant_ein);
-      const g = Grant.getGrant(id);
-      if (g) {
-        g.addAmt(amt);
-        return g;
-      } else {
-        return new Grant({
-          filer_ein,
-          grant_ein,
-          amt,
-          grantType,
-        });
-      }
-    } else if (filer_ein !== grant_ein && grant_ein !== "Unknown") {
-      if (!Charity.getCharity(filer_ein))
-        Grant.missingValues[filer_ein] = "filer";
-      if (!Charity.getCharity(grant_ein))
-        Grant.missingValues[grant_ein] = `grantee-${amt}`;
-      console.warn(`Skipping grant: invalid EINs`, {
+    if (
+      !filer_ein ||
+      !grant_ein ||
+      filer_ein === grant_ein ||
+      grant_ein === "Unknown" ||
+      !/^[0-9]{3,9}$/.test(grant_ein)
+    ) {
+      console.warn(`Invalid EINs for grant row:`, {
         filer_ein,
         grant_ein,
         amt,
       });
+      return null;
     }
-    return null;
+    if (!Charity.getCharity(filer_ein)) {
+      console.warn(`Missing filer_ein ${filer_ein} for grant`, row);
+      Grant.missingValues[filer_ein] = "filer";
+    }
+    if (!Charity.getCharity(grant_ein)) {
+      console.warn(
+        `Missing grant_ein ${grant_ein} for grant with amount ${amt}`,
+        row
+      );
+      Grant.missingValues[grant_ein] = `grantee-${amt}`;
+    }
+    const id = Grant.grantIDBuilder(filer_ein, grant_ein);
+    const g = Grant.getGrant(id);
+    if (g) {
+      g.addAmt(amt);
+      return g;
+    } else {
+      return new Grant({
+        filer_ein,
+        grant_ein,
+        amt,
+        grantType,
+      });
+    }
   }
+
   /** it is what it is */
   constructor({
     filer_ein,
