@@ -1,18 +1,20 @@
 #!/bin/bash
 
-# split_tsvs.sh: Splits TSV files into 10,000-row chunks with fixed-order columns by name and zips them
+# split_tsvs.sh: Splits TSV files into chunks with selected columns by name
 
 set -e
 
-# Input TSV files and required columns in fixed order
+# Input TSV files and required columns
 TSV_FILES=("charities.tsv" "grants_final.tsv" "grants.pf.tsv")
 CHARITY_COLUMNS="filer_ein,filer_name,xml_name,receipt_amt,govt_amt,contrib_amt,tax_year,org_type,total_assets,form_type,denominator"
 GRANT_COLUMNS="filer_ein,grant_ein,grant_amt"
-CHUNK_SIZE=10000
+CHARITY_CHUNK_SIZE=10000
+GRANT_CHUNK_SIZE=50000
 OUTPUT_DIR="tsv_chunks"
+DATA_FILES_FILE="data_files.js"
 
-# Create output directory
-mkdir -p "$OUTPUT_DIR"
+# Clear output directory
+rm -rf "$OUTPUT_DIR" && mkdir -p "$OUTPUT_DIR"
 
 # Function to get column indices from header
 get_column_indices() {
@@ -20,6 +22,7 @@ get_column_indices() {
   local required_columns="$2"
   local header
   header=$(head -n 1 "$tsv_file")
+  echo "Header for $tsv_file: $header" >&2
   IFS=$'\t' read -r -a header_array <<< "$header"
   local indices=""
   local IFS=","
@@ -33,33 +36,55 @@ get_column_indices() {
       fi
     done
     if [ "$found" = false ]; then
-      echo "Error: Column $col not found in $tsv_file header"
+      echo "Error: Column $col not found in $tsv_file header" >&2
       exit 1
     fi
   done
   # Remove leading comma and return
-  echo "${indices#,}"
+  indices="${indices#,}"
+  echo "Selected column indices for $tsv_file: $indices" >&2
+  echo "$indices"
 }
+
+# Calculate dbVersion as sum of filtered grant lines
+GRANT_LINES=0
+for GRANT_FILE in "grants_final.tsv" "grants.pf.tsv"; do
+  if [ -f "$GRANT_FILE" ]; then
+    FILTERED_LINES=$(tail -n +2 "$GRANT_FILE" | awk -F'\t' '$1 != $2 && $3 != "0" && $3 != "" {print}' | wc -l)
+    GRANT_LINES=$((GRANT_LINES + FILTERED_LINES))
+  fi
+done
+DB_VERSION=$GRANT_LINES
+echo "Calculated dbVersion: $DB_VERSION (sum of filtered grant lines)" >&2
+
+# Initialize DATA_FILES array
+DATA_FILES=()
 
 for TSV_FILE in "${TSV_FILES[@]}"; do
   if [ ! -f "$TSV_FILE" ]; then
-    echo "Error: $TSV_FILE not found"
+    echo "Error: $TSV_FILE not found" >&2
     exit 1
   fi
 
-  # Select columns and header based on file type
+  # Select columns, header, and chunk size based on file type
   if [[ "$TSV_FILE" == "charities.tsv" ]]; then
     COLUMNS="$CHARITY_COLUMNS"
     HEADER="filer_ein\tfiler_name\txml_name\treceipt_amt\tgovt_amt\tcontrib_amt\ttax_year\torg_type\ttotal_assets\tform_type\tdenominator"
+    CHUNK_SIZE="$CHARITY_CHUNK_SIZE"
+    TYPE="charities"
+    GRANT_TYPE=""
   else
     COLUMNS="$GRANT_COLUMNS"
     HEADER="filer_ein\tgrant_ein\tgrant_amt"
+    CHUNK_SIZE="$GRANT_CHUNK_SIZE"
+    TYPE="grants"
+    GRANT_TYPE=$( [[ "$TSV_FILE" == "grants_final.tsv" ]] && echo "regular" || echo "private" )
   fi
 
   # Get column indices
   COLUMN_INDICES=$(get_column_indices "$TSV_FILE" "$COLUMNS")
   if [ -z "$COLUMN_INDICES" ]; then
-    echo "Error: Could not find required columns in $TSV_FILE"
+    echo "Error: Could not find required columns in $TSV_FILE" >&2
     exit 1
   fi
 
@@ -67,25 +92,86 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
   TOTAL_LINES=$(wc -l < "$TSV_FILE")
   DATA_LINES=$((TOTAL_LINES - 1))
 
-  # Calculate number of chunks
-  CHUNKS=$(((DATA_LINES + CHUNK_SIZE - 1) / CHUNK_SIZE))
+  # Filter data rows
+  if [[ "$TSV_FILE" == "charities.tsv" ]]; then
+    tail -n +2 "$TSV_FILE" | awk -F'\t' -v cols="$COLUMN_INDICES" '
+      BEGIN {
+        split(cols, arr, ",");
+        for (i in arr) {
+          if (arr[i] == 0) {
+            print "Error: Invalid column index 0 for column " i > "/dev/stderr";
+            exit 1;
+          }
+        }
+      } 
+      {
+        for (i=1; i<=length(arr); i++) {
+          idx = arr[i];
+          if (idx > NF) {
+            print "Error: Row " NR " has " NF " columns, expected at least " idx " for column " i > "/dev/stderr";
+            printf "";
+          } else {
+            printf "%s", ($idx == "" ? "" : $idx);
+          }
+          printf "%s", (i == length(arr) ? "\n" : "\t");
+        }
+      }' > "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+  else
+    # Filter out grants where filer_ein equals grant_ein or grant_amt is zero
+    tail -n +2 "$TSV_FILE" | awk -F'\t' -v cols="$COLUMN_INDICES" '
+      BEGIN {
+        split(cols, arr, ",");
+        for (i in arr) {
+          if (arr[i] == 0) {
+            print "Error: Invalid column index 0 for column " i > "/dev/stderr";
+            exit 1;
+          }
+        }
+      } 
+      {
+        filer_ein = $arr[1];
+        grant_ein = $arr[2];
+        grant_amt = $arr[3];
+        if (filer_ein != grant_ein && grant_amt != "0" && grant_amt != "") {
+          for (i=1; i<=length(arr); i++) {
+            idx = arr[i];
+            if (idx > NF) {
+              print "Error: Row " NR " has " NF " columns, expected at least " idx " for column " i > "/dev/stderr";
+              printf "";
+            } else {
+              printf "%s", ($idx == "" ? "" : $idx);
+            }
+            printf "%s", (i == length(arr) ? "\n" : "\t");
+          }
+        }
+      }' > "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+  fi
 
-  echo "Splitting $TSV_FILE ($DATA_LINES data lines) into $CHUNKS chunks of $CHUNK_SIZE rows with columns $COLUMNS"
+  # Verify filtered file exists and is non-empty
+  if [ ! -s "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv" ]; then
+    echo "Error: Filtered file ${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv is empty or not created" >&2
+    exit 1
+  fi
 
-  # Filter data rows with selected columns (excluding header)
-  tail -n +2 "$TSV_FILE" | awk -F'\t' -v cols="$COLUMN_INDICES" 'BEGIN {split(cols, arr, ",")} {for (i in arr) printf "%s%s", $arr[i], (i == length(arr) ? "\n" : "\t")}' > "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+  # Verify filtered file column count
+  filtered_cols=$(head -n 1 "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv" | awk -F'\t' '{print NF}' || echo 0)
+  expected_cols=$(echo "$COLUMNS" | awk -F',' '{print NF}')
+  if [ "$filtered_cols" != "$expected_cols" ]; then
+    echo "Error: Filtered file for $TSV_FILE has $filtered_cols columns, expected $expected_cols" >&2
+    exit 1
+  fi
 
-  # Split filtered file
+  # Split filtered file (BSD-compatible)
   split -l "$CHUNK_SIZE" "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv" "${OUTPUT_DIR}/${TSV_FILE%.tsv}_chunk_"
 
   # Process each chunk
   i=0
-  for CHUNK_FILE in "${OUTPUT_DIR}/${TSV_FILE%.tsv}_chunk_"*; do
-    # Add fixed header to chunk
+  find "$OUTPUT_DIR" -type f -name "${TSV_FILE%.tsv}_chunk_*" | sort | while read -r CHUNK_FILE; do
     CHUNK_NAME="${TSV_FILE%.tsv}_chunk_${i}.tsv"
-    echo -e "$HEADER" > "${OUTPUT_DIR}/$CHUNK_NAME"
-    cat "$CHUNK_FILE" >> "${OUTPUT_DIR}/$CHUNK_NAME"
-    rm "$CHUNK_FILE"
+    mv "$CHUNK_FILE" "${OUTPUT_DIR}/$CHUNK_NAME"
+    echo -e "$HEADER" > "${OUTPUT_DIR}/${CHUNK_NAME}.tmp"
+    cat "${OUTPUT_DIR}/$CHUNK_NAME" >> "${OUTPUT_DIR}/${CHUNK_NAME}.tmp"
+    mv "${OUTPUT_DIR}/${CHUNK_NAME}.tmp" "${OUTPUT_DIR}/$CHUNK_NAME"
 
     # Zip the chunk
     (cd "$OUTPUT_DIR" && zip "${CHUNK_NAME}.zip" "$CHUNK_NAME")
@@ -95,8 +181,38 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
     ((i++))
   done
 
+  # Verify chunk count
+  actual_chunks=$(find "$OUTPUT_DIR" -type f -name "${TSV_FILE%.tsv}_chunk_*.tsv.zip" | wc -l)
+  actual_chunks=$((actual_chunks))
+  if [ "$actual_chunks" -ne "$CHUNKS" ]; then
+    echo "Error: Created $actual_chunks chunks, expected $CHUNKS for $TSV_FILE" >&2
+    exit 1
+  fi
+
+  # Add to DATA_FILES
+  DATA_FILES+=("{
+    status: \"Loading $( [[ "$TSV_FILE" == "charities.tsv" ]] && echo "Charities" || echo "$( [[ "$TSV_FILE" == "grants_final.tsv" ]] && echo "501 Grants" || echo "Private Foundation Grants" )")\",
+    baseFile: \"./tsv_chunks/${TSV_FILE%.tsv}_chunk_\",
+    tsvFilePrefix: \"${TSV_FILE%.tsv}_chunk_\",
+    type: \"$TYPE\",
+    chunkCount: $actual_chunks$( [[ -n "$GRANT_TYPE" ]] && echo ", grantType: \"$GRANT_TYPE\"" || echo "" )
+  }")
+
   # Clean up filtered file
   rm "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
 done
 
+# Write DATA_FILES to file
+printf "export const DATA_FILES = {\n  dbVersion: %s,\n  files: [\n" "$DB_VERSION" > "$DATA_FILES_FILE"
+for ((i=0; i<${#DATA_FILES[@]}; i++)); do
+  printf "    %s" "${DATA_FILES[i]}" >> "$DATA_FILES_FILE"
+  if [ $i -lt $((${#DATA_FILES[@]}-1)) ]; then
+    printf ",\n" >> "$DATA_FILES_FILE"
+  else
+    printf "\n" >> "$DATA_FILES_FILE"
+  fi
+done
+printf "  ]\n};\n" >> "$DATA_FILES_FILE"
+
 echo "Splitting and zipping complete. Chunks are in $OUTPUT_DIR"
+echo "Generated $DATA_FILES_FILE with dbVersion: $DB_VERSION"
