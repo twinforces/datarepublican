@@ -4,7 +4,16 @@ import {
   formatNumber,
   viewModel,
   BrowseViewModel,
+  getColorForEIN,
 } from "./models.js";
+
+import {
+  sankeyWithCircles,
+  adjustCircularLink,
+  generateOctagonPath,
+  generateTrapezoidPath,
+  generatePlusPath,
+} from "./d3-sankey-circular.js";
 
 let svg = null;
 let zoom = null;
@@ -14,16 +23,185 @@ const OTHER_WIDTH = 30;
 const NODE_PADDING = 25;
 const MIN_LINK_HEIGHT = 5;
 
-const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
-
 function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
 }
+
+window.exportDB = function () {
+  viewModel.exportDB();
+};
+
+window.loadPreset = function (value, mode) {
+  viewModel.loadPreset(value, mode);
+  hidePresets(); // our work here is done.
+  refresh();
+};
+
+function renderPopup() {
+  const popup = document.getElementById("ngo-popup");
+  const presets = viewModel.presets();
+  popup.innerHTML = `
+    <div class="ngopreset-container show-when-panel-shown">
+      <div class="ngopreset-columns">
+        <div class="toggle-row">
+          <div class="button-group-column">
+            <button id="ngopreset-toggle" class="ngopreset-toggle-btn " style="font-size: 11px;">Hide Presets</button>
+            <div class="ngopreset-mode-switch">
+              <span class="toggle-label toggle-label-add">Preset will add</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="preset-mode" value="add">
+                <label for="preset-mode"></label>
+              </div>
+              <span class="toggle-label toggle-label-replace">Preset will replace</span>
+            </div>
+          </div>
+          <div class="filler-column"></div>
+        </div>
+        <div class="grid-row">
+          <!-- General Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">General</h2>
+            <div class="ngopreset-grid">
+              ${presets
+                .filter((item) => !item.subcategories)
+                .map(
+                  (item) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(item.eins)}' 
+                          data-title="${item.title}"
+                          title="${item.description || ""}">
+                    ${item.title}
+                  </button>
+                `
+                )
+                .join("")}
+            </div>
+          </div>
+          <!-- Controversies Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Controversies</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find((item) => item.title === "Controversies")
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+          <!-- Politicians Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Politicians</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find((item) => item.title === "Politicians")
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+          <!-- Billionaires Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Billionaires</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find(
+                    (item) =>
+                      item.title === "Friendly Neighborhood Billionaires"
+                  )
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Add event listeners for preset buttons
+  const presetButtons = document.querySelectorAll(".ngopreset-btn");
+  presetButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const eins = JSON.parse(btn.dataset.eins);
+      const title = btn.dataset.title;
+      const mode = document.getElementById("preset-mode").checked
+        ? "replace"
+        : "add";
+      console.log(
+        `${mode === "add" ? "Adding" : "Replacing"} ${title}: ${eins}`
+      );
+      loadPreset({ eins, title }, mode);
+    });
+  });
+
+  // Wire up the toggle buttons
+  const showBtn = document.getElementById("showPresetsBtn");
+  const hideBtn = document.getElementById("ngopreset-toggle");
+  if (showBtn) {
+    showBtn.addEventListener("click", showPresets);
+  }
+  if (hideBtn) {
+    hideBtn.addEventListener("click", hidePresets);
+  }
+
+  // Toggle How It Works
+  document.getElementById("howItWorksBtn").addEventListener("click", () => {
+    const list = document.getElementById("howItWorksList");
+    list.classList.toggle("visible");
+  });
+}
+
+// Show Presets and Hide Presets implementations
+window.showPresets = function () {
+  document.documentElement.style.setProperty("--panel-shown", "block");
+  document.documentElement.style.setProperty("--panel-hidden", "none");
+  console.log("Panel shown");
+};
+
+window.hidePresets = function () {
+  document.documentElement.style.setProperty("--panel-shown", "none");
+  document.documentElement.style.setProperty("--panel-hidden", "block");
+  console.log("Panel hidden");
+};
 
 $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
   updateStatus("Loading Data...");
+
+  // Initialize the select on page load
+  renderPopup();
+
   viewModel
     .loadData()
     .then(() => {
@@ -105,8 +283,10 @@ $(document).ready(function () {
 
 function addEINFromInput() {
   let val = $("#einShowInput").val().trim().replace(/[-\s]/g, "");
-  if (!/^\d{9}$/.test(val) && val !== "001") {
-    alert("EIN must be 9 digits after removing dashes/spaces or 001.");
+  if (!/^\d{3,9}$/.test(val)) {
+    alert(
+      "EIN must be 9 digits after removing dashes/spaces or 3 for countries."
+    );
     return;
   }
   const charity = Charity.getCharity(val);
@@ -114,7 +294,7 @@ function addEINFromInput() {
   viewModel.addToShowList(val);
   $("#einShowInput").val("");
   renderActiveEINs();
-  charity.place();
+  if (charity) charity.place(charity.ein);
   updateQueryParams();
   generateGraph();
 }
@@ -270,62 +450,6 @@ function calculateScale(graph, width, height) {
   const layoutWidth = Math.max(maxX - minX, 1);
   const layoutHeight = Math.max(maxY - minY, 1);
   return Math.min(width / layoutWidth, height / layoutHeight);
-}
-
-function generateTrapezoidPath(d) {
-  const midY = (d.y0 + d.y1) / 2;
-  const y0In = midY - d.inflowHeight / 2;
-  const y1In = midY + d.inflowHeight / 2;
-  const y0Out = midY - d.outflowHeight / 2;
-  const y1Out = midY + d.outflowHeight / 2;
-  return `M${d.x0},${y0In} L${d.x0},${y1In} L${d.x1},${y1Out} L${d.x1},${y0Out} Z`;
-}
-
-function generateOctagonPath(d) {
-  const radius = d.inflowHeight / 2 || 10;
-  const cx = d.x0;
-  const cy = (d.y0 + d.y1) / 2;
-  const r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
-
-  const c = Math.sqrt(2 + Math.SQRT2) / 2;
-  const s = Math.sqrt(2 - Math.SQRT2) / 2;
-
-  return `M${cx + r * c},${cy + r * s} L${cx + r * s},${cy + r * c} L${
-    cx - r * s
-  },${cy + r * c} L${cx - r * c},${cy + r * s} L${cx - r * c},${cy - r * s} L${
-    cx - r * s
-  },${cy - r * c} L${cx + r * s},${cy - r * c} L${cx + r * c},${cy - r * s} Z`;
-}
-
-function generatePlusPath(d) {
-  const radius = OTHER_WIDTH / 2;
-  const armWidth = radius * 0.4;
-  let cx, circlePath;
-  const cy = (d.y0 + d.y1) / 2;
-
-  if (d.isTerminal) {
-    const inflowHeight = d.inflowHeight || OTHER_WIDTH;
-    cx = d.x0 - inflowHeight / 2;
-    circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy - radius
-    }`; // Bottom to top, left
-  } else if (d.isRight) {
-    cx = d.x1;
-    circlePath = `M${cx},${cy - radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy + radius
-    }`; // Top to bottom, right
-  } else {
-    cx = d.x0;
-    circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy - radius
-    }`; // Bottom to top, left
-  }
-
-  const plusPath = `
-    M${cx - armWidth},${cy} H${cx + armWidth}
-    M${cx},${cy - armWidth} V${cy + armWidth}
-  `;
-  return `${circlePath} ${plusPath}`;
 }
 
 function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
@@ -601,9 +725,8 @@ function generateGraph() {
     .attr("class", "main")
     .attr("transform", "translate(50, 50)");
 
-  const sankey = d3
-    .sankey()
-    .nodeId((d) => d.id)
+  const sankey = sankeyWithCircles()
+    .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
     .linkSort(compareLinks)
@@ -612,7 +735,10 @@ function generateGraph() {
     .size([width - 100, height - 100]);
 
   viewModel.parseQueryParams();
-  if (!viewModel.matchURL()) viewModel.loadDefaultData();
+  if (viewModel.matchURL() === 0) {
+    showPresets();
+    return;
+  }
 
   viewModel.previousData = renderFocusedSankey(
     g,
@@ -698,8 +824,31 @@ function generateGraph() {
   zoomToFit();
   renderActiveEINs();
   renderActiveKeywords();
+  renderActiveEINs();
   renderHideEINs();
   $("#loading").hide();
+}
+
+function adjustCircularLinks(graph) {
+  let circularLinkData = graph.links.filter((l) => l.circular);
+  // adjust circular links for trapezoid
+  for (const l of circularLinkData) {
+    l.y0 = computeLinkY(
+      l.source,
+      l.source.sourceLinks.indexOf(l),
+      l.source.sourceLinks,
+      "outflowHeight",
+      true
+    );
+    l.y1 = computeLinkY(
+      l.target,
+      l.target.targetLinks.indexOf(l),
+      l.target.targetLinks,
+      "inflowHeight",
+      false
+    );
+    adjustCircularLink(l);
+  }
 }
 
 function renderFocusedSankey(
@@ -718,6 +867,7 @@ function renderFocusedSankey(
   $("#downloadBtn").hide();
 
   let currentData = viewModel.buildSankeyData();
+
   savePreviousState(currentData);
 
   const sankeyWidth = width - 100;
@@ -728,53 +878,12 @@ function renderFocusedSankey(
 
   const scale = calculateScale(graph, width, height);
   calculateNodePositions(graph.nodes, scale, height);
+  adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
 
   if (!previousData) {
     svg.selectAll("*").remove();
   }
-
-  const defs = svg.selectAll("defs").data([0]).join("defs");
-  graph.links.forEach((link) => {
-    link.gradientId = link.gradientId || generateUniqueId("gradient", link);
-  });
-
-  const gradients = defs
-    .selectAll("linearGradient.dynamic")
-    .data(graph.links, (d) => d.gradientId);
-
-  gradients.exit().remove();
-
-  const gradientEnter = gradients
-    .enter()
-    .append("linearGradient")
-    .attr("class", "dynamic")
-    .attr("id", (d) => d.gradientId)
-    .attr("gradientUnits", "objectBoundingBox")
-    .attr("x1", "0")
-    .attr("y1", "0.5")
-    .attr("x2", "1")
-    .attr("y2", "0.5");
-
-  gradientEnter
-    .append("stop")
-    .attr("offset", "0%")
-    .attr("stop-color", (d) => colorScale(d.source.id));
-  gradientEnter
-    .append("stop")
-    .attr("offset", "100%")
-    .attr("stop-color", (d) => colorScale(d.target.id));
-
-  gradients
-    .merge(gradientEnter)
-    .selectAll("stop")
-    .data((d) => [
-      { offset: "0%", color: colorScale(d.source.id) },
-      { offset: "100%", color: colorScale(d.target.id) },
-    ])
-    .join("stop")
-    .attr("offset", (d) => d.offset)
-    .attr("stop-color", (d) => d.color);
 
   g = svg
     .selectAll("g.main")
@@ -783,14 +892,13 @@ function renderFocusedSankey(
     .attr("class", "main")
     .attr("transform", `translate(50, 50) scale(${scale})`);
 
-  // No local zoom definition here—rely on global zoom from generateGraph
-
   const masterGroup = g
     .selectAll(".graph-group")
     .data([0])
     .join("g")
     .attr("class", "graph-group");
 
+  // Regular (non-circular) links
   const linkGroup = masterGroup
     .selectAll("g.links")
     .data([0])
@@ -800,9 +908,10 @@ function renderFocusedSankey(
     .attr("stroke-opacity", 1)
     .style("mix-blend-mode", "multiply");
 
+  const regularLinks = graph.links.filter((d) => !d.circular);
   const link = linkGroup
     .selectAll(".link")
-    .data(graph.links, (d) => `${d.source.id}-${d.target.id}`);
+    .data(regularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   link.exit().transition().duration(ANIM_LINK).attr("stroke-width", 0).remove();
 
@@ -811,7 +920,7 @@ function renderFocusedSankey(
     .append("path")
     .attr("class", "link")
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => colorScale(d.source.id))
+    .attr("stroke", (d) => getColorForEIN(d.source.id))
     .style("stroke-opacity", "0.3")
     .attr("stroke-width", 0);
 
@@ -820,7 +929,7 @@ function renderFocusedSankey(
     .transition()
     .duration(ANIM_LINK)
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => colorScale(d.source.id))
+    .attr("stroke", (d) => getColorForEIN(d.source.id))
     .attr("stroke-width", (d) => d.width || 1);
 
   linkEnter
@@ -829,6 +938,107 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
+  // Function to extract points from an SVG path string
+  function extractPointsFromPath(pathString) {
+    const points = [];
+    let currentPoint = { x: 0, y: 0 };
+    const commands = pathString.split(/(?=[MLAZ])/); // Split on M, L, A, Z
+
+    commands.forEach((command) => {
+      const type = command[0];
+      const values = command
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(parseFloat);
+
+      if (type === "M") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "L") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "A") {
+        // For arcs, the endpoint is the last two values (x, y)
+        currentPoint = { x: values[5], y: values[6] };
+        points.push({ ...currentPoint });
+      }
+      // Ignore Z (close path) for now since our paths are open
+    });
+
+    return points;
+  } // Circular links
+  // Circular links
+  const circularLinkGroup = masterGroup
+    .selectAll("g.circular-links")
+    .data([0])
+    .join("g")
+    .attr("class", "circular-links")
+    .attr("fill", "none")
+    .attr("stroke-opacity", 0.5);
+
+  let circularLinks = graph.links.filter((d) => d.circular);
+  const circularLink = circularLinkGroup
+    .selectAll(".circular-link")
+    .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
+
+  circularLink
+    .exit()
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("fill-opacity", 0)
+    .remove();
+
+  const circularLinkEnter = circularLink
+    .enter()
+    .append("path")
+    .attr("class", "circular-link")
+    .attr("d", (d) => d.path)
+    .attr("fill", "none")
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", "0.5")
+    .attr("stroke-width", (d) => d.width);
+
+  circularLink
+    .merge(circularLinkEnter)
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("d", (d) => d.path)
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", 0.5);
+
+  /*// Add debug points for each circular link
+  circularLink.merge(circularLinkEnter).each(function (d) {
+    const path = d.path;
+    const points = extractPointsFromPath(path);
+
+    // Append circles for each point within the same group
+    d3.select(this.parentNode)
+      .selectAll("circle.debug-point-" + d.source.id + "-" + d.target.id)
+      .data(points)
+      .enter()
+      .append("circle")
+      .attr("class", "debug-point-" + d.source.id + "-" + d.target.id)
+      .attr("cx", (p) => p.x)
+      .attr("cy", (p) => p.y)
+      .attr("r", 3)
+      .attr("fill", "black")
+      .attr("stroke", "white")
+      .attr("stroke-width", 1)
+      .append("title")
+      .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
+  });*/
+
+  circularLinkEnter
+    .append("title")
+    .text(
+      (d) =>
+        `${d.source.name} → ${d.target.name}\n$${formatNumber(
+          d.amt
+        )} (Circular)`
+    );
+
+  // Node rendering (unchanged)
   const nodeGroup = masterGroup
     .selectAll("g.nodes")
     .data([0])
@@ -876,7 +1086,7 @@ function renderFocusedSankey(
               y1: d.previousY1 || d.y1,
             })
       )
-      .attr("fill", colorScale(d.id))
+      .attr("fill", getColorForEIN(d.id))
       .style("cursor", d.isTerminal ? "zoom-out" : "grab")
       .append("title")
       .text((d) => d.toolTipText());
@@ -949,6 +1159,7 @@ function renderFocusedSankey(
     .attr("d", (d) =>
       generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
     );
+
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
       (d) =>
@@ -1046,7 +1257,7 @@ function renderFocusedSankey(
   const url = encodeURIComponent(window.location.href);
   const hashtags = encodeURIComponent("DRBadNGOs");
   $("#PostBox").html(
-    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&via=twinforces" 
+    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&hashtags=${hashtags}&via=twinforces" 
     target="_blank"  
     title="Share on X" 
     class="x-share-button">&#x1D54F;</a>`
@@ -1172,8 +1383,9 @@ function handleSearchResultHover(index) {
 }
 
 function refresh() {
-  renderHideEINs();
   updateQueryParams();
+  renderActiveEINs;
+  renderHideEINs();
   generateGraph();
 }
 
@@ -1225,7 +1437,6 @@ function showControlPanel(type, data, element) {
       return `
         <div class="bg-blue-500 text-white flex-col p-4 text-center">
           <h3>${node.name}</h3>
-          <p>EIN: ${node.ein}</p>
         </div>
         <div class="flex flex-row gap-4">
           <div class="flex-1 bg-gray-200 p-4">
@@ -1263,7 +1474,7 @@ function showControlPanel(type, data, element) {
     return `
       <div class="bg-blue-500 text-white flex-col p-4 text-center">
         <h3>${node.name}</h3>
-        <p>EIN: ${node.ein}</p>
+        <p>EIN: ${node.longEIN}</p>
       </div>
       <div class="flex flex-row gap-4">
         <div class="flex-1 bg-gray-200 p-4">
