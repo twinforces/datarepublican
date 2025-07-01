@@ -47,6 +47,8 @@ function dataLoaded(state = true) {
     $("#statusSpinner").addClass("hidden");
     $("#loading").addClass("hidden");
     $("#downloadPanel").removeClass("hidden");
+    document.documentElement.style.setProperty("--web-load", "none");
+    document.documentElement.style.setProperty("--db-load", "none");
   } else {
     $("#statusSpinner").removeClass("hidden");
     $("#loading").removeClass("hidden");
@@ -219,6 +221,15 @@ window.hidePresets = function () {
   document.documentElement.style.setProperty("--panel-shown", "none");
   document.documentElement.style.setProperty("--panel-hidden", "block");
   console.log("Panel hidden");
+};
+
+window.loadingViaDB = function () {
+  document.documentElement.style.setProperty("--db-load", "block");
+  document.documentElement.style.setProperty("--web-load", "none");
+};
+window.loadingViaWeb = function () {
+  document.documentElement.style.setProperty("--db-load", "none");
+  document.documentElement.style.setProperty("--web-load", "block");
 };
 
 $(document).ready(function () {
@@ -683,7 +694,15 @@ function bindEvents(g) {
 }
 
 function zoomToFit() {
-  const g = svg.select("g.main");
+  let g = svg.select("g.main");
+  if (g.empty()) {
+    console.warn("g.main not found, creating new g.main");
+    g = svg
+      .append("g")
+      .attr("class", "main")
+      .attr("transform", "translate(50, 50)");
+    return; // Skip zooming until graph is rendered
+  }
   const bounds = g.node().getBBox();
   if (
     !isFinite(bounds.width) ||
@@ -696,7 +715,7 @@ function zoomToFit() {
   }
   const container = document.getElementById("graph-container");
   const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.7;
+  const height = container.offsetHeight || window.innerHeight * 0.75;
   const dx = bounds.x;
   const dy = bounds.y;
   const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
@@ -720,7 +739,7 @@ function generateGraph() {
     return;
   }
 
-  $("#graph-container svg").remove();
+  $("#graph").empty();
   updateStatus("Generating Graph...");
 
   const container = document.getElementById("graph-container");
@@ -728,14 +747,30 @@ function generateGraph() {
   const height = Math.max(container.offsetHeight, window.innerHeight * 0.75);
 
   svg = d3
-    .select("#graph-container")
-    .append("svg")
+    .select("#graph-container > svg#graph[data-graph='true']")
     .attr("id", "graph")
-    .attr("width", "100%")
+    .attr("data-graph", "true");
+  // Fallback: Create SVG if not found
+  if (!svg.node()) {
+    console.warn("No #graph SVG found, creating new one");
+    svg = d3
+      .select("#graph-container")
+      .append("svg")
+      .attr("id", "graph")
+      .attr("data-graph", "true");
+  }
+
+  svg
+    .attr("width", "100%") // Ensure attributes are set in case SVG was cleared
     .attr("height", "100%")
     .style("display", "block")
     .style("background", "#fff")
-    .attr("class", "flex-grow");
+    .attr("class", "flex-1");
+
+  let g = svg
+    .append("g")
+    .attr("class", "main")
+    .attr("transform", "translate(50, 50)");
 
   zoom = d3
     .zoom()
@@ -754,11 +789,6 @@ function generateGraph() {
     });
 
   svg.call(zoom);
-
-  let g = svg
-    .append("g")
-    .attr("class", "main")
-    .attr("transform", "translate(50, 50)");
 
   updateScaledConstants();
   const sankey = sankeyWithCircles()
@@ -886,13 +916,13 @@ function generateGraph() {
     generateGraph();
     setTimeout(() => (isRedrawing = false), 1000);
   };
-  zoomToFit();
   renderActiveEINs();
   renderActiveKeywords();
   renderActiveEINs();
   renderHideEINs();
 
   dataLoaded(true);
+  zoomToFit();
 }
 
 function adjustCircularLinks(graph) {
