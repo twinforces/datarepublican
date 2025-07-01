@@ -1,7 +1,7 @@
 const POWER_LAW_RESET = 3;
 const TOP_N_INITIAL = 5;
 const START_REVEAL = 5;
-const MAX_EXPAND_SCALE = 10;
+const MAX_EXPAND_SCALE = 50;
 const MIN_EXPAND_SCALE = 0.1;
 const EXPAND_FACTOR = 1.5;
 
@@ -990,8 +990,7 @@ export class BrowseViewModel {
       if (matches.length > MAX_KEYWORD_NODES) {
         updateStatus(
           `<span>Note: Graph limited to first ${MAX_KEYWORD_NODES} of ${matches.length} matching results</span>`,
-          "black",
-          false
+          "black"
         );
       }
 
@@ -1020,7 +1019,8 @@ export class BrowseViewModel {
     }
 
     updateStatus(
-      `Building World from ${Object.keys(iso3166_alpha2).length} countries`
+      `Building World from ${Object.keys(iso3166_alpha2).length} countries`,
+      "black"
     );
     const countryRecords = [];
     let countriesProcessed = 0;
@@ -1437,7 +1437,7 @@ export class BrowseViewModel {
         const charities = await fetchLocalData(this.db, CHARITY_STORE);
         console.timeEnd("loadCharitiesFromDB");
         console.log(`Fetched ${charities.length} charities from IndexedDB`);
-
+        loadingViaDB();
         let chunkSize = 10000;
         const TARGET_CYCLE_TIME = 500;
         const MIN_CHUNK_SIZE = 2500;
@@ -1546,6 +1546,8 @@ export class BrowseViewModel {
         );
       } else {
         updateStatus("Fetching data from server...");
+        loadingViaWeb();
+
         try {
           console.time("buildTheWorld");
           await this.buildTheWorld(this.db);
@@ -1702,7 +1704,8 @@ export class BrowseViewModel {
           (govTotal / totalGrants) * 100
         )}% ${govGrants}/${govCount} ${formatNumber(govTotal)}/${formatNumber(
           totalGrants
-        )} complete</span>`
+        )} complete</span>`,
+        "green"
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
       chunk = processList.slice(0, CHUNK_SIZE);
