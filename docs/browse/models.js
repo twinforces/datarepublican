@@ -1,6 +1,10 @@
 const POWER_LAW_RESET = 3;
 const TOP_N_INITIAL = 5;
 const START_REVEAL = 5;
+const MAX_EXPAND_SCALE = 50;
+const MIN_EXPAND_SCALE = 0.1;
+const EXPAND_FACTOR = 1.5;
+
 const MIN_REVEAL = 2;
 const NEXT_REVEAL = 3;
 const NEXT_REVEAL_MAX = 15;
@@ -10,7 +14,7 @@ const STORE_CHUNK_SIZE = 10000;
 const PROCESS_CHUNK_SIZE = 10000;
 const CHUNK_SIZE = 10000;
 
-const MAX_KEYWORD_NODES = 25;
+const MAX_KEYWORD_NODES = 100;
 
 const DB_NAME = "CharityDatabase";
 const DB_VERSION = 1;
@@ -666,6 +670,18 @@ export class BrowseViewModel {
     return this.#_presetsData;
   }
 
+  getBillionaireOrgs() {
+    const result = new Set();
+    for (p of this.presets()) {
+      if (p.title.includes("Billion")) {
+        for (e of p.subcategories) {
+          result.add(e.eins);
+        }
+      }
+    }
+    return result;
+  }
+
   loadPreset(preset, mode) {
     const eins = preset.eins;
     if (mode === "replace") {
@@ -693,6 +709,33 @@ export class BrowseViewModel {
   }
 
   /** methods for manipulating the scaling */
+
+  setExpandScale(scale) {
+    this.expandScale = scale;
+  }
+
+  getExpandScale() {
+    return this.expandScale || 2;
+  }
+
+  canExpandUp() {
+    return this.getExpandScale() < MAX_EXPAND_SCALE;
+  }
+
+  canExpandDown() {
+    return this.getExpandScale() > MIN_EXPAND_SCALE;
+  }
+
+  expandScaleUp() {
+    this.expandScale = Math.min(MAX_EXPAND_SCALE, this.expandScale * 1.5);
+  }
+
+  expandScaleDown() {
+    this.expandScale = Math.max(
+      MIN_EXPAND_SCALE,
+      this.expandScale / EXPAND_FACTOR
+    );
+  }
 
   setGraphScale(scale) {
     if (scale != this.POWER_LAW) {
@@ -866,6 +909,7 @@ export class BrowseViewModel {
     this.getHideList().forEach((e) => params.append("nein", e));
     this.getKeywordList().forEach((k) => params.append("keywords", k));
     params.append("scale", this.POWER_LAW);
+    params.append("expand", this.expandScale);
     return params;
   }
 
@@ -884,6 +928,8 @@ export class BrowseViewModel {
     this.setKeywordList(params.getAll("keywords"));
     const scale = parseInt(params.get("scale") || "0", 10);
     if (scale) this.setGraphScale(scale);
+    const expand = parseFloat(params.get("expand") || "2", 10);
+    this.setExpandScale(expand);
   }
 
   /** Place holder for when we actually parse the breadcrumb data, for
@@ -944,8 +990,7 @@ export class BrowseViewModel {
       if (matches.length > MAX_KEYWORD_NODES) {
         updateStatus(
           `<span>Note: Graph limited to first ${MAX_KEYWORD_NODES} of ${matches.length} matching results</span>`,
-          "black",
-          false
+          "black"
         );
       }
 
@@ -974,7 +1019,8 @@ export class BrowseViewModel {
     }
 
     updateStatus(
-      `Building World from ${Object.keys(iso3166_alpha2).length} countries`
+      `Building World from ${Object.keys(iso3166_alpha2).length} countries`,
+      "black"
     );
     const countryRecords = [];
     let countriesProcessed = 0;
@@ -1080,6 +1126,24 @@ export class BrowseViewModel {
     this.buildSankeyData(); // Update the graph data
     if (refreshCallback) refreshCallback(); // Always refresh
   }
+
+  /**
+   * Clicking on the pig emoji recurses upward setting any ndoe on a path to USG colors
+   * to desired visible
+   */
+  porkClick(ein) {
+    const c = Charity.getCharity(`${ein}`);
+    if (c) c.porkClick();
+  }
+
+  /** Clicking on the Money Bags emoji recurses upstards setting any node on the path
+   * to a billionaire influenced charity visible
+   */
+  billClick(ein) {
+    const c = Charity.getCharity(`${ein}`);
+    if (c) c.billionarieClick();
+  }
+
   /**
    *  Doubleclicking being the "expand/open" gesture means in this
    * case that we force desiredVisible to true, and add more visible grants.
@@ -1373,7 +1437,7 @@ export class BrowseViewModel {
         const charities = await fetchLocalData(this.db, CHARITY_STORE);
         console.timeEnd("loadCharitiesFromDB");
         console.log(`Fetched ${charities.length} charities from IndexedDB`);
-
+        loadingViaDB();
         let chunkSize = 10000;
         const TARGET_CYCLE_TIME = 500;
         const MIN_CHUNK_SIZE = 2500;
@@ -1482,6 +1546,8 @@ export class BrowseViewModel {
         );
       } else {
         updateStatus("Fetching data from server...");
+        loadingViaWeb();
+
         try {
           console.time("buildTheWorld");
           await this.buildTheWorld(this.db);
@@ -1578,7 +1644,7 @@ export class BrowseViewModel {
       tax_year: "2025",
       org_type: "USG",
       receipt_amt: 0,
-      govt_amt: 0,
+      govt_amt: 1,
       total_assets: null,
       form_type: null,
       denominator: null,
@@ -1638,7 +1704,8 @@ export class BrowseViewModel {
           (govTotal / totalGrants) * 100
         )}% ${govGrants}/${govCount} ${formatNumber(govTotal)}/${formatNumber(
           totalGrants
-        )} complete</span>`
+        )} complete</span>`,
+        "green"
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
       chunk = processList.slice(0, CHUNK_SIZE);
@@ -1718,6 +1785,8 @@ export class Charity {
   static charityLookup = {};
   static _desiredCharities = new Set();
   static _visibleCharities = new Set();
+  static _organizedCharities = new Set();
+  static usgDirect = new Set();
 
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
@@ -1759,7 +1828,7 @@ export class Charity {
    * Clear all caches
    */
   static disorganzeAll() {
-    Charity.organizedSet.forEach((c) => (c.isOrganized = false));
+    Charity._organizedCharities.forEach((c) => (c.isOrganized = false));
   }
 
   /**
@@ -1854,6 +1923,12 @@ export class Charity {
     this._valueCache = {};
     this.sourceLinks = [];
     this.targetLinks = [];
+    this.govDepth = Infinity;
+    if (this.govt_amt > 0) {
+      Charity.usgDirect.add(this);
+      this.govDepth = 0;
+    } else {
+    }
     Charity.loadExtraData(this, row);
     Charity.registerCharity(ein, this);
   }
@@ -1914,6 +1989,90 @@ export class Charity {
    */
   get isVisible() {
     return this.impliedVisible > 0 || this.desiredVisible;
+  }
+
+  getMaxDepth() {
+    return this.maxDepth || 2;
+  }
+
+  findAllPaths(startNode, maxDepth = 5) {
+    const markedYes = new Set(); // Nodes on USG paths
+    const visited = new Set(); // Nodes checked to avoid cycles
+
+    function dfs(node, depth = 0) {
+      if (depth > maxDepth) {
+        console.log(`Max depth ${maxDepth} reached at node ${node.ein}`);
+        return;
+      }
+
+      if (visited.has(node.ein)) {
+        return;
+      }
+
+      visited.add(node.ein);
+
+      // Pruning: Skip if no grantsIn and not USG-funded
+      if (node.grantsIn.length < 1 && node.govt_amt <= 0) {
+        console.log(`Skipped ${node.ein}: no grantsIn and not USG-funded`);
+        return;
+      }
+
+      // Mark if on USG path
+      if (node.govDepth !== Infinity) {
+        markedYes.add(node.ein);
+        console.log(`Marked ${node.ein} as YES, govDepth: ${node.govDepth}`);
+      }
+
+      // Filter grantsIn for shortest path filers
+      const targetGovDepth = node.govt_amt > 0 ? 0 : node.govDepth - 1;
+      const neighbors = node.grantsIn.filter(
+        (grant) => grant.filer.govDepth === targetGovDepth
+      );
+
+      // Explore viable neighbors
+      for (const grant of neighbors) {
+        const neighbor = grant.filer;
+        if (neighbor.govDepth > maxDepth - depth) {
+          console.log(
+            `Skipped neighbor ${neighbor.ein}: govDepth ${
+              neighbor.govDepth
+            } > ${maxDepth - depth}`
+          );
+          continue;
+        }
+        if (!visited.has(neighbor.ein)) {
+          dfs(neighbor, depth + 1);
+        }
+      }
+    }
+
+    dfs(startNode);
+
+    console.log(`Total marked nodes: ${markedYes.size}`);
+    return markedYes;
+  }
+
+  /**
+   * Compute all the paths to the USG from this charity, and set them to desired visible
+   */
+  porkClick() {
+    const paths = this.findAllPaths(this, this.getMaxDepth());
+    for (const ein of paths) {
+      const c = Charity.getCharity(ein);
+      if (c) c.desiredVisible = true;
+    }
+    this.maxDepth = this.getMaxDepth() + 1;
+  }
+
+  billionarieClick() {
+    const billionaires = viewModel.getBillionaireOrgs();
+    const bpaths = this.findAllPaths(
+      this,
+      (target = (c) => billionaires.has(c.ein))
+    );
+    for (const p of bpaths) {
+      p.desiredVisible = true;
+    }
   }
 
   /**
@@ -2167,6 +2326,11 @@ export class Charity {
     if (this._isOrganized !== value) {
       this._valueCache = {};
       this._isOrganized = value;
+      if (value) {
+        Charity._organizedCharities.add(this);
+      } else {
+        Charity._organizedCharities.delete(this);
+      }
       this.clearValueCache(); // force regen
     }
   }
@@ -2178,6 +2342,7 @@ export class Charity {
     if (grant instanceof Grant) {
       this.grants.push(grant);
       this.isOrganized = false;
+      this.govDepth = Math.min(this.govDepth, grant.filer.govDepth + 1);
     } else {
       console.log("Error: Can only add Grant objects.");
     }

@@ -18,13 +18,42 @@ import {
 let svg = null;
 let zoom = null;
 
-const NODE_WIDTH = 50;
-const OTHER_WIDTH = 30;
-const NODE_PADDING = 25;
-const MIN_LINK_HEIGHT = 5;
+let boundaryScaleFactor = 2;
+const MAX_SCALE = 10;
+
+let NODE_WIDTH = 50 * boundaryScaleFactor;
+let OTHER_WIDTH = 30 * boundaryScaleFactor;
+let NODE_PADDING = 25 * boundaryScaleFactor;
+let MIN_LINK_HEIGHT = 5 * boundaryScaleFactor;
+let FONT_SIZE = 12 * boundaryScaleFactor;
+let isRedrawing = false;
+
+function updateScaledConstants() {
+  boundaryScaleFactor = viewModel.getExpandScale();
+  NODE_WIDTH = 50 * boundaryScaleFactor;
+  OTHER_WIDTH = 30 * boundaryScaleFactor;
+  NODE_PADDING = 25 * boundaryScaleFactor;
+  MIN_LINK_HEIGHT = 5 * boundaryScaleFactor;
+  FONT_SIZE = 12 * boundaryScaleFactor;
+}
 
 function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
+  //$("#statusSpinner").toggle(message === "Failed to load data.");
+}
+
+function dataLoaded(state = true) {
+  if (state) {
+    $("#statusSpinner").addClass("hidden");
+    $("#loading").addClass("hidden");
+    $("#downloadPanel").removeClass("hidden");
+    document.documentElement.style.setProperty("--web-load", "none");
+    document.documentElement.style.setProperty("--db-load", "none");
+  } else {
+    $("#statusSpinner").removeClass("hidden");
+    $("#loading").removeClass("hidden");
+    $("#downloadPanel").addClass("hidden");
+  }
 }
 
 window.exportDB = function () {
@@ -194,14 +223,28 @@ window.hidePresets = function () {
   console.log("Panel hidden");
 };
 
+window.loadingViaDB = function () {
+  document.documentElement.style.setProperty("--db-load", "block");
+  document.documentElement.style.setProperty("--web-load", "none");
+};
+window.loadingViaWeb = function () {
+  document.documentElement.style.setProperty("--db-load", "none");
+  document.documentElement.style.setProperty("--web-load", "block");
+};
+
 $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
+
+  const params = new URLSearchParams(window.location.search);
+  const boundaryScale = viewModel.getExpandScale();
 
   updateStatus("Loading Data...");
 
   // Initialize the select on page load
   renderPopup();
+  updateLayoutButtons();
 
+  dataLoaded(false);
   viewModel
     .loadData()
     .then(() => {
@@ -651,7 +694,15 @@ function bindEvents(g) {
 }
 
 function zoomToFit() {
-  const g = svg.select("g.main"); // Select g.main dynamically
+  let g = svg.select("g.main");
+  if (g.empty()) {
+    console.warn("g.main not found, creating new g.main");
+    g = svg
+      .append("g")
+      .attr("class", "main")
+      .attr("transform", "translate(50, 50)");
+    return; // Skip zooming until graph is rendered
+  }
   const bounds = g.node().getBBox();
   if (
     !isFinite(bounds.width) ||
@@ -664,10 +715,10 @@ function zoomToFit() {
   }
   const container = document.getElementById("graph-container");
   const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.7;
+  const height = container.offsetHeight || window.innerHeight * 0.75;
   const dx = bounds.x;
   const dy = bounds.y;
-  const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+  const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
   svg
     .transition()
     .duration(750)
@@ -682,25 +733,44 @@ function zoomToFit() {
 
 function generateGraph() {
   if (!viewModel.dataReady) {
+    updateStatus("No Data Loaded");
+    dataLoaded(false);
     alert("Data not loaded yet. Please wait.");
     return;
   }
 
-  $("#loading").show();
-  $("#graph-container svg").remove();
+  $("#graph").empty();
+  updateStatus("Generating Graph...");
 
   const container = document.getElementById("graph-container");
   const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.7;
+  const height = Math.max(container.offsetHeight, window.innerHeight * 0.75);
 
   svg = d3
-    .select("#graph-container")
-    .append("svg")
+    .select("#graph-container > svg#graph[data-graph='true']")
     .attr("id", "graph")
-    .attr("width", "100%")
+    .attr("data-graph", "true");
+  // Fallback: Create SVG if not found
+  if (!svg.node()) {
+    console.warn("No #graph SVG found, creating new one");
+    svg = d3
+      .select("#graph-container")
+      .append("svg")
+      .attr("id", "graph")
+      .attr("data-graph", "true");
+  }
+
+  svg
+    .attr("width", "100%") // Ensure attributes are set in case SVG was cleared
     .attr("height", "100%")
     .style("display", "block")
-    .style("background", "#fff");
+    .style("background", "#fff")
+    .attr("class", "flex-1");
+
+  let g = svg
+    .append("g")
+    .attr("class", "main")
+    .attr("transform", "translate(50, 50)");
 
   zoom = d3
     .zoom()
@@ -720,11 +790,7 @@ function generateGraph() {
 
   svg.call(zoom);
 
-  let g = svg
-    .append("g")
-    .attr("class", "main")
-    .attr("transform", "translate(50, 50)");
-
+  updateScaledConstants();
   const sankey = sankeyWithCircles()
     .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
@@ -732,7 +798,10 @@ function generateGraph() {
     .linkSort(compareLinks)
     .nodeAlign(d3.sankeyCenter)
     .nodeSort(compareCharities)
-    .size([width - 100, height - 100]);
+    .size([
+      (width - 100) * viewModel.getExpandScale(),
+      (height - 100) * viewModel.getExpandScale(),
+    ]);
 
   viewModel.parseQueryParams();
   if (viewModel.matchURL() === 0) {
@@ -820,13 +889,40 @@ function generateGraph() {
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
   }, 1000);*/
-
-  zoomToFit();
+  document.getElementById("expandLayout").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactor = viewModel.expandScaleUp();
+    updateLayoutButtons();
+    updateQueryParams();
+    generateGraph();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("shrinkLayout").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactor = viewModel.expandScaleDown();
+    updateLayoutButtons();
+    updateQueryParams();
+    generateGraph();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("layoutScaleReset").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    viewModel.setExpandScale(2);
+    updateLayoutButtons();
+    updateQueryParams();
+    generateGraph();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
   renderActiveEINs();
   renderActiveKeywords();
   renderActiveEINs();
   renderHideEINs();
-  $("#loading").hide();
+
+  dataLoaded(true);
+  zoomToFit();
 }
 
 function adjustCircularLinks(graph) {
@@ -851,6 +947,19 @@ function adjustCircularLinks(graph) {
   }
 }
 
+function updateLayoutButtons() {
+  const expandBtn = document.getElementById("expandLayout");
+  const shrinkBtn = document.getElementById("shrinkLayout");
+  expandBtn.disabled = !viewModel.canExpandUp();
+  shrinkBtn.disabled = !viewModel.canExpandDown();
+  const scaleDisplay = document.getElementById("layoutScaleDisplay");
+  if (scaleDisplay) {
+    scaleDisplay.textContent = `Layout Scale: ${viewModel
+      .getExpandScale()
+      .toFixed(1)}x`;
+  }
+}
+
 function renderFocusedSankey(
   g,
   sankey,
@@ -864,19 +973,29 @@ function renderFocusedSankey(
   const ANIM_LINK = 1200;
   const ANIM_HAT = 1500;
   const ANIM_TEXT = 1500;
-  $("#downloadBtn").hide();
+  dataLoaded(false);
 
   let currentData = viewModel.buildSankeyData();
+  const nodeCount = currentData.nodes.length;
+  const edgeCount = currentData.links.length;
+  const edgeTotal = formatNumber(
+    currentData.links.reduce((sum, g) => sum + g.amt, 0)
+  );
 
   savePreviousState(currentData);
 
-  const sankeyWidth = width - 100;
-  const sankeyHeight = height - 100;
-  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(25);
+  updateScaledConstants();
+  const sankeyWidth = (width - 100) * boundaryScaleFactor;
+  const sankeyHeight = (height - 100) * boundaryScaleFactor;
+  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(NODE_PADDING);
 
   const graph = sankey(currentData);
 
   const scale = calculateScale(graph, width, height);
+  calculateNodePositions(graph.nodes, scale, height);
+  adjustCircularLinks(graph);
+  normalizeStrokeWidths(graph);
+
   calculateNodePositions(graph.nodes, scale, height);
   adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
@@ -1233,7 +1352,7 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style("font-size", `${12 * scale}px`);
+    .style("font-size", `${Math.max(FONT_SIZE, 10)}px`);
 
   text
     .merge(textEnter)
@@ -1244,13 +1363,15 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style("font-size", `${12 * scale}px`)
+    .style("font-size", `${Math.max(FONT_SIZE, 10)}px`)
     .text((d) => d.name);
 
   bindEvents(g);
 
   viewModel.cleanAfterRender();
-  $("#downloadBtn").show();
+  dataLoaded(true);
+  updateStatus(`Orgs: ${nodeCount} Flows:${edgeCount} $:${edgeTotal}`);
+
   const post = encodeURIComponent(
     `Hey, @twinforces @datarepublican, Check this out because:`
   );
@@ -1389,6 +1510,14 @@ function refresh() {
   generateGraph();
 }
 
+window.porkClick = function (ein) {
+  viewModel.porkClick(ein);
+  refresh();
+};
+window.billClick = function (ein) {
+  viewModel.billClick(ein);
+};
+
 function showControlPanel(type, data, element) {
   const panel = document.getElementById("control-panel");
   let content = "";
@@ -1461,7 +1590,12 @@ function showControlPanel(type, data, element) {
           node.visibleGrantsTotal
         )} visible (${node.visibleGrants.length} grants)</p> ${hiddenOutflows}`;
       links = `
-        <p>From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
+        <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
+        <p>Find indirect sources: 
+           <a onClick="porkClick(${
+             node.ein
+           })" title="Show USG Indirect (each click does one more level)"><span class="emoji">&#x1F437;</span></a>
+           </p>
         <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
         <p><a href="${node.officersLink()}">Show me the Officers</a></p>
         <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
