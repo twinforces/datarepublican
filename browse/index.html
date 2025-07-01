@@ -160,17 +160,16 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     <div class="flex flex-col gap-2">
       {% include input.html label="Add EIN(s)" id="einShowInput"
       placeholder="XX-XXXXXXX or 9 digits" buttonLabel="Add EIN"
-      buttonId="addEinBtn" actionId="clearEINsBtnShow" actionLabel="Reset" %}
-      <div id="activeEINs" class="flex flex-wrap gap-2"></div>
+      buttonId="addEinBtn" actions="<button id='clearEINsBtnShow' class='frameless'>Reset</button>"%}
+      <div id="activeEINs" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
     </div>
 
     <!-- Block EIN(s) -->
     <div class="flex flex-col gap-2">
       {% include input.html label="Block EIN(s)" id="einHideInput"
       placeholder="XX-XXXXXXX or 9 digits" buttonLabel="Block EIN"
-      buttonId="hideEinBtn" actionId="clearEINsBtnHide" actionLabel="Unblock All
-      EINs" %}
-      <div id="hideEINs" class="flex flex-wrap gap-2"></div>
+      buttonId="hideEinBtn" actions="<button id='clearEINsBtnShow' class='frameless'>Unblock All</button>" %}
+      <div id="hideEINs" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
     </div>
 
     <!-- Bulk Add by Keyword -->
@@ -178,7 +177,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
       {% include input.html label="Bulk add orgs by keyword" id="keywordInput"
       placeholder="Keyword or phrase..." buttonLabel="Add"
       buttonId="addFilterBtn" %}
-      <div id="activeFilters" class="flex flex-wrap gap-2"></div>
+      <div id="activeFilters" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
     </div>
 
     <!-- Placeholder for future controls -->
@@ -469,8 +468,9 @@ title: Charity explorer - Sankey chart of NGOs and their flows
       <p class="text-sm mb-4">
         Thank you for your patience, and I hope you you enjoy exploring the
         crazy world of NGOs. After the data downloads, you'll be able to choose
-        from a list of starting points. Follow @twinforces on X to see previews
-        of future work.
+        from a list of starting points. Follow <a href="https://x.com/twinforces" target="_blank">@twinforces</a> 
+        to see insights and previews
+        of works in progress.
       </p>
       <p class="show-web-load text-sm  mb-4">
         <i
@@ -490,8 +490,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         take a few seconds.
       </p>
       <p class="text-sm mb-4">
-        Follow <a href="https://x.com/twinforces" target="_blank">@twinforces</a> on X to see
-        works in progress and previews. All code is open source, hosted at
+        All code is open source, hosted at
         <a href="https://github.com/twinforces" target="_blank">github</a>.
       </p>
     </div>

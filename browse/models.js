@@ -1,9 +1,9 @@
 const POWER_LAW_RESET = 3;
 const TOP_N_INITIAL = 5;
 const START_REVEAL = 5;
-const MAX_EXPAND_SCALE = 50;
+const MAX_EXPAND_SCALE = 100;
 const MIN_EXPAND_SCALE = 0.1;
-const EXPAND_FACTOR = 1.5;
+const EXPAND_FACTOR = 2;
 
 const MIN_REVEAL = 2;
 const NEXT_REVEAL = 3;
@@ -727,7 +727,10 @@ export class BrowseViewModel {
   }
 
   expandScaleUp() {
-    this.expandScale = Math.min(MAX_EXPAND_SCALE, this.expandScale * 1.5);
+    this.expandScale = Math.min(
+      MAX_EXPAND_SCALE,
+      this.expandScale * EXPAND_FACTOR
+    );
   }
 
   expandScaleDown() {

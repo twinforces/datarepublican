@@ -26,6 +26,7 @@ let OTHER_WIDTH = 30 * boundaryScaleFactor;
 let NODE_PADDING = 25 * boundaryScaleFactor;
 let MIN_LINK_HEIGHT = 5 * boundaryScaleFactor;
 let FONT_SIZE = 12 * boundaryScaleFactor;
+const FONT_CONSTANT = 4;
 let isRedrawing = false;
 
 function updateScaledConstants() {
@@ -260,7 +261,9 @@ $(document).ready(function () {
     if (e.key === "Enter") addEINFromInput();
   });
   $("#clearEINsBtnShow").on("click", () => {
-    window.location.href = "/browse/";
+    viewModel.clearShowList();
+    viewModel.clearAll();
+    refresh();
   });
   $("#clearEINsBtnHide").on("click", () => {
     viewModel.clearHideList();
@@ -1352,7 +1355,10 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style("font-size", `${Math.max(FONT_SIZE, 10)}px`);
+    .style(
+      "font-size",
+      (d) => `${Math.max(FONT_SIZE, 10, (d.y1 - d.y0) / FONT_CONSTANT)}px`
+    );
 
   text
     .merge(textEnter)
@@ -1363,7 +1369,10 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style("font-size", `${Math.max(FONT_SIZE, 10)}px`)
+    .style(
+      "font-size",
+      (d) => `${Math.max(FONT_SIZE, 10, (d.y1 - d.y0) / FONT_CONSTANT)}px`
+    )
     .text((d) => d.name);
 
   bindEvents(g);
@@ -1505,7 +1514,7 @@ function handleSearchResultHover(index) {
 
 function refresh() {
   updateQueryParams();
-  renderActiveEINs;
+  renderActiveEINs();
   renderHideEINs();
   generateGraph();
 }
