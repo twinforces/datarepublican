@@ -3,7 +3,7 @@ const TOP_N_INITIAL = 5;
 const START_REVEAL = 5;
 const MAX_EXPAND_SCALE = 1024;
 const MIN_EXPAND_SCALE = 0.1;
-const EXPAND_FACTOR = 2;
+const EXPAND_FACTOR = 1.25;
 
 const MIN_REVEAL = 2;
 const NEXT_REVEAL = 3;
@@ -664,6 +664,7 @@ export class BrowseViewModel {
 
   clearAll() {
     for (const c of Charity.visibleCharities) c.clearVisibility();
+    Grant.desiredGrants.forEach((g) => g.clearAll());
   }
 
   presets() {
@@ -710,36 +711,65 @@ export class BrowseViewModel {
 
   /** methods for manipulating the scaling */
 
-  setExpandScale(scale) {
-    this.expandScale = scale;
+  setExpandScaleY(scale) {
+    this.expandScaleY = scale;
   }
 
-  getExpandScale() {
-    return this.expandScale || 2;
+  getExpandScaleY() {
+    return this.expandScaleY || 2;
   }
 
-  canExpandUp() {
-    return this.getExpandScale() < MAX_EXPAND_SCALE;
+  canExpandUpY() {
+    return this.getExpandScaleY() < MAX_EXPAND_SCALE;
   }
 
-  canExpandDown() {
-    return this.getExpandScale() > MIN_EXPAND_SCALE;
+  canExpandDownY() {
+    return this.getExpandScaleY() > MIN_EXPAND_SCALE;
   }
 
-  expandScaleUp() {
-    this.expandScale = Math.min(
+  expandScaleYUp() {
+    this.expandScaleY = Math.min(
       MAX_EXPAND_SCALE,
-      this.expandScale * EXPAND_FACTOR
+      this.expandScaleY * EXPAND_FACTOR
     );
   }
 
-  expandScaleDown() {
-    this.expandScale = Math.max(
+  expandScaleYDown() {
+    this.expandScaleY = Math.max(
       MIN_EXPAND_SCALE,
-      this.expandScale / EXPAND_FACTOR
+      this.expandScaleY / EXPAND_FACTOR
     );
   }
 
+  setExpandScaleX(scale) {
+    this.expandScaleX = scale;
+  }
+
+  getExpandScaleX() {
+    return this.expandScaleX || 2;
+  }
+
+  canExpandUpX() {
+    return this.getExpandScaleX() < MAX_EXPAND_SCALE;
+  }
+
+  canExpandDownX() {
+    return this.getExpandScaleX() > MIN_EXPAND_SCALE;
+  }
+
+  expandScaleXUp() {
+    this.expandScaleX = Math.min(
+      MAX_EXPAND_SCALE,
+      this.expandScaleX * EXPAND_FACTOR
+    );
+  }
+
+  expandScaleXDown() {
+    this.expandScaleX = Math.max(
+      MIN_EXPAND_SCALE,
+      this.expandScaleX / EXPAND_FACTOR
+    );
+  }
   setGraphScale(scale) {
     if (scale != this.POWER_LAW) {
       this.POWER_LAW = scale;
@@ -912,7 +942,8 @@ export class BrowseViewModel {
     this.getHideList().forEach((e) => params.append("nein", e));
     this.getKeywordList().forEach((k) => params.append("keywords", k));
     params.append("scale", this.POWER_LAW);
-    params.append("expand", this.expandScale);
+    params.append("expandX", this.expandScaleX);
+    params.append("expandY", this.expandScaleY);
     return params;
   }
 
@@ -931,8 +962,10 @@ export class BrowseViewModel {
     this.setKeywordList(params.getAll("keywords"));
     const scale = parseInt(params.get("scale") || "0", 10);
     if (scale) this.setGraphScale(scale);
-    const expand = parseFloat(params.get("expand") || "2", 10);
-    this.setExpandScale(expand);
+    const expandX = parseFloat(params.get("expandX") || "2", 10);
+    const expandY = parseFloat(params.get("expandY") || "2", 10);
+    this.setExpandScaleX(expandX);
+    this.setExpandScaleY(expandY);
   }
 
   /** Place holder for when we actually parse the breadcrumb data, for
@@ -1259,7 +1292,7 @@ export class BrowseViewModel {
 
     if (rootCharity) {
       // incremental case
-      if (inflowsOnly) {
+      /* if (inflowsOnly) {
         for (const grant of rootCharity.invisibleGrantsIn.slice(
           0,
           NEXT_REVEAL
@@ -1280,7 +1313,7 @@ export class BrowseViewModel {
             console.log(`  Outflow grantee ${grant.grantee.ein} set visible`);
           }
         }
-      }
+      }*/
     } else {
       // brute force whole data model case
       const seeds = Charity.desiredCharities; //handy accessor

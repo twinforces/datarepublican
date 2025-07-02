@@ -67,7 +67,11 @@ wc -l $FINAL_DIR/*.tsv
 cp $FINAL_DIR/grants_final.tsv $BROWSE
 cp $FINAL_DIR/grants_pf.tsv $BROWSE/grants.pf.tsv
 cp $FINAL_DIR/charity_latest.tsv $$BROWSE/charities.tsv
-pushd $BROWSE; $TOOLS/split_tsvs.sh
+
+
+pushd $BROWSE
+rm -rf $BROWSE/tsv_chunks
+$TOOLS/split_tsvs.sh
 
 
 
