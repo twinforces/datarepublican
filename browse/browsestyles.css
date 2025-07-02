@@ -185,7 +185,6 @@ text { fill: #000; }
   gap: 0.5rem;
 }
 #downloadPanel {
-  display: flex;
   gap: 0.5rem;
 }
 #downloadPanel button:not(.x-share-button) {

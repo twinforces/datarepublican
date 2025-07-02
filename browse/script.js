@@ -18,24 +18,27 @@ import {
 let svg = null;
 let zoom = null;
 
-let boundaryScaleFactor = 2;
+let boundaryScaleFactorX = 2;
+let boundaryScaleFactorY = 2;
 const MAX_SCALE = 10;
 
-let NODE_WIDTH = 50 * boundaryScaleFactor;
-let OTHER_WIDTH = 30 * boundaryScaleFactor;
-let NODE_PADDING = 25 * boundaryScaleFactor;
-let MIN_LINK_HEIGHT = 5 * boundaryScaleFactor;
-let FONT_SIZE = 12 * boundaryScaleFactor;
+let NODE_WIDTH = 50 * boundaryScaleFactorX;
+let OTHER_WIDTH = 30 * boundaryScaleFactorY;
+let NODE_PADDING = 25 * boundaryScaleFactorX;
+let MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
+let FONT_SIZE = 12 * boundaryScaleFactorY;
+const VERT_SCALE_RATIO = 1.5; // better to scale vertically faster with a sankey
 const FONT_CONSTANT = 4;
 let isRedrawing = false;
 
 function updateScaledConstants() {
-  boundaryScaleFactor = viewModel.getExpandScale();
-  NODE_WIDTH = 50 * boundaryScaleFactor;
-  OTHER_WIDTH = 30 * boundaryScaleFactor;
-  NODE_PADDING = 25 * boundaryScaleFactor;
-  MIN_LINK_HEIGHT = 5 * boundaryScaleFactor;
-  FONT_SIZE = 12 * boundaryScaleFactor;
+  boundaryScaleFactorX = viewModel.getExpandScaleX();
+  boundaryScaleFactorY = viewModel.getExpandScaleY();
+  NODE_WIDTH = 50 * boundaryScaleFactorX;
+  OTHER_WIDTH = 30 * boundaryScaleFactorX;
+  NODE_PADDING = 25 * boundaryScaleFactorY;
+  MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
+  FONT_SIZE = 12 * boundaryScaleFactorY;
 }
 
 function updateStatus(message, color = "black") {
@@ -237,7 +240,7 @@ $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
   const params = new URLSearchParams(window.location.search);
-  const boundaryScale = viewModel.getExpandScale();
+  const boundaryScale = viewModel.getExpandScaleX();
 
   updateStatus("Loading Data...");
 
@@ -802,8 +805,8 @@ function generateGraph() {
     .nodeAlign(d3.sankeyCenter)
     .nodeSort(compareCharities)
     .size([
-      (width - 100) * viewModel.getExpandScale(),
-      (height - 100) * viewModel.getExpandScale(),
+      (width - 100) * viewModel.getExpandScaleX(),
+      (height - 100) * viewModel.getExpandScaleY(),
     ]);
 
   viewModel.parseQueryParams();
@@ -892,31 +895,54 @@ function generateGraph() {
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
   }, 1000);*/
-  document.getElementById("expandLayout").onclick = () => {
+  document.getElementById("expandLayoutX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    boundaryScaleFactor = viewModel.expandScaleUp();
-    updateLayoutButtons();
-    updateQueryParams();
-    generateGraph();
+    boundaryScaleFactorX = viewModel.expandScaleXUp();
+    refresh();
     setTimeout(() => (isRedrawing = false), 1000);
   };
-  document.getElementById("shrinkLayout").onclick = () => {
+  document.getElementById("shrinkLayoutX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    boundaryScaleFactor = viewModel.expandScaleDown();
+    boundaryScaleFactorX = viewModel.expandScaleXDown();
     updateLayoutButtons();
-    updateQueryParams();
-    generateGraph();
+    refresh();
     setTimeout(() => (isRedrawing = false), 1000);
   };
-  document.getElementById("layoutScaleReset").onclick = () => {
+  document.getElementById("layoutScaleResetX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    viewModel.setExpandScale(2);
+    viewModel.setExpandScaleX(2);
     updateLayoutButtons();
-    updateQueryParams();
-    generateGraph();
+    refresh();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("expandLayoutY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactorY = viewModel.expandScaleYUp();
+    updateLayoutButtons();
+    refresh();
+
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("shrinkLayoutY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactorY = viewModel.expandScaleYDown();
+    updateLayoutButtons();
+    refresh();
+
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("layoutScaleResetY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    viewModel.setExpandScaleY(2);
+    updateLayoutButtons();
+    refresh();
+
     setTimeout(() => (isRedrawing = false), 1000);
   };
   renderActiveEINs();
@@ -951,15 +977,21 @@ function adjustCircularLinks(graph) {
 }
 
 function updateLayoutButtons() {
-  const expandBtn = document.getElementById("expandLayout");
-  const shrinkBtn = document.getElementById("shrinkLayout");
-  expandBtn.disabled = !viewModel.canExpandUp();
-  shrinkBtn.disabled = !viewModel.canExpandDown();
-  const scaleDisplay = document.getElementById("layoutScaleDisplay");
-  if (scaleDisplay) {
-    scaleDisplay.textContent = `Layout Scale: ${viewModel
-      .getExpandScale()
-      .toFixed(1)}x`;
+  const expandBtnX = document.getElementById("expandLayoutX");
+  const shrinkBtnX = document.getElementById("shrinkLayoutX");
+  expandBtnX.disabled = !viewModel.canExpandUpX();
+  shrinkBtnX.disabled = !viewModel.canExpandDownX();
+  const expandBtnY = document.getElementById("expandLayoutX");
+  const shrinkBtnY = document.getElementById("shrinkLayoutX");
+  expandBtnY.disabled = !viewModel.canExpandUpY();
+  shrinkBtnY.disabled = !viewModel.canExpandDownY();
+  const scaleDisplayX = document.getElementById("layoutScaleDisplayX");
+  if (scaleDisplayX) {
+    scaleDisplayX.textContent = `${viewModel.getExpandScaleX().toFixed(1)}x`;
+  }
+  const scaleDisplayY = document.getElementById("layoutScaleDisplayY");
+  if (scaleDisplayY) {
+    scaleDisplayY.textContent = ` ${viewModel.getExpandScaleY().toFixed(1)}x`;
   }
 }
 
@@ -988,8 +1020,8 @@ function renderFocusedSankey(
   savePreviousState(currentData);
 
   updateScaledConstants();
-  const sankeyWidth = (width - 100) * boundaryScaleFactor;
-  const sankeyHeight = (height - 100) * boundaryScaleFactor;
+  const sankeyWidth = (width - 100) * boundaryScaleFactorX;
+  const sankeyHeight = (height - 100) * boundaryScaleFactorY;
   sankey.size([sankeyWidth, sankeyHeight]).nodePadding(NODE_PADDING);
 
   const graph = sankey(currentData);
@@ -1209,7 +1241,7 @@ function renderFocusedSankey(
             })
       )
       .attr("fill", getColorForEIN(d.id))
-      .style("cursor", d.isTerminal ? "zoom-out" : "grab")
+      .style("cursor", d.isTerminal ? "zoom-in" : "grab")
       .append("title")
       .text((d) => d.toolTipText());
   });
@@ -1258,10 +1290,10 @@ function renderFocusedSankey(
     .attr("d", (d) =>
       generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
     )
-    .attr("fill", "#ccc")
+    .attr("fill", (d) => getColorForEIN(d.id))
     .attr("stroke", "#000")
     .attr("class", "hat-up")
-    .style("cursor", "pointer")
+    .style("cursor", "crosshair")
     .append("title")
     .text("expand more inflows");
 
@@ -1307,10 +1339,10 @@ function renderFocusedSankey(
   rightHatEnter
     .append("path")
     .attr("d", (d) => generatePlusPath({ ...d, isRight: true }))
-    .attr("fill", "#ccc")
+    .attr("fill", (d) => getColorForEIN(d.id))
     .attr("stroke", "#000")
     .attr("class", "hat-down")
-    .style("cursor", "pointer")
+    .style("cursor", "crosshair")
     .append("title")
     .text("expand more outflows");
 
@@ -1747,9 +1779,9 @@ window.focusNode = function (ein) {
 const extraStyle = `
   .node { fill: #999; }
   .node.expand { cursor: grab; }
-  .node.no-grants { cursor: zoom-out; }
+  .node.no-grants { cursor: zoom-in; }
   .link { stroke-opacity: 0.5; }
-  .hat-up, .hat-down { cursor: pointer; }
+  .hat-up, .hat-down { cursor: crosshair; }
   text { fill: #000; }
   .selected { stroke: #ff0; stroke-width: 2px; }
 `;

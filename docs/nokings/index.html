@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1751332293">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1751332293">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1751479444">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1751479444">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1040,10 +1040,14 @@ $(document).ready(function() {
           })
         );
 
-      const allEins = rows.map((a) => a.filer_ein);
+      const sortedRows = [...rows].sort(
+        (a, b) =>
+          b["govt_amt"] + b["contrib_amt"] - a["govt_amt"] - a["contrib_amt"]
+      );
+      const allEins = sortedRows.map((a) => a.filer_ein);
       const browseLink = buildBrowseLink(
-        allEins.slice(0, 25),
-        "Explore First 25"
+        allEins.slice(0, 100),
+        "Explore Top 100"
       );
       $("#fullExplore").html(browseLink);
 

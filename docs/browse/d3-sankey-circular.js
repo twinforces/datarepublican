@@ -3,7 +3,7 @@ import { findCircuits } from "./circleMath.js";
 // Use global d3 from CDN
 const d3Array = window.d3;
 const d3Shape = window.d3;
-const OTHER_WIDTH = 30;
+let OTHER_WIDTH = 30;
 
 // For a given link, return the target node's depth
 function targetDepth(d) {
@@ -1180,13 +1180,13 @@ function generateOctagonPath(d) {
 }
 
 function generatePlusPath(d) {
-  const radius = OTHER_WIDTH / 2;
+  const radius = (d.x1 - d.x0) / 5;
   const armWidth = radius * 0.4;
   let cx, circlePath;
   const cy = (d.y0 + d.y1) / 2;
 
   if (d.isTerminal) {
-    const inflowHeight = d.inflowHeight || OTHER_WIDTH;
+    const inflowHeight = d.inflowHeight || d.x1 - d.x0;
     cx = d.x0 - inflowHeight / 2;
     circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
       cy - radius
@@ -1203,11 +1203,13 @@ function generatePlusPath(d) {
     }`; // Bottom to top, left
   }
 
+  /*
+  no plus for now
   const plusPath = `
     M${cx - armWidth},${cy} H${cx + armWidth}
-    M${cx},${cy - armWidth} V${cy + armWidth}
-  `;
-  return `${circlePath} ${plusPath}`;
+    M${cx},${cy - armWidth} V${cy + armWidth} 
+  `;*/
+  return `${circlePath}`;
 }
 function adjustCircularLink(link) {
   // fix path if we moved it.
