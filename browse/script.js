@@ -302,29 +302,6 @@ $(document).ready(function () {
     }
   });
 
-  const searchInput = document.getElementById("searchInput");
-  const searchResults = document.getElementById("searchResults");
-  const clearButton = document.getElementById("clearSearch");
-
-  const newSearchInput = searchInput.cloneNode(true);
-  const newSearchResults = searchResults.cloneNode(true);
-  const newClearButton = clearButton.cloneNode(true);
-
-  searchInput.parentNode.replaceChild(newSearchInput, searchInput);
-  searchResults.parentNode.replaceChild(newSearchResults, searchResults);
-  clearButton.parentNode.replaceChild(newClearButton, clearButton);
-
-  newSearchInput.addEventListener("input", handleSearch);
-  newSearchInput.addEventListener("blur", handleSearchBlur);
-  newSearchInput.addEventListener("keydown", handleSearchKeydown);
-  newSearchResults.addEventListener("click", handleSearchClick);
-
-  newClearButton.addEventListener("click", () => {
-    newSearchInput.value = "";
-    newSearchInput.focus();
-    handleSearch({ target: newSearchInput });
-  });
-
   $(window).on("resize", function () {
     if (viewModel.dataReady) generateGraph();
   });
@@ -814,18 +791,25 @@ function generateGraph() {
     showPresets();
     return;
   }
-
-  viewModel.previousData = renderFocusedSankey(
-    g,
-    sankey,
-    svg, // Use global svg instead of svgRef
-    width,
-    height,
-    viewModel.getShowList().length
-      ? viewModel.getShowList()
-      : [viewModel.GOV_EIN],
-    viewModel.previousData
-  );
+  try {
+    $("#statusSpinner").show();
+    viewModel.previousData = renderFocusedSankey(
+      g,
+      sankey,
+      svg, // Use global svg instead of svgRef
+      width,
+      height,
+      viewModel.getShowList().length
+        ? viewModel.getShowList()
+        : [viewModel.GOV_EIN],
+      viewModel.previousData
+    );
+    $("#statusSpinner").hide();
+  } catch (err) {
+    console.error("Error generating graph:", err);
+    updateStatus(`Graph Generation Failed: ${err.message}`, "red", false);
+    throw err;
+  }
 
   // Button handlers using global zoom
   document.getElementById("zoomIn").onclick = () =>

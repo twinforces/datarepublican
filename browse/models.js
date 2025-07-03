@@ -30,6 +30,7 @@ import { iso3166_alpha2 } from "./countryCodes.js";
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
 import presetsData from "./presets.js";
+let DEBUGLOG = false;
 let GOV_NODE = null; // I use this when debugging.
 
 /**
@@ -99,12 +100,12 @@ export function getColorForEIN(ein) {
 // Initialize IndexedDB
 
 async function initDB() {
-  console.log("Opening IndexedDB: CharityDatabase");
+  if (DEBUGLOG) console.log("Opening IndexedDB: CharityDatabase");
   // Close any existing connections
   const existingDBs = indexedDB.databases ? await indexedDB.databases() : [];
   for (const dbInfo of existingDBs) {
     if (dbInfo.name === "CharityDatabase") {
-      console.log("Closing existing CharityDatabase connection");
+      if (DEBUGLOG) console.log("Closing existing CharityDatabase connection");
       await new Promise((resolve) => {
         const request = indexedDB.open(dbInfo.name);
         request.onsuccess = () => {
@@ -119,32 +120,35 @@ async function initDB() {
     const request = indexedDB.open("CharityDatabase", 1);
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
-      console.log("Creating or upgrading IndexedDB stores...");
+      if (DEBUGLOG) console.log("Creating or upgrading IndexedDB stores...");
       if (db.objectStoreNames.contains(CHARITY_STORE)) {
         db.deleteObjectStore(CHARITY_STORE);
-        console.log(`Deleted existing ${CHARITY_STORE} store`);
+        if (DEBUGLOG) console.log(`Deleted existing ${CHARITY_STORE} store`);
       }
       if (db.objectStoreNames.contains(GRANT_STORE)) {
         db.deleteObjectStore(GRANT_STORE);
-        console.log(`Deleted existing ${GRANT_STORE} store`);
+        if (DEBUGLOG) console.log(`Deleted existing ${GRANT_STORE} store`);
       }
       if (db.objectStoreNames.contains(METADATA_STORE)) {
         db.deleteObjectStore(METADATA_STORE);
-        console.log(`Deleted existing ${METADATA_STORE} store`);
+        if (DEBUGLOG) console.log(`Deleted existing ${METADATA_STORE} store`);
       }
       db.createObjectStore(CHARITY_STORE, { keyPath: "filer_ein" });
-      console.log(`Created ${CHARITY_STORE} store with keyPath: filer_ein`);
+      if (DEBUGLOG)
+        console.log(`Created ${CHARITY_STORE} store with keyPath: filer_ein`);
       db.createObjectStore(GRANT_STORE, { keyPath: "id" });
-      console.log(`Created ${GRANT_STORE} store with keyPath: id`);
+      if (DEBUGLOG)
+        console.log(`Created ${GRANT_STORE} store with keyPath: id`);
       db.createObjectStore(METADATA_STORE, { keyPath: "id" });
-      console.log(`Created ${METADATA_STORE} store with keyPath: id`);
+      if (DEBUGLOG)
+        console.log(`Created ${METADATA_STORE} store with keyPath: id`);
     };
     request.onsuccess = () => {
-      console.log("IndexedDB opened successfully");
+      if (DEBUGLOG) console.log("IndexedDB opened successfully");
       resolve(request.result);
     };
     request.onerror = () => {
-      console.error("Failed to open IndexedDB:", request.error);
+      if (DEBUGLOG) console.error("Failed to open IndexedDB:", request.error);
       reject(request.error);
     };
   });
@@ -187,6 +191,7 @@ async function hasValidData(db) {
       request.onerror = () => reject(request.error);
     });
     await tx.done;
+    loadingViaDB();
     return (
       versionRequest?.value === DATA_FILES.dbVersion &&
       generatedRequest?.value === true
@@ -219,7 +224,8 @@ async function fetchLocalData(db, storeName) {
     });
 
     await tx.done;
-    console.log(`Retrieved ${records.length} records from ${storeName}`);
+    if (DEBUGLOG)
+      console.log(`Retrieved ${records.length} records from ${storeName}`);
     return records;
   } catch (error) {
     console.error(`Error fetching data from ${storeName}:`, error);
@@ -246,7 +252,7 @@ async function storeData(db, storeName, records) {
   }
 
   try {
-    console.time(`storeD-${storeName}`);
+    if (DEBUGLOG) console.time(`storeD-${storeName}`);
     const tx = db.transaction(storeName, "readwrite");
     const store = tx.objectStore(storeName);
     let storedRecords = 0;
@@ -275,7 +281,7 @@ async function storeData(db, storeName, records) {
       tx.onerror = () => reject(tx.error);
     });
 
-    console.timeEnd(`storeD-${storeName}`);
+    if (DEBUGLOG) console.timeEnd(`storeD-${storeName}`);
     return storedRecords;
   } catch (err) {
     console.error(`Error storing data in ${storeName}:`, err);
@@ -404,7 +410,7 @@ async function fetchAndStoreTSV(db, files) {
         const endIndex = Math.min(startIndex + BATCH_SIZE, lines.length);
         let row;
         try {
-          console.time(`processTSV-${tsvFile}-${startIndex}`);
+          if (DEBUGLOG) console.time(`processTSV-${tsvFile}-${startIndex}`);
           for (let index = startIndex; index < endIndex; index++) {
             const values = lines[index]
               .split("\t")
@@ -485,10 +491,10 @@ async function fetchAndStoreTSV(db, files) {
               }
             }
           }
-          console.timeEnd(`processTSV-${tsvFile}-${startIndex}`);
+          if (DEBUGLOG) console.timeEnd(`processTSV-${tsvFile}-${startIndex}`);
 
           if (records.length > 0) {
-            console.time(`storeTSV-${tsvFile}-${startIndex}`);
+            if (DEBUGLOG) console.time(`storeTSV-${tsvFile}-${startIndex}`);
             try {
               await storeData(
                 db,
@@ -502,7 +508,7 @@ async function fetchAndStoreTSV(db, files) {
               );
               throw storeError;
             }
-            console.timeEnd(`storeTSV-${tsvFile}-${startIndex}`);
+            if (DEBUGLOG) console.timeEnd(`storeTSV-${tsvFile}-${startIndex}`);
           }
           updateStatus(
             `Loaded ${formatNumber(
@@ -728,6 +734,8 @@ export class BrowseViewModel {
   }
 
   expandScaleYUp() {
+    this.debugCloneDesired = new Set([...Charity.desiredCharities]);
+    this.debugCloneVisible = new Set([...Charity.visibleCharities]);
     this.expandScaleY = Math.min(
       MAX_EXPAND_SCALE,
       this.expandScaleY * EXPAND_FACTOR
@@ -938,12 +946,12 @@ export class BrowseViewModel {
       if (p) visibleMap[c.ein] = p;
     });
     this.getHideList().forEach((ein) => delete visibleMap[ein]);
-    Object.values(visibleMap).forEach((e) => params.append("ein", e));
-    this.getHideList().forEach((e) => params.append("nein", e));
-    this.getKeywordList().forEach((k) => params.append("keywords", k));
-    params.append("scale", this.POWER_LAW);
-    params.append("expandX", this.expandScaleX);
-    params.append("expandY", this.expandScaleY);
+    Object.values(visibleMap).forEach((e) => params.append("e", e));
+    this.getHideList().forEach((e) => params.append("n", e));
+    this.getKeywordList().forEach((k) => params.append("k", k));
+    params.append("s", this.POWER_LAW);
+    params.append("X", this.getExpandScaleX());
+    params.append("Y", this.getExpandScaleY());
     return params;
   }
 
@@ -953,19 +961,30 @@ export class BrowseViewModel {
     window.history.replaceState({}, "", newUrl);
   }
 
+  parseParamsWithOldNew(params, oldName, newName) {
+    let parms = params.getAll(newName);
+    if (!parms) parms = params.getAll(oldName);
+    return parms;
+  }
   /** given a URL, parse it into our relevant pieces */
   parseQueryParams(params = new URLSearchParams(window.location.search)) {
     this.showList = {};
-    this.setShowList(params.getAll("ein"));
-    this.setHideList(params.getAll("nein"));
-    this.setBreadCrumbs(params.getAll("breadCrumbs"));
-    this.setKeywordList(params.getAll("keywords"));
-    const scale = parseInt(params.get("scale") || "0", 10);
+    this.setShowList(this.parseParamsWithOldNew(params, "ein", "e"));
+    this.setHideList(this.parseParamsWithOldNew(params, "nein", "n"));
+    this.setKeywordList(this.parseParamsWithOldNew(params, "keywords", "k"));
+    const scale = parseInt(params.get("s") || params.get("scale") || "0", 10);
     if (scale) this.setGraphScale(scale);
-    const expandX = parseFloat(params.get("expandX") || "2", 10);
-    const expandY = parseFloat(params.get("expandY") || "2", 10);
+    const expandX = parseFloat(
+      params.get("X") || params.get("expandX") || "2",
+      10
+    );
+    const expandY = parseFloat(
+      params.get("Y") || params.get("expandY") || "2",
+      10
+    );
     this.setExpandScaleX(expandX);
     this.setExpandScaleY(expandY);
+    if (params.get("D")) DEBUGLOG = true; /// set it once, it sticks
   }
 
   /** Place holder for when we actually parse the breadcrumb data, for
@@ -990,7 +1009,8 @@ export class BrowseViewModel {
   matchURL(params = new URLSearchParams(window.location.search)) {
     this.parseQueryParams(params);
     updateStatus("", "green", false);
-    console.log("ShowList before processing:", this.getShowList());
+    if (DEBUGLOG)
+      console.log("ShowList before processing:", this.getShowList());
     Charity.visibleCharities.forEach((c) => {
       c.desiredVisible = false;
       c.impliedVisible = 0;
@@ -1002,12 +1022,13 @@ export class BrowseViewModel {
       const downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
       const charity = Charity.getCharity(id);
       if (charity && !this.shouldHide(id)) {
-        charity.place(ups, downs);
-        console.log(
-          `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
-        );
+        if (!(charity.impliedVisible > 1)) charity.place(ups, downs); // circular grants suck
+        if (DEBUGLOG)
+          console.log(
+            `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
+          );
       } else {
-        console.log(`no match for ${ein} in match`);
+        if (DEBUGLOG) console.error(`no match for ${ein} in match`);
       }
     });
     this.getHideList().forEach((ein) => {
@@ -1026,7 +1047,7 @@ export class BrowseViewModel {
       if (matches.length > MAX_KEYWORD_NODES) {
         updateStatus(
           `<span>Note: Graph limited to first ${MAX_KEYWORD_NODES} of ${matches.length} matching results</span>`,
-          "black"
+          "orange"
         );
       }
 
@@ -1035,11 +1056,12 @@ export class BrowseViewModel {
       });
     }
     this.computeImpliedVisibility(null, true, true);
-    console.log(
-      "Visible Charities after matchURL:",
-      Charity.visibleCharities.length,
-      Array.from(Charity.visibleCharities).map((c) => c.id)
-    );
+    if (DEBUGLOG)
+      console.log(
+        "Visible Charities after matchURL:",
+        Charity.visibleCharities.size,
+        Array.from(Charity.visibleCharities).map((c) => c.toString())
+      );
     return Charity.visibleCharities.size;
   }
 
@@ -1091,9 +1113,9 @@ export class BrowseViewModel {
 
     updateStatus(`Storing ${countriesProcessed} country records`);
     try {
-      console.time("storeCountries");
+      if (DEBUGLOG) console.time("storeCountries");
       const storedCount = await storeData(db, CHARITY_STORE, countryRecords);
-      console.timeEnd("storeCountries");
+      if (DEBUGLOG) console.timeEnd("storeCountries");
       if (storedCount !== countryRecords.length) {
         console.warn(
           `Storage mismatch: Prepared ${countryRecords.length} countries, stored ${storedCount}`
@@ -1101,11 +1123,11 @@ export class BrowseViewModel {
       }
     } catch (error) {
       console.error(`Failed to store countries in IndexedDB:`, error);
-      console.log("Continuing despite storage error");
+      if (DEBUGLOG) console.log("Continuing despite storage error");
     }
 
     try {
-      console.time("storeMetadata");
+      if (DEBUGLOG) console.time("storeMetadata");
       const tx = db.transaction(METADATA_STORE, "readwrite");
       const store = tx.objectStore(METADATA_STORE);
       await Promise.all([
@@ -1124,7 +1146,7 @@ export class BrowseViewModel {
         }),
       ]);
       await tx.done;
-      console.timeEnd("storeMetadata");
+      if (DEBUGLOG) console.timeEnd("storeMetadata");
     } catch (error) {
       console.error(`Failed to store metadata:`, error);
       console.log("Continuing despite metadata error");
@@ -1154,7 +1176,7 @@ export class BrowseViewModel {
    * as it will step 1 node farther down the graph.
    */
   clickNode(event, charity, refreshCallback) {
-    console.log(`Clicked node ${charity.id} ${charity.name}`);
+    if (DEBUGLOG) console.log(`Clicked node ${charity.id} ${charity.name}`);
     //charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
     charity.expandOutflows(NEXT_REVEAL);
     charity.expandInflows(NEXT_REVEAL);
@@ -1192,12 +1214,12 @@ export class BrowseViewModel {
       charity.desiredVisible = false;
       charity.compressOutflows(NEXT_REVEAL);
       charity.compressInflows(NEXT_REVEAL);
-      console.log(`Compressing ${charity.id} ${charity.name}`);
+      if (DEBUGLOG) console.log(`Compressing ${charity.id} ${charity.name}`);
     } else {
       desiredVisible = true;
       charity.expandOutflows(NEXT_REVEAL);
       charity.expandInflows(NEXT_REVEAL);
-      console.log(`Expanding ${charity.id} ${charity.name}`);
+      if (DEBUGLOG) console.log(`Expanding ${charity.id} ${charity.name}`);
     }
     this.computeImpliedVisibility(charity, true, true);
   }
@@ -1211,9 +1233,10 @@ export class BrowseViewModel {
   clickGrant(event, grant) {
     grant.desiredVisible = !grant.desiredVisible;
     /*TODO Think about what we should do to grant.filer and grant.grantee  */
-    console.log(
-      `${grant.desiredVisible ? "Showing" : "Hiding"} grant ${grant.id}`
-    );
+    if (DEBUGLOG)
+      console.log(
+        `${grant.desiredVisible ? "Showing" : "Hiding"} grant ${grant.id}`
+      );
     this.computeImpliedVisibility(grant.filer, true, false);
     this.computeImpliedVisibility(grant.grantee, false, true);
   }
@@ -1223,12 +1246,12 @@ export class BrowseViewModel {
     if (event.shiftKey) {
       grant.filer.desiredVisible = false;
       grant.grantee.desiredVisible = false;
-      console.log(`Hiding nodes for grant ${grant.id}`);
+      if (DEBUGLOG) console.log(`Hiding nodes for grant ${grant.id}`);
     } else {
       grant.filer.desiredVisible = true;
       grant.grantee.desiredVisible = true;
       grant.desiredVisible = true;
-      console.log(`Showing nodes and grant ${grant.id}`);
+      if (DEBUGLOG) console.log(`Showing nodes and grant ${grant.id}`);
     }
     this.computeImpliedVisibility(grant.filer, true, false);
     this.computeImpliedVisibility(grant.grantee, false, true);
@@ -1240,7 +1263,8 @@ export class BrowseViewModel {
    * expands that way, clicking on the downstream that way.
    */
   handleUpClick(event, charity, refreshCallback) {
-    console.log(`Expanding inflows for ${charity.id} ${charity.name}`);
+    if (DEBUGLOG)
+      console.log(`Expanding inflows for ${charity.id} ${charity.name}`);
     charity.desiredVisible = true;
     charity.expandInflows(NEXT_REVEAL);
     this.computeImpliedVisibility(charity, true, true);
@@ -1249,7 +1273,8 @@ export class BrowseViewModel {
   }
 
   handleDownClick(event, charity, refreshCallback) {
-    console.log(`Expanding outflows for ${charity.id} ${charity.name}`);
+    if (DEBUGLOG)
+      console.log(`Expanding outflows for ${charity.id} ${charity.name}`);
     charity.desiredVisible = true;
     charity.expandOutflows(NEXT_REVEAL);
     this.computeImpliedVisibility(charity, true, true);
@@ -1326,7 +1351,10 @@ export class BrowseViewModel {
             grant.grantee.impliedVisible++;
             grant.impliedVisible = true;
             if (!grant.grantee.isGov || grant.grantee.desiredVisible) {
-              console.log(`  Outflow grantee ${grant.grantee.ein} set visible`);
+              if (DEBUGLOG)
+                console.log(
+                  `  Outflow grantee ${grant.grantee.ein} set visible`
+                );
             }
           }
         }
@@ -1338,7 +1366,8 @@ export class BrowseViewModel {
             grant.filer.impliedVisible++;
             grant.impliedVisible = true;
             if (!grant.filer.isGov || grant.filer.desiredVisible) {
-              console.log(`  Inflow filer ${grant.filer.ein} set visible`);
+              if (DEBUGLOG)
+                console.log(`  Inflow filer ${grant.filer.ein} set visible`);
             }
           }
         }
@@ -1388,6 +1417,22 @@ export class BrowseViewModel {
     this.renderData = { nodes: [], links: [] };
     //this.computeImpliedVisibility();
     this.buildCleanSankeyData(maxSeeds);
+    if (this.debugCloneDesired) {
+      const differenceD = new Set();
+      for (const item of Charity.desiredCharities) {
+        if (!this.debugCloneDesired.has(item)) {
+          differenceD.add(item);
+        }
+      }
+      const differenceV = new Set();
+      for (const item of Charity.visibleCharities) {
+        if (!this.debugCloneVisible.has(item)) {
+          if (item.impliedVisible > 0) differenceV.add(item);
+        }
+      }
+      console.log("Desired", [...differenceD]);
+      console.log("Implied", [...differenceV]);
+    }
     /*while (this.renderData.nodes.length > MAX_NODES && maxSeeds > 5) {
       updateStatus(`Too Many Nodes, reducing to ${maxSeeds} seeds`);
       Charity.visibleCharities // reverse sort so largest flows larger get kept
@@ -1410,9 +1455,10 @@ export class BrowseViewModel {
   }
   async processGrantsZipFile({ status, zipFile, tsvFile, grantType }) {
     try {
-      console.log(`Starting ${zipFile} at ${new Date().toISOString()}`);
+      if (DEBUGLOG)
+        console.log(`Starting ${zipFile} at ${new Date().toISOString()}`);
       const db = await initDB();
-      console.time("Starting grant fetch" + zipFile);
+      if (DEBUGLOG) console.time("Starting grant fetch" + zipFile);
 
       const records = await fetchAndStoreTSV(db, {
         zipFile,
@@ -1421,11 +1467,11 @@ export class BrowseViewModel {
         grantType,
         status,
       });
-      console.timeEnd("Starting grant fetch" + zipFile);
+      if (DEBUGLOG) console.timeEnd("Starting grant fetch" + zipFile);
 
-      console.time("Starting grant store" + zipFile);
+      if (DEBUGLOG) console.time("Starting grant store" + zipFile);
       await storeData(db, GRANT_STORE, records);
-      console.timeEnd("Starting grant store" + zipFile);
+      if (DEBUGLOG) console.timeEnd("Starting grant store" + zipFile);
       let totalGrantsRows = records.length;
 
       for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -1439,7 +1485,8 @@ export class BrowseViewModel {
         );
       }
 
-      console.log(`Finished ${zipFile}, totalGrantsRows: ${totalGrantsRows}`);
+      if (DEBUGLOG)
+        console.log(`Finished ${zipFile}, totalGrantsRows: ${totalGrantsRows}`);
       updateStatus(
         `Processed ${formatNumber(totalGrantsRows)} grants for ${tsvFile}`,
         "green",
@@ -1453,26 +1500,29 @@ export class BrowseViewModel {
     }
   }
   async loadData() {
-    console.log(`Starting loadData at ${new Date().toISOString()}`);
+    if (DEBUGLOG)
+      console.log(`Starting loadData at ${new Date().toISOString()}`);
     updateStatus("Loading data...");
     this.dataReady = false;
     Charity.charityLookup = {};
     Grant.grantLookup = {};
 
     try {
-      console.log("Initializing IndexedDB...");
+      if (DEBUGLOG) console.log("Initializing IndexedDB...");
       this.db = await initDB();
-      console.log("IndexedDB initialized");
-      console.log(
-        `Database stores: ${Array.from(this.db.objectStoreNames).join(", ")}`
-      );
+      if (DEBUGLOG) console.log("IndexedDB initialized");
+      if (DEBUGLOG)
+        console.log(
+          `Database stores: ${Array.from(this.db.objectStoreNames).join(", ")}`
+        );
 
       if (await hasValidData(this.db)) {
         updateStatus("Loading from local storage...");
-        console.time("loadCharitiesFromDB");
+        if (DEBUGLOG) console.time("loadCharitiesFromDB");
         const charities = await fetchLocalData(this.db, CHARITY_STORE);
-        console.timeEnd("loadCharitiesFromDB");
-        console.log(`Fetched ${charities.length} charities from IndexedDB`);
+        if (DEBUGLOG) console.timeEnd("loadCharitiesFromDB");
+        if (DEBUGLOG)
+          console.log(`Fetched ${charities.length} charities from IndexedDB`);
         loadingViaDB();
         let chunkSize = 10000;
         const TARGET_CYCLE_TIME = 500;
@@ -1483,7 +1533,7 @@ export class BrowseViewModel {
         let i = 0;
         while (i < charities.length) {
           const startTime = performance.now();
-          console.time(`processCharities-${i}`);
+          if (DEBUGLOG) console.time(`processCharities-${i}`);
           const chunk = charities.slice(i, i + chunkSize);
           for (const row of chunk) {
             try {
@@ -1494,7 +1544,7 @@ export class BrowseViewModel {
               continue;
             }
           }
-          console.timeEnd(`processCharities-${i}`);
+          if (DEBUGLOG) console.timeEnd(`processCharities-${i}`);
           updateStatus(
             `Loading charities: ${formatNumber(
               Object.keys(Charity.charityLookup).length
@@ -1516,23 +1566,23 @@ export class BrowseViewModel {
           }
           i += chunk.length;
         }
-        console.log(
-          `Processed ${processedCharities} charities, lookup size: ${
-            Object.keys(Charity.charityLookup).length
-          }`
-        );
+        if (DEBUGLOG)
+          console.log(
+            `Processed ${processedCharities} charities, lookup size: ${
+              Object.keys(Charity.charityLookup).length
+            }`
+          );
 
-        console.time("loadGrantsFromDB");
+        if (DEBUGLOG) console.time("loadGrantsFromDB");
         const grants = await fetchLocalData(this.db, GRANT_STORE);
-        console.timeEnd("loadGrantsFromDB");
+        if (DEBUGLOG) console.timeEnd("loadGrantsFromDB");
         console.log(`Fetched ${grants.length} grants from IndexedDB`);
-
-        chunkSize = 10000;
+        if (DEBUGLOG) chunkSize = 10000;
         let processedGrants = 0;
         i = 0;
         while (i < grants.length) {
           const startTime = performance.now();
-          console.time(`processGrants-${i}`);
+          if (DEBUGLOG) console.time(`processGrants-${i}`);
           const chunk = grants.slice(i, i + chunkSize);
           for (const row of chunk) {
             try {
@@ -1543,7 +1593,7 @@ export class BrowseViewModel {
               continue;
             }
           }
-          console.timeEnd(`processGrants-${i}`);
+          if (DEBUGLOG) console.timeEnd(`processGrants-${i}`);
           updateStatus(
             `Loading grants: ${formatNumber(
               Object.keys(Grant.grantLookup).length
@@ -1565,11 +1615,12 @@ export class BrowseViewModel {
           }
           i += chunk.length;
         }
-        console.log(
-          `Processed ${processedGrants} grants, lookup size: ${
-            Object.keys(Grant.grantLookup).length
-          }`
-        );
+        if (DEBUGLOG)
+          console.log(
+            `Processed ${processedGrants} grants, lookup size: ${
+              Object.keys(Grant.grantLookup).length
+            }`
+          );
 
         updateStatus(
           `Loaded ${formatNumber(
@@ -1585,19 +1636,19 @@ export class BrowseViewModel {
         loadingViaWeb();
 
         try {
-          console.time("buildTheWorld");
+          if (DEBUGLOG) console.time("buildTheWorld");
           await this.buildTheWorld(this.db);
-          console.timeEnd("buildTheWorld");
+          if (DEBUGLOG) console.timeEnd("buildTheWorld");
 
-          console.time("loadTSVFiles");
+          if (DEBUGLOG) console.time("loadTSVFiles");
           await fetchAndStoreTSV(this.db, DATA_FILES.files);
-          console.timeEnd("loadTSVFiles");
+          if (DEBUGLOG) console.timeEnd("loadTSVFiles");
 
-          console.time("buildGovCharity");
+          if (DEBUGLOG) console.time("buildGovCharity");
           await this.buildGovCharity(this.db);
-          console.timeEnd("buildGovCharity");
+          if (DEBUGLOG) console.timeEnd("buildGovCharity");
 
-          console.time("storeMetadata");
+          if (DEBUGLOG) console.time("storeMetadata");
           const tx = this.db.transaction(METADATA_STORE, "readwrite");
           const store = tx.objectStore(METADATA_STORE);
           await Promise.all([
@@ -1616,7 +1667,7 @@ export class BrowseViewModel {
             }),
           ]);
           await tx.done;
-          console.timeEnd("storeMetadata");
+          if (DEBUGLOG) console.timeEnd("storeMetadata");
 
           updateStatus(
             `Loaded ${formatNumber(
@@ -1640,12 +1691,14 @@ export class BrowseViewModel {
         }
       }
 
-      console.log(
-        `Grants Net ${formatNumber(Object.keys(Grant.grantLookup).length)}`
-      );
+      if (DEBUGLOG)
+        console.log(
+          `Grants Net ${formatNumber(Object.keys(Grant.grantLookup).length)}`
+        );
       updateStatus("USG & NGOs & grants loaded", "black", false);
       this.dataReady = true;
-      console.log(`loadData completed at ${new Date().toISOString()}`);
+      if (DEBUGLOG)
+        console.log(`loadData completed at ${new Date().toISOString()}`);
       return Object.keys(Grant.grantLookup).length;
     } catch (err) {
       console.error("Error in loadData:", err);
@@ -1749,18 +1802,18 @@ export class BrowseViewModel {
     }
 
     try {
-      console.time("storeGovCharity");
+      if (DEBUGLOG) console.time("storeGovCharity");
       await storeData(db, CHARITY_STORE, [gov_proto]);
-      console.timeEnd("storeGovCharity");
+      if (DEBUGLOG) console.timeEnd("storeGovCharity");
     } catch (error) {
       console.error(`Failed to store government charity:`, error);
       throw error;
     }
 
     try {
-      console.time("storeGovGrants");
+      if (DEBUGLOG) console.time("storeGovGrants");
       await storeData(db, GRANT_STORE, grantRecords);
-      console.timeEnd("storeGovGrants");
+      if (DEBUGLOG) console.timeEnd("storeGovGrants");
     } catch (error) {
       console.error(`Failed to store government grants:`, error);
       throw error;
@@ -1823,6 +1876,10 @@ export class Charity {
   static _visibleCharities = new Set();
   static _organizedCharities = new Set();
   static usgDirect = new Set();
+
+  toString() {
+    return `${this.name} - ${this.ein}`;
+  }
 
   /** Basic methods for puting charites into and out of the lookup */
   static getCharity(ein) {
@@ -2037,7 +2094,8 @@ export class Charity {
 
     function dfs(node, depth = 0) {
       if (depth > maxDepth) {
-        console.log(`Max depth ${maxDepth} reached at node ${node.ein}`);
+        if (DEBUGLOG)
+          console.log(`Max depth ${maxDepth} reached at node ${node.ein}`);
         return;
       }
 
@@ -2049,14 +2107,16 @@ export class Charity {
 
       // Pruning: Skip if no grantsIn and not USG-funded
       if (node.grantsIn.length < 1 && node.govt_amt <= 0) {
-        console.log(`Skipped ${node.ein}: no grantsIn and not USG-funded`);
+        if (DEBUGLOG)
+          console.log(`Skipped ${node.ein}: no grantsIn and not USG-funded`);
         return;
       }
 
       // Mark if on USG path
       if (node.govDepth !== Infinity) {
         markedYes.add(node.ein);
-        console.log(`Marked ${node.ein} as YES, govDepth: ${node.govDepth}`);
+        if (DEBUGLOG)
+          console.log(`Marked ${node.ein} as YES, govDepth: ${node.govDepth}`);
       }
 
       // Filter grantsIn for shortest path filers
@@ -2069,11 +2129,12 @@ export class Charity {
       for (const grant of neighbors) {
         const neighbor = grant.filer;
         if (neighbor.govDepth > maxDepth - depth) {
-          console.log(
-            `Skipped neighbor ${neighbor.ein}: govDepth ${
-              neighbor.govDepth
-            } > ${maxDepth - depth}`
-          );
+          if (DEBUGLOG)
+            console.log(
+              `Skipped neighbor ${neighbor.ein}: govDepth ${
+                neighbor.govDepth
+              } > ${maxDepth - depth}`
+            );
           continue;
         }
         if (!visited.has(neighbor.ein)) {
@@ -2084,7 +2145,7 @@ export class Charity {
 
     dfs(startNode);
 
-    console.log(`Total marked nodes: ${markedYes.size}`);
+    if (DEBUGLOG) console.log(`Total marked nodes: ${markedYes.size}`);
     return markedYes;
   }
 
@@ -2138,6 +2199,9 @@ export class Charity {
       this.isOrganized = false;
       if (value) Charity._desiredCharities.add(this);
       else Charity._desiredCharities.delete(this);
+      /*if (this.ein === "200849590" && value) {
+        debugger;
+      }*/
     }
   }
 
@@ -2152,6 +2216,9 @@ export class Charity {
       this.isOrganized = false;
       if (value || this.desiredVisible) Charity._visibleCharities.add(this);
       else Charity._visibleCharities.delete(this);
+      /*if (this.ein === "200849590" && value) {
+        debugger;
+      }*/
     }
   }
 
@@ -2380,7 +2447,7 @@ export class Charity {
       this.isOrganized = false;
       this.govDepth = Math.min(this.govDepth, grant.filer.govDepth + 1);
     } else {
-      console.log("Error: Can only add Grant objects.");
+      console.error("Error: Can only add Grant objects.");
     }
   }
 
@@ -2389,7 +2456,7 @@ export class Charity {
       this.grantsIn.push(grant);
       this.isOrganized = false;
     } else {
-      console.log("Error: Can only add Grant objects.");
+      console.error("Error: Can only add Grant objects.");
     }
   }
 
@@ -2463,11 +2530,11 @@ export class Charity {
   handleClick(e, count = -1) {
     if (e.altKey) return this.tunnelNode(e);
     if (e.metaKey || this.isTerminal) {
-      console.log(`Hiding ${this.id} ${this.name}`);
+      if (DEBUGLOG) console.log(`Hiding ${this.id} ${this.name}`);
       this.hide();
       return false;
     }
-    console.log(`Expanding ${this.id} ${this.name}`);
+    if (DEBUGLOG) console.log(`Expanding ${this.id} ${this.name}`);
     this.expandDown(NEXT_REVEAL);
     this.expandUp(NEXT_REVEAL);
     return true;
@@ -2518,14 +2585,16 @@ export class Charity {
   expandOutflows(count = NEXT_REVEAL) {
     if (!count || count == "0") return;
     const grantsToReveal = this.invisibleGrants.slice(0, count);
-    console.log(
-      `Expanding ${grantsToReveal.length} outflows for ${this.id} (total invisible: ${this.invisibleGrants.length})`
-    );
+    if (DEBUGLOG)
+      console.log(
+        `Expanding ${grantsToReveal.length} outflows for ${this.id} (total invisible: ${this.invisibleGrants.length})`
+      );
     grantsToReveal.forEach((grant) => {
       grant.desiredVisible = true;
-      console.log(
-        `  Grant ${grant.id} set visible, grantee ${grant.grantee.id} set visible`
-      );
+      if (DEBUGLOG)
+        console.log(
+          `  Grant ${grant.id} set visible, grantee ${grant.grantee.id} set visible`
+        );
     });
     viewModel.resetEIN(this.ein);
     this.isOrganized = false;
@@ -2602,13 +2671,16 @@ export class Charity {
    */
   place(upCount = START_REVEAL, downCount = START_REVEAL) {
     this.desiredVisible = true;
-    this.expandOutflows(downCount);
-    this.expandInflows(upCount);
+    if (this.visibleGrants.length < downCount)
+      this.expandOutflows(downCount - this.visibleGrants.length);
+    if (this.visibleGrantsIn.length < upCount)
+      this.expandInflows(upCount - this.visibleGrantsIn.length);
     this.organize();
     this.expanded = true;
-    console.log(
-      `Placed ${this.id}: ${this.visibleGrants.length} outflows visible, ${this.invisibleGrants.length} outflows invisible, ${this.visibleGrantsIn.length} inflows visible`
-    );
+    if (DEBUGLOG)
+      console.log(
+        `Placed ${this.id}: ${this.visibleGrants.length} outflows visible, ${this.invisibleGrants.length} outflows invisible, ${this.visibleGrantsIn.length} inflows visible`
+      );
   }
 
   get orgShort() {
@@ -2730,7 +2802,7 @@ export class Grant {
     for (const id of visibleGrants) {
       const g = Grant.grantLookup[id];
       if (g) result.push(g);
-      else console.log(`Couldn't find grant ${g} in visibleGrants`);
+      else console.error(`Couldn't find grant ${g} in visibleGrants`);
     }
     return result;
   }
@@ -2896,6 +2968,21 @@ export class Grant {
       this.disorganize();
       if (value) Grant._desiredGrants.add(this);
       else Grant._desiredGrants.delete(this);
+      if (!value) {
+        if (this.filer) {
+          this.filer.impliedVisible--;
+        }
+        if (this.grantee) {
+          this.grantee.impliedVisible--;
+        }
+      } else {
+        if (this.filer) {
+          this.filer.impliedVisible++;
+        }
+        if (this.grantee) {
+          this.grantee.impliedVisible++;
+        }
+      }
     }
   }
 

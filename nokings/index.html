@@ -45,7 +45,7 @@ title: NoKings → Federal‑Grant Links
     for (const e of eins) {
       result.push(`${e}~${upDown}~${upDown}`);
     }
-    return `<a href="/browse/?ein=${result.join("&ein=")}">${label}</a>`;
+    return `<a href="/browse/?e=${result.join("&e=")}">${label}</a>`;
   }
 
   function formatMoney(x) {
