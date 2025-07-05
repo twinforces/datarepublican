@@ -1,19 +1,19 @@
 export const DATA_FILES = {
-  dbVersion: 1160189,
+  dbVersion: 1364979,
   files: [
     {
     status: "Loading Charities",
     baseFile: "./tsv_chunks/charities_chunk_",
     tsvFilePrefix: "charities_chunk_",
     type: "charities",
-    chunkCount: 78
+    chunkCount: 90
   },
     {
     status: "Loading 501 Grants",
     baseFile: "./tsv_chunks/grants_final_chunk_",
     tsvFilePrefix: "grants_final_chunk_",
     type: "grants",
-    chunkCount: 12, grantType: "regular"
+    chunkCount: 16, grantType: "regular"
   },
     {
     status: "Loading Private Foundation Grants",
