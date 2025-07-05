@@ -453,7 +453,11 @@ async function fetchAndStoreTSV(db, files) {
                 rowsSkipped++;
                 continue;
               }
-              if (charity.xml_name && !/.*\.xml$/.test(charity.xml_name)) {
+              if (
+                charity.xml_name &&
+                charity.org_type !== "backfill" &&
+                !/.*\.xml$|^backfill$/.test(charity.xml_name)
+              ) {
                 rowsSkipped++;
                 continue;
               }
@@ -2050,8 +2054,12 @@ export class Charity {
             "grift",
           ].includes(mkey)
         ) {
-          const value = parseFloat(raw_row[mkey]);
-          obj[mkey] = isNaN(value) ? null : value;
+          if (raw_row.org_type == "backfill") {
+            obj[mkey] = -1;
+          } else {
+            const value = parseFloat(raw_row[mkey]);
+            obj[mkey] = isNaN(value) ? null : value;
+          }
         }
         // Convert boolean field
         else if (mkey === "foreign_office") {

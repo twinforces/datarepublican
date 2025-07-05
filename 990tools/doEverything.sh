@@ -67,8 +67,8 @@ python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv -
 wc -l $FINAL_DIR/*.tsv 
 
 # zip everything and move it into place
-mv $FINAL_DIR/charity_latest.tsv charity_latest_without_backfill.tsv
-mv $FINAL_DIR/charity_latest_with_backfill.tsv charity_latest.tsv
+mv $FINAL_DIR/charity_latest.tsv $FINAL_DIR/charity_latest_without_backfill.tsv
+mv $FINAL_DIR/charity_latest_with_backfill.tsv $FINAL_DIR/charity_latest.tsv
 cp $FINAL_DIR/grants_final.tsv $BROWSE
 cp $FINAL_DIR/grants_pf.tsv $BROWSE/grants.pf.tsv
 cp $FINAL_DIR/charity_latest.tsv $BROWSE/charities.tsv
@@ -77,6 +77,7 @@ cp $FINAL_DIR/charity_latest.tsv $BROWSE/charities.tsv
 pushd $BROWSE
 rm -rf $BROWSE/tsv_chunks
 $TOOLS/split_tsvs.sh
+popd
 
 
 
