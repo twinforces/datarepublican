@@ -721,6 +721,37 @@ export class BrowseViewModel {
 
   /** methods for manipulating the scaling */
 
+  rememberGraphSize(X, Y) {
+    this.graphSizeX = X;
+    this.graphSizeY = Y;
+  }
+
+  static SLOT_SIZE = 200; // graph sizing tweaks
+  static COLUMN_SIZE = 500; // graph sizing tweaks
+  countGraphRows() {
+    const slots = {};
+    let max = 0;
+    for (const c of Charity.visibleCharities) {
+      const slot = c.layer + 1;
+      slots[slot] = (slots[slot] || 0) + 1;
+      if (slots[slot] > max) max = slots[slot];
+    }
+    return max;
+  }
+
+  resetExpandScaleX() {
+    if (this.graphSizeX) {
+      const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
+      this.expandScaleX = layers - 1; // i.e. more or less 100px per layer;
+    }
+  }
+
+  resetExpandScaleY() {
+    if (this.graphSizeY) {
+      this.expandScaleY = Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
+    }
+  }
+
   setExpandScaleY(scale) {
     this.expandScaleY = scale;
   }
@@ -1022,8 +1053,10 @@ export class BrowseViewModel {
     this.getShowList().forEach((ein) => {
       const parts = ein.split(/[:~]/);
       const id = parts[0];
-      const ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
-      const downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
+      let ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
+      if (parts[1] && parts[1] == "0") ups = 0; // || confuses things
+      let downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
+      if (parts[2] && parts[2] == "0") downs = 0; // || confuses things
       const charity = Charity.getCharity(id);
       if (charity && !this.shouldHide(id)) {
         if (!(charity.impliedVisible > 1)) charity.place(ups, downs); // circular grants suck
@@ -2207,9 +2240,13 @@ export class Charity {
       this.isOrganized = false;
       if (value) Charity._desiredCharities.add(this);
       else Charity._desiredCharities.delete(this);
-      /*if (this.ein === "200849590" && value) {
-        debugger;
-      }*/
+      if (
+        value &&
+        viewModel.debugCloneDesired &&
+        !viewModel.debugCloneDesired.has(this)
+      ) {
+        if (DEBUGLOG) debugger;
+      }
     }
   }
 
@@ -2224,9 +2261,13 @@ export class Charity {
       this.isOrganized = false;
       if (value || this.desiredVisible) Charity._visibleCharities.add(this);
       else Charity._visibleCharities.delete(this);
-      /*if (this.ein === "200849590" && value) {
-        debugger;
-      }*/
+      if (
+        value &&
+        viewModel.debugCloneVisible &&
+        !viewModel.debugCloneVisible.has(this)
+      ) {
+        if (DEBUGLOG) debugger;
+      }
     }
   }
 

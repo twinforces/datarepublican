@@ -786,6 +786,8 @@ function generateGraph() {
       (height - 100) * viewModel.getExpandScaleY(),
     ]);
 
+  viewModel.rememberGraphSize(width, height);
+
   viewModel.parseQueryParams();
   if (viewModel.matchURL() === 0) {
     showPresets();
@@ -897,7 +899,7 @@ function generateGraph() {
   document.getElementById("layoutScaleResetX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    viewModel.setExpandScaleX(2);
+    viewModel.resetExpandScaleX();
     updateLayoutButtons();
     refresh();
     setTimeout(() => (isRedrawing = false), 1000);
@@ -923,7 +925,7 @@ function generateGraph() {
   document.getElementById("layoutScaleResetY").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    viewModel.setExpandScaleY(2);
+    viewModel.resetExpandScaleY();
     updateLayoutButtons();
     refresh();
 
