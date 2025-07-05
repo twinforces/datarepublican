@@ -1,4 +1,5 @@
 import os
+import glob
 import argparse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -34,7 +35,7 @@ def main():
     global verbose, quiet, total_addresses, total_address_errors, total_queue_puts, total_skipped
     global args, zip_index, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     global results_queue
-    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files.")
+    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files and integrate backfill.tsv.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
     parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
@@ -49,6 +50,7 @@ def main():
     parser.add_argument("--skip-address-errors", action="store_true", help="Continue despite address errors")
     parser.add_argument("--sample-xml", type=str, default=None, help="Directory to save failing XMLs")
     parser.add_argument("--log-zip-errors", action="store_true", help="Log invalid ZIP codes")
+    parser.add_argument("--backfill-source", type=str, default="./backfill.tsv", help="Path to backfill.tsv")
     args = parser.parse_args()
     verbose = args.verbose
     quiet = args.quiet
@@ -80,7 +82,50 @@ def main():
         if addr_cache_valid and not args.force_reprocess:
             address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index = addr_cached_data
             cu.log_error("Loaded address cache: {} addresses, {} PO boxes, {} ZIP index entries", len(address_entries), len(po_box_entries), len(zip_code_index))
+        # Load backfill.tsv
+        if os.path.exists(args.backfill_source):
+            backfill_rows = cu.read_tsv_files(args.backfill_source, args.start_year, args.end_year)
+            if backfill_rows:
+                cu.log_error("Loaded {} rows from {}", len(backfill_rows), args.backfill_source)
+                seen_ein_name_zip = set()
+                unique_backfill_rows = []
+                for row in backfill_rows:
+                    ein = row.get('grant_ein', '')
+                    name = row.get('name', '')
+                    zip_code = row.get('zip_code', '')
+                    key = (ein, name, zip_code)
+                    if key not in seen_ein_name_zip:
+                        seen_ein_name_zip.add(key)
+                        unique_backfill_rows.append(row)
+                for row in unique_backfill_rows:
+                    ein = row.get('grant_ein', '')
+                    name = row.get('name', '')
+                    canonical_address = row.get('canonical_address', '')
+                    po_box = row.get('po_box', '')
+                    zip_code = row.get('zip_code', '')
+                    if ein and canonical_address:
+                        address_entries.append({
+                            'filer_ein': ein,
+                            'filer_name': name,
+                            'canonical_address': canonical_address,
+                            'po_box': po_box,
+                            'zip_code': zip_code
+                        })
+                        if po_box and zip_code and cu.ZIP_REGEX.match(zip_code):
+                            po_box_entries.append({
+                                'po_box': po_box,
+                                'zip_code': zip_code,
+                                'ein': ein,
+                                'org_name': name
+                            })
+                            po_box_key = (po_box, zip_code)
+                            po_box_zip_index.setdefault(po_box_key, set()).add((ein, name))
+                        if zip_code and cu.ZIP_REGEX.match(zip_code):
+                            zip_code_index.setdefault(zip_code, set()).add((ein, name))
+                cu.log_error("Integrated {} unique backfill entries (after deduplication by EIN+name+zip_code) into address indices", len(unique_backfill_rows))
         else:
+            cu.log_error("Backfill file {} does not exist, proceeding without backfill data", args.backfill_source)
+        if not addr_cache_valid or args.force_reprocess:
             process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir, args.sample_xml)
             cu.save_address_cache(args.cache_dir, args.start_year, args.end_year, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index)
         write_outputs(args.output_dir, addr_cache_valid and not args.force_reprocess)
@@ -145,7 +190,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                success, filer_ein = cu.parse_addresses(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer")
+                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer")
                 if not success:
                     file_counter_local.skipped += 1
                     total_skipped += 1

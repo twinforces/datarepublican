@@ -2,7 +2,9 @@ import argparse
 import os
 import csv
 import logging
-from collections import defaultdict
+import subprocess
+import tempfile
+import shutil
 
 # Constants
 BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
@@ -31,28 +33,58 @@ def log_error(msg_format, *args, exc_info=False):
     else:
         logger.info(msg_format, exc_info=exc_info)
 
-def read_tsv(tsv_file):
-    """Read a TSV file and return header and rows."""
-    rows = []
-    header = []
+def sort_backfill_tsv(backfill_tsv, temp_dir):
+    """Sort backfill.tsv by grant_ein and name length (descending) using command-line sort."""
     try:
-        with open(tsv_file, 'r', encoding='utf-8') as f:
-            header = f.readline().strip().split('\t')
-            for line in f:
-                fields = line.strip().split('\t')
-                if len(fields) >= len(header):
-                    rows.append(dict(zip(header, fields)))
-        log_error("Read {} rows from {}", len(rows), tsv_file)
-        return header, rows
+        # Create a temporary file for sorted output
+        with tempfile.NamedTemporaryFile(delete=False, mode='w', dir=temp_dir, suffix='.tsv') as temp_file:
+            sorted_file = temp_file.name
+        # Use sort command: sort by grant_ein (field 1) and name length (field 2, descending)
+        sort_command = f"sort -k1,1 -k2,2r {backfill_tsv} > {sorted_file}"
+        subprocess.run(sort_command, shell=True, check=True)
+        return sorted_file
     except Exception as e:
-        log_error("Error reading TSV {}: {}", tsv_file, str(e), exc_info=True)
-        return [], []
+        log_error("Error sorting backfill TSV {}: {}", backfill_tsv, str(e), exc_info=True)
+        raise
+
+def process_backfill_rows(sorted_backfill_file, charity_header):
+    """Process sorted backfill.tsv to select the longest name per EIN."""
+    unique_rows = []
+    seen_eins = set()
+    with open(sorted_backfill_file, 'r', encoding='utf-8') as f:
+        header = f.readline().strip().split('\t')
+        if not all(col in header for col in ['grant_ein', 'name']):
+            log_error("Missing required columns in backfill TSV header: {}", header)
+            return []
+        for line in f:
+            fields = line.strip().split('\t')
+            if len(fields) < len(header):
+                continue
+            row = dict(zip(header, fields))
+            ein = row.get('grant_ein', '')
+            name = row.get('name', 'Unknown')
+            if not ein:
+                if args.verbose:
+                    log_error("Skipping backfill row with missing EIN")
+                continue
+            if ein not in seen_eins:
+                seen_eins.add(ein)
+                new_row = {col: 'n/a' for col in charity_header}
+                new_row['filer_ein'] = ein
+                new_row['filer_name'] = name
+                new_row['form_type'] = 'backfill'
+                new_row['xml_name'] = 'backfill'
+                unique_rows.append(new_row)
+                if args.verbose:
+                    log_error("Selected backfill row for EIN={}, Name={}", ein, name)
+    return unique_rows
 
 def main():
+    global args
     parser = argparse.ArgumentParser(
         description=(
             "Combine charity_latest.tsv with backfill.tsv to produce charity_latest_with_backfill.tsv/csv.\n"
-            "Backfill rows are added with grant_ein as filer_ein, name as filer_name, form_type and xml_name as 'backfill', and other columns as 'n/a'."
+            "Selects the longest name per EIN from backfill.tsv and appends to the output without loading charity_latest.tsv into memory."
         )
     )
     parser.add_argument("--charity-tsv", type=str, default="./charity_latest.tsv", help="Path to charity_latest.tsv")
@@ -73,52 +105,36 @@ def main():
     logger = setup_logging(args.output_dir, args.verbose, args.quiet)
 
     try:
-        # Read charity_latest.tsv
-        charity_header, charity_rows = read_tsv(args.charity_tsv)
+        # Read charity_latest.tsv header
+        with open(args.charity_tsv, 'r', encoding='utf-8') as f:
+            charity_header = f.readline().strip().split('\t')
         if not charity_header:
             log_error("No header found in {}. Exiting.", args.charity_tsv)
             return
 
-        # Read backfill.tsv
-        _, backfill_rows = read_tsv(args.backfill_tsv)
-        
-        # Track existing EINs to avoid duplicates
-        existing_eins = {row['filer_ein'] for row in charity_rows}
-        
-        # Create combined rows
-        combined_rows = charity_rows.copy()
-        backfill_count = 0
-        for backfill_row in backfill_rows:
-            ein = backfill_row.get('grant_ein', '')
-            if not ein or ein in existing_eins:
-                if args.verbose:
-                    log_error("Skipping backfill EIN {}: already exists or invalid", ein)
-                continue
-            new_row = {col: 'n/a' for col in charity_header}
-            new_row['filer_ein'] = ein
-            new_row['filer_name'] = backfill_row.get('name', 'Unknown')
-            new_row['form_type'] = 'backfill'
-            new_row['xml_name'] = 'backfill'
-            combined_rows.append(new_row)
-            existing_eins.add(ein)
-            backfill_count += 1
-            if args.verbose:
-                log_error("Added backfill row for EIN={}", ein)
+        # Sort backfill.tsv by grant_ein and name length
+        temp_dir = os.path.join(args.output_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        sorted_backfill_file = sort_backfill_tsv(args.backfill_tsv, temp_dir)
 
-        # Write output TSV
+        # Process sorted backfill rows to select longest name per EIN
+        unique_rows = process_backfill_rows(sorted_backfill_file, charity_header)
+        backfill_count = len(unique_rows)
+
+        # Copy charity_latest.tsv to output TSV and append backfill rows
         output_tsv = os.path.join(args.output_dir, 'charity_latest_with_backfill.tsv')
-        with open(output_tsv, 'w', encoding='utf-8') as f:
-            f.write('\t'.join(charity_header) + '\n')
-            for row in combined_rows:
+        shutil.copyfile(args.charity_tsv, output_tsv)
+        with open(output_tsv, 'a', encoding='utf-8') as f:
+            for row in unique_rows:
                 f.write('\t'.join(str(row.get(col, '')) for col in charity_header) + '\n')
-        log_error("Wrote {} rows (including {} backfill rows) to {}", len(combined_rows), backfill_count, output_tsv)
+        log_error("Appended {} backfill rows to {}", backfill_count, output_tsv)
 
         # Write output CSV
         output_csv = os.path.join(args.output_dir, 'charity_latest_with_backfill.csv')
-        with open(output_csv, 'w', encoding='utf-8', newline='') as f:
+        shutil.copyfile(args.charity_tsv, output_csv)
+        with open(output_csv, 'a', encoding='utf-8', newline='') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
-            writer.writerow(charity_header)
-            for row in combined_rows:
+            for row in unique_rows:
                 csv_row = []
                 for col in charity_header:
                     value = str(row.get(col, ''))
@@ -127,9 +143,14 @@ def main():
                     else:
                         csv_row.append(value)
                 writer.writerow(csv_row)
-        log_error("Wrote {} rows (including {} backfill rows) to {}", len(combined_rows), backfill_count, output_csv)
+        log_error("Appended {} backfill rows to {}", backfill_count, output_csv)
 
-        print(f"Combined {len(charity_rows)} charity rows with {backfill_count} backfill rows")
+        # Clean up temporary file
+        os.remove(sorted_backfill_file)
+        if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+            os.rmdir(temp_dir)
+
+        print(f"Appended {backfill_count} backfill rows to charity data")
         print(f"Output written to {output_tsv} and {output_csv}")
         print(f"Log file written to {os.path.join(args.output_dir, 'add_backfill_log.txt')}")
 

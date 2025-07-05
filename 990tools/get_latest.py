@@ -16,6 +16,7 @@ from io import BytesIO
 import re
 import csv
 from countryCodes import lookupCC
+import extract_utils as cu
 
 # Constants
 TSV_COLUMNS = [
@@ -34,38 +35,20 @@ CSV_QUOTE_FIELDS = {
     'grants': ['filer_name', 'grant_ein'],
     'backfill': ['name', 'canonical_address', 'po_box', 'zip_code']
 }
-ZIP_REGEX = re.compile(r'^\d{5}(?:-\d{4})?$')
 
 # Global variables
 logger = None
 backfill_entries = []
 backfill_lock = threading.Lock()
+seen_backfill_keys = set()  # For deduplication by grant_ein, name, zip_code
 
 # Logging setup
 def setup_logging(output_dir, verbose, quiet):
     global logger
-    log_queue = queue.Queue(-1)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    queue_handler = QueueHandler(log_queue)
-    queue_handler.setFormatter(formatter)
-    file_handler = logging.FileHandler(os.path.join(output_dir, 'integrate_log.txt'))
-    file_handler.setFormatter(formatter)
-    listener = QueueListener(log_queue, file_handler)
-    listener.start()
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.ERROR if not verbose else logging.INFO)
-    console_handler.setFormatter(formatter)
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.handlers = [queue_handler, console_handler] if not quiet else []
-    return listener
+    return cu.setup_logging(output_dir, 'integrate_log.txt', verbose, quiet)
 
 def log_error(msg_format, *args, ein=None, exc_info=False):
-    if args:
-        logger.info(msg_format.format(*args), extra={'ein': ein} if ein else None, exc_info=exc_info)
-    else:
-        logger.info(msg_format, extra={'ein': ein} if ein else None, exc_info=exc_info)
+    cu.log_error(msg_format, *args, ein=ein, exc_info=exc_info)
 
 # Thread-local counters
 file_counter_local = threading.local()
@@ -83,30 +66,7 @@ def initialize_thread_local_counters():
 
 def build_zip_index(zip_dir, start_year, end_year):
     """Build an index of XML filenames to ZIP paths, including end_year + 1."""
-    index = {}  # filename -> (zip_path, internal_path)
-    zip_files = []
-    zip_names = set()
-    for year in range(start_year, end_year + 2):  # Include end_year + 1
-        zip_files.extend(glob.glob(os.path.join(zip_dir, f"{year}*.zip")))
-    
-    for zip_path in zip_files:
-        zip_names.add(os.path.basename(zip_path))
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                for internal_path in zf.namelist():
-                    if internal_path.endswith('.xml'):
-                        filename = os.path.basename(internal_path)
-                        if filename in index:
-                            log_error(
-                                "Duplicate XML filename {} found in ZIP {}, overwriting with {}",
-                                filename, index[filename][0], zip_path
-                            )
-                        index[filename] = (zip_path, internal_path)
-        except Exception as e:
-            log_error("Error indexing ZIP {}: {}", zip_path, str(e), exc_info=True)
-    
-    log_error("Built ZIP index with {} XML files from {} ZIPs: {}", len(index), len(zip_files), sorted(zip_names))
-    return index
+    return cu.build_zip_index(zip_dir, start_year, end_year)
 
 def get_tsv_files(start_year, end_year, org_types, not_types, source_dir):
     """Collect TSV files matching the org_types or not_types filter within the year range, in descending order."""
@@ -424,18 +384,17 @@ def write_grants_latest(grants, output_tsv, output_csv):
     log_error("Wrote {} grant rows to {}", len(grants), output_csv)
 
 def write_backfill(backfill_entries, output_tsv, output_csv):
-    """Write backfill data to TSV and CSV with quoted string fields in CSV."""
-    unique_entries = {entry['grant_ein']: entry for entry in backfill_entries}
+    """Write backfill data to TSV and CSV with quoted string fields in CSV, allowing multiple names per EIN."""
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(BACKFILL_COLUMNS) + '\n')
-        for entry in unique_entries.values():
+        for entry in backfill_entries:
             f.write('\t'.join(str(entry.get(col, '')) for col in BACKFILL_COLUMNS) + '\n')
-    log_error("Wrote {} backfill rows to {}", len(unique_entries), output_tsv)
+    log_error("Wrote {} backfill rows to {}", len(backfill_entries), output_tsv)
 
     with open(output_csv, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
         writer.writerow(BACKFILL_COLUMNS)
-        for entry in unique_entries.values():
+        for entry in backfill_entries:
             csv_row = []
             for col in BACKFILL_COLUMNS:
                 value = str(entry.get(col, ''))
@@ -444,7 +403,7 @@ def write_backfill(backfill_entries, output_tsv, output_csv):
                 else:
                     csv_row.append(value)
             writer.writerow(csv_row)
-    log_error("Wrote {} backfill rows to {}", len(unique_entries), output_csv)
+    log_error("Wrote {} backfill rows to {}", len(backfill_entries), output_csv)
 
 def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins):
     """Parse grant data from an XML file, handling foreign addresses as country-level grants and collecting backfill for domestic unknown EINs."""
@@ -533,47 +492,30 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 )
                             # Backfill for domestic grants with unknown EINs
                             if not is_foreign and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999":
-                                # Extract address details
-                                address_parts = []
-                                po_box = ""
-                                zip_code = ""
-                                us_address = elem.xpath("irs:USAddress", namespaces=NAMESPACES)
-                                if us_address:
-                                    street = elem.xpath("irs:USAddress/irs:AddressLine1Txt", namespaces=NAMESPACES)
-                                    city = elem.xpath("irs:USAddress/irs:CityNm", namespaces=NAMESPACES)
-                                    state = elem.xpath("irs:USAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES)
-                                    zip_elem = elem.xpath("irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES)
-                                    if street and street[0].text:
-                                        street_text = street[0].text.strip().upper()
-                                        address_parts.append(street_text)
-                                        if "PO BOX" in street_text:
-                                            po_box = street_text
-                                    if city and city[0].text:
-                                        address_parts.append(city[0].text.strip().upper())
-                                    if state and state[0].text:
-                                        address_parts.append(state[0].text.strip().upper())
-                                    if zip_elem and zip_elem[0].text:
-                                        zip_text = zip_elem[0].text.strip()
-                                        if ZIP_REGEX.match(zip_text):
-                                            zip_code = zip_text
-                                            address_parts.append(zip_text)
-                                # Create canonical address
-                                canonical_address = ", ".join(part for part in address_parts if part) if address_parts else ""
+                                # Extract address components using XPath
+                                address_components = []
+                                us_address = elem.xpath("irs:USAddress/*", namespaces=NAMESPACES)
+                                address_components.extend([comp for comp in us_address if comp.text])
+                                # Canonicalize address
+                                canonical_address, po_box, zip_code, _ = cu.canonicalize_address(address_components, output_dir=None)
                                 if canonical_address or po_box or zip_code:
-                                    backfill_entry = {
-                                        'grant_ein': grant_ein,
-                                        'name': grantee_name,
-                                        'canonical_address': canonical_address,
-                                        'po_box': po_box,
-                                        'zip_code': zip_code
-                                    }
+                                    backfill_key = (grant_ein, grantee_name, zip_code)
                                     with backfill_lock:
-                                        backfill_entries.append(backfill_entry)
-                                    if verbose:
-                                        log_error(
-                                            "Added backfill: EIN={}, Name={}, Address={} in {} for filer EIN={}",
-                                            grant_ein, grantee_name, canonical_address, xml_filename, filer_ein, ein=filer_ein
-                                        )
+                                        if backfill_key not in seen_backfill_keys:
+                                            seen_backfill_keys.add(backfill_key)
+                                            backfill_entry = {
+                                                'grant_ein': grant_ein,
+                                                'name': grantee_name,
+                                                'canonical_address': canonical_address,
+                                                'po_box': po_box,
+                                                'zip_code': zip_code
+                                            }
+                                            backfill_entries.append(backfill_entry)
+                                            if verbose:
+                                                log_error(
+                                                    "Added backfill: EIN={}, Name={}, Address={}, PO Box={}, ZIP={}",
+                                                    grant_ein, grantee_name, canonical_address, po_box, zip_code, ein=filer_ein
+                                                )
                     except (ValueError, TypeError) as e:
                         if verbose:
                             log_error(
@@ -769,7 +711,7 @@ def main():
         write_grants_latest(grants, os.path.join(output_dir, "grants_latest.tsv"), os.path.join(output_dir, "grants_latest.csv"))
         write_backfill(backfill_entries, os.path.join(output_dir, "backfill.tsv"), os.path.join(output_dir, "backfill.csv"))
         print(f"Total grant entries extracted: {len(grants)}")
-        print(f"Total backfill entries written: {len(set(entry['grant_ein'] for entry in backfill_entries))}")
+        print(f"Total backfill entries written: {len(backfill_entries)}")
     finally:
         done_queuing = True
         listener.stop()
