@@ -34,14 +34,22 @@ def log_error(msg_format, *args, exc_info=False):
         logger.info(msg_format, exc_info=exc_info)
 
 def sort_backfill_tsv(backfill_tsv, temp_dir):
-    """Sort backfill.tsv by grant_ein and name length (descending) using command-line sort."""
+    """Sort backfill.tsv by grant_ein and name length (descending), preserving the header."""
     try:
+        # Read the header
+        with open(backfill_tsv, 'r', encoding='utf-8') as f:
+            header = f.readline().strip()
         # Create a temporary file for sorted output
         with tempfile.NamedTemporaryFile(delete=False, mode='w', dir=temp_dir, suffix='.tsv') as temp_file:
             sorted_file = temp_file.name
-        # Use sort command: sort by grant_ein (field 1) and name length (field 2, descending)
-        sort_command = f"sort -k1,1 -k2,2r {backfill_tsv} > {sorted_file}"
+        # Sort data rows (skip header) by grant_ein (field 1) and name length (field 2, descending)
+        sort_command = f"tail -n +2 {backfill_tsv} | sort -k1,1 -k2,2r > {sorted_file}"
         subprocess.run(sort_command, shell=True, check=True)
+        # Prepend the header to the sorted file
+        with open(sorted_file, 'r', encoding='utf-8') as f:
+            sorted_content = f.read()
+        with open(sorted_file, 'w', encoding='utf-8') as f:
+            f.write(header + '\n' + sorted_content)
         return sorted_file
     except Exception as e:
         log_error("Error sorting backfill TSV {}: {}", backfill_tsv, str(e), exc_info=True)
@@ -56,6 +64,7 @@ def process_backfill_rows(sorted_backfill_file, charity_header):
         if not all(col in header for col in ['grant_ein', 'name']):
             log_error("Missing required columns in backfill TSV header: {}", header)
             return []
+        backfill_count = 0
         for line in f:
             fields = line.strip().split('\t')
             if len(fields) < len(header):
@@ -67,6 +76,7 @@ def process_backfill_rows(sorted_backfill_file, charity_header):
                 if args.verbose:
                     log_error("Skipping backfill row with missing EIN")
                 continue
+            backfill_count += 1
             if ein not in seen_eins:
                 seen_eins.add(ein)
                 new_row = {col: 'n/a' for col in charity_header}
@@ -77,6 +87,8 @@ def process_backfill_rows(sorted_backfill_file, charity_header):
                 unique_rows.append(new_row)
                 if args.verbose:
                     log_error("Selected backfill row for EIN={}, Name={}", ein, name)
+        if args.verbose:
+            log_error("Processed {} backfill rows, selected {} unique EINs", backfill_count, len(unique_rows))
     return unique_rows
 
 def main():
