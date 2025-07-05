@@ -302,29 +302,6 @@ $(document).ready(function () {
     }
   });
 
-  const searchInput = document.getElementById("searchInput");
-  const searchResults = document.getElementById("searchResults");
-  const clearButton = document.getElementById("clearSearch");
-
-  const newSearchInput = searchInput.cloneNode(true);
-  const newSearchResults = searchResults.cloneNode(true);
-  const newClearButton = clearButton.cloneNode(true);
-
-  searchInput.parentNode.replaceChild(newSearchInput, searchInput);
-  searchResults.parentNode.replaceChild(newSearchResults, searchResults);
-  clearButton.parentNode.replaceChild(newClearButton, clearButton);
-
-  newSearchInput.addEventListener("input", handleSearch);
-  newSearchInput.addEventListener("blur", handleSearchBlur);
-  newSearchInput.addEventListener("keydown", handleSearchKeydown);
-  newSearchResults.addEventListener("click", handleSearchClick);
-
-  newClearButton.addEventListener("click", () => {
-    newSearchInput.value = "";
-    newSearchInput.focus();
-    handleSearch({ target: newSearchInput });
-  });
-
   $(window).on("resize", function () {
     if (viewModel.dataReady) generateGraph();
   });
@@ -809,23 +786,32 @@ function generateGraph() {
       (height - 100) * viewModel.getExpandScaleY(),
     ]);
 
+  viewModel.rememberGraphSize(width, height);
+
   viewModel.parseQueryParams();
   if (viewModel.matchURL() === 0) {
     showPresets();
     return;
   }
-
-  viewModel.previousData = renderFocusedSankey(
-    g,
-    sankey,
-    svg, // Use global svg instead of svgRef
-    width,
-    height,
-    viewModel.getShowList().length
-      ? viewModel.getShowList()
-      : [viewModel.GOV_EIN],
-    viewModel.previousData
-  );
+  try {
+    $("#statusSpinner").show();
+    viewModel.previousData = renderFocusedSankey(
+      g,
+      sankey,
+      svg, // Use global svg instead of svgRef
+      width,
+      height,
+      viewModel.getShowList().length
+        ? viewModel.getShowList()
+        : [viewModel.GOV_EIN],
+      viewModel.previousData
+    );
+    $("#statusSpinner").hide();
+  } catch (err) {
+    console.error("Error generating graph:", err);
+    updateStatus(`Graph Generation Failed: ${err.message}`, "red", false);
+    throw err;
+  }
 
   // Button handlers using global zoom
   document.getElementById("zoomIn").onclick = () =>
@@ -913,7 +899,7 @@ function generateGraph() {
   document.getElementById("layoutScaleResetX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    viewModel.setExpandScaleX(2);
+    viewModel.resetExpandScaleX();
     updateLayoutButtons();
     refresh();
     setTimeout(() => (isRedrawing = false), 1000);
@@ -939,7 +925,7 @@ function generateGraph() {
   document.getElementById("layoutScaleResetY").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
-    viewModel.setExpandScaleY(2);
+    viewModel.resetExpandScaleY();
     updateLayoutButtons();
     refresh();
 

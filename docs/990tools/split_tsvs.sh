@@ -92,6 +92,14 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
   TOTAL_LINES=$(wc -l < "$TSV_FILE")
   DATA_LINES=$((TOTAL_LINES - 1))
 
+  # Calculate expected number of chunks
+  if [ "$DATA_LINES" -le 0 ]; then
+    CHUNKS=0
+  else
+    CHUNKS=$(((DATA_LINES + CHUNK_SIZE - 1) / CHUNK_SIZE))
+  fi
+  echo "Expected chunks for $TSV_FILE: $CHUNKS (DATA_LINES=$DATA_LINES, CHUNK_SIZE=$CHUNK_SIZE)" >&2
+
   # Filter data rows
   if [[ "$TSV_FILE" == "charities.tsv" ]]; then
     tail -n +2 "$TSV_FILE" | awk -F'\t' -v cols="$COLUMN_INDICES" '
@@ -149,8 +157,14 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
 
   # Verify filtered file exists and is non-empty
   if [ ! -s "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv" ]; then
-    echo "Error: Filtered file ${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv is empty or not created" >&2
-    exit 1
+    if [ "$CHUNKS" -eq 0 ]; then
+      echo "Warning: No data lines after filtering for $TSV_FILE, skipping chunk creation" >&2
+      rm -f "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+      continue
+    else
+      echo "Error: Filtered file ${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv is empty or not created" >&2
+      exit 1
+    fi
   fi
 
   # Verify filtered file column count
@@ -177,7 +191,7 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
     (cd "$OUTPUT_DIR" && zip "${CHUNK_NAME}.zip" "$CHUNK_NAME")
     rm "${OUTPUT_DIR}/$CHUNK_NAME"
 
-    echo "Created ${OUTPUT_DIR}/${CHUNK_NAME}.zip"
+    echo "Created ${OUTPUT_DIR}/${CHUNK_NAME}.zip" >&2
     ((i++))
   done
 
@@ -199,7 +213,7 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
   }")
 
   # Clean up filtered file
-  rm "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+  rm -f "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
 done
 
 # Write DATA_FILES to file

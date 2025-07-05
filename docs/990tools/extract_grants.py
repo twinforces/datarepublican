@@ -35,7 +35,6 @@ zip_code_index = {}
 po_box_zip_index = {}
 thread_local = threading.local()
 file_counter_local = threading.local()
-thread_local = threading.local()
 
 def main():
     global verbose, quiet, total_grants, total_990pf_rows, total_queue_puts, total_tasks_done, total_skipped
@@ -43,11 +42,12 @@ def main():
     parser = argparse.ArgumentParser(description="Extract grants from IRS 990 XML files using address mappings.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
-    parser.add_argument("--source-dir", type=str, default=".", help="Directory containing charity_latest.tsv")
+    parser.add_argument("--source-dir", type=str, default=".", help="Directory containing charity_latest.tsv and backfill.tsv")
     parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
     parser.add_argument("--cache-dir", type=str, default="./_cache", help="Directory for cache files")
     parser.add_argument("--output-dir", type=str, default="./_output", help="Directory for output TSV files")
     parser.add_argument("--charity-source", type=str, help="Path to charity_latest.tsv", default=None)
+    parser.add_argument("--backfill-source", type=str, help="Path to backfill.tsv", default=None)
     parser.add_argument("--merge-batch-size", type=int, default=1000, help="Batch size for queuing results")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--quiet", action="store_true", help="Disable all logging")
@@ -65,6 +65,8 @@ def main():
         raise ValueError(f"ZIP directory {args.zip_dir} does not exist")
     if args.charity_source is None:
         args.charity_source = os.path.join(args.source_dir, 'charity_latest.tsv')
+    if args.backfill_source is None:
+        args.backfill_source = os.path.join(args.source_dir, 'backfill.tsv')
     listener = cu.setup_logging(args.output_dir, 'extract_grants_log.txt', verbose, quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
     try:
@@ -81,13 +83,33 @@ def main():
              return
         address_entries, _, po_box_entries, zip_code_index, po_box_zip_index = addr_cached_data
         cu.log_error("Loaded address cache: {} PO boxes, {} ZIP index entries", len(po_box_entries), len(zip_code_index))
+        
+        # Load backfill.tsv
+        backfill_rows = cu.read_tsv_files(args.backfill_source, args.start_year, args.end_year)
+        if backfill_rows:
+            cu.log_error("Loaded {} rows from {}", len(backfill_rows), args.backfill_source)
+            for row in backfill_rows:
+                ein = row.get('grant_ein', '')
+                name = row.get('name', '')
+                canonical_address = row.get('canonical_address', '')
+                po_box = row.get('po_box', '')
+                zip_code = row.get('zip_code', '')
+                if ein and canonical_address:
+                    address_entries.append({'filer_ein': ein, 'canonical_address': canonical_address})
+                    if po_box and zip_code and cu.ZIP_REGEX.match(zip_code):
+                        po_box_entries.append({'ein': ein, 'po_box': po_box, 'zip_code': zip_code, 'name': name})
+                        po_box_zip_index.setdefault((po_box, zip_code), set()).add((ein, name))
+                    if zip_code and cu.ZIP_REGEX.match(zip_code):
+                        zip_code_index.setdefault(zip_code, set()).add((ein, name))
+            cu.log_error("Integrated {} backfill entries into address indices", len(backfill_rows))
+        
         rows = cu.read_tsv_files(args.charity_source, args.start_year, args.end_year)
         if not rows:
             write_outputs(args.output_dir)
             cu.log_error("No rows in {}. Ensure {} exists.", args.charity_source, args.charity_source)
             return
         cu.log_error("Processing {} rows from {}", len(rows), args.charity_source)
-        process_charity_rows(address_entries,rows, args.worker_threads, args.start_year, args.end_year, args.output_dir)
+        process_charity_rows(address_entries, rows, args.worker_threads, args.start_year, args.end_year, args.output_dir)
         write_outputs(args.output_dir)
     except Exception as e:
         cu.log_error("Error during processing: {}", str(e), exc_info=True)
@@ -117,8 +139,6 @@ def expand_state_codes(text):
     Returns:
         str: String with state codes expanded to full names.
     """
-
-
     state_map = {
         'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
         'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
@@ -132,8 +152,6 @@ def expand_state_codes(text):
         'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming'
     }
 
-    import re
-
     def replace_state(match):
         code = match.group(0).upper()
         return state_map.get(code, match.group(0))
@@ -141,17 +159,12 @@ def expand_state_codes(text):
     # Match 2-letter codes as standalone words (case-insensitive)
     return stateCodePattern.sub(replace_state, text.upper())
 
-# Example usage:
-# text = "I live in CA, work in UT, and was born in NY."
-# print(expand_state_codes(text))
-# Output: "I live in California, work in Utah, and was born in New York."
 def compute_name_heuristic(grantee_name_in, filer_name_in):
     if not grantee_name_in or not filer_name_in:
         return 0
     
     filer_name = expand_state_codes(filer_name_in)
     grantee_name = expand_state_codes(grantee_name_in)
-    
     
     words1 = {w.lower() for w in grantee_name.split() if w not in cu.STOP_WORDS}
     words2 = {w.lower() for w in filer_name.split() if w not in cu.STOP_WORDS}
@@ -235,22 +248,20 @@ def parse_grants(xml_content, xml_filename, row, filer_ein, output_dir, zip_code
                             grantee_canonical_address = country["name"]
                             cu.log_error("Foreign address mapped to ISO 3166-1 number: {} for country: {}", grant_ein, country_code)
                         else:
-                            grantee_canonical_address = "Foreign_"+country_code
-                            grant_ein='999' # the unknown country code country
-                            #grant_ein = f"Address:{grantee_canonical_address}" if grantee_canonical_address else "Unknown"
+                            grantee_canonical_address = "Foreign_" + (country_code or "Unknown")
+                            grant_ein = '999'  # the unknown country code country
                             cu.log_error("Foreign address unmapped, using address-based EIN: {}, country: {}, city: {}, province: {}", grant_ein, country_code or "None", city or "None", province or "None")
                     else:
                         # Parse recipient address
                         grantee_canonical_address, grant_po_box, grant_zip_code = cu.parse_recipient_address(element, xml_filename, grant_ein, grantee_name, output_dir)
                         
-                        # Address matching
+                    # Address matching
                     if grantee_canonical_address or amount_elem is not None or name_elem is not None or grant_ein != "Unknown":
                         try:
                             grant_amt = int(float(amount_elem.text.strip())) if amount_elem is not None and amount_elem.text else 0
                             if is_foreign_address:
-                                status='success_foreign'
+                                status = 'success_foreign'
                                 best_score = 1000
-                                pass                            
                             else:
                                 best_score = 0
                                 best_filer = None

@@ -1,0 +1,278 @@
+2025-07-03 11:40:33,452 - INFO - 2025-07-03 11:40:33,452 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c2_2014.tsv
+2025-07-03 11:40:33,452 - INFO - 2025-07-03 11:40:33,452 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c3_2014.tsv
+2025-07-03 11:40:33,453 - INFO - 2025-07-03 11:40:33,453 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c4_2014.tsv
+2025-07-03 11:40:33,453 - INFO - 2025-07-03 11:40:33,453 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c5_2014.tsv
+2025-07-03 11:40:33,454 - INFO - 2025-07-03 11:40:33,454 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c6_2014.tsv
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 XPath match for field filer_name with XPath .//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 Incremented xpath_match_stats for 990:filer_name:.//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt: 1
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 XPath match for field receipt with XPath .//irs:IRS990/irs:GrossReceiptsAmt
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 Incremented xpath_match_stats for 990:receipt:.//irs:IRS990/irs:GrossReceiptsAmt: 1
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 XPath match for field filer_name with XPath .//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 Incremented xpath_match_stats for 990:filer_name:.//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt: 2
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 XPath match for field receipt with XPath .//irs:IRS990/irs:GrossReceiptsAmt
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 Incremented xpath_match_stats for 990:receipt:.//irs:IRS990/irs:GrossReceiptsAmt: 2
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 XPath match for field contributions with XPath .//irs:IRS990/irs:TotalContributionsAmt
+2025-07-03 11:40:33,530 - INFO - 2025-07-03 11:40:33,530 - INFO - 1026 Incremented xpath_match_stats for 990:contributions:.//irs:IRS990/irs:TotalContributionsAmt: 1
+2025-07-03 11:40:33,531 - INFO - 2025-07-03 11:40:33,531 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-03 11:40:33,531 - INFO - 2025-07-03 11:40:33,531 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-03 11:40:33,531 - INFO - 2025-07-03 11:40:33,531 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-03 11:40:33,531 - INFO - 2025-07-03 11:40:33,531 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-03 11:40:33,531 - INFO - 2025-07-03 11:40:33,531 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-03 11:40:42,025 - INFO - 2025-07-03 11:40:42,025 - INFO - 1026 Found CashGrantAmt $25182958 in Schedule ELEMENTS for EIN 420680323, File 202003259349300920_public.xml
+2025-07-03 11:40:42,124 - INFO - 2025-07-03 11:40:42,124 - INFO - 1026 Found CashGrantAmt $29009395 in Schedule ELEMENTS for EIN 272559468, File 202003299349300010_public.xml
+2025-07-03 11:40:42,473 - INFO - 2025-07-03 11:40:42,473 - INFO - 1026 Found CashGrantAmt $18213599 in Schedule ELEMENTS for EIN 350868147, File 202003369349300425_public.xml
+2025-07-03 11:40:42,473 - INFO - 2025-07-03 11:40:42,473 - INFO - 1026 Found CashGrantAmt $8377668 in Schedule ELEMENTS for EIN 350868147, File 202003369349300425_public.xml
+2025-07-03 11:40:42,475 - INFO - 2025-07-03 11:40:42,475 - INFO - 1026 Found CashGrantAmt $166995521 in Schedule EXP for EIN 350868147, File 202003369349300425_public.xml
+2025-07-03 11:40:46,761 - INFO - 2025-07-03 11:40:46,761 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-03 11:40:58,835 - INFO - 2025-07-03 11:40:58,835 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-03 11:41:11,007 - INFO - 2025-07-03 11:41:11,007 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-03 11:41:24,680 - INFO - 2025-07-03 11:41:24,680 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-03 11:41:35,234 - INFO - 2025-07-03 11:41:35,234 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100759339300000_public.xml, skipping
+2025-07-03 11:41:35,234 - INFO - 2025-07-03 11:41:35,234 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100759339300200_public.xml, skipping
+2025-07-03 11:41:35,270 - INFO - 2025-07-03 11:41:35,270 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100759339300000_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100759339300000_public.xml')
+2025-07-03 11:41:35,270 - INFO - 2025-07-03 11:41:35,270 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100759339300200_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100759339300200_public.xml')
+2025-07-03 11:41:35,406 - INFO - 2025-07-03 11:41:35,406 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100769339300000_public.xml, skipping
+2025-07-03 11:41:35,406 - INFO - 2025-07-03 11:41:35,406 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100769339300100_public.xml, skipping
+2025-07-03 11:41:35,422 - INFO - 2025-07-03 11:41:35,422 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100769339300000_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100769339300000_public.xml')
+2025-07-03 11:41:35,422 - INFO - 2025-07-03 11:41:35,422 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100769339300100_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100769339300100_public.xml')
+2025-07-03 11:41:35,617 - INFO - 2025-07-03 11:41:35,617 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100779339300050_public.xml, skipping
+2025-07-03 11:41:35,650 - INFO - 2025-07-03 11:41:35,650 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100779339300050_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100779339300050_public.xml')
+2025-07-03 11:41:47,008 - INFO - 2025-07-03 11:41:47,008 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2020.tsv by writer writer-0
+2025-07-03 11:45:47,440 - INFO - 2025-07-03 11:45:47,440 - INFO - 1026 Amnesty Grant: $16511044 in Schedule ELEMENTS for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-03 11:45:47,441 - INFO - 2025-07-03 11:45:47,441 - INFO - 1026 Amnesty Grant: $58030 in Schedule ELEMENTS for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-03 11:45:47,441 - INFO - 2025-07-03 11:45:47,441 - INFO - 1026 Amnesty Grant: $20000 in Schedule ELEMENTS for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-03 11:45:47,441 - INFO - 2025-07-03 11:45:47,441 - INFO - 1026 Amnesty Grant: $16511044 in Schedule EXP for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-03 11:46:43,113 - INFO - 2025-07-03 11:46:43,113 - INFO - 1026 CHAI Grant: $1862652 in Schedule ELEMENTS for EIN 271414646, File 2021Redo_allCycles/202123199349316242_public.xml
+2025-07-03 12:19:33,136 - INFO - 2025-07-03 12:19:33,136 - INFO - 1026 Error reading XML 202501159339300115_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-03 12:19:33,141 - INFO - 2025-07-03 12:19:33,141 - INFO - 1026 Error reading XML 202501159339300205_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-03 12:19:33,141 - INFO - 2025-07-03 12:19:33,141 - INFO - 1026 Error reading XML 202501159339300210_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-03 12:19:33,142 - INFO - 2025-07-03 12:19:33,142 - INFO - 1026 Error reading XML 202501159339300305_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-03 12:19:33,142 - INFO - 2025-07-03 12:19:33,142 - INFO - 1026 Error reading XML 202501159339300405_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-03 12:19:36,410 - INFO - 2025-07-03 12:19:36,410 - INFO - 1026 ZIP file /Volumes/Data/irs_zips/sdn_advanced.zip does not start with a valid year, skipping
+2025-07-03 12:19:36,410 - INFO - 2025-07-03 12:19:36,410 - INFO - 1026 ZIP file /Volumes/Data/irs_zips/sdn_enhanced.zip does not start with a valid year, skipping
+2025-07-03 12:19:36,484 - INFO - 2025-07-03 12:19:36,484 - INFO - 1026 Final flush of 10 rows to TSV /Volumes/Data/tsvs/charities_501c5_2017.tsv by writer writer-0
+2025-07-03 12:19:36,495 - INFO - 2025-07-03 12:19:36,495 - INFO - 1026 Final flush of 1 rows to TSV /Volumes/Data/tsvs/charities_501c12_2017.tsv by writer writer-0
+2025-07-03 12:19:36,502 - INFO - 2025-07-03 12:19:36,502 - INFO - 1026 Final flush of 13 rows to TSV /Volumes/Data/tsvs/charities_501c6_2017.tsv by writer writer-0
+2025-07-03 12:19:36,962 - INFO - 2025-07-03 12:19:36,962 - INFO - 1026 Final flush of 1891 rows to TSV /Volumes/Data/tsvs/charities_501c3_2018.tsv by writer writer-0
+2025-07-03 12:19:36,992 - INFO - 2025-07-03 12:19:36,992 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2018.tsv in mode a by writer writer-0
+2025-07-03 12:19:37,071 - INFO - 2025-07-03 12:19:37,071 - INFO - 1026 Final flush of 307 rows to TSV /Volumes/Data/tsvs/charities_4947a1_2018.tsv by writer writer-0
+2025-07-03 12:19:38,104 - INFO - 2025-07-03 12:19:38,104 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2019.tsv in mode a by writer writer-0
+2025-07-03 12:19:38,219 - INFO - 2025-07-03 12:19:38,219 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2017.tsv in mode a by writer writer-0
+2025-07-03 12:19:38,582 - INFO - 2025-07-03 12:19:38,582 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2020.tsv in mode a by writer writer-0
+2025-07-03 12:19:38,743 - INFO - 2025-07-03 12:19:38,743 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2021.tsv in mode a by writer writer-0
+2025-07-03 12:19:50,497 - INFO - 2025-07-03 12:19:50,497 - INFO - 1026 Wrote officer mapping to officer_mapping.json
+2025-07-03 12:19:51,677 - INFO - 2025-07-03 12:19:51,677 - INFO - 1026 Saving xpath_stats.json. Current xpath_match_stats: 990:form_type:.//irs:ReturnHeader/irs:ReturnTypeCd
+2025-07-04 22:35:12,682 - INFO - 2025-07-04 22:35:12,682 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c2_2014.tsv
+2025-07-04 22:35:12,682 - INFO - 2025-07-04 22:35:12,682 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c3_2014.tsv
+2025-07-04 22:35:12,683 - INFO - 2025-07-04 22:35:12,683 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c4_2014.tsv
+2025-07-04 22:35:12,683 - INFO - 2025-07-04 22:35:12,683 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c5_2014.tsv
+2025-07-04 22:35:12,684 - INFO - 2025-07-04 22:35:12,684 - INFO - 1026 Preallocated TSV /Volumes/Data/tsvs/charities_501c6_2014.tsv
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 XPath match for field filer_name with XPath .//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 Incremented xpath_match_stats for 990:filer_name:.//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt: 1
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 XPath match for field receipt with XPath .//irs:IRS990/irs:GrossReceiptsAmt
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 Incremented xpath_match_stats for 990:receipt:.//irs:IRS990/irs:GrossReceiptsAmt: 1
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 XPath match for field filer_name with XPath .//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 Incremented xpath_match_stats for 990:filer_name:.//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt: 2
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 XPath match for field contributions with XPath .//irs:IRS990/irs:TotalContributionsAmt
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 Incremented xpath_match_stats for 990:contributions:.//irs:IRS990/irs:TotalContributionsAmt: 1
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 XPath match for field total_exp with XPath .//irs:IRS990/irs:TotalFunctionalExpensesGrp/irs:TotalAmt
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 Incremented xpath_match_stats for 990:total_exp:.//irs:IRS990/irs:TotalFunctionalExpensesGrp/irs:TotalAmt: 1
+2025-07-04 22:35:12,791 - INFO - 2025-07-04 22:35:12,791 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-04 22:35:12,792 - INFO - 2025-07-04 22:35:12,792 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-04 22:35:12,792 - INFO - 2025-07-04 22:35:12,792 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-04 22:35:12,792 - INFO - 2025-07-04 22:35:12,792 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-04 22:35:12,792 - INFO - 2025-07-04 22:35:12,792 - INFO - 1026 Cache hit for field officer_comp_value with XPath irs:ReportableCompFromOrgAmt
+2025-07-04 22:35:20,720 - INFO - 2025-07-04 22:35:20,720 - INFO - 1026 Found CashGrantAmt $25182958 in Schedule ELEMENTS for EIN 420680323, File 202003259349300920_public.xml
+2025-07-04 22:35:20,832 - INFO - 2025-07-04 22:35:20,832 - INFO - 1026 Found CashGrantAmt $29009395 in Schedule ELEMENTS for EIN 272559468, File 202003299349300010_public.xml
+2025-07-04 22:35:21,125 - INFO - 2025-07-04 22:35:21,125 - INFO - 1026 Found CashGrantAmt $18213599 in Schedule ELEMENTS for EIN 350868147, File 202003369349300425_public.xml
+2025-07-04 22:35:21,125 - INFO - 2025-07-04 22:35:21,125 - INFO - 1026 Found CashGrantAmt $8377668 in Schedule ELEMENTS for EIN 350868147, File 202003369349300425_public.xml
+2025-07-04 22:35:21,125 - INFO - 2025-07-04 22:35:21,125 - INFO - 1026 Found CashGrantAmt $166995521 in Schedule EXP for EIN 350868147, File 202003369349300425_public.xml
+2025-07-04 22:35:25,565 - INFO - 2025-07-04 22:35:25,565 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-04 22:35:37,949 - INFO - 2025-07-04 22:35:37,949 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-04 22:35:50,289 - INFO - 2025-07-04 22:35:50,289 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-04 22:36:04,369 - INFO - 2025-07-04 22:36:04,369 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2019.tsv by writer writer-0
+2025-07-04 22:36:14,946 - INFO - 2025-07-04 22:36:14,946 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100759339300000_public.xml, skipping
+2025-07-04 22:36:14,947 - INFO - 2025-07-04 22:36:14,947 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100759339300200_public.xml, skipping
+2025-07-04 22:36:14,959 - INFO - 2025-07-04 22:36:14,959 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100759339300000_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100759339300000_public.xml')
+2025-07-04 22:36:14,959 - INFO - 2025-07-04 22:36:14,959 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100759339300200_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100759339300200_public.xml')
+2025-07-04 22:36:15,112 - INFO - 2025-07-04 22:36:15,112 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100769339300000_public.xml, skipping
+2025-07-04 22:36:15,112 - INFO - 2025-07-04 22:36:15,112 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100769339300100_public.xml, skipping
+2025-07-04 22:36:15,128 - INFO - 2025-07-04 22:36:15,128 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100769339300000_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100769339300000_public.xml')
+2025-07-04 22:36:15,128 - INFO - 2025-07-04 22:36:15,128 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100769339300100_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100769339300100_public.xml')
+2025-07-04 22:36:15,324 - INFO - 2025-07-04 22:36:15,324 - INFO - 1026 Unsupported form type 990T in 2021Redo_allCycles/202100779339300050_public.xml, skipping
+2025-07-04 22:36:15,338 - INFO - 2025-07-04 22:36:15,338 - INFO - 1026 Invalid return value from parse_xml_file for 2021Redo_allCycles/202100779339300050_public.xml: expected 4-tuple, got ([], None, '2021Redo_allCycles/202100779339300050_public.xml')
+2025-07-04 22:36:26,622 - INFO - 2025-07-04 22:36:26,622 - INFO - 1026 Flushed 10000 rows to TSV /Volumes/Data/tsvs/charities_501c3_2020.tsv by writer writer-0
+2025-07-04 22:40:29,391 - INFO - 2025-07-04 22:40:29,391 - INFO - 1026 Amnesty Grant: $16511044 in Schedule ELEMENTS for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-04 22:40:29,391 - INFO - 2025-07-04 22:40:29,391 - INFO - 1026 Amnesty Grant: $58030 in Schedule ELEMENTS for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-04 22:40:29,391 - INFO - 2025-07-04 22:40:29,391 - INFO - 1026 Amnesty Grant: $20000 in Schedule ELEMENTS for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-04 22:40:29,391 - INFO - 2025-07-04 22:40:29,391 - INFO - 1026 Amnesty Grant: $16511044 in Schedule EXP for EIN 520851555, File 2021Redo_allCycles/202121589349300717_public.xml
+2025-07-04 22:41:23,961 - INFO - 2025-07-04 22:41:23,961 - INFO - 1026 CHAI Grant: $1862652 in Schedule ELEMENTS for EIN 271414646, File 2021Redo_allCycles/202123199349316242_public.xml
+2025-07-04 23:14:37,220 - INFO - 2025-07-04 23:14:37,220 - INFO - 1026 Error reading XML 202501159339300115_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-04 23:14:37,227 - INFO - 2025-07-04 23:14:37,227 - INFO - 1026 Error reading XML 202501159339300205_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-04 23:14:37,227 - INFO - 2025-07-04 23:14:37,227 - INFO - 1026 Error reading XML 202501159339300210_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-04 23:14:37,227 - INFO - 2025-07-04 23:14:37,227 - INFO - 1026 Error reading XML 202501159339300305_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-04 23:14:37,227 - INFO - 2025-07-04 23:14:37,227 - INFO - 1026 Error reading XML 202501159339300405_public.xml from /Volumes/Data/irs_zips/2025_TEOS_XML_05A.zip: That compression method is not supported
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/extract_charities.py", line 534, in process_zip_file
+    with zip_ref.open(xml_filename) as xml_file:
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 1703, in open
+    return ZipExtFile(zef_file, mode + 'b', zinfo, pwd, True)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 889, in __init__
+    self._decompressor = _get_decompressor(self._compress_type)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 785, in _get_decompressor
+    _check_compression(compress_type)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/zipfile/__init__.py", line 765, in _check_compression
+    raise NotImplementedError("That compression method is not supported")
+NotImplementedError: That compression method is not supported
+2025-07-04 23:14:40,544 - INFO - 2025-07-04 23:14:40,544 - INFO - 1026 ZIP file /Volumes/Data/irs_zips/sdn_advanced.zip does not start with a valid year, skipping
+2025-07-04 23:14:40,544 - INFO - 2025-07-04 23:14:40,544 - INFO - 1026 ZIP file /Volumes/Data/irs_zips/sdn_enhanced.zip does not start with a valid year, skipping
+2025-07-04 23:14:40,612 - INFO - 2025-07-04 23:14:40,612 - INFO - 1026 Final flush of 10 rows to TSV /Volumes/Data/tsvs/charities_501c5_2017.tsv by writer writer-0
+2025-07-04 23:14:40,619 - INFO - 2025-07-04 23:14:40,619 - INFO - 1026 Final flush of 1 rows to TSV /Volumes/Data/tsvs/charities_501c12_2017.tsv by writer writer-0
+2025-07-04 23:14:40,625 - INFO - 2025-07-04 23:14:40,625 - INFO - 1026 Final flush of 13 rows to TSV /Volumes/Data/tsvs/charities_501c6_2017.tsv by writer writer-0
+2025-07-04 23:14:41,014 - INFO - 2025-07-04 23:14:41,014 - INFO - 1026 Final flush of 1891 rows to TSV /Volumes/Data/tsvs/charities_501c3_2018.tsv by writer writer-0
+2025-07-04 23:14:41,033 - INFO - 2025-07-04 23:14:41,033 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2018.tsv in mode a by writer writer-0
+2025-07-04 23:14:41,102 - INFO - 2025-07-04 23:14:41,102 - INFO - 1026 Final flush of 307 rows to TSV /Volumes/Data/tsvs/charities_4947a1_2018.tsv by writer writer-0
+2025-07-04 23:14:42,186 - INFO - 2025-07-04 23:14:42,186 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2019.tsv in mode a by writer writer-0
+2025-07-04 23:14:42,244 - INFO - 2025-07-04 23:14:42,244 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2017.tsv in mode a by writer writer-0
+2025-07-04 23:14:42,616 - INFO - 2025-07-04 23:14:42,616 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2020.tsv in mode a by writer writer-0
+2025-07-04 23:14:42,739 - INFO - 2025-07-04 23:14:42,739 - INFO - 1026 Opened TSV /Volumes/Data/tsvs/charities_4947a1_2021.tsv in mode a by writer writer-0
+2025-07-04 23:14:54,662 - INFO - 2025-07-04 23:14:54,662 - INFO - 1026 Wrote officer mapping to officer_mapping.json
+2025-07-04 23:14:55,796 - INFO - 2025-07-04 23:14:55,796 - INFO - 1026 Saving xpath_stats.json. Current xpath_match_stats: 990:form_type:.//irs:ReturnHeader/irs:ReturnTypeCd
