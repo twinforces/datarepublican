@@ -9,6 +9,7 @@ from lxml import etree
 from io import BytesIO
 import sys
 import extract_utils as cu
+import re
 
 logger = None
 verbose = False
@@ -31,11 +32,34 @@ thread_local = threading.local()
 file_counter_local = threading.local()
 filer_eins = {}
 
+def generate_acronym(name):
+    """Generate an acronym from an organization name, handling special cases like universities."""
+    if not name or len(name.split()) < 2:  # Skip single-word names
+        return None
+    # Common stop words to exclude
+    stop_words = cu.STOP_WORDS | {'AT', 'FOR', 'WITH', 'BY'}
+    # Handle special cases (e.g., universities)
+    university_pattern = re.compile(r'university\s+of\s+([\w\s,]+)', re.IGNORECASE)
+    match = university_pattern.match(name)
+    if match:
+        # For universities, use the main location (e.g., "University Of California, Los Angeles" -> "UCLA")
+        location = match.group(1).strip()
+        words = [w for w in location.split() if w.upper() not in stop_words and w]
+        if words:
+            return ''.join(w[0].upper() for w in words if w)
+        return None
+    # General case: take first letter of each significant word
+    words = [w for w in name.split() if w.upper() not in stop_words and w]
+    if not words:
+        return None
+    acronym = ''.join(w[0].upper() for w in words if w)
+    return acronym if len(acronym) > 1 else None
+
 def main():
     global verbose, quiet, total_addresses, total_address_errors, total_queue_puts, total_skipped
     global args, zip_index, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     global results_queue
-    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files and integrate backfill.tsv.")
+    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files and integrate backfill.tsv with acronym variations.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
     parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
@@ -89,6 +113,7 @@ def main():
                 cu.log_error("Loaded {} rows from {}", len(backfill_rows), args.backfill_source)
                 seen_ein_name_zip = set()
                 unique_backfill_rows = []
+                acronym_count = 0
                 for row in backfill_rows:
                     ein = row.get('grant_ein', '')
                     name = row.get('name', '')
@@ -97,6 +122,22 @@ def main():
                     if key not in seen_ein_name_zip:
                         seen_ein_name_zip.add(key)
                         unique_backfill_rows.append(row)
+                        # Generate acronym
+                        acronym = generate_acronym(name)
+                        if acronym and (ein, acronym, zip_code) not in seen_ein_name_zip:
+                            seen_ein_name_zip.add((ein, acronym, zip_code))
+                            acronym_row = {
+                                'grant_ein': ein,
+                                'name': acronym,
+                                'canonical_address': row.get('canonical_address', ''),
+                                'po_box': row.get('po_box', ''),
+                                'zip_code': zip_code
+                            }
+                            unique_backfill_rows.append(acronym_row)
+                            acronym_count += 1
+                            if verbose:
+                                cu.log_error("Generated acronym {} for EIN={}, original name={}", acronym, ein, name)
+                cu.log_error("Generated {} acronym entries", acronym_count)
                 for row in unique_backfill_rows:
                     ein = row.get('grant_ein', '')
                     name = row.get('name', '')
@@ -122,7 +163,7 @@ def main():
                             po_box_zip_index.setdefault(po_box_key, set()).add((ein, name))
                         if zip_code and cu.ZIP_REGEX.match(zip_code):
                             zip_code_index.setdefault(zip_code, set()).add((ein, name))
-                cu.log_error("Integrated {} unique backfill entries (after deduplication by EIN+name+zip_code) into address indices", len(unique_backfill_rows))
+                cu.log_error("Integrated {} unique backfill entries (including acronyms, after deduplication by EIN+name+zip_code) into address indices", len(unique_backfill_rows))
         else:
             cu.log_error("Backfill file {} does not exist, proceeding without backfill data", args.backfill_source)
         if not addr_cache_valid or args.force_reprocess:
