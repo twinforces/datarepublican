@@ -13,8 +13,8 @@ from logging.handlers import QueueHandler, QueueListener
 import psutil
 from lxml import etree
 from io import BytesIO
-import re
 import csv
+import re
 from countryCodes import lookupCC
 import extract_utils as cu
 
@@ -327,6 +327,8 @@ def print_summary_table(summary, total_mismatches, total_missing_xmls, total_pot
 
 def write_charity_latest(rows, output_tsv, output_csv, zip_index):
     """Write charity data to TSV and CSV with quoted string fields in CSV."""
+    output_tsv = cu.normalize_file_path(output_tsv, 'charity_latest.tsv')
+    output_csv = cu.normalize_file_path(output_csv, 'charity_latest.csv')
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(TSV_COLUMNS) + '\n')
         for row, _, _ in rows:
@@ -363,6 +365,8 @@ def write_charity_latest(rows, output_tsv, output_csv, zip_index):
 
 def write_grants_latest(grants, output_tsv, output_csv):
     """Write grant data to TSV and CSV with quoted string fields in CSV."""
+    output_tsv = cu.normalize_file_path(output_tsv, 'grants_latest.tsv')
+    output_csv = cu.normalize_file_path(output_csv, 'grants_latest.csv')
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(GRANT_COLUMNS) + '\n')
         for grant in grants:
@@ -385,6 +389,8 @@ def write_grants_latest(grants, output_tsv, output_csv):
 
 def write_backfill(backfill_entries, output_tsv, output_csv):
     """Write backfill data to TSV and CSV with quoted string fields in CSV, allowing multiple names per EIN."""
+    output_tsv = cu.normalize_file_path(output_tsv, 'backfill.tsv')
+    output_csv = cu.normalize_file_path(output_csv, 'backfill.csv')
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(BACKFILL_COLUMNS) + '\n')
         for entry in backfill_entries:

@@ -74,7 +74,7 @@ def main():
     parser.add_argument("--skip-address-errors", action="store_true", help="Continue despite address errors")
     parser.add_argument("--sample-xml", type=str, default=None, help="Directory to save failing XMLs")
     parser.add_argument("--log-zip-errors", action="store_true", help="Log invalid ZIP codes")
-    parser.add_argument("--backfill-source", type=str, default="./backfill.tsv", help="Path to backfill.tsv")
+    parser.add_argument("--backfill-source", type=str, default=None, help="Path to backfill.tsv or directory")
     args = parser.parse_args()
     verbose = args.verbose
     quiet = args.quiet
@@ -87,6 +87,8 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     if not os.path.isdir(args.zip_dir):
         raise ValueError(f"ZIP directory {args.zip_dir} does not exist")
+    # Normalize file path
+    args.backfill_source = cu.normalize_file_path(args.backfill_source, 'backfill.tsv', args.output_dir)
     listener = cu.setup_logging(args.output_dir, 'extract_addresses_log.txt', verbose, quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
     addr_cache_valid = True
@@ -116,7 +118,7 @@ def main():
                 acronym_count = 0
                 for row in backfill_rows:
                     ein = row.get('grant_ein', '')
-                    name = row.get('name', '')
+                    name = row.get('name', '').title()  # Title-case for consistency
                     zip_code = row.get('zip_code', '')
                     key = (ein, name, zip_code)
                     if key not in seen_ein_name_zip:
@@ -140,7 +142,7 @@ def main():
                 cu.log_error("Generated {} acronym entries", acronym_count)
                 for row in unique_backfill_rows:
                     ein = row.get('grant_ein', '')
-                    name = row.get('name', '')
+                    name = row.get('name', '').title()  # Ensure title-case for consistency
                     canonical_address = row.get('canonical_address', '')
                     po_box = row.get('po_box', '')
                     zip_code = row.get('zip_code', '')

@@ -5,6 +5,7 @@ import logging
 import subprocess
 import tempfile
 import shutil
+import extract_utils as cu
 
 # Constants
 BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
@@ -15,23 +16,10 @@ logger = None
 
 def setup_logging(output_dir, verbose, quiet):
     global logger
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    file_handler = logging.FileHandler(os.path.join(output_dir, 'add_backfill_log.txt'))
-    file_handler.setFormatter(formatter)
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.ERROR if not verbose else logging.INFO)
-    console_handler.setFormatter(formatter)
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.handlers = [file_handler, console_handler] if not quiet else [file_handler]
-    return logger
+    return cu.setup_logging(output_dir, 'add_backfill_log.txt', verbose, quiet)
 
 def log_error(msg_format, *args, exc_info=False):
-    if args:
-        logger.info(msg_format.format(*args), exc_info=exc_info)
-    else:
-        logger.info(msg_format, exc_info=exc_info)
+    cu.log_error(msg_format, *args, exc_info=exc_info)
 
 def sort_backfill_tsv(backfill_tsv, temp_dir):
     """Sort backfill.tsv by grant_ein and name length (descending), preserving the header."""
@@ -99,12 +87,16 @@ def main():
             "Selects the longest name per EIN from backfill.tsv and appends to the output without loading charity_latest.tsv into memory."
         )
     )
-    parser.add_argument("--charity-tsv", type=str, default="./charity_latest.tsv", help="Path to charity_latest.tsv")
-    parser.add_argument("--backfill-tsv", type=str, default="./backfill.tsv", help="Path to backfill.tsv")
+    parser.add_argument("--charity-tsv", type=str, default=None, help="Path to charity_latest.tsv or directory")
+    parser.add_argument("--backfill-tsv", type=str, default=None, help="Path to backfill.tsv or directory")
     parser.add_argument("--output-dir", type=str, default=".", help="Directory for output TSV and CSV files")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--quiet", action="store_true", help="Disable all logging")
     args = parser.parse_args()
+
+    # Normalize file paths
+    args.charity_tsv = cu.normalize_file_path(args.charity_tsv, 'charity_latest.tsv', args.output_dir)
+    args.backfill_tsv = cu.normalize_file_path(args.backfill_tsv, 'backfill.tsv', args.output_dir)
 
     # Validate arguments
     if not os.path.isfile(args.charity_tsv):

@@ -549,3 +549,11 @@ def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_a
             pickle.dump((po_box_entries, zip_code_index, po_box_zip_index), f)
     except Exception as e:
         log_error("Error saving address cache: {}", str(e), exc_info=True)
+        
+def normalize_file_path(arg_value, default_filename, base_dir=None):
+    """Normalize a file path argument, appending default_filename to a directory or using the file path as-is."""
+    if not arg_value:
+        return os.path.join(base_dir or ".", default_filename)
+    if os.path.isdir(arg_value):
+        return os.path.join(arg_value, default_filename)
+    return arg_value

@@ -46,8 +46,8 @@ def main():
     parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
     parser.add_argument("--cache-dir", type=str, default="./_cache", help="Directory for cache files")
     parser.add_argument("--output-dir", type=str, default="./_output", help="Directory for output TSV files")
-    parser.add_argument("--charity-source", type=str, help="Path to charity_latest.tsv", default=None)
-    parser.add_argument("--backfill-source", type=str, help="Path to backfill.tsv", default=None)
+    parser.add_argument("--charity-source", type=str, help="Path to charity_latest.tsv or directory", default=None)
+    parser.add_argument("--backfill-source", type=str, help="Path to backfill.tsv or directory", default=None)
     parser.add_argument("--merge-batch-size", type=int, default=1000, help="Batch size for queuing results")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--quiet", action="store_true", help="Disable all logging")
@@ -63,10 +63,9 @@ def main():
         raise ValueError(f"Source directory {args.source_dir} does not exist")
     if not os.path.isdir(args.zip_dir):
         raise ValueError(f"ZIP directory {args.zip_dir} does not exist")
-    if args.charity_source is None:
-        args.charity_source = os.path.join(args.source_dir, 'charity_latest.tsv')
-    if args.backfill_source is None:
-        args.backfill_source = os.path.join(args.source_dir, 'backfill.tsv')
+    # Normalize file paths
+    args.charity_source = cu.normalize_file_path(args.charity_source, 'charity_latest.tsv', args.source_dir)
+    args.backfill_source = cu.normalize_file_path(args.backfill_source, 'backfill.tsv', args.source_dir)
     listener = cu.setup_logging(args.output_dir, 'extract_grants_log.txt', verbose, quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
     try:
@@ -90,7 +89,7 @@ def main():
             cu.log_error("Loaded {} rows from {}", len(backfill_rows), args.backfill_source)
             for row in backfill_rows:
                 ein = row.get('grant_ein', '')
-                name = row.get('name', '')
+                name = row.get('name', '').title()  # Title-case for consistency
                 canonical_address = row.get('canonical_address', '')
                 po_box = row.get('po_box', '')
                 zip_code = row.get('zip_code', '')
@@ -163,8 +162,9 @@ def compute_name_heuristic(grantee_name_in, filer_name_in):
     if not grantee_name_in or not filer_name_in:
         return 0
     
-    filer_name = expand_state_codes(filer_name_in)
-    grantee_name = expand_state_codes(grantee_name_in)
+    # Title-case names for consistent matching
+    filer_name = expand_state_codes(filer_name_in).title()
+    grantee_name = expand_state_codes(grantee_name_in).title()
     
     words1 = {w.lower() for w in grantee_name.split() if w not in cu.STOP_WORDS}
     words2 = {w.lower() for w in filer_name.split() if w not in cu.STOP_WORDS}
