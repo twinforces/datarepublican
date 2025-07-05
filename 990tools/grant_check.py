@@ -92,7 +92,7 @@ def index_and_filter(index_file, input_file, output_file, report_file=None, repo
             markdown = "# Filtered-Out Grants Report\n\n"
 
             # Top 10 grant_ein by count
-            markdown += "## Top 10 grant_ein by Count\n"
+            markdown += f"## Top {report_depth} grant_ein by Count\n"
             markdown += "| grant_ein | Count | Total Grant Amount |\n"
             markdown += "|-----------|-------|--------------------|\n"
             top_grant_eins = sorted(grant_ein_counts.items(), key=lambda x: (-x[1], x[0]))[:report_depth]
@@ -103,7 +103,7 @@ def index_and_filter(index_file, input_file, output_file, report_file=None, repo
             markdown += "\n"
 
             # Top 10 grant_ein by total grant_amt
-            markdown += "## Top 10 grant_ein by Total Grant Amount\n"
+            markdown += f"## Top {report_depth} grant_ein by Total Grant Amount\n"
             markdown += "| grant_ein | Count | Total Grant Amount |\n"
             markdown += "|-----------|-------|--------------------|\n"
             top_amt_grant_eins = sorted(grant_ein_amts.items(), key=lambda x: (-x[1], x[0]))[:report_depth]
@@ -126,7 +126,7 @@ def main():
     parser.add_argument('--input-file', help='TSV file to filter based on grant_ein', required=True)
     parser.add_argument('--output-file', help='Output filtered TSV file', required=True)
     parser.add_argument('--report-file', help='Output Markdown file for report of filtered-out rows', default=None)
-    parser.add_argument('--report-depth', help="Top N", default=10, type=int)
+    parser.add_argument('--report-depth', help="Top N", default=1000, type=int)
 
     args = parser.parse_args()
 
