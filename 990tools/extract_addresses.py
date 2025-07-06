@@ -110,7 +110,7 @@ def main():
             cu.log_error("Loaded address cache: {} addresses, {} PO boxes, {} ZIP index entries", len(address_entries), len(po_box_entries), len(zip_code_index))
         # Load backfill.tsv
         if os.path.exists(args.backfill_source):
-            backfill_rows = cu.read_tsv_files(args.backfill_source, args.start_year, args.end_year)
+            backfill_rows = cu.read_tsv_files(args.backfill_source, args.start_year, args.end_year, expected_columns=cu.BACKFILL_COLUMNS)
             if backfill_rows:
                 cu.log_error("Loaded {} rows from {}", len(backfill_rows), args.backfill_source)
                 seen_ein_name_zip = set()
@@ -191,7 +191,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
     global address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     results_queue = queue.Queue(maxsize=20000)
     zip_cache = {}
-    def process_address_row(row):
+    def process_address_row(xml_filename):
         global total_skipped
         if not hasattr(file_counter_local, 'value'):
             file_counter_local.value = 0
@@ -210,7 +210,6 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
             'po_box_zip_index': {},
             'filer_eins': {}
         }
-        xml_filename = row['xml_name']
         try:
             if xml_filename not in zip_index:
                 cu.log_error("No file {} in ZIP index, skipping (total missing: {})", xml_filename, total_skipped + 1)
@@ -233,7 +232,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer")
+                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, {}, zip_index, output_dir, sample_xml, parse_type="filer")
                 if not success:
                     file_counter_local.skipped += 1
                     total_skipped += 1
@@ -257,7 +256,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
     try:
         if args.no_threads:
             for xml_filename in tqdm(zip_index.keys(), desc="Processing addresses from all XMLs"):
-                result = process_address_row({'xml_name': xml_filename})
+                result = process_address_row(xml_filename)
                 with zip_index_lock:
                     address_entries.extend(result['address_entries'])
                     debug_address_entries.extend(result['debug_address_entries'])
@@ -282,12 +281,12 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
                 batch = []
                 batch_size = args.merge_batch_size
                 for xml_filename in zip_index.keys():
-                    batch.append({'xml_name': xml_filename})
+                    batch.append(xml_filename)
                     if len(batch) >= batch_size:
-                        futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
+                        futures.append(executor.submit(lambda b: [process_address_row(f) for f in b], batch))
                         batch = []
                 if batch:
-                    futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
+                    futures.append(executor.submit(lambda b: [process_address_row(f) for f in b], batch))
                 with tqdm(total=len(zip_index), desc="Processing addresses from all XMLs") as pbar:
                     for future in as_completed(futures):
                         results = future.result()

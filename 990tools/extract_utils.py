@@ -79,6 +79,7 @@ CSV_QUOTE_FIELDS = {
     'po_box_matches': ['org_name']
 }
 EIN_REGEX = re.compile(r'^\d{9}$')
+BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
 
 logger = None
 quiet = False
@@ -182,37 +183,35 @@ def save_zip_cache(cache_dir, start_year, end_year, checksums, zip_index):
     except Exception as e:
         log_error("Error saving ZIP index cache: {}", str(e), exc_info=True)
 
-def read_tsv_files(charity_source, start_year, end_year):
+def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
     rows = []
-    if not os.path.exists(charity_source):
-        log_error("TSV file {} does not exist. Ensure it is in the source directory.", charity_source)
-        sys.exit(1)
+    if not os.path.exists(tsv_file):
+        log_error("TSV file {} does not exist.", tsv_file)
+        return rows
     try:
-        with open(charity_source, 'r', encoding='utf-8') as f:
+        with open(tsv_file, 'r', encoding='utf-8') as f:
             header = f.readline().strip().split('\t')
             header_map = {col: idx for idx, col in enumerate(header)}
-            required_cols = ['filer_ein', 'filer_name', 'tax_year', 'form_type', 'xml_name']
-            if not all(col in header_map for col in required_cols):
-                log_error("Missing required columns in TSV {}: {}", charity_source, required_cols)
-                sys.exit(1)
+            if expected_columns and not all(col in header_map for col in expected_columns):
+                log_error("Missing required columns in TSV {}: {}", tsv_file, [col for col in expected_columns if col not in header_map])
+                return rows
             for line in f:
                 fields = line.strip().split('\t')
                 if len(fields) < len(header_map):
                     continue
                 row = {col: fields[idx] for col, idx in header_map.items()}
-                try:
-                    row_year = int(row['tax_year'])
-                    if start_year <= row_year <= end_year:
-                        rows.append(row)
-                except ValueError:
-                    log_error("Invalid tax_year {} in TSV {}, skipping row", row.get('tax_year', ''), charity_source)
+                if 'tax_year' in row:
+                    try:
+                        row_year = int(row['tax_year'])
+                        if start_year <= row_year <= end_year:
+                            rows.append(row)
+                    except ValueError:
+                        log_error("Invalid tax_year {} in TSV {}, skipping row", row.get('tax_year', ''), tsv_file)
+                else:
+                    rows.append(row)
     except Exception as e:
-        log_error("Error reading TSV {}: {}", charity_source, str(e), exc_info=True)
-        sys.exit(1)
-    if not rows:
-        log_error("No valid rows read from {}. Check file format and year range {}-{}", charity_source, start_year, end_year)
-        sys.exit(1)
-    log_error("Read {} rows from {}", len(rows), charity_source)
+        log_error("Error reading TSV {}: {}", tsv_file, str(e), exc_info=True)
+    log_error("Read {} rows from {}", len(rows), tsv_file)
     return rows
 
 def canonicalize_address(address_components, output_dir):
@@ -442,6 +441,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             'reason': str(e)
         })
         return False, None
+
 def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipient_name, output_dir):
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -549,7 +549,7 @@ def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_a
             pickle.dump((po_box_entries, zip_code_index, po_box_zip_index), f)
     except Exception as e:
         log_error("Error saving address cache: {}", str(e), exc_info=True)
-        
+
 def normalize_file_path(arg_value, default_filename, base_dir=None):
     """Normalize a file path argument, appending default_filename to a directory or using the file path as-is."""
     if not arg_value:
