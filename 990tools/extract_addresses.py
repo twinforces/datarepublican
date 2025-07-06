@@ -169,7 +169,7 @@ def main():
         else:
             cu.log_error("Backfill file {} does not exist, proceeding without backfill data", args.backfill_source)
         if not addr_cache_valid or args.force_reprocess:
-            process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir, args.sample_xml)
+            process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir, args.sample_xml, args.skip_address_errors)
             cu.save_address_cache(args.cache_dir, args.start_year, args.end_year, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index)
         write_outputs(args.output_dir, addr_cache_valid and not args.force_reprocess)
     except Exception as e:
@@ -186,7 +186,7 @@ def main():
     print(f"PO Boxes found: {len(po_box_entries)}")
     print(f"Output files in: {args.output_dir}")
 
-def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml):
+def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml, skip_address_errors):
     global total_addresses, total_address_errors, total_queue_puts, total_skipped, results_queue
     global address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     results_queue = queue.Queue(maxsize=20000)
@@ -232,7 +232,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, {}, zip_index, output_dir, sample_xml, parse_type="filer")
+                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, {}, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=skip_address_errors)
                 if not success:
                     file_counter_local.skipped += 1
                     total_skipped += 1

@@ -17,7 +17,6 @@ import threading
 from tqdm import tqdm
 from collections import defaultdict
 import hashlib
-import threading
 from io import BytesIO
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
@@ -301,7 +300,7 @@ def canonicalize_address(address_components, output_dir):
         canonical = f"PO Box {po_box} {canonical}"
     return canonical, po_box, zip_code, ""
 
-def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer"):
+def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
     global thread_local
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -421,7 +420,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 os.makedirs(sample_xml, exist_ok=True)
                 with open(os.path.join(sample_xml, xml_filename), 'wb') as f:
                     f.write(xml_content)
-            if not args.skip_address_errors:
+            if not skip_address_errors:
                 return False, None
             with threading.Lock():
                 result['filer_eins'][xml_filename] = (xml_ein, row, canonical_address)
@@ -478,7 +477,6 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
                 'reason': f"Invalid recipient address; components={address_components}; snippet={address_snippet}"
             })
             return "", None, None
-
         return canonical_address, po_box, zip_code
     except Exception as e:
         log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
