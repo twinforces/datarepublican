@@ -15,7 +15,7 @@ export BROWSE=$DR_ROOT/browse
 python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR
 
 #one of the IRS zip files is in a format that can’t be read by python, so this recompresses it. You'll have to move the fixed ones back.
-cd $ZIPS_DIR; python recompress_irs_zips
+cd $ZIPS_DIR; python $TOOLS/recompress_irs_zips.py
 
 cd $DR_ROOT/990tools
 
