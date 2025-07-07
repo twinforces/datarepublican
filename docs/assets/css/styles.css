@@ -3696,15 +3696,6 @@ body > div#main-content {
     padding-right: 1.5rem;
   }
 }
-.\[\&\:empty\]\:h-0:empty {
-  height: 0px;
-}
-.\[\&\:empty\]\:overflow-hidden:empty {
-  overflow: hidden;
-}
-.\[\&\:empty\]\:leading-none:empty {
-  line-height: 1;
-}
 .\[\&\>div\:first-child\]\:\!mt-0>div:first-child {
   margin-top: 0px !important;
 }
