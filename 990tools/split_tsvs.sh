@@ -46,16 +46,9 @@ get_column_indices() {
   echo "$indices"
 }
 
-# Calculate dbVersion as sum of filtered grant lines
-GRANT_LINES=0
-for GRANT_FILE in "grants_final.tsv" "grants.pf.tsv"; do
-  if [ -f "$GRANT_FILE" ]; then
-    FILTERED_LINES=$(tail -n +2 "$GRANT_FILE" | awk -F'\t' '$1 != $2 && $3 != "0" && $3 != "" {print}' | wc -l)
-    GRANT_LINES=$((GRANT_LINES + FILTERED_LINES))
-  fi
-done
-DB_VERSION=$GRANT_LINES
-echo "Calculated dbVersion: $DB_VERSION (sum of filtered grant lines)" >&2
+# Set dbVersion as current timestamp in ISO 8601 format
+DB_VERSION=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+echo "Calculated dbVersion: $DB_VERSION (current timestamp)" >&2
 
 # Initialize DATA_FILES array
 DATA_FILES=()
@@ -217,7 +210,7 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
 done
 
 # Write DATA_FILES to file
-printf "export const DATA_FILES = {\n  dbVersion: %s,\n  files: [\n" "$DB_VERSION" > "$DATA_FILES_FILE"
+printf "export const DATA_FILES = {\n  dbVersion: \"%s\",\n  files: [\n" "$DB_VERSION" > "$DATA_FILES_FILE"
 for ((i=0; i<${#DATA_FILES[@]}; i++)); do
   printf "    %s" "${DATA_FILES[i]}" >> "$DATA_FILES_FILE"
   if [ $i -lt $((${#DATA_FILES[@]}-1)) ]; then

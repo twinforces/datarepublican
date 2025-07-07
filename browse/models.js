@@ -34,6 +34,7 @@ let DEBUGLOG = false;
 let DEBUGSTOP = false;
 
 let GOV_NODE = null; // I use this when debugging.
+let colorOffest = 0;
 
 /**
  * Tried logarithmic scaling, but it was too drastic 1M vs. 1B was 3. 
