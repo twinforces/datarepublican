@@ -1,3 +1,4 @@
+# extract_utils.py
 import os
 import glob
 import logging
@@ -79,10 +80,37 @@ CSV_QUOTE_FIELDS = {
 }
 EIN_REGEX = re.compile(r'^\d{9}$')
 BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
+VALID_EIN_PREFIXES = {
+    '01', '02', '03', '04', '05', '06', '11', '13', '14', '16', '20', '21', '22', '23', '24', '25', '26', '27',
+    '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49',
+    '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69',
+    '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88', '90', '91',
+    '92', '93', '94', '95', '98'
+}
 
 logger = None
 quiet = False
 thread_local = threading.local()
+
+def validate_ein(ein):
+    """
+    Validate an EIN against IRS standards.
+    
+    Args:
+        ein (str): The EIN to validate.
+    
+    Returns:
+        tuple: (bool, str) where bool indicates validity and str provides the reason if invalid.
+    """
+    if not ein:
+        return False, "EIN is empty"
+    if not EIN_REGEX.match(ein):
+        return False, f"EIN {ein} is not a 9-digit number"
+    if ein == "000000000":
+        return False, "EIN is all zeros"
+    if ein[:2] not in VALID_EIN_PREFIXES:
+        return False, f"EIN prefix {ein[:2]} is not a valid IRS prefix"
+    return True, ""
 
 def log_error(msg_format, *args, ein=None, exc_info=False):
     if logger and not quiet:

@@ -31,6 +31,8 @@ import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
 import presetsData from "./presets.js";
 let DEBUGLOG = false;
+let DEBUGSTOP = false;
+
 let GOV_NODE = null; // I use this when debugging.
 
 /**
@@ -69,32 +71,64 @@ export function formatNumber(num) {
  */
 let viewModel = null;
 
-// Hash function
 function hashEIN(ein) {
-  let hash = 0;
-  for (let i = 0; i < ein.length; i++) {
-    hash = (hash * 31 + ein.charCodeAt(i)) % 1000000;
+  let hash = 2862166261; // so 001 is greenish
+  const paddedEin = ein.length === 3 ? ein.padEnd(9, "0") : ein; // Pad 3-digit EINs
+  for (let i = 0; i < paddedEin.length; i++) {
+    const weight = i < 2 ? 2 : 1; // Weight IRS office digits
+    hash ^= paddedEin.charCodeAt(i) * weight;
+    hash = (hash * 16777619) >>> 0;
   }
-  return hash / 1000000;
+  return (hash % 1000000) / 1000000;
 }
 
-// Sinebow function
-function sinebow(t) {
-  t = t * 2 * Math.PI;
-  const offset = Math.PI / 2;
-  const r = Math.sin(t + offset);
-  const g = Math.sin(t + offset + (2 * Math.PI) / 3);
-  const b = Math.sin(t + offset + (4 * Math.PI) / 3);
+export function interpolateRainbow(t) {
+  return (
+    (t = (t + 0.2) % 1),
+    d3.cubehelix(
+      360 * t - 100,
+      1.5 - 1.5 * Math.abs(t - 0.5),
+      0.8 - 0.9 * Math.abs(t - 0.5)
+    )
+  );
+}
+
+export function interpolateDarkRainbow(t) {
+  return (
+    (t = (t + 0.2) % 1),
+    d3.cubehelix(
+      360 * t - 100,
+      1.5 - 1.5 * Math.abs(t - 0.5),
+      0.5 - 0.9 * Math.abs(t - 0.5)
+    )
+  );
+}
+
+// Cubehelix function
+function cubehelix2(t) {
+  const start = 240; // Start hue adjusted to align green near t=0.123456
+  const rotations = 1.5; // Keep 1.5 rotations for variety
+  const saturation = 0.2 + 0.3 * Math.sin(t * 2 * Math.PI + Math.PI / 2); // 0.2–0.5, peaks near t=0.125
+  const gamma = 0.9; // Slightly darker brightness
+  const angle = 2 * Math.PI * (start / 360 + rotations * t);
+  const amp = saturation * (1 - t) * t * 2;
+  const r = t + amp * (-0.14861 * Math.cos(angle) + 1.78277 * Math.sin(angle));
+  const g = t + amp * (-0.29227 * Math.cos(angle) - 0.90649 * Math.sin(angle));
+  const b = t + amp * (1.97294 * Math.cos(angle));
   return d3.rgb(
-    Math.floor((0.2 + 0.6 * r * r) * 255),
-    Math.floor((0.2 + 0.6 * g * g) * 255),
-    Math.floor((0.2 + 0.6 * b * b) * 255)
+    Math.max(0, Math.min(1, r ** gamma)) * 255,
+    Math.max(0, Math.min(1, g ** gamma)) * 255,
+    Math.max(0, Math.min(1, b ** gamma)) * 255
   );
 }
 
 // Color function
 export function getColorForEIN(ein) {
-  return sinebow((hashEIN(ein) * 5) % 1);
+  return interpolateRainbow(hashEIN(ein));
+}
+export function getTextColorForEIN(ein) {
+  // same hue/sat but darker so more texty.
+  return interpolateDarkRainbow(hashEIN(ein));
 }
 
 // Initialize IndexedDB
@@ -161,6 +195,7 @@ async function clearStorage() {
       [CHARITY_STORE, GRANT_STORE, METADATA_STORE],
       "readwrite"
     );
+    updateStatus("clearing store", "orange");
     await tx.objectStore(CHARITY_STORE).clear();
     await tx.objectStore(GRANT_STORE).clear();
     await tx.objectStore(METADATA_STORE).clear();
@@ -706,7 +741,8 @@ export class BrowseViewModel {
           clearStorage();
           return;
         }
-        this.addToShowList(e);
+        const ex = `${e}~${START_REVEAL}~${START_REVEAL}`;
+        this.addToShowList(ex);
       }
     }
   }
@@ -742,14 +778,19 @@ export class BrowseViewModel {
   resetExpandScaleX() {
     if (this.graphSizeX) {
       const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
-      this.expandScaleX = layers - 1; // i.e. more or less 100px per layer;
+      this.expandScaleX = 4 * (layers - 1); // i.e. more or less 100px per layer;
     }
   }
 
   resetExpandScaleY() {
     if (this.graphSizeY) {
-      this.expandScaleY = Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
+      this.expandScaleY = 4 * Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
     }
+  }
+  defaultSize() {
+    const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
+    this.expandScaleX = 5 * (layers - 1); // i.e. more or less 100px per layer;
+    this.expandScaleY = 5 * Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
   }
 
   setExpandScaleY(scale) {
@@ -840,13 +881,22 @@ export class BrowseViewModel {
 
   /** methods for manipulating the Show List */
   addToShowList(ein) {
+    if (ein == "86") {
+      clearStorage();
+      return;
+    }
+    if (ein == "99") {
+      DEBUGLOG = true; //get smart!
+      return;
+    }
     const c = Charity.getCharity(ein);
     if (c) {
-      this.showList[c.ein] = ein.split(/[:~]/).slice(1) || [
-        START_REVEAL,
-        START_REVEAL,
-      ];
-      c.desiredVisible = true;
+      let tail = ein.split(/[:~]/).slice(1);
+      if (!tail || tail.length == 0) {
+        tail = [START_REVEAL, START_REVEAL];
+      }
+      this.showList[c.ein] = tail;
+      if (!c.isVisible) c.place(tail[0], tail[1]);
     }
   }
 
@@ -987,6 +1037,8 @@ export class BrowseViewModel {
     params.append("s", this.POWER_LAW);
     params.append("X", this.getExpandScaleX());
     params.append("Y", this.getExpandScaleY());
+    if (DEBUGLOG) params.append("D", 1); //make it sticky
+    if (DEBUGSTOP) params.append("d", 1); //make it sticky
     return params;
   }
 
@@ -2245,7 +2297,7 @@ export class Charity {
         viewModel.debugCloneDesired &&
         !viewModel.debugCloneDesired.has(this)
       ) {
-        if (DEBUGLOG) debugger;
+        if (DEBUGSTOP) debugger;
       }
     }
   }
@@ -2266,7 +2318,7 @@ export class Charity {
         viewModel.debugCloneVisible &&
         !viewModel.debugCloneVisible.has(this)
       ) {
-        if (DEBUGLOG) debugger;
+        if (DEBUGSTOP) debugger;
       }
     }
   }

@@ -1,3 +1,4 @@
+# get_latest.py
 import os
 import glob
 import argparse
@@ -498,6 +499,15 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 )
                             # Backfill for domestic grants with unknown EINs
                             if not is_foreign and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999":
+                                # Validate EIN
+                                is_valid, reason = cu.validate_ein(grant_ein)
+                                if not is_valid:
+                                    if verbose:
+                                        log_error(
+                                            "Skipping invalid EIN {} in {} for filer EIN={}: {}",
+                                            grant_ein, xml_filename, filer_ein, reason, ein=filer_ein
+                                        )
+                                    continue
                                 # Extract address components using XPath
                                 address_components = []
                                 us_address = elem.xpath("irs:USAddress/*", namespaces=NAMESPACES)
