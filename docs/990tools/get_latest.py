@@ -1,3 +1,4 @@
+# get_latest.py
 import os
 import glob
 import argparse
@@ -13,8 +14,10 @@ from logging.handlers import QueueHandler, QueueListener
 import psutil
 from lxml import etree
 from io import BytesIO
-import re
 import csv
+import re
+from countryCodes import lookupCC
+import extract_utils as cu
 
 # Constants
 TSV_COLUMNS = [
@@ -26,40 +29,27 @@ TSV_COLUMNS = [
     "xml_name", "grift"
 ]
 GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"]
+BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 CSV_QUOTE_FIELDS = {
-    'charity': ['filer_name', 'org_type', 'form_type', 'xml_name', 'foreign_office', 'domestic_misrep_flag'],
-    'grants': ['filer_name', 'grant_ein']
+    'charity': ['filer_name', 'org_type', "form_type", 'xml_name', 'foreign_office', 'domestic_misrep_flag'],
+    'grants': ['filer_name', 'grant_ein'],
+    'backfill': ['name', 'canonical_address', 'po_box', 'zip_code']
 }
 
-# Global logger
+# Global variables
 logger = None
+backfill_entries = []
+backfill_lock = threading.Lock()
+seen_backfill_keys = set()  # For deduplication by grant_ein, name, zip_code
 
 # Logging setup
 def setup_logging(output_dir, verbose, quiet):
     global logger
-    log_queue = queue.Queue(-1)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    queue_handler = QueueHandler(log_queue)
-    queue_handler.setFormatter(formatter)
-    file_handler = logging.FileHandler(os.path.join(output_dir, 'integrate_log.txt'))
-    file_handler.setFormatter(formatter)
-    listener = QueueListener(log_queue, file_handler)
-    listener.start()
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.ERROR if not verbose else logging.INFO)
-    console_handler.setFormatter(formatter)
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.handlers = [queue_handler, console_handler] if not quiet else []
-    return listener
+    return cu.setup_logging(output_dir, 'integrate_log.txt', verbose, quiet)
 
 def log_error(msg_format, *args, ein=None, exc_info=False):
-    if args:
-        logger.info(msg_format.format(*args), extra={'ein': ein} if ein else None, exc_info=exc_info)
-    else:
-        logger.info(msg_format, extra={'ein': ein} if ein else None, exc_info=exc_info)
+    cu.log_error(msg_format, *args, ein=ein, exc_info=exc_info)
 
 # Thread-local counters
 file_counter_local = threading.local()
@@ -77,30 +67,7 @@ def initialize_thread_local_counters():
 
 def build_zip_index(zip_dir, start_year, end_year):
     """Build an index of XML filenames to ZIP paths, including end_year + 1."""
-    index = {}  # filename -> (zip_path, internal_path)
-    zip_files = []
-    zip_names = set()
-    for year in range(start_year, end_year + 2):  # Include end_year + 1
-        zip_files.extend(glob.glob(os.path.join(zip_dir, f"{year}*.zip")))
-    
-    for zip_path in zip_files:
-        zip_names.add(os.path.basename(zip_path))
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                for internal_path in zf.namelist():
-                    if internal_path.endswith('.xml'):
-                        filename = os.path.basename(internal_path)
-                        if filename in index:
-                            log_error(
-                                "Duplicate XML filename {} found in ZIP {}, overwriting with {}",
-                                filename, index[filename][0], zip_path
-                            )
-                        index[filename] = (zip_path, internal_path)
-        except Exception as e:
-            log_error("Error indexing ZIP {}: {}", zip_path, str(e), exc_info=True)
-    
-    log_error("Built ZIP index with {} XML files from {} ZIPs: {}", len(index), len(zip_files), sorted(zip_names))
-    return index
+    return cu.build_zip_index(zip_dir, start_year, end_year)
 
 def get_tsv_files(start_year, end_year, org_types, not_types, source_dir):
     """Collect TSV files matching the org_types or not_types filter within the year range, in descending order."""
@@ -354,7 +321,6 @@ def print_summary_table(summary, total_mismatches, total_missing_xmls, total_pot
         missing_xmls_sum += missing_xmls
         potential_mismatches_sum += potential_mismatches
     total_mismatch_pct = (mismatches_sum / selected_rows_sum * 100) if selected_rows_sum > 0 else 0
-    #print("|----------|------|------------|---------------------------|-----------------------|--------------------|-----------|-------------|---------------------|")
     print(f"| **Total**|      | **{total_rows_sum:<10}** | **{filtered_rows_sum:<25}** | **{selected_rows_sum:<21}** | **{mismatches_sum:<18}** | **{total_mismatch_pct:<9.2f}%** | **{missing_xmls_sum:<11}** | **{potential_mismatches_sum:<19}** |")
     print(f"\nTotal xml_name mismatches across all files: {total_mismatches}")
     print(f"Total missing XMLs across all files: {total_missing_xmls}")
@@ -362,7 +328,8 @@ def print_summary_table(summary, total_mismatches, total_missing_xmls, total_pot
 
 def write_charity_latest(rows, output_tsv, output_csv, zip_index):
     """Write charity data to TSV and CSV with quoted string fields in CSV."""
-    # TSV output
+    output_tsv = cu.normalize_file_path(output_tsv, 'charity_latest.tsv')
+    output_csv = cu.normalize_file_path(output_csv, 'charity_latest.csv')
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(TSV_COLUMNS) + '\n')
         for row, _, _ in rows:
@@ -383,7 +350,6 @@ def write_charity_latest(rows, output_tsv, output_csv, zip_index):
             f.write('\t'.join(str(row.get(col, '')) for col in TSV_COLUMNS) + '\n')
     log_error("Wrote {} rows to {}", len(rows), output_tsv)
 
-    # CSV output
     with open(output_csv, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
         writer.writerow(TSV_COLUMNS)
@@ -392,7 +358,7 @@ def write_charity_latest(rows, output_tsv, output_csv, zip_index):
             for col in TSV_COLUMNS:
                 value = str(row.get(col, ''))
                 if col in CSV_QUOTE_FIELDS['charity']:
-                    csv_row.append(value)  # csv.writer handles quoting
+                    csv_row.append(value)
                 else:
                     csv_row.append(value)
             writer.writerow(csv_row)
@@ -400,14 +366,14 @@ def write_charity_latest(rows, output_tsv, output_csv, zip_index):
 
 def write_grants_latest(grants, output_tsv, output_csv):
     """Write grant data to TSV and CSV with quoted string fields in CSV."""
-    # TSV output
+    output_tsv = cu.normalize_file_path(output_tsv, 'grants_latest.tsv')
+    output_csv = cu.normalize_file_path(output_csv, 'grants_latest.csv')
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(GRANT_COLUMNS) + '\n')
         for grant in grants:
             f.write('\t'.join(str(grant[col]) for col in GRANT_COLUMNS) + '\n')
     log_error("Wrote {} grant rows to {}", len(grants), output_tsv)
 
-    # CSV output
     with open(output_csv, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
         writer.writerow(GRANT_COLUMNS)
@@ -416,14 +382,38 @@ def write_grants_latest(grants, output_tsv, output_csv):
             for col in GRANT_COLUMNS:
                 value = str(grant[col])
                 if col in CSV_QUOTE_FIELDS['grants']:
-                    csv_row.append(value)  # csv.writer handles quoting
+                    csv_row.append(value)
                 else:
                     csv_row.append(value)
             writer.writerow(csv_row)
     log_error("Wrote {} grant rows to {}", len(grants), output_csv)
 
-def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year):
-    """Parse grant data from an XML file, skipping rows with grant_ein='Unknown'."""
+def write_backfill(backfill_entries, output_tsv, output_csv):
+    """Write backfill data to TSV and CSV with quoted string fields in CSV, allowing multiple names per EIN."""
+    output_tsv = cu.normalize_file_path(output_tsv, 'backfill.tsv')
+    output_csv = cu.normalize_file_path(output_csv, 'backfill.csv')
+    with open(output_tsv, 'w', encoding='utf-8') as f:
+        f.write('\t'.join(BACKFILL_COLUMNS) + '\n')
+        for entry in backfill_entries:
+            f.write('\t'.join(str(entry.get(col, '')) for col in BACKFILL_COLUMNS) + '\n')
+    log_error("Wrote {} backfill rows to {}", len(backfill_entries), output_tsv)
+
+    with open(output_csv, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(BACKFILL_COLUMNS)
+        for entry in backfill_entries:
+            csv_row = []
+            for col in BACKFILL_COLUMNS:
+                value = str(entry.get(col, ''))
+                if col in CSV_QUOTE_FIELDS['backfill']:
+                    csv_row.append(value)
+                else:
+                    csv_row.append(value)
+            writer.writerow(csv_row)
+    log_error("Wrote {} backfill rows to {}", len(backfill_entries), output_csv)
+
+def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins):
+    """Parse grant data from an XML file, handling foreign addresses as country-level grants and collecting backfill for domestic unknown EINs."""
     try:
         parser = etree.XMLParser(recover=True)
         tree = etree.parse(BytesIO(xml_content), parser)
@@ -449,12 +439,42 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year):
             total_elements += len(elements)
             for elem in elements:
                 ein_elem = elem.xpath("irs:EIN | irs:RecipientEIN | irs:RecipientBusinessName/irs:EIN", namespaces=NAMESPACES)
+                name_elem = elem.xpath(
+                    "irs:RecipientNameBusiness | irs:RecipientBusinessName/irs:BusinessNameLine1Txt | irs:BusinessName/irs:BusinessNameLine1Txt",
+                    namespaces=NAMESPACES
+                )
                 amount_elem = elem.xpath(
                     "irs:CashGrantAmt | irs:TotalGrantOrContriPdDurYrAmt | irs:GrantOrContributionAmt | irs:Amount",
                     namespaces=NAMESPACES
                 )
-                grant_ein = ein_elem[0].text.strip() if ein_elem and ein_elem[0].text else "Unknown"
-                if grant_ein == "Unknown":
+                grantee_name = name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown"
+                
+                # Check for foreign address
+                is_foreign = elem.xpath("irs:RecipientForeignAddress", namespaces=NAMESPACES)
+                if is_foreign:
+                    country_elem = elem.xpath("irs:RecipientForeignAddress/irs:CountryCd", namespaces=NAMESPACES)
+                    country_code = country_elem[0].text.strip() if country_elem and country_elem[0].text else None
+                    if country_code and lookupCC(country_code):
+                        country = lookupCC(country_code)
+                        grant_ein = country["number"]
+                        grantee_name = country["name"]
+                        if verbose:
+                            log_error(
+                                "Foreign grant to country {} with EIN {} in {} for filer EIN={}",
+                                country_code, grant_ein, xml_filename, filer_ein, ein=filer_ein
+                            )
+                    else:
+                        grant_ein = "999"
+                        grantee_name = "Foreign_" + (country_code or "Unknown")
+                        if verbose:
+                            log_error(
+                                "Unmapped foreign address, using EIN 999 for country {} in {} for filer EIN={}",
+                                country_code or "None", xml_filename, filer_ein, ein=filer_ein
+                            )
+                else:
+                    grant_ein = ein_elem[0].text.strip() if ein_elem and ein_elem[0].text else "Unknown"
+                
+                if grant_ein == "Unknown" and not is_foreign:
                     if verbose:
                         log_error(
                             "Skipping grant with Unknown EIN in {} for filer EIN={}",
@@ -477,6 +497,41 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year):
                                     "Found grant: EIN={}, Amount=${} in {} for filer EIN={}",
                                     grant_ein, grant_amt, xml_filename, filer_ein, ein=filer_ein
                                 )
+                            # Backfill for domestic grants with unknown EINs
+                            if not is_foreign and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999":
+                                # Validate EIN
+                                is_valid, reason = cu.validate_ein(grant_ein)
+                                if not is_valid:
+                                    if verbose:
+                                        log_error(
+                                            "Skipping invalid EIN {} in {} for filer EIN={}: {}",
+                                            grant_ein, xml_filename, filer_ein, reason, ein=filer_ein
+                                        )
+                                    continue
+                                # Extract address components using XPath
+                                address_components = []
+                                us_address = elem.xpath("irs:USAddress/*", namespaces=NAMESPACES)
+                                address_components.extend([comp for comp in us_address if comp.text])
+                                # Canonicalize address
+                                canonical_address, po_box, zip_code, _ = cu.canonicalize_address(address_components, output_dir=None)
+                                if canonical_address or po_box or zip_code:
+                                    backfill_key = (grant_ein, grantee_name, zip_code)
+                                    with backfill_lock:
+                                        if backfill_key not in seen_backfill_keys:
+                                            seen_backfill_keys.add(backfill_key)
+                                            backfill_entry = {
+                                                'grant_ein': grant_ein,
+                                                'name': grantee_name,
+                                                'canonical_address': canonical_address,
+                                                'po_box': po_box,
+                                                'zip_code': zip_code
+                                            }
+                                            backfill_entries.append(backfill_entry)
+                                            if verbose:
+                                                log_error(
+                                                    "Added backfill: EIN={}, Name={}, Address={}, PO Box={}, ZIP={}",
+                                                    grant_ein, grantee_name, canonical_address, po_box, zip_code, ein=filer_ein
+                                                )
                     except (ValueError, TypeError) as e:
                         if verbose:
                             log_error(
@@ -486,8 +541,8 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year):
         
         if verbose:
             log_error(
-                "Processed {} grant elements in {} for EIN={}, grants found: {}",
-                total_elements, xml_filename, filer_ein, len(grants), ein=filer_ein
+                "Processed {} grant elements in {} for EIN={}, grants found: {}, backfill entries: {}",
+                total_elements, xml_filename, filer_ein, len(grants), len(backfill_entries), ein=filer_ein
             )
         return grants
     except Exception as e:
@@ -498,6 +553,7 @@ def process_grants(row_data, worker_threads, zip_index, start_year, end_year):
     """Process XML files to extract grant data using the ZIP index."""
     grants = []
     zip_cache = {}
+    known_eins = {row['filer_ein'] for row, _, _ in row_data}
 
     def process_row(row, org_type, year):
         xml_path = row['xml_name']
@@ -534,7 +590,7 @@ def process_grants(row_data, worker_threads, zip_index, start_year, end_year):
                 zip_cache[zip_path] = zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                return parse_grants(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'])
+                return parse_grants(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'], known_eins)
         except Exception as e:
             log_error(
                 "Error accessing XML {} for EIN={}: {}", xml_path, row['filer_ein'], str(e),
@@ -567,8 +623,8 @@ def main():
             "Integrate IRS 990 data to produce latest charity and grant data.\n"
             "Note: Use --minimumD (not --miniumD) to set the minimum denominator value.\n"
             "Note: ZIP files are indexed for start_year to end_year + 1 to account for 990 filing lag.\n"
-            "Output: Produces charity_latest.tsv/csv and grants_latest.tsv/csv, excluding grants with Unknown EIN.\n"
-            "Processing: Selects latest qualifying filing per EIN by scanning TSVs year by year in descending order."
+            "Output: Produces charity_latest.tsv/csv, grants_latest.tsv/csv, and backfill.tsv/csv.\n"
+            "Processing: Selects latest qualifying filing per EIN and backfills grantee data for unknown domestic EINs."
         )
     )
     parser.add_argument("start_year", type=int, help="Start year for processing")
@@ -666,10 +722,12 @@ def main():
         print(f"Total charity entries processed: {total_entries}")
         print_summary_table(summary, total_mismatches, total_missing_xmls, total_potential_mismatches)
 
-        # Step 2: Extract grants
+        # Step 2: Extract grants and backfill
         grants = process_grants(latest_rows, worker_threads, zip_index, start_year, end_year)
         write_grants_latest(grants, os.path.join(output_dir, "grants_latest.tsv"), os.path.join(output_dir, "grants_latest.csv"))
+        write_backfill(backfill_entries, os.path.join(output_dir, "backfill.tsv"), os.path.join(output_dir, "backfill.csv"))
         print(f"Total grant entries extracted: {len(grants)}")
+        print(f"Total backfill entries written: {len(backfill_entries)}")
     finally:
         done_queuing = True
         listener.stop()

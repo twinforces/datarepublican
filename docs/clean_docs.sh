@@ -27,27 +27,38 @@ for dir in $dirs; do
     find "docs/$dir" -type f | while read -r doc_file; do
         # Convert /docs/$dir path to equivalent root $dir path
         root_file=${doc_file/docs\//}
-        # Check if the file exists in the tracked files list
+        # Check if the file is tracked in the root directory
         if ! echo "$tracked_files" | grep -Fx "$root_file" > /dev/null; then
             echo "Removing $doc_file (untracked in $root_file)"
-            git rm -f "$doc_file"
-            removed=1
+            # Delete the file from the filesystem
+            if [ -f "$doc_file" ]; then
+                rm -f "$doc_file"
+                # Check if the file was previously tracked in Git
+                if git ls-files --error-unmatch "$doc_file" > /dev/null 2>&1; then
+                    # Remove from Git index if it was tracked
+                    git rm --cached "$doc_file"
+                fi
+                removed=1
+            else
+                echo "Warning: File $doc_file does not exist, skipping."
+            fi
         fi
     done
+
+    # Remove empty directories in docs/$dir
+    find "docs/$dir" -type d -empty -delete
 done
 
 # Verify no large files remain in the index
-if [ $removed -eq 1 ]; then
-    echo "Verifying no large files remain in the index..."
-    # Check for files >50MB in the index
-    git ls-files --stage | while read -r mode sha size path; do
-        # Convert size from bytes to MB (approx)
-        size_mb=$((size / 1024 / 1024))
-        if [ $size_mb -gt 50 ]; then
-            echo "Warning: Large file ($size_mb MB) still in index: $path"
-        fi
-    done
-fi
+echo "Verifying no large files remain in the index..."
+# Check for files >50MB in the index
+git ls-files --stage | while read -r mode sha size path; do
+    # Convert size from bytes to MB (approx)
+    size_mb=$((size / 1024 / 1024))
+    if [ $size_mb -gt 50 ]; then
+        echo "Warning: Large file ($size_mb MB) still in index: $path"
+    fi
+done
 
 # If files were removed, suggest committing
 if [ $removed -eq 1 ]; then

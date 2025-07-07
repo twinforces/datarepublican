@@ -112,21 +112,19 @@ def recompress_zip(zip_file, base_dir):
     extracted_files = len(list(Path(temp_path).rglob("*.xml")))
     print(f"Extracted {extracted_files} files from {zip_file}.")
 
-    # Recompress with zip
+    # Recompress with zip in one go
     temp_zip = os.path.join(temp_path, "temp.zip")
     print(f"Creating temp ZIP: {temp_zip}")
     os.chdir(temp_path)
     print(f"Changed to directory: {os.getcwd()}")
     try:
-        # Process files one at a time to avoid resource limits
-        xml_files = list(Path(".").rglob("*.xml"))
-        for xml_file in xml_files:
-            subprocess.run(
-                ["zip", "-r", "-Z", "deflate", temp_zip, str(xml_file)],
-                check=True,
-                capture_output=True,
-                text=True
-            )
+        # Compress all XML files in one zip command
+        subprocess.run(
+            ["zip", "-r", "-Z", "deflate", temp_zip, "."],
+            check=True,
+            capture_output=True,
+            text=True
+        )
     except subprocess.CalledProcessError as e:
         error_msg = f"Error recompressing {zip_file}: {e.stderr}"
         print(error_msg)

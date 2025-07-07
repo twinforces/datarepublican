@@ -1,3 +1,4 @@
+# extract_utils.py
 import os
 import glob
 import logging
@@ -17,7 +18,6 @@ import threading
 from tqdm import tqdm
 from collections import defaultdict
 import hashlib
-import threading
 from io import BytesIO
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
@@ -79,10 +79,38 @@ CSV_QUOTE_FIELDS = {
     'po_box_matches': ['org_name']
 }
 EIN_REGEX = re.compile(r'^\d{9}$')
+BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
+VALID_EIN_PREFIXES = {
+    '01', '02', '03', '04', '05', '06', '11', '13', '14', '16', '20', '21', '22', '23', '24', '25', '26', '27',
+    '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49',
+    '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69',
+    '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88', '90', '91',
+    '92', '93', '94', '95', '98'
+}
 
 logger = None
 quiet = False
 thread_local = threading.local()
+
+def validate_ein(ein):
+    """
+    Validate an EIN against IRS standards.
+    
+    Args:
+        ein (str): The EIN to validate.
+    
+    Returns:
+        tuple: (bool, str) where bool indicates validity and str provides the reason if invalid.
+    """
+    if not ein:
+        return False, "EIN is empty"
+    if not EIN_REGEX.match(ein):
+        return False, f"EIN {ein} is not a 9-digit number"
+    if ein == "000000000":
+        return False, "EIN is all zeros"
+    if ein[:2] not in VALID_EIN_PREFIXES:
+        return False, f"EIN prefix {ein[:2]} is not a valid IRS prefix"
+    return True, ""
 
 def log_error(msg_format, *args, ein=None, exc_info=False):
     if logger and not quiet:
@@ -182,37 +210,35 @@ def save_zip_cache(cache_dir, start_year, end_year, checksums, zip_index):
     except Exception as e:
         log_error("Error saving ZIP index cache: {}", str(e), exc_info=True)
 
-def read_tsv_files(charity_source, start_year, end_year):
+def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
     rows = []
-    if not os.path.exists(charity_source):
-        log_error("TSV file {} does not exist. Ensure it is in the source directory.", charity_source)
-        sys.exit(1)
+    if not os.path.exists(tsv_file):
+        log_error("TSV file {} does not exist.", tsv_file)
+        return rows
     try:
-        with open(charity_source, 'r', encoding='utf-8') as f:
+        with open(tsv_file, 'r', encoding='utf-8') as f:
             header = f.readline().strip().split('\t')
             header_map = {col: idx for idx, col in enumerate(header)}
-            required_cols = ['filer_ein', 'filer_name', 'tax_year', 'form_type', 'xml_name']
-            if not all(col in header_map for col in required_cols):
-                log_error("Missing required columns in TSV {}: {}", charity_source, required_cols)
-                sys.exit(1)
+            if expected_columns and not all(col in header_map for col in expected_columns):
+                log_error("Missing required columns in TSV {}: {}", tsv_file, [col for col in expected_columns if col not in header_map])
+                return rows
             for line in f:
                 fields = line.strip().split('\t')
                 if len(fields) < len(header_map):
                     continue
                 row = {col: fields[idx] for col, idx in header_map.items()}
-                try:
-                    row_year = int(row['tax_year'])
-                    if start_year <= row_year <= end_year:
-                        rows.append(row)
-                except ValueError:
-                    log_error("Invalid tax_year {} in TSV {}, skipping row", row.get('tax_year', ''), charity_source)
+                if 'tax_year' in row:
+                    try:
+                        row_year = int(row['tax_year'])
+                        if start_year <= row_year <= end_year:
+                            rows.append(row)
+                    except ValueError:
+                        log_error("Invalid tax_year {} in TSV {}, skipping row", row.get('tax_year', ''), tsv_file)
+                else:
+                    rows.append(row)
     except Exception as e:
-        log_error("Error reading TSV {}: {}", charity_source, str(e), exc_info=True)
-        sys.exit(1)
-    if not rows:
-        log_error("No valid rows read from {}. Check file format and year range {}-{}", charity_source, start_year, end_year)
-        sys.exit(1)
-    log_error("Read {} rows from {}", len(rows), charity_source)
+        log_error("Error reading TSV {}: {}", tsv_file, str(e), exc_info=True)
+    log_error("Read {} rows from {}", len(rows), tsv_file)
     return rows
 
 def canonicalize_address(address_components, output_dir):
@@ -302,7 +328,7 @@ def canonicalize_address(address_components, output_dir):
         canonical = f"PO Box {po_box} {canonical}"
     return canonical, po_box, zip_code, ""
 
-def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer"):
+def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
     global thread_local
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -422,7 +448,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 os.makedirs(sample_xml, exist_ok=True)
                 with open(os.path.join(sample_xml, xml_filename), 'wb') as f:
                     f.write(xml_content)
-            if not args.skip_address_errors:
+            if not skip_address_errors:
                 return False, None
             with threading.Lock():
                 result['filer_eins'][xml_filename] = (xml_ein, row, canonical_address)
@@ -442,6 +468,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             'reason': str(e)
         })
         return False, None
+
 def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipient_name, output_dir):
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -478,7 +505,6 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
                 'reason': f"Invalid recipient address; components={address_components}; snippet={address_snippet}"
             })
             return "", None, None
-
         return canonical_address, po_box, zip_code
     except Exception as e:
         log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
@@ -549,3 +575,11 @@ def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_a
             pickle.dump((po_box_entries, zip_code_index, po_box_zip_index), f)
     except Exception as e:
         log_error("Error saving address cache: {}", str(e), exc_info=True)
+
+def normalize_file_path(arg_value, default_filename, base_dir=None):
+    """Normalize a file path argument, appending default_filename to a directory or using the file path as-is."""
+    if not arg_value:
+        return os.path.join(base_dir or ".", default_filename)
+    if os.path.isdir(arg_value):
+        return os.path.join(arg_value, default_filename)
+    return arg_value

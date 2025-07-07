@@ -1,4 +1,5 @@
 import os
+import glob
 import argparse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,6 +9,7 @@ from lxml import etree
 from io import BytesIO
 import sys
 import extract_utils as cu
+import re
 
 logger = None
 verbose = False
@@ -30,11 +32,34 @@ thread_local = threading.local()
 file_counter_local = threading.local()
 filer_eins = {}
 
+def generate_acronym(name):
+    """Generate an acronym from an organization name, handling special cases like universities."""
+    if not name or len(name.split()) < 2:  # Skip single-word names
+        return None
+    # Common stop words to exclude
+    stop_words = cu.STOP_WORDS | {'AT', 'FOR', 'WITH', 'BY'}
+    # Handle special cases (e.g., universities)
+    university_pattern = re.compile(r'university\s+of\s+([\w\s,]+)', re.IGNORECASE)
+    match = university_pattern.match(name)
+    if match:
+        # For universities, use the main location (e.g., "University Of California, Los Angeles" -> "UCLA")
+        location = match.group(1).strip()
+        words = [w for w in location.split() if w.upper() not in stop_words and w]
+        if words:
+            return ''.join(w[0].upper() for w in words if w)
+        return None
+    # General case: take first letter of each significant word
+    words = [w for w in name.split() if w.upper() not in stop_words and w]
+    if not words:
+        return None
+    acronym = ''.join(w[0].upper() for w in words if w)
+    return acronym if len(acronym) > 1 else None
+
 def main():
     global verbose, quiet, total_addresses, total_address_errors, total_queue_puts, total_skipped
     global args, zip_index, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     global results_queue
-    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files.")
+    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files and integrate backfill.tsv with acronym variations.")
     parser.add_argument("start_year", type=int, help="Start year for processing")
     parser.add_argument("end_year", type=int, help="End year for processing")
     parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
@@ -49,6 +74,7 @@ def main():
     parser.add_argument("--skip-address-errors", action="store_true", help="Continue despite address errors")
     parser.add_argument("--sample-xml", type=str, default=None, help="Directory to save failing XMLs")
     parser.add_argument("--log-zip-errors", action="store_true", help="Log invalid ZIP codes")
+    parser.add_argument("--backfill-source", type=str, default=None, help="Path to backfill.tsv or directory")
     args = parser.parse_args()
     verbose = args.verbose
     quiet = args.quiet
@@ -61,6 +87,8 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     if not os.path.isdir(args.zip_dir):
         raise ValueError(f"ZIP directory {args.zip_dir} does not exist")
+    # Normalize file path
+    args.backfill_source = cu.normalize_file_path(args.backfill_source, 'backfill.tsv', args.output_dir)
     listener = cu.setup_logging(args.output_dir, 'extract_addresses_log.txt', verbose, quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
     addr_cache_valid = True
@@ -80,8 +108,68 @@ def main():
         if addr_cache_valid and not args.force_reprocess:
             address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index = addr_cached_data
             cu.log_error("Loaded address cache: {} addresses, {} PO boxes, {} ZIP index entries", len(address_entries), len(po_box_entries), len(zip_code_index))
+        # Load backfill.tsv
+        if os.path.exists(args.backfill_source):
+            backfill_rows = cu.read_tsv_files(args.backfill_source, args.start_year, args.end_year, expected_columns=cu.BACKFILL_COLUMNS)
+            if backfill_rows:
+                cu.log_error("Loaded {} rows from {}", len(backfill_rows), args.backfill_source)
+                seen_ein_name_zip = set()
+                unique_backfill_rows = []
+                acronym_count = 0
+                for row in backfill_rows:
+                    ein = row.get('grant_ein', '')
+                    name = row.get('name', '').title()  # Title-case for consistency
+                    zip_code = row.get('zip_code', '')
+                    key = (ein, name, zip_code)
+                    if key not in seen_ein_name_zip:
+                        seen_ein_name_zip.add(key)
+                        unique_backfill_rows.append(row)
+                        # Generate acronym
+                        acronym = generate_acronym(name)
+                        if acronym and (ein, acronym, zip_code) not in seen_ein_name_zip:
+                            seen_ein_name_zip.add((ein, acronym, zip_code))
+                            acronym_row = {
+                                'grant_ein': ein,
+                                'name': acronym,
+                                'canonical_address': row.get('canonical_address', ''),
+                                'po_box': row.get('po_box', ''),
+                                'zip_code': zip_code
+                            }
+                            unique_backfill_rows.append(acronym_row)
+                            acronym_count += 1
+                            if verbose:
+                                cu.log_error("Generated acronym {} for EIN={}, original name={}", acronym, ein, name)
+                cu.log_error("Generated {} acronym entries", acronym_count)
+                for row in unique_backfill_rows:
+                    ein = row.get('grant_ein', '')
+                    name = row.get('name', '').title()  # Ensure title-case for consistency
+                    canonical_address = row.get('canonical_address', '')
+                    po_box = row.get('po_box', '')
+                    zip_code = row.get('zip_code', '')
+                    if ein and canonical_address:
+                        address_entries.append({
+                            'filer_ein': ein,
+                            'filer_name': name,
+                            'canonical_address': canonical_address,
+                            'po_box': po_box,
+                            'zip_code': zip_code
+                        })
+                        if po_box and zip_code and cu.ZIP_REGEX.match(zip_code):
+                            po_box_entries.append({
+                                'po_box': po_box,
+                                'zip_code': zip_code,
+                                'ein': ein,
+                                'org_name': name
+                            })
+                            po_box_key = (po_box, zip_code)
+                            po_box_zip_index.setdefault(po_box_key, set()).add((ein, name))
+                        if zip_code and cu.ZIP_REGEX.match(zip_code):
+                            zip_code_index.setdefault(zip_code, set()).add((ein, name))
+                cu.log_error("Integrated {} unique backfill entries (including acronyms, after deduplication by EIN+name+zip_code) into address indices", len(unique_backfill_rows))
         else:
-            process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir, args.sample_xml)
+            cu.log_error("Backfill file {} does not exist, proceeding without backfill data", args.backfill_source)
+        if not addr_cache_valid or args.force_reprocess:
+            process_all_xml_addresses(args.worker_threads, zip_index, args.output_dir, args.sample_xml, args.skip_address_errors)
             cu.save_address_cache(args.cache_dir, args.start_year, args.end_year, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index)
         write_outputs(args.output_dir, addr_cache_valid and not args.force_reprocess)
     except Exception as e:
@@ -98,12 +186,12 @@ def main():
     print(f"PO Boxes found: {len(po_box_entries)}")
     print(f"Output files in: {args.output_dir}")
 
-def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml):
+def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml, skip_address_errors):
     global total_addresses, total_address_errors, total_queue_puts, total_skipped, results_queue
     global address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     results_queue = queue.Queue(maxsize=20000)
     zip_cache = {}
-    def process_address_row(row):
+    def process_address_row(xml_filename):
         global total_skipped
         if not hasattr(file_counter_local, 'value'):
             file_counter_local.value = 0
@@ -122,7 +210,6 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
             'po_box_zip_index': {},
             'filer_eins': {}
         }
-        xml_filename = row['xml_name']
         try:
             if xml_filename not in zip_index:
                 cu.log_error("No file {} in ZIP index, skipping (total missing: {})", xml_filename, total_skipped + 1)
@@ -145,7 +232,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                success, filer_ein = cu.parse_addresses(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer")
+                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, {}, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=skip_address_errors)
                 if not success:
                     file_counter_local.skipped += 1
                     total_skipped += 1
@@ -169,7 +256,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
     try:
         if args.no_threads:
             for xml_filename in tqdm(zip_index.keys(), desc="Processing addresses from all XMLs"):
-                result = process_address_row({'xml_name': xml_filename})
+                result = process_address_row(xml_filename)
                 with zip_index_lock:
                     address_entries.extend(result['address_entries'])
                     debug_address_entries.extend(result['debug_address_entries'])
@@ -194,12 +281,12 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml)
                 batch = []
                 batch_size = args.merge_batch_size
                 for xml_filename in zip_index.keys():
-                    batch.append({'xml_name': xml_filename})
+                    batch.append(xml_filename)
                     if len(batch) >= batch_size:
-                        futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
+                        futures.append(executor.submit(lambda b: [process_address_row(f) for f in b], batch))
                         batch = []
                 if batch:
-                    futures.append(executor.submit(lambda b: [process_address_row(r) for r in b], batch))
+                    futures.append(executor.submit(lambda b: [process_address_row(f) for f in b], batch))
                 with tqdm(total=len(zip_index), desc="Processing addresses from all XMLs") as pbar:
                     for future in as_completed(futures):
                         results = future.result()
