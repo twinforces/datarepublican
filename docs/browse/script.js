@@ -5,6 +5,9 @@ import {
   viewModel,
   BrowseViewModel,
   getColorForEIN,
+  getTextColorForEIN,
+  interpolateDarkRainbow,
+  interpolateRainbow,
 } from "./models.js";
 
 import {
@@ -68,6 +71,8 @@ window.loadPreset = function (value, mode) {
   viewModel.loadPreset(value, mode);
   hidePresets(); // our work here is done.
   refresh();
+  viewModel.defaultSize();
+  zoomToFit();
 };
 
 function renderPopup() {
@@ -213,7 +218,18 @@ function renderPopup() {
     list.classList.toggle("visible");
   });
 }
+// show and hide controls implementation
+window.collapseControls = function () {
+  document.documentElement.style.setProperty("--controls-shown", "none");
+  document.documentElement.style.setProperty("--controls-hidden", "block");
+  console.log("Controls shown");
+};
 
+window.expandControls = function () {
+  document.documentElement.style.setProperty("--controls-shown", "block");
+  document.documentElement.style.setProperty("--controls-hidden", "none");
+  console.log("Controls hidden");
+};
 // Show Presets and Hide Presets implementations
 window.showPresets = function () {
   document.documentElement.style.setProperty("--panel-shown", "block");
@@ -309,10 +325,16 @@ $(document).ready(function () {
 
 function addEINFromInput() {
   let val = $("#einShowInput").val().trim().replace(/[-\s]/g, "");
-  if (!/^\d{3,9}$/.test(val)) {
+  if (!/^\d{3,9}$|86|99/) {
+    // allow hack codes too.
     alert(
       "EIN must be 9 digits after removing dashes/spaces or 3 for countries."
     );
+    return;
+  }
+  if (val == "86" || val == "99") {
+    viewModel.addToShowList(val);
+    //special hacks.
     return;
   }
   const charity = Charity.getCharity(val);
@@ -325,15 +347,47 @@ function addEINFromInput() {
   generateGraph();
 }
 
+function renderColorPicker() {
+  let boxes = [];
+  for (let t = 0; t < 1; t += 0.02) {
+    boxes.push(
+      `<span class="color-box" style="width:12px; height:12px; background-color: ${interpolateRainbow(
+        t
+      )}" title=${t}></span>`
+    );
+  }
+  $("#colorPicker1").html(boxes.join(""));
+  boxes = [];
+  for (let t = 0; t < 1; t += 0.02) {
+    boxes.push(
+      `<span class="color-box" style="width:12px; height:12px; background-color: ${interpolateDarkRainbow(
+        t
+      )}" title=${t}></span>`
+    );
+  }
+  $("#colorPicker2").html(boxes.join(""));
+}
+
 function renderActiveEINs() {
   const $c = $("#activeEINs");
   $c.empty();
   $("#clearEINsBtnShow").toggle(viewModel.getShowList().length > 0);
+  $("#activeEINs").toggle(viewModel.getShowList().length > 0);
 
   viewModel.getShowList().forEach((ein) => {
-    const name = Charity.getCharity(ein)?.name || "???";
+    const c = Charity.getCharity(ein);
+    const name = c?.name || "???";
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>'
+      `<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>`
+    );
+    $tag.on("click", function () {
+      flashNode(c.ein);
+    });
+    // Add color box
+    const $colorBox = $(
+      `<div class="color-box" style="width:12px; height:12px; background-color: ${getColorForEIN(
+        c.ein
+      ).toString()}"></div>`
     );
     const $text = $(
       `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
@@ -349,7 +403,7 @@ function renderActiveEINs() {
       updateQueryParams();
       generateGraph();
     });
-    $tag.append($text).append($rm);
+    $tag.append($colorBox).append($text).append($rm);
     $c.append($tag);
   });
 }
@@ -625,6 +679,19 @@ function savePreviousState(data) {
 }
 
 function bindEvents(g) {
+  g.selectAll(".nodeLabel").on("click", (event, d) => {
+    console.log("Text clicked:", d.id);
+    event.stopPropagation();
+    if (event.shiftKey) {
+      d.hide();
+      Charity.addToHideList(d.ein);
+      refresh();
+    } else if (event.metaKey) {
+      showControlPanel("node", d, this);
+    } else {
+      viewModel.clickNode(event, d, refresh);
+    }
+  });
   g.selectAll(".node")
     .on("click", (event, d) => {
       console.log("Node clicked:", d.id);
@@ -650,6 +717,14 @@ function bindEvents(g) {
         viewModel.doubleClickNode(event, d, refresh);
       }
     });
+  /*.on("touchstart", function (event) {
+      event.preventDefault(); // Prevent default right-click behavior
+      const timer = setTimeout(() => {
+        // Show control panel (e.g., append a rect or update DOM)
+        showControlPanel("node", d, this);
+      }, 1000); // 1-second long press
+      d3.select(this).on("touchend", () => clearTimeout(timer)); // Cancel on touch end
+    })*/
 
   g.selectAll(".link")
     .on("click", (event, d) => {
@@ -662,6 +737,14 @@ function bindEvents(g) {
       event.stopPropagation();
       viewModel.doubleClickGrant(event, d, refresh);
     });
+  /*.on("touchstart", function (event) {
+      event.preventDefault(); // Prevent default right-click behavior
+      const timer = setTimeout(() => {
+        // Show control panel (e.g., append a rect or update DOM)
+        showControlPanel("link", d, this);
+      }, 1000); // 1-second long press
+      d3.select(this).on("touchend", () => clearTimeout(timer)); // Cancel on touch end
+    })*/
 
   g.selectAll(".hat-up").on("click", (event, d) => {
     console.log("Hat left clicked:", d.id);
@@ -981,6 +1064,57 @@ function updateLayoutButtons() {
   }
 }
 
+function fontSizeFromHeight(height) {
+  return (
+    ((boundaryScaleFactorY * 2) / FONT_CONSTANT) *
+    Math.min(48, Math.max(FONT_SIZE, 10, height / FONT_CONSTANT))
+  );
+}
+
+function defaultSize() {
+  viewModel.resetExpandScaleX();
+  viewModel.resetExpandScaleY();
+  zoomToFit();
+}
+
+function scrollToNode(dataId) {
+  const $element = $(`[data-id="${dataId}"]`);
+
+  // Check if element exists
+  if ($element.length === 0) {
+    console.warn(`Element with data-id "${dataId}" not found`);
+    return;
+  }
+
+  // Scroll to element
+  $("html, body").animate(
+    {
+      scrollTop: $element.offset().top,
+    },
+    500
+  ); // 500ms for smooth scrolling
+}
+
+function flashNode(dataId) {
+  const $element = $(`[data-id="${dataId}"]`);
+
+  // Check if element exists
+  if ($element.length === 0) {
+    console.warn(`Element with data-id "${dataId}" not found`);
+    return;
+  }
+
+  //scrollToNode(dataId);
+  // Flash effect: fade to 30% opacity and back 3x
+  $element
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+}
+
 function renderFocusedSankey(
   g,
   sankey,
@@ -1002,6 +1136,7 @@ function renderFocusedSankey(
   const edgeTotal = formatNumber(
     currentData.links.reduce((sum, g) => sum + g.amt, 0)
   );
+  dataLoaded(true);
 
   savePreviousState(currentData);
 
@@ -1187,7 +1322,8 @@ function renderFocusedSankey(
 
   const nodeElements = nodeGroup
     .selectAll("g.node")
-    .data(graph.nodes, (d) => d.id);
+    .data(graph.nodes, (d) => d.id)
+    .attr("id", (d) => `node-${d.id}`);
 
   nodeElements
     .exit()
@@ -1373,10 +1509,11 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style(
-      "font-size",
-      (d) => `${Math.max(FONT_SIZE, 10, (d.y1 - d.y0) / FONT_CONSTANT)}px`
-    );
+    .style("cursor", "crosshair")
+    .attr("class", "nodeLabel")
+
+    .attr("fill", (d) => getTextColorForEIN(d.ein))
+    .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`);
 
   text
     .merge(textEnter)
@@ -1387,10 +1524,11 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style(
-      "font-size",
-      (d) => `${Math.max(FONT_SIZE, 10, (d.y1 - d.y0) / FONT_CONSTANT)}px`
-    )
+    .style("cursor", "crosshair")
+    .attr("class", "nodeLabel")
+
+    .attr("fill", (d) => getTextColorForEIN(d.ein))
+    .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
     .text((d) => d.name);
 
   bindEvents(g);
@@ -1553,7 +1691,7 @@ function showControlPanel(type, data, element) {
     if (!withButtons) return "";
     return `
       <div class="flex-1 bg-gray-200 p-4">
-        <button onclick="focusNode('${node.ein}')">Focus on This</button>
+        <button onclick="focusNode('${node.ein}')">Only This</button>
         <button ${
           !node.canExpandInflows ? 'disabled class="bg-gray-100 disabled"' : ""
         } onclick="expandInflows('${node.ein}')">Show 3 Inflows</button>
@@ -1752,14 +1890,12 @@ window.compressOutflows = function (ein) {
 };
 
 window.focusNode = function (ein) {
-  const params = new URLSearchParams();
-  params.append("ein", ein);
-  const newUrl = window.location.pathname + "?" + params.toString();
-  window.history.replaceState({}, "", newUrl);
-  viewModel.parseQueryParams();
-  viewModel.resetAll();
-  generateGraph();
-  closePanel();
+  const charity = Charity.getCharity(ein);
+  if (charity) {
+    charity.tunnelNode();
+    refresh();
+    closePanel();
+  }
 };
 
 const extraStyle = `
@@ -1768,7 +1904,6 @@ const extraStyle = `
   .node.no-grants { cursor: zoom-in; }
   .link { stroke-opacity: 0.5; }
   .hat-up, .hat-down { cursor: crosshair; }
-  text { fill: #000; }
   .selected { stroke: #ff0; stroke-width: 2px; }
 `;
 d3.select("head").append("style").text(extraStyle);

@@ -4,7 +4,8 @@
 .node.no-grants { cursor: zoom-out; }
 .link { stroke-opacity: 0.5; }
 .hat-up, .hat-down { cursor: pointer; }
-text { fill: #000; }
+.nodeLabel:hover{fill:#000}
+/*text { fill: #000; }*/
 .selected { stroke: #ff0; stroke-width: 2px; }
 
 /* Critical styles without @apply */
@@ -616,5 +617,10 @@ text { fill: #000; }
     #top-buttons .flex {
       flex-direction: column;
       gap: 1rem;
+    }
+    .color-box {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px; /* Optional: slight rounding */
     }
 }

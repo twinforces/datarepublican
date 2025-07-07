@@ -1691,7 +1691,7 @@ function showControlPanel(type, data, element) {
     if (!withButtons) return "";
     return `
       <div class="flex-1 bg-gray-200 p-4">
-        <button onclick="focusNode('${node.ein}')">Focus on This</button>
+        <button onclick="focusNode('${node.ein}')">Only This</button>
         <button ${
           !node.canExpandInflows ? 'disabled class="bg-gray-100 disabled"' : ""
         } onclick="expandInflows('${node.ein}')">Show 3 Inflows</button>
@@ -1890,14 +1890,12 @@ window.compressOutflows = function (ein) {
 };
 
 window.focusNode = function (ein) {
-  const params = new URLSearchParams();
-  params.append("ein", ein);
-  const newUrl = window.location.pathname + "?" + params.toString();
-  window.history.replaceState({}, "", newUrl);
-  viewModel.parseQueryParams();
-  viewModel.resetAll();
-  generateGraph();
-  closePanel();
+  const charity = Charity.getCharity(ein);
+  if (charity) {
+    charity.tunnelNode();
+    refresh();
+    closePanel();
+  }
 };
 
 const extraStyle = `

@@ -2759,9 +2759,9 @@ export class Charity {
    * I'd provide a way that it would just jump to a new starting point.
    */
   tunnelNode() {
-    const newParams = new URLSearchParams(); //empty
-    newParams.add("ein", this.ein);
-    viewModel.matchURL(newParams);
+    viewModel.clearAll();
+    viewModel.setShowList([this.ein]);
+    viewModel.computeAndSaveURLParams();
   }
 
   /**

@@ -40,3 +40,6 @@ Thumbs.db
 # !docs/ 
 __pycache__
 test-results
+charities.tsv
+grants.pf.tsv
+grants_final.tsv

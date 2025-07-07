@@ -1496,6 +1496,9 @@ body > div#main-content {
 .relative {
   position: relative;
 }
+.sticky {
+  position: sticky;
+}
 .inset-0 {
   inset: 0px;
 }
@@ -3692,6 +3695,15 @@ body > div#main-content {
     padding-left: 1.5rem;
     padding-right: 1.5rem;
   }
+}
+.\[\&\:empty\]\:h-0:empty {
+  height: 0px;
+}
+.\[\&\:empty\]\:overflow-hidden:empty {
+  overflow: hidden;
+}
+.\[\&\:empty\]\:leading-none:empty {
+  line-height: 1;
 }
 .\[\&\>div\:first-child\]\:\!mt-0>div:first-child {
   margin-top: 0px !important;
