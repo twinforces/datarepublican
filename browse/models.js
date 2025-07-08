@@ -73,7 +73,7 @@ export function formatNumber(num) {
 let viewModel = null;
 
 function hashEIN(ein) {
-  let hash = 2862166261; // so 001 is greenish
+  let hash = 2862953042; // so 001 is greenish
   const paddedEin = ein.length === 3 ? ein.padEnd(9, "0") : ein; // Pad 3-digit EINs
   for (let i = 0; i < paddedEin.length; i++) {
     const weight = i < 2 ? 2 : 1; // Weight IRS office digits
