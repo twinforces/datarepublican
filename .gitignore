@@ -9,6 +9,7 @@ docs/pa
 docs/Gemfile.lock
 docs/README.html
 docs/python/index.html
+docs/990tools
 Gemfile.lock
 
 # Environment files
@@ -39,3 +40,6 @@ Thumbs.db
 # !docs/ 
 __pycache__
 test-results
+charities.tsv
+grants.pf.tsv
+grants_final.tsv

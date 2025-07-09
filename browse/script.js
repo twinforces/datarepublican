@@ -4,26 +4,267 @@ import {
   formatNumber,
   viewModel,
   BrowseViewModel,
+  getColorForEIN,
+  getTextColorForEIN,
+  interpolateDarkRainbow,
+  interpolateRainbow,
 } from "./models.js";
+
+import {
+  sankeyWithCircles,
+  adjustCircularLink,
+  generateOctagonPath,
+  generateTrapezoidPath,
+  generatePlusPath,
+} from "./d3-sankey-circular.js";
 
 let svg = null;
 let zoom = null;
 
-const NODE_WIDTH = 50;
-const OTHER_WIDTH = 30;
-const NODE_PADDING = 25;
-const MIN_LINK_HEIGHT = 5;
+let boundaryScaleFactorX = 2;
+let boundaryScaleFactorY = 2;
+const MAX_SCALE = 10;
 
-const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+let NODE_WIDTH = 50 * boundaryScaleFactorX;
+let OTHER_WIDTH = 30 * boundaryScaleFactorY;
+let NODE_PADDING = 25 * boundaryScaleFactorX;
+let MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
+let FONT_SIZE = 12 * boundaryScaleFactorY;
+const VERT_SCALE_RATIO = 1.5; // better to scale vertically faster with a sankey
+const FONT_CONSTANT = 4;
+let isRedrawing = false;
+
+function updateScaledConstants() {
+  boundaryScaleFactorX = viewModel.getExpandScaleX();
+  boundaryScaleFactorY = viewModel.getExpandScaleY();
+  NODE_WIDTH = 50 * boundaryScaleFactorX;
+  OTHER_WIDTH = 30 * boundaryScaleFactorX;
+  NODE_PADDING = 25 * boundaryScaleFactorY;
+  MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
+  FONT_SIZE = 12 * boundaryScaleFactorY;
+}
 
 function updateStatus(message, color = "black") {
   $("#status").text(message).css("color", color);
+  //$("#statusSpinner").toggle(message === "Failed to load data.");
 }
+
+function dataLoaded(state = true) {
+  if (state) {
+    $("#statusSpinner").addClass("hidden");
+    $("#loading").addClass("hidden");
+    $("#downloadPanel").removeClass("hidden");
+    document.documentElement.style.setProperty("--web-load", "none");
+    document.documentElement.style.setProperty("--db-load", "none");
+  } else {
+    $("#statusSpinner").removeClass("hidden");
+    $("#loading").removeClass("hidden");
+    $("#downloadPanel").addClass("hidden");
+  }
+}
+
+window.exportDB = function () {
+  viewModel.exportDB();
+};
+
+window.loadPreset = function (value, mode) {
+  viewModel.loadPreset(value, mode);
+  hidePresets(); // our work here is done.
+  refresh();
+  viewModel.defaultSize();
+  zoomToFit();
+};
+
+function renderPopup() {
+  const popup = document.getElementById("ngo-popup");
+  const presets = viewModel.presets();
+  popup.innerHTML = `
+    <div class="ngopreset-container show-when-panel-shown">
+      <div class="ngopreset-columns">
+        <div class="toggle-row">
+          <div class="button-group-column">
+            <button id="ngopreset-toggle" class="ngopreset-toggle-btn " style="font-size: 11px;">Hide Presets</button>
+            <div class="ngopreset-mode-switch">
+              <span class="toggle-label toggle-label-add">Preset will add</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="preset-mode" value="add">
+                <label for="preset-mode"></label>
+              </div>
+              <span class="toggle-label toggle-label-replace">Preset will replace</span>
+            </div>
+          </div>
+          <div class="filler-column"></div>
+        </div>
+        <div class="grid-row">
+          <!-- General Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">General</h2>
+            <div class="ngopreset-grid">
+              ${presets
+                .filter((item) => !item.subcategories)
+                .map(
+                  (item) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(item.eins)}' 
+                          data-title="${item.title}"
+                          title="${item.description || ""}">
+                    ${item.title}
+                  </button>
+                `
+                )
+                .join("")}
+            </div>
+          </div>
+          <!-- Controversies Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Controversies</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find((item) => item.title === "Controversies")
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+          <!-- Politicians Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Politicians</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find((item) => item.title === "Politicians")
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+          <!-- Billionaires Column -->
+          <div class="ngopreset-column">
+            <h2 class="ngopreset-column-title">Billionaires</h2>
+            <div class="ngopreset-grid">
+              ${
+                presets
+                  .find(
+                    (item) =>
+                      item.title === "Friendly Neighborhood Billionaires"
+                  )
+                  ?.subcategories?.map(
+                    (group) => `
+                  <button class="ngopreset-btn" 
+                          data-eins='${JSON.stringify(group.eins)}' 
+                          data-title="${group.title}"
+                          title="${group.description || ""}">
+                    ${group.title}
+                  </button>
+                `
+                  )
+                  .join("") || ""
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Add event listeners for preset buttons
+  const presetButtons = document.querySelectorAll(".ngopreset-btn");
+  presetButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const eins = JSON.parse(btn.dataset.eins);
+      const title = btn.dataset.title;
+      const mode = document.getElementById("preset-mode").checked
+        ? "replace"
+        : "add";
+      console.log(
+        `${mode === "add" ? "Adding" : "Replacing"} ${title}: ${eins}`
+      );
+      loadPreset({ eins, title }, mode);
+    });
+  });
+
+  // Wire up the toggle buttons
+  const showBtn = document.getElementById("showPresetsBtn");
+  const hideBtn = document.getElementById("ngopreset-toggle");
+  if (showBtn) {
+    showBtn.addEventListener("click", showPresets);
+  }
+  if (hideBtn) {
+    hideBtn.addEventListener("click", hidePresets);
+  }
+
+  // Toggle How It Works
+  document.getElementById("howItWorksBtn").addEventListener("click", () => {
+    const list = document.getElementById("howItWorksList");
+    list.classList.toggle("visible");
+  });
+}
+// show and hide controls implementation
+window.collapseControls = function () {
+  document.documentElement.style.setProperty("--controls-shown", "none");
+  document.documentElement.style.setProperty("--controls-hidden", "block");
+  console.log("Controls shown");
+};
+
+window.expandControls = function () {
+  document.documentElement.style.setProperty("--controls-shown", "block");
+  document.documentElement.style.setProperty("--controls-hidden", "none");
+  console.log("Controls hidden");
+};
+// Show Presets and Hide Presets implementations
+window.showPresets = function () {
+  document.documentElement.style.setProperty("--panel-shown", "block");
+  document.documentElement.style.setProperty("--panel-hidden", "none");
+  console.log("Panel shown");
+};
+
+window.hidePresets = function () {
+  document.documentElement.style.setProperty("--panel-shown", "none");
+  document.documentElement.style.setProperty("--panel-hidden", "block");
+  console.log("Panel hidden");
+};
+
+window.loadingViaDB = function () {
+  document.documentElement.style.setProperty("--db-load", "block");
+  document.documentElement.style.setProperty("--web-load", "none");
+};
+window.loadingViaWeb = function () {
+  document.documentElement.style.setProperty("--db-load", "none");
+  document.documentElement.style.setProperty("--web-load", "block");
+};
 
 $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
+  const params = new URLSearchParams(window.location.search);
+  const boundaryScale = viewModel.getExpandScaleX();
+
   updateStatus("Loading Data...");
+
+  // Initialize the select on page load
+  renderPopup();
+  updateLayoutButtons();
+
+  dataLoaded(false);
   viewModel
     .loadData()
     .then(() => {
@@ -39,7 +280,9 @@ $(document).ready(function () {
     if (e.key === "Enter") addEINFromInput();
   });
   $("#clearEINsBtnShow").on("click", () => {
-    window.location.href = "/browse/";
+    viewModel.clearShowList();
+    viewModel.clearAll();
+    refresh();
   });
   $("#clearEINsBtnHide").on("click", () => {
     viewModel.clearHideList();
@@ -75,29 +318,6 @@ $(document).ready(function () {
     }
   });
 
-  const searchInput = document.getElementById("searchInput");
-  const searchResults = document.getElementById("searchResults");
-  const clearButton = document.getElementById("clearSearch");
-
-  const newSearchInput = searchInput.cloneNode(true);
-  const newSearchResults = searchResults.cloneNode(true);
-  const newClearButton = clearButton.cloneNode(true);
-
-  searchInput.parentNode.replaceChild(newSearchInput, searchInput);
-  searchResults.parentNode.replaceChild(newSearchResults, searchResults);
-  clearButton.parentNode.replaceChild(newClearButton, clearButton);
-
-  newSearchInput.addEventListener("input", handleSearch);
-  newSearchInput.addEventListener("blur", handleSearchBlur);
-  newSearchInput.addEventListener("keydown", handleSearchKeydown);
-  newSearchResults.addEventListener("click", handleSearchClick);
-
-  newClearButton.addEventListener("click", () => {
-    newSearchInput.value = "";
-    newSearchInput.focus();
-    handleSearch({ target: newSearchInput });
-  });
-
   $(window).on("resize", function () {
     if (viewModel.dataReady) generateGraph();
   });
@@ -105,8 +325,16 @@ $(document).ready(function () {
 
 function addEINFromInput() {
   let val = $("#einShowInput").val().trim().replace(/[-\s]/g, "");
-  if (!/^\d{9}$/.test(val) && val !== "001") {
-    alert("EIN must be 9 digits after removing dashes/spaces or 001.");
+  if (!/^\d{3,9}$|86|99/) {
+    // allow hack codes too.
+    alert(
+      "EIN must be 9 digits after removing dashes/spaces or 3 for countries."
+    );
+    return;
+  }
+  if (val == "86" || val == "99") {
+    viewModel.addToShowList(val);
+    //special hacks.
     return;
   }
   const charity = Charity.getCharity(val);
@@ -114,20 +342,52 @@ function addEINFromInput() {
   viewModel.addToShowList(val);
   $("#einShowInput").val("");
   renderActiveEINs();
-  charity.place();
+  if (charity) charity.place(charity.ein);
   updateQueryParams();
   generateGraph();
+}
+
+function renderColorPicker() {
+  let boxes = [];
+  for (let t = 0; t < 1; t += 0.02) {
+    boxes.push(
+      `<span class="color-box" style="width:12px; height:12px; background-color: ${interpolateRainbow(
+        t
+      )}" title=${t}></span>`
+    );
+  }
+  $("#colorPicker1").html(boxes.join(""));
+  boxes = [];
+  for (let t = 0; t < 1; t += 0.02) {
+    boxes.push(
+      `<span class="color-box" style="width:12px; height:12px; background-color: ${interpolateDarkRainbow(
+        t
+      )}" title=${t}></span>`
+    );
+  }
+  $("#colorPicker2").html(boxes.join(""));
 }
 
 function renderActiveEINs() {
   const $c = $("#activeEINs");
   $c.empty();
   $("#clearEINsBtnShow").toggle(viewModel.getShowList().length > 0);
+  $("#activeEINs").toggle(viewModel.getShowList().length > 0);
 
   viewModel.getShowList().forEach((ein) => {
-    const name = Charity.getCharity(ein)?.name || "???";
+    const c = Charity.getCharity(ein);
+    const name = c?.name || "???";
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>'
+      `<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>`
+    );
+    $tag.on("click", function () {
+      flashNode(c.ein);
+    });
+    // Add color box
+    const $colorBox = $(
+      `<div class="color-box" style="width:12px; height:12px; background-color: ${getColorForEIN(
+        c.ein
+      ).toString()}"></div>`
     );
     const $text = $(
       `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
@@ -143,7 +403,7 @@ function renderActiveEINs() {
       updateQueryParams();
       generateGraph();
     });
-    $tag.append($text).append($rm);
+    $tag.append($colorBox).append($text).append($rm);
     $c.append($tag);
   });
 }
@@ -270,62 +530,6 @@ function calculateScale(graph, width, height) {
   const layoutWidth = Math.max(maxX - minX, 1);
   const layoutHeight = Math.max(maxY - minY, 1);
   return Math.min(width / layoutWidth, height / layoutHeight);
-}
-
-function generateTrapezoidPath(d) {
-  const midY = (d.y0 + d.y1) / 2;
-  const y0In = midY - d.inflowHeight / 2;
-  const y1In = midY + d.inflowHeight / 2;
-  const y0Out = midY - d.outflowHeight / 2;
-  const y1Out = midY + d.outflowHeight / 2;
-  return `M${d.x0},${y0In} L${d.x0},${y1In} L${d.x1},${y1Out} L${d.x1},${y0Out} Z`;
-}
-
-function generateOctagonPath(d) {
-  const radius = d.inflowHeight / 2 || 10;
-  const cx = d.x0;
-  const cy = (d.y0 + d.y1) / 2;
-  const r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
-
-  const c = Math.sqrt(2 + Math.SQRT2) / 2;
-  const s = Math.sqrt(2 - Math.SQRT2) / 2;
-
-  return `M${cx + r * c},${cy + r * s} L${cx + r * s},${cy + r * c} L${
-    cx - r * s
-  },${cy + r * c} L${cx - r * c},${cy + r * s} L${cx - r * c},${cy - r * s} L${
-    cx - r * s
-  },${cy - r * c} L${cx + r * s},${cy - r * c} L${cx + r * c},${cy - r * s} Z`;
-}
-
-function generatePlusPath(d) {
-  const radius = OTHER_WIDTH / 2;
-  const armWidth = radius * 0.4;
-  let cx, circlePath;
-  const cy = (d.y0 + d.y1) / 2;
-
-  if (d.isTerminal) {
-    const inflowHeight = d.inflowHeight || OTHER_WIDTH;
-    cx = d.x0 - inflowHeight / 2;
-    circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy - radius
-    }`; // Bottom to top, left
-  } else if (d.isRight) {
-    cx = d.x1;
-    circlePath = `M${cx},${cy - radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy + radius
-    }`; // Top to bottom, right
-  } else {
-    cx = d.x0;
-    circlePath = `M${cx},${cy + radius} A${radius},${radius} 0 0 1 ${cx},${
-      cy - radius
-    }`; // Bottom to top, left
-  }
-
-  const plusPath = `
-    M${cx - armWidth},${cy} H${cx + armWidth}
-    M${cx},${cy - armWidth} V${cy + armWidth}
-  `;
-  return `${circlePath} ${plusPath}`;
 }
 
 function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
@@ -475,6 +679,19 @@ function savePreviousState(data) {
 }
 
 function bindEvents(g) {
+  g.selectAll(".nodeLabel").on("click", (event, d) => {
+    console.log("Text clicked:", d.id);
+    event.stopPropagation();
+    if (event.shiftKey) {
+      d.hide();
+      Charity.addToHideList(d.ein);
+      refresh();
+    } else if (event.metaKey) {
+      showControlPanel("node", d, this);
+    } else {
+      viewModel.clickNode(event, d, refresh);
+    }
+  });
   g.selectAll(".node")
     .on("click", (event, d) => {
       console.log("Node clicked:", d.id);
@@ -500,6 +717,14 @@ function bindEvents(g) {
         viewModel.doubleClickNode(event, d, refresh);
       }
     });
+  /*.on("touchstart", function (event) {
+      event.preventDefault(); // Prevent default right-click behavior
+      const timer = setTimeout(() => {
+        // Show control panel (e.g., append a rect or update DOM)
+        showControlPanel("node", d, this);
+      }, 1000); // 1-second long press
+      d3.select(this).on("touchend", () => clearTimeout(timer)); // Cancel on touch end
+    })*/
 
   g.selectAll(".link")
     .on("click", (event, d) => {
@@ -512,6 +737,14 @@ function bindEvents(g) {
       event.stopPropagation();
       viewModel.doubleClickGrant(event, d, refresh);
     });
+  /*.on("touchstart", function (event) {
+      event.preventDefault(); // Prevent default right-click behavior
+      const timer = setTimeout(() => {
+        // Show control panel (e.g., append a rect or update DOM)
+        showControlPanel("link", d, this);
+      }, 1000); // 1-second long press
+      d3.select(this).on("touchend", () => clearTimeout(timer)); // Cancel on touch end
+    })*/
 
   g.selectAll(".hat-up").on("click", (event, d) => {
     console.log("Hat left clicked:", d.id);
@@ -527,7 +760,15 @@ function bindEvents(g) {
 }
 
 function zoomToFit() {
-  const g = svg.select("g.main"); // Select g.main dynamically
+  let g = svg.select("g.main");
+  if (g.empty()) {
+    console.warn("g.main not found, creating new g.main");
+    g = svg
+      .append("g")
+      .attr("class", "main")
+      .attr("transform", "translate(50, 50)");
+    return; // Skip zooming until graph is rendered
+  }
   const bounds = g.node().getBBox();
   if (
     !isFinite(bounds.width) ||
@@ -540,10 +781,10 @@ function zoomToFit() {
   }
   const container = document.getElementById("graph-container");
   const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.7;
+  const height = container.offsetHeight || window.innerHeight * 0.75;
   const dx = bounds.x;
   const dy = bounds.y;
-  const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+  const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
   svg
     .transition()
     .duration(750)
@@ -558,25 +799,44 @@ function zoomToFit() {
 
 function generateGraph() {
   if (!viewModel.dataReady) {
+    updateStatus("No Data Loaded");
+    dataLoaded(false);
     alert("Data not loaded yet. Please wait.");
     return;
   }
 
-  $("#loading").show();
-  $("#graph-container svg").remove();
+  $("#graph").empty();
+  updateStatus("Generating Graph...");
 
   const container = document.getElementById("graph-container");
   const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.7;
+  const height = Math.max(container.offsetHeight, window.innerHeight * 0.75);
 
   svg = d3
-    .select("#graph-container")
-    .append("svg")
+    .select("#graph-container > svg#graph[data-graph='true']")
     .attr("id", "graph")
-    .attr("width", "100%")
+    .attr("data-graph", "true");
+  // Fallback: Create SVG if not found
+  if (!svg.node()) {
+    console.warn("No #graph SVG found, creating new one");
+    svg = d3
+      .select("#graph-container")
+      .append("svg")
+      .attr("id", "graph")
+      .attr("data-graph", "true");
+  }
+
+  svg
+    .attr("width", "100%") // Ensure attributes are set in case SVG was cleared
     .attr("height", "100%")
     .style("display", "block")
-    .style("background", "#fff");
+    .style("background", "#fff")
+    .attr("class", "flex-1");
+
+  let g = svg
+    .append("g")
+    .attr("class", "main")
+    .attr("transform", "translate(50, 50)");
 
   zoom = d3
     .zoom()
@@ -596,35 +856,45 @@ function generateGraph() {
 
   svg.call(zoom);
 
-  let g = svg
-    .append("g")
-    .attr("class", "main")
-    .attr("transform", "translate(50, 50)");
-
-  const sankey = d3
-    .sankey()
-    .nodeId((d) => d.id)
+  updateScaledConstants();
+  const sankey = sankeyWithCircles()
+    .nodeId((d) => d.ein)
     .nodeWidth(NODE_WIDTH)
     .nodePadding(NODE_PADDING)
     .linkSort(compareLinks)
     .nodeAlign(d3.sankeyCenter)
     .nodeSort(compareCharities)
-    .size([width - 100, height - 100]);
+    .size([
+      (width - 100) * viewModel.getExpandScaleX(),
+      (height - 100) * viewModel.getExpandScaleY(),
+    ]);
+
+  viewModel.rememberGraphSize(width, height);
 
   viewModel.parseQueryParams();
-  if (!viewModel.matchURL()) viewModel.loadDefaultData();
-
-  viewModel.previousData = renderFocusedSankey(
-    g,
-    sankey,
-    svg, // Use global svg instead of svgRef
-    width,
-    height,
-    viewModel.getShowList().length
-      ? viewModel.getShowList()
-      : [viewModel.GOV_EIN],
-    viewModel.previousData
-  );
+  if (viewModel.matchURL() === 0) {
+    showPresets();
+    return;
+  }
+  try {
+    $("#statusSpinner").show();
+    viewModel.previousData = renderFocusedSankey(
+      g,
+      sankey,
+      svg, // Use global svg instead of svgRef
+      width,
+      height,
+      viewModel.getShowList().length
+        ? viewModel.getShowList()
+        : [viewModel.GOV_EIN],
+      viewModel.previousData
+    );
+    $("#statusSpinner").hide();
+  } catch (err) {
+    console.error("Error generating graph:", err);
+    updateStatus(`Graph Generation Failed: ${err.message}`, "red", false);
+    throw err;
+  }
 
   // Button handlers using global zoom
   document.getElementById("zoomIn").onclick = () =>
@@ -694,12 +964,155 @@ function generateGraph() {
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
   }, 1000);*/
+  document.getElementById("expandLayoutX").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactorX = viewModel.expandScaleXUp();
+    refresh();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("shrinkLayoutX").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactorX = viewModel.expandScaleXDown();
+    updateLayoutButtons();
+    refresh();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("layoutScaleResetX").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    viewModel.resetExpandScaleX();
+    updateLayoutButtons();
+    refresh();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("expandLayoutY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactorY = viewModel.expandScaleYUp();
+    updateLayoutButtons();
+    refresh();
 
-  zoomToFit();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("shrinkLayoutY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    boundaryScaleFactorY = viewModel.expandScaleYDown();
+    updateLayoutButtons();
+    refresh();
+
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
+  document.getElementById("layoutScaleResetY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    viewModel.resetExpandScaleY();
+    updateLayoutButtons();
+    refresh();
+
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
   renderActiveEINs();
   renderActiveKeywords();
+  renderActiveEINs();
   renderHideEINs();
-  $("#loading").hide();
+
+  dataLoaded(true);
+  zoomToFit();
+}
+
+function adjustCircularLinks(graph) {
+  let circularLinkData = graph.links.filter((l) => l.circular);
+  // adjust circular links for trapezoid
+  for (const l of circularLinkData) {
+    l.y0 = computeLinkY(
+      l.source,
+      l.source.sourceLinks.indexOf(l),
+      l.source.sourceLinks,
+      "outflowHeight",
+      true
+    );
+    l.y1 = computeLinkY(
+      l.target,
+      l.target.targetLinks.indexOf(l),
+      l.target.targetLinks,
+      "inflowHeight",
+      false
+    );
+    adjustCircularLink(l);
+  }
+}
+
+function updateLayoutButtons() {
+  const expandBtnX = document.getElementById("expandLayoutX");
+  const shrinkBtnX = document.getElementById("shrinkLayoutX");
+  expandBtnX.disabled = !viewModel.canExpandUpX();
+  shrinkBtnX.disabled = !viewModel.canExpandDownX();
+  const expandBtnY = document.getElementById("expandLayoutX");
+  const shrinkBtnY = document.getElementById("shrinkLayoutX");
+  expandBtnY.disabled = !viewModel.canExpandUpY();
+  shrinkBtnY.disabled = !viewModel.canExpandDownY();
+  const scaleDisplayX = document.getElementById("layoutScaleDisplayX");
+  if (scaleDisplayX) {
+    scaleDisplayX.textContent = `${viewModel.getExpandScaleX().toFixed(1)}x`;
+  }
+  const scaleDisplayY = document.getElementById("layoutScaleDisplayY");
+  if (scaleDisplayY) {
+    scaleDisplayY.textContent = ` ${viewModel.getExpandScaleY().toFixed(1)}x`;
+  }
+}
+
+function fontSizeFromHeight(height) {
+  return (
+    ((boundaryScaleFactorY * 2) / FONT_CONSTANT) *
+    Math.min(48, Math.max(FONT_SIZE, 10, height / FONT_CONSTANT))
+  );
+}
+
+function defaultSize() {
+  viewModel.resetExpandScaleX();
+  viewModel.resetExpandScaleY();
+  zoomToFit();
+}
+
+function scrollToNode(dataId) {
+  const $element = $(`[data-id="${dataId}"]`);
+
+  // Check if element exists
+  if ($element.length === 0) {
+    console.warn(`Element with data-id "${dataId}" not found`);
+    return;
+  }
+
+  // Scroll to element
+  $("html, body").animate(
+    {
+      scrollTop: $element.offset().top,
+    },
+    500
+  ); // 500ms for smooth scrolling
+}
+
+function flashNode(dataId) {
+  const $element = $(`[data-id="${dataId}"]`);
+
+  // Check if element exists
+  if ($element.length === 0) {
+    console.warn(`Element with data-id "${dataId}" not found`);
+    return;
+  }
+
+  //scrollToNode(dataId);
+  // Flash effect: fade to 30% opacity and back 3x
+  $element
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
 }
 
 function renderFocusedSankey(
@@ -715,66 +1128,37 @@ function renderFocusedSankey(
   const ANIM_LINK = 1200;
   const ANIM_HAT = 1500;
   const ANIM_TEXT = 1500;
-  $("#downloadBtn").hide();
+  dataLoaded(false);
 
   let currentData = viewModel.buildSankeyData();
+  const nodeCount = currentData.nodes.length;
+  const edgeCount = currentData.links.length;
+  const edgeTotal = formatNumber(
+    currentData.links.reduce((sum, g) => sum + g.amt, 0)
+  );
+  dataLoaded(true);
+
   savePreviousState(currentData);
 
-  const sankeyWidth = width - 100;
-  const sankeyHeight = height - 100;
-  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(25);
+  updateScaledConstants();
+  const sankeyWidth = (width - 100) * boundaryScaleFactorX;
+  const sankeyHeight = (height - 100) * boundaryScaleFactorY;
+  sankey.size([sankeyWidth, sankeyHeight]).nodePadding(NODE_PADDING);
 
   const graph = sankey(currentData);
 
   const scale = calculateScale(graph, width, height);
   calculateNodePositions(graph.nodes, scale, height);
+  adjustCircularLinks(graph);
+  normalizeStrokeWidths(graph);
+
+  calculateNodePositions(graph.nodes, scale, height);
+  adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
 
   if (!previousData) {
     svg.selectAll("*").remove();
   }
-
-  const defs = svg.selectAll("defs").data([0]).join("defs");
-  graph.links.forEach((link) => {
-    link.gradientId = link.gradientId || generateUniqueId("gradient", link);
-  });
-
-  const gradients = defs
-    .selectAll("linearGradient.dynamic")
-    .data(graph.links, (d) => d.gradientId);
-
-  gradients.exit().remove();
-
-  const gradientEnter = gradients
-    .enter()
-    .append("linearGradient")
-    .attr("class", "dynamic")
-    .attr("id", (d) => d.gradientId)
-    .attr("gradientUnits", "objectBoundingBox")
-    .attr("x1", "0")
-    .attr("y1", "0.5")
-    .attr("x2", "1")
-    .attr("y2", "0.5");
-
-  gradientEnter
-    .append("stop")
-    .attr("offset", "0%")
-    .attr("stop-color", (d) => colorScale(d.source.id));
-  gradientEnter
-    .append("stop")
-    .attr("offset", "100%")
-    .attr("stop-color", (d) => colorScale(d.target.id));
-
-  gradients
-    .merge(gradientEnter)
-    .selectAll("stop")
-    .data((d) => [
-      { offset: "0%", color: colorScale(d.source.id) },
-      { offset: "100%", color: colorScale(d.target.id) },
-    ])
-    .join("stop")
-    .attr("offset", (d) => d.offset)
-    .attr("stop-color", (d) => d.color);
 
   g = svg
     .selectAll("g.main")
@@ -783,14 +1167,13 @@ function renderFocusedSankey(
     .attr("class", "main")
     .attr("transform", `translate(50, 50) scale(${scale})`);
 
-  // No local zoom definition here—rely on global zoom from generateGraph
-
   const masterGroup = g
     .selectAll(".graph-group")
     .data([0])
     .join("g")
     .attr("class", "graph-group");
 
+  // Regular (non-circular) links
   const linkGroup = masterGroup
     .selectAll("g.links")
     .data([0])
@@ -800,9 +1183,10 @@ function renderFocusedSankey(
     .attr("stroke-opacity", 1)
     .style("mix-blend-mode", "multiply");
 
+  const regularLinks = graph.links.filter((d) => !d.circular);
   const link = linkGroup
     .selectAll(".link")
-    .data(graph.links, (d) => `${d.source.id}-${d.target.id}`);
+    .data(regularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   link.exit().transition().duration(ANIM_LINK).attr("stroke-width", 0).remove();
 
@@ -811,7 +1195,7 @@ function renderFocusedSankey(
     .append("path")
     .attr("class", "link")
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => colorScale(d.source.id))
+    .attr("stroke", (d) => getColorForEIN(d.source.id))
     .style("stroke-opacity", "0.3")
     .attr("stroke-width", 0);
 
@@ -820,7 +1204,7 @@ function renderFocusedSankey(
     .transition()
     .duration(ANIM_LINK)
     .attr("d", sankeyLinkHorizontalTrapezoid())
-    .attr("stroke", (d) => colorScale(d.source.id))
+    .attr("stroke", (d) => getColorForEIN(d.source.id))
     .attr("stroke-width", (d) => d.width || 1);
 
   linkEnter
@@ -829,6 +1213,107 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
+  // Function to extract points from an SVG path string
+  function extractPointsFromPath(pathString) {
+    const points = [];
+    let currentPoint = { x: 0, y: 0 };
+    const commands = pathString.split(/(?=[MLAZ])/); // Split on M, L, A, Z
+
+    commands.forEach((command) => {
+      const type = command[0];
+      const values = command
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(parseFloat);
+
+      if (type === "M") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "L") {
+        currentPoint = { x: values[0], y: values[1] };
+        points.push({ ...currentPoint });
+      } else if (type === "A") {
+        // For arcs, the endpoint is the last two values (x, y)
+        currentPoint = { x: values[5], y: values[6] };
+        points.push({ ...currentPoint });
+      }
+      // Ignore Z (close path) for now since our paths are open
+    });
+
+    return points;
+  } // Circular links
+  // Circular links
+  const circularLinkGroup = masterGroup
+    .selectAll("g.circular-links")
+    .data([0])
+    .join("g")
+    .attr("class", "circular-links")
+    .attr("fill", "none")
+    .attr("stroke-opacity", 0.5);
+
+  let circularLinks = graph.links.filter((d) => d.circular);
+  const circularLink = circularLinkGroup
+    .selectAll(".circular-link")
+    .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
+
+  circularLink
+    .exit()
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("fill-opacity", 0)
+    .remove();
+
+  const circularLinkEnter = circularLink
+    .enter()
+    .append("path")
+    .attr("class", "circular-link")
+    .attr("d", (d) => d.path)
+    .attr("fill", "none")
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", "0.5")
+    .attr("stroke-width", (d) => d.width);
+
+  circularLink
+    .merge(circularLinkEnter)
+    .transition()
+    .duration(ANIM_LINK)
+    .attr("d", (d) => d.path)
+    .attr("stroke", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke-opacity", 0.5);
+
+  /*// Add debug points for each circular link
+  circularLink.merge(circularLinkEnter).each(function (d) {
+    const path = d.path;
+    const points = extractPointsFromPath(path);
+
+    // Append circles for each point within the same group
+    d3.select(this.parentNode)
+      .selectAll("circle.debug-point-" + d.source.id + "-" + d.target.id)
+      .data(points)
+      .enter()
+      .append("circle")
+      .attr("class", "debug-point-" + d.source.id + "-" + d.target.id)
+      .attr("cx", (p) => p.x)
+      .attr("cy", (p) => p.y)
+      .attr("r", 3)
+      .attr("fill", "black")
+      .attr("stroke", "white")
+      .attr("stroke-width", 1)
+      .append("title")
+      .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
+  });*/
+
+  circularLinkEnter
+    .append("title")
+    .text(
+      (d) =>
+        `${d.source.name} → ${d.target.name}\n$${formatNumber(
+          d.amt
+        )} (Circular)`
+    );
+
+  // Node rendering (unchanged)
   const nodeGroup = masterGroup
     .selectAll("g.nodes")
     .data([0])
@@ -837,7 +1322,8 @@ function renderFocusedSankey(
 
   const nodeElements = nodeGroup
     .selectAll("g.node")
-    .data(graph.nodes, (d) => d.id);
+    .data(graph.nodes, (d) => d.id)
+    .attr("id", (d) => `node-${d.id}`);
 
   nodeElements
     .exit()
@@ -876,8 +1362,8 @@ function renderFocusedSankey(
               y1: d.previousY1 || d.y1,
             })
       )
-      .attr("fill", colorScale(d.id))
-      .style("cursor", d.isTerminal ? "zoom-out" : "grab")
+      .attr("fill", getColorForEIN(d.id))
+      .style("cursor", d.isTerminal ? "zoom-in" : "grab")
       .append("title")
       .text((d) => d.toolTipText());
   });
@@ -926,10 +1412,10 @@ function renderFocusedSankey(
     .attr("d", (d) =>
       generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
     )
-    .attr("fill", "#ccc")
+    .attr("fill", (d) => getColorForEIN(d.id))
     .attr("stroke", "#000")
     .attr("class", "hat-up")
-    .style("cursor", "pointer")
+    .style("cursor", "crosshair")
     .append("title")
     .text("expand more inflows");
 
@@ -949,6 +1435,7 @@ function renderFocusedSankey(
     .attr("d", (d) =>
       generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
     );
+
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
       (d) =>
@@ -974,10 +1461,10 @@ function renderFocusedSankey(
   rightHatEnter
     .append("path")
     .attr("d", (d) => generatePlusPath({ ...d, isRight: true }))
-    .attr("fill", "#ccc")
+    .attr("fill", (d) => getColorForEIN(d.id))
     .attr("stroke", "#000")
     .attr("class", "hat-down")
-    .style("cursor", "pointer")
+    .style("cursor", "crosshair")
     .append("title")
     .text("expand more outflows");
 
@@ -1022,7 +1509,11 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style("font-size", `${12 * scale}px`);
+    .style("cursor", "crosshair")
+    .attr("class", "nodeLabel")
+
+    .attr("fill", (d) => getTextColorForEIN(d.ein))
+    .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`);
 
   text
     .merge(textEnter)
@@ -1033,13 +1524,19 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
     )
-    .style("font-size", `${12 * scale}px`)
+    .style("cursor", "crosshair")
+    .attr("class", "nodeLabel")
+
+    .attr("fill", (d) => getTextColorForEIN(d.ein))
+    .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
     .text((d) => d.name);
 
   bindEvents(g);
 
   viewModel.cleanAfterRender();
-  $("#downloadBtn").show();
+  dataLoaded(true);
+  updateStatus(`Orgs: ${nodeCount} Flows:${edgeCount} $:${edgeTotal}`);
+
   const post = encodeURIComponent(
     `Hey, @twinforces @datarepublican, Check this out because:`
   );
@@ -1172,10 +1669,19 @@ function handleSearchResultHover(index) {
 }
 
 function refresh() {
-  renderHideEINs();
   updateQueryParams();
+  renderActiveEINs();
+  renderHideEINs();
   generateGraph();
 }
+
+window.porkClick = function (ein) {
+  viewModel.porkClick(ein);
+  refresh();
+};
+window.billClick = function (ein) {
+  viewModel.billClick(ein);
+};
 
 function showControlPanel(type, data, element) {
   const panel = document.getElementById("control-panel");
@@ -1185,7 +1691,7 @@ function showControlPanel(type, data, element) {
     if (!withButtons) return "";
     return `
       <div class="flex-1 bg-gray-200 p-4">
-        <button onclick="focusNode('${node.ein}')">Focus on This</button>
+        <button onclick="focusNode('${node.ein}')">Only This</button>
         <button ${
           !node.canExpandInflows ? 'disabled class="bg-gray-100 disabled"' : ""
         } onclick="expandInflows('${node.ein}')">Show 3 Inflows</button>
@@ -1225,7 +1731,6 @@ function showControlPanel(type, data, element) {
       return `
         <div class="bg-blue-500 text-white flex-col p-4 text-center">
           <h3>${node.name}</h3>
-          <p>EIN: ${node.ein}</p>
         </div>
         <div class="flex flex-row gap-4">
           <div class="flex-1 bg-gray-200 p-4">
@@ -1250,7 +1755,12 @@ function showControlPanel(type, data, element) {
           node.visibleGrantsTotal
         )} visible (${node.visibleGrants.length} grants)</p> ${hiddenOutflows}`;
       links = `
-        <p>From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
+        <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
+        <p>Find indirect sources: 
+           <a onClick="porkClick(${
+             node.ein
+           })" title="Show USG Indirect (each click does one more level)"><span class="emoji">&#x1F437;</span></a>
+           </p>
         <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
         <p><a href="${node.officersLink()}">Show me the Officers</a></p>
         <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
@@ -1263,7 +1773,7 @@ function showControlPanel(type, data, element) {
     return `
       <div class="bg-blue-500 text-white flex-col p-4 text-center">
         <h3>${node.name}</h3>
-        <p>EIN: ${node.ein}</p>
+        <p>EIN: ${node.longEIN}</p>
       </div>
       <div class="flex flex-row gap-4">
         <div class="flex-1 bg-gray-200 p-4">
@@ -1380,23 +1890,20 @@ window.compressOutflows = function (ein) {
 };
 
 window.focusNode = function (ein) {
-  const params = new URLSearchParams();
-  params.append("ein", ein);
-  const newUrl = window.location.pathname + "?" + params.toString();
-  window.history.replaceState({}, "", newUrl);
-  viewModel.parseQueryParams();
-  viewModel.resetAll();
-  generateGraph();
-  closePanel();
+  const charity = Charity.getCharity(ein);
+  if (charity) {
+    charity.tunnelNode();
+    refresh();
+    closePanel();
+  }
 };
 
 const extraStyle = `
   .node { fill: #999; }
   .node.expand { cursor: grab; }
-  .node.no-grants { cursor: zoom-out; }
+  .node.no-grants { cursor: zoom-in; }
   .link { stroke-opacity: 0.5; }
-  .hat-up, .hat-down { cursor: pointer; }
-  text { fill: #000; }
+  .hat-up, .hat-down { cursor: crosshair; }
   .selected { stroke: #ff0; stroke-width: 2px; }
 `;
 d3.select("head").append("style").text(extraStyle);
