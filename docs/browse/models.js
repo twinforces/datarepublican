@@ -734,6 +734,7 @@ export class BrowseViewModel {
     if (mode === "replace") {
       this.clearAll();
       this.setShowList(eins);
+      //this.computeImpliedVisibility();
       this.computeAndSaveURLParams();
     } else {
       for (const e of eins) {
@@ -898,6 +899,7 @@ export class BrowseViewModel {
       }
       this.showList[c.ein] = tail;
       if (!c.isVisible) c.place(tail[0], tail[1]);
+      else c.desiredVisible = true; // we don't have to place it if its already visible but we do have to record the users desire.
     }
   }
 
