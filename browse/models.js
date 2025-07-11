@@ -1099,8 +1099,7 @@ export class BrowseViewModel {
     });
     const allRegexes = [...regexKws];
     if (stringKws.length > 0) {
-      const escaped = stringKws.map(escapeRegExp);
-      const pat = escaped.join("|");
+      const pat = stringKws.join("|");
       allRegexes.push(new RegExp(pat, "i"));
     }
     return allRegexes;
