@@ -778,21 +778,73 @@ export class BrowseViewModel {
   }
 
   resetExpandScaleX() {
-    if (this.graphSizeX) {
-      const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
-      this.expandScaleX = 4 * (layers - 1); // i.e. more or less 100px per layer;
+    const layers =
+      d3.max(Array.from(Charity.visibleCharities), (c) => c.layer) + 1;
+    if (layers < 2) {
+      this.expandScaleX = 2;
+      return;
     }
+    const width = this.graphSizeX;
+    const scaleY = this.getExpandScaleY();
+    const fontSize = 12 * scaleY;
+    const charWidth = fontSize * 0.6;
+    let maxLen = 0;
+    Charity.visibleCharities.forEach((c) => {
+      if (c.name.length > maxLen) maxLen = c.name.length;
+    });
+    const maxW = maxLen * charWidth;
+    const pad = 20;
+    const labelGap = 12;
+    const maxPair = maxW * 2;
+    const c_val = labelGap + maxPair + pad;
+    const a = (width - 100) / (layers - 1);
+    const b = 50;
+    let minScaleX = 2;
+    if (a > b) {
+      minScaleX = Math.max(2, (c_val / (a - b)) * 1.1);
+    }
+    this.expandScaleX = Math.ceil(minScaleX / 100) * 100;
   }
 
   resetExpandScaleY() {
-    if (this.graphSizeY) {
-      this.expandScaleY = 4 * Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
+    const rows = this.countGraphRows();
+    if (rows < 2) {
+      this.expandScaleY = 2;
+      return;
     }
+    const height = this.graphSizeY;
+    const scaleX = this.getExpandScaleX();
+    const baseFont = 12;
+    const nodeHeight = baseFont * 1.5;
+    const padY = 25 * scaleX;
+    const minH = (height - 100) / rows;
+    let temp = ((nodeHeight + padY) / minH) * 1.1;
+    let minScaleY = Math.max(2, temp);
+    this.expandScaleY = Math.ceil(minScaleY / 100) * 100;
   }
+
   defaultSize() {
-    const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
-    this.expandScaleX = 5 * (layers - 1); // i.e. more or less 100px per layer;
-    this.expandScaleY = 5 * Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
+    this.resetExpandScaleX();
+    this.resetExpandScaleY();
+    const aspect = this.graphSizeX / this.graphSizeY;
+    const scaleX = this.getExpandScaleX();
+    const scaleY = this.getExpandScaleY();
+    const ratio = scaleX / scaleY;
+    if (Math.abs(ratio - aspect) > 0.2) {
+      const targetRatio = aspect;
+      if (ratio > targetRatio) {
+        this.expandScaleY = Math.min(
+          MAX_EXPAND_SCALE,
+          scaleY * (ratio / targetRatio)
+        );
+      } else {
+        this.expandScaleX = Math.min(
+          MAX_EXPAND_SCALE,
+          scaleX * (targetRatio / ratio)
+        );
+      }
+    }
+    //zoomToFit();
   }
 
   setExpandScaleY(scale) {
@@ -856,6 +908,7 @@ export class BrowseViewModel {
       this.expandScaleX / EXPAND_FACTOR
     );
   }
+
   setGraphScale(scale) {
     if (scale != this.POWER_LAW) {
       this.POWER_LAW = scale;
