@@ -961,8 +961,13 @@ export class BrowseViewModel {
     delete this.showList[id];
     const c = Charity.getCharity(id);
     if (c) {
+      const tests = viewModel.buildSearchRegexes();
+      if (tests.length && c.searchMatch(tests))
+        // see if this was a keyword match we're getting rid of
+        this.addToHideList(id);
       c.clearVisibility();
     }
+    this.computeAndSaveURLParams(); // make sure it sticks
   }
 
   getShowList() {
@@ -1038,11 +1043,22 @@ export class BrowseViewModel {
 
   /** keep track of search keywords */
   addToKeywords(word) {
-    this.keywords[word.toLowerCase()] = 1;
+    const trimmed = word.trim();
+    if (trimmed.startsWith("/") && trimmed.endsWith("/")) {
+      this.keywords[trimmed] = 1;
+    } else {
+      this.keywords[trimmed.toLowerCase()] = 1;
+    }
   }
 
+  // Modify removeFromKeywords:
   removeFromKeywords(word) {
-    delete this.keywords[word.toLowerCase()];
+    const trimmed = word.trim();
+    const key =
+      trimmed.startsWith("/") && trimmed.endsWith("/")
+        ? trimmed
+        : trimmed.toLowerCase();
+    delete this.keywords[key];
   }
 
   clearKeywordList() {
@@ -1053,14 +1069,54 @@ export class BrowseViewModel {
     return Object.keys(this.keywords).sort();
   }
 
+  // Modify setKeywordList:
   setKeywordList(list) {
-    this.keywords = Object.fromEntries(list.map((key) => [key, 1]));
+    this.keywords = {};
+    list.forEach((kw) => {
+      if (kw.startsWith("/") && kw.endsWith("/")) {
+        this.keywords[kw] = 1;
+      } else {
+        this.keywords[kw.toLowerCase()] = 1;
+      }
+    });
+  }
+
+  // Add new method:
+  buildSearchRegexes() {
+    const stringKws = [];
+    const regexKws = [];
+    this.getKeywordList().forEach((kw) => {
+      if (kw.startsWith("/") && kw.endsWith("/")) {
+        const pat = kw.slice(1, -1);
+        try {
+          regexKws.push(new RegExp(pat, "i"));
+        } catch (e) {
+          console.warn(`Invalid regex: ${kw}`);
+        }
+      } else {
+        stringKws.push(kw);
+      }
+    });
+    const allRegexes = [...regexKws];
+    if (stringKws.length > 0) {
+      const escaped = stringKws.map(escapeRegExp);
+      const pat = escaped.join("|");
+      allRegexes.push(new RegExp(pat, "i"));
+    }
+    return allRegexes;
+  }
+
+  // Add escapeRegExp function if not present (can add globally or in file):
+  escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   /** match Charities against search terms */
   matchKeys() {
-    return Object.values(Charity.charityLookup).filter((c) =>
-      c.searchMatch(Object.keys(this.keywords))
+    const regexes = this.buildSearchRegexes();
+    return Object.values(Charity.charityLookup).filter(
+      (c) =>
+        !this.shouldHide(c.id) && c.searchMatch(regexes) && !c.desiredVisible
     );
   }
 
@@ -1089,7 +1145,13 @@ export class BrowseViewModel {
     this.getHideList().forEach((ein) => delete visibleMap[ein]);
     Object.values(visibleMap).forEach((e) => params.append("e", e));
     this.getHideList().forEach((e) => params.append("n", e));
-    this.getKeywordList().forEach((k) => params.append("k", k));
+    this.getKeywordList().forEach((k) => {
+      let urlK = k;
+      if (urlK.startsWith("/") && urlK.endsWith("/")) {
+        urlK = `~${urlK.slice(1, -1)}~`;
+      }
+      params.append("k", urlK);
+    });
     params.append("s", this.POWER_LAW);
     params.append("X", this.getExpandScaleX());
     params.append("Y", this.getExpandScaleY());
@@ -1114,7 +1176,15 @@ export class BrowseViewModel {
     this.showList = {};
     this.setShowList(this.parseParamsWithOldNew(params, "ein", "e"));
     this.setHideList(this.parseParamsWithOldNew(params, "nein", "n"));
-    this.setKeywordList(this.parseParamsWithOldNew(params, "keywords", "k"));
+    const rawKs = this.parseParamsWithOldNew(params, "keywords", "k");
+    const processed = rawKs.map((k) => {
+      if (k.startsWith("~") && k.endsWith("~")) {
+        return `/${k.slice(1, -1)}/`;
+      } else {
+        return k;
+      }
+    });
+    this.setKeywordList(processed);
     const scale = parseInt(params.get("s") || params.get("scale") || "0", 10);
     if (scale) this.setGraphScale(scale);
     const expandX = parseFloat(
@@ -1154,51 +1224,70 @@ export class BrowseViewModel {
     updateStatus("", "green", false);
     if (DEBUGLOG)
       console.log("ShowList before processing:", this.getShowList());
-    Charity.visibleCharities.forEach((c) => {
-      c.desiredVisible = false;
-      c.impliedVisible = 0;
-    });
-    this.getShowList().forEach((ein) => {
-      const parts = ein.split(/[:~]/);
-      const id = parts[0];
-      let ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
-      if (parts[1] && parts[1] == "0") ups = 0; // || confuses things
-      let downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
-      if (parts[2] && parts[2] == "0") downs = 0; // || confuses things
-      const charity = Charity.getCharity(id);
-      if (charity && !this.shouldHide(id)) {
-        if (!(charity.impliedVisible > 1)) charity.place(ups, downs); // circular grants suck
-        if (DEBUGLOG)
-          console.log(
-            `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
-          );
-      } else {
-        if (DEBUGLOG) console.error(`no match for ${ein} in match`);
-      }
-    });
-    this.getHideList().forEach((ein) => {
-      const c = Charity.getCharity(ein);
-      if (c) c.desiredVisible = false;
-    });
+    let regexes = [];
+    let visibleKeywordMatches = 0;
     if (this.getKeywordList().length) {
-      const matches = Charity.invisibleCharities.filter(
-        (c) =>
-          !this.shouldHide(c.id) &&
-          c.searchMatch(Object.keys(this.keywords)) &&
-          !c.desiredVisible
-      );
+      regexes = this.buildSearchRegexes();
+      visibleKeywordMatches = Array.from(Charity.visibleCharities).filter(
+        (c) => !this.shouldHide(c.id) && c.searchMatch(regexes)
+      ).length;
 
-      const limitedMatches = matches.slice(0, MAX_KEYWORD_NODES);
-      if (matches.length > MAX_KEYWORD_NODES) {
-        updateStatus(
-          `<span>Note: Graph limited to first ${MAX_KEYWORD_NODES} of ${matches.length} matching results</span>`,
-          "orange"
-        );
-      }
-
-      limitedMatches.forEach((c) => {
-        c.place(1, 1); // avoid sankey explosion
+      Charity.visibleCharities.forEach((c) => {
+        c.desiredVisible = false;
+        c.impliedVisible = 0;
       });
+      this.getShowList().forEach((ein) => {
+        const parts = ein.split(/[:~]/);
+        const id = parts[0];
+        let ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
+        if (parts[1] && parts[1] == "0") ups = 0; // || confuses things
+        let downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
+        if (parts[2] && parts[2] == "0") downs = 0; // || confuses things
+        const charity = Charity.getCharity(id);
+        if (charity && !this.shouldHide(id)) {
+          if (!(charity.impliedVisible > 1)) charity.place(ups, downs); // circular grants suck
+          if (DEBUGLOG)
+            console.log(
+              `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
+            );
+        } else {
+          if (DEBUGLOG) console.error(`no match for ${ein} in match`);
+        }
+      });
+      this.getHideList().forEach((ein) => {
+        const c = Charity.getCharity(ein);
+        if (c) c.desiredVisible = false;
+      });
+
+      if (regexes.length) {
+        const remainingSlots = Math.max(
+          0,
+          MAX_KEYWORD_NODES - visibleKeywordMatches
+        );
+
+        if (remainingSlots > 0) {
+          const invisibleMatches = Charity.invisibleCharities
+            .filter(
+              (c) =>
+                !this.shouldHide(c.id) &&
+                c.searchMatch(regexes) &&
+                !c.desiredVisible
+            )
+            .sort((a, b) => b.denominator - a.denominator);
+
+          if (invisibleMatches.length > remainingSlots) {
+            updateStatus(
+              `<span>Note: Graph limited to ${MAX_KEYWORD_NODES} largest orgs matching results (${visibleKeywordMatches} visible + ${remainingSlots} new)</span>`,
+              "orange"
+            );
+          }
+          const limitedMatches = invisibleMatches.slice(0, remainingSlots);
+
+          limitedMatches.forEach((c) => {
+            c.place(1, 1); // avoid sankey explosion
+          });
+        }
+      }
     }
     this.computeImpliedVisibility(null, true, true);
     if (DEBUGLOG)
@@ -2047,6 +2136,12 @@ export class Charity {
     return Object.values(Charity.charityLookup).filter((c) => !c.isVisible);
   }
 
+  static get allCharities() {
+    return Object.values(Charity.charityLookup)
+      .filter((c) => !c.isVisible)
+      .sort((a, b) => b.denominator - a.denominator);
+  }
+
   static get impliedCharities() {
     return Object.values(Charity.charityLookup).filter(
       (c) => c.impliedVisible > 0
@@ -2802,12 +2897,9 @@ export class Charity {
    * @param {*} keywords
    * @returns
    */
-  searchMatch(keywords) {
-    const lowerStr = this.name.toLowerCase();
-    return keywords
-      .map((kw) => kw.trim().toLowerCase())
-      .filter((kw) => kw !== "")
-      .some((kw) => lowerStr.includes(kw));
+
+  searchMatch(regexes) {
+    return regexes.some((r) => r.test(this.name));
   }
 
   /**

@@ -964,6 +964,15 @@ function generateGraph() {
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
   }, 1000);*/
+  document.getElementById("layoutScaleResetXY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    viewModel.defaultSize();
+    boundaryScaleFactorX = viewModel.getExpandScaleX();
+    boundaryScaleFactorY = viewModel.getExpandScaleY();
+    refresh();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
   document.getElementById("expandLayoutX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
@@ -1766,7 +1775,7 @@ function showControlPanel(type, data, element) {
         <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
         <p>${node.propublicaLink("Take me to Propublica")}</p>
         <p>${node.googleLink("Google")}</p>
-        <!--<p>${node.grokLink("Grok")}</p>-->
+        <p>${node.grokLink("Grok")}</p>
       `;
     }
 
