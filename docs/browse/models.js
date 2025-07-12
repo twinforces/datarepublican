@@ -71,7 +71,6 @@ export function formatNumber(num) {
  * As they say in Highlander, there can be only one
  */
 let viewModel = null;
-
 function hashEIN(ein) {
   let hash = 2862953042; // so 001 is greenish
   const paddedEin = ein.length === 3 ? ein.padEnd(9, "0") : ein; // Pad 3-digit EINs
@@ -83,53 +82,45 @@ function hashEIN(ein) {
   return (hash % 1000000) / 1000000;
 }
 
-export function interpolateRainbow(t) {
-  return (
-    (t = (t + 0.2) % 1),
-    d3.cubehelix(
-      360 * t - 100,
-      1.5 - 1.5 * Math.abs(t - 0.5),
-      0.8 - 0.9 * Math.abs(t - 0.5)
-    )
+function interpolateBand(t, baseBrightness, mod_brightness) {
+  const abs_diff = Math.abs(t - 0.5);
+  const brightness = Math.max(0.05, baseBrightness - mod_brightness * abs_diff); // Clamp min brightness
+  const saturation = 1.5 - 1.5 * abs_diff; // Original fixed saturation
+  return d3.cubehelix(
+    360 * t - 65, // Tuned offset to make 001 (t~0.55) hue ~133 (forest green)
+    saturation,
+    brightness
   );
 }
 
-export function interpolateDarkRainbow(t) {
-  return (
-    (t = (t + 0.2) % 1),
-    d3.cubehelix(
-      360 * t - 100,
-      1.5 - 1.5 * Math.abs(t - 0.5),
-      0.5 - 0.9 * Math.abs(t - 0.5)
-    )
-  );
-}
+const brightnessBands = [
+  { base: 0.9, mod: 0.8 }, // 0: pastel (light)
+  { base: 0.7, mod: 0.6 }, // 1: medium
+  { base: 0.45, mod: 0.3 }, // 2: dark (~0.3 center)
+  { base: 0.3, mod: 0.2 }, // 3: extra dark (~0.23 center)
+];
 
-// Cubehelix function
-function cubehelix2(t) {
-  const start = 240; // Start hue adjusted to align green near t=0.123456
-  const rotations = 1.5; // Keep 1.5 rotations for variety
-  const saturation = 0.2 + 0.3 * Math.sin(t * 2 * Math.PI + Math.PI / 2); // 0.2–0.5, peaks near t=0.125
-  const gamma = 0.9; // Slightly darker brightness
-  const angle = 2 * Math.PI * (start / 360 + rotations * t);
-  const amp = saturation * (1 - t) * t * 2;
-  const r = t + amp * (-0.14861 * Math.cos(angle) + 1.78277 * Math.sin(angle));
-  const g = t + amp * (-0.29227 * Math.cos(angle) - 0.90649 * Math.sin(angle));
-  const b = t + amp * (1.97294 * Math.cos(angle));
-  return d3.rgb(
-    Math.max(0, Math.min(1, r ** gamma)) * 255,
-    Math.max(0, Math.min(1, g ** gamma)) * 255,
-    Math.max(0, Math.min(1, b ** gamma)) * 255
-  );
-}
+const bandOffset = 1; // Tuned: lastDigit=1 +1 %4=2 -> dark for node
 
-// Color function
 export function getColorForEIN(ein) {
-  return interpolateRainbow(hashEIN(ein));
+  let t = hashEIN(ein);
+  const lastDigit = parseInt(ein.slice(-1), 10);
+  let bandIndex = (lastDigit + bandOffset) % 4;
+  const brightBand = brightnessBands[bandIndex];
+  return interpolateBand(t, brightBand.base, brightBand.mod);
 }
+
 export function getTextColorForEIN(ein) {
-  // same hue/sat but darker so more texty.
-  return interpolateDarkRainbow(hashEIN(ein));
+  let t = hashEIN(ein);
+  const lastDigit = parseInt(ein.slice(-1), 10);
+  let bandIndex = ((lastDigit + bandOffset) % 4) + 1; // One darker
+  bandIndex = Math.min(3, bandIndex); // Cap at extra dark (no wrap to light for contrast)
+  const brightBand = brightnessBands[bandIndex];
+  return interpolateBand(t, brightBand.base, brightBand.mod);
+}
+
+export function interpolateBandIndex(t, band) {
+  return interpolateBand(t, colorBands[band].base, colorBands[band].mod);
 }
 
 // Initialize IndexedDB
@@ -778,21 +769,111 @@ export class BrowseViewModel {
   }
 
   resetExpandScaleX() {
-    if (this.graphSizeX) {
-      const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
-      this.expandScaleX = 4 * (layers - 1); // i.e. more or less 100px per layer;
+    const layers =
+      d3.max(Array.from(Charity.visibleCharities), (c) => c.layer) + 1;
+    if (layers < 2) {
+      this.expandScaleX = 2;
+      return;
     }
+    const width = this.graphSizeX;
+    const scaleY = this.getExpandScaleY();
+    const fontSize = 12 * scaleY;
+    const charWidth = fontSize * 0.6;
+    let maxLen = 0;
+    Charity.visibleCharities.forEach((c) => {
+      if (c.name.length > maxLen) maxLen = c.name.length;
+    });
+    const maxW = maxLen * charWidth;
+    const pad = 20;
+    const labelGap = 12;
+    const maxPair = maxW * 2;
+    const c_val = labelGap + maxPair + pad;
+    const a = (width - 100) / (layers - 1);
+    const b = 50;
+    let minScaleX = 2;
+    if (a > b) {
+      minScaleX = Math.max(2, (c_val / (a - b)) * 1.1);
+    }
+
+    // Clamp for effective sizes (iterate for convergence, max 2x)
+    const minFont = 8; // Pixels
+    let iterations = 0;
+    while (iterations++ < 2) {
+      // Estimate zoom: approx 0.9 / minScaleX if X-limited
+      const estZoom = 0.9 / minScaleX;
+      const effFont = 12 * scaleY * estZoom;
+      if (effFont < minFont) {
+        minScaleX /= (minFont / effFont) * 1.1; // Reduce scaleX to increase zoom
+      }
+    }
+
+    // Soft cap to prevent jumps
+    minScaleX = Math.min(1024, Math.log(layers + Math.E) * minScaleX); // Log for extremes
+
+    this.expandScaleX = Math.ceil(minScaleX / 100) * 100;
   }
 
   resetExpandScaleY() {
-    if (this.graphSizeY) {
-      this.expandScaleY = 4 * Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
+    const rows = this.countGraphRows();
+    if (rows < 2) {
+      this.expandScaleY = 2;
+      return;
     }
+    const height = this.graphSizeY;
+    const scaleX = this.getExpandScaleX();
+    const baseFont = 12;
+    const nodeHeight = baseFont * 1.5; // 18
+    const padY = 25 * scaleX;
+    const minH = (height - 100) / rows;
+    let temp = ((nodeHeight + padY) / minH) * 1.1;
+    let minScaleY = Math.max(2, temp);
+
+    // Clamp for effective sizes (iterate for convergence, max 2x)
+    const minFont = 8; // Pixels
+    const minPad = 5;
+    let iterations = 0;
+    while (iterations++ < 2) {
+      // Estimate zoom: approx min(1, height / (height * minScaleY)) if Y-dom, but conservative
+      const estZoom = Math.min(1, 0.9 / minScaleY); // Y-limited assumption
+      const effFont = baseFont * minScaleY * estZoom;
+      const effPad = 25 * minScaleY * estZoom;
+      if (effFont < minFont) {
+        minScaleY *= (minFont / effFont) * 1.1; // Boost
+      }
+      if (effPad < minPad) {
+        minScaleY *= (minPad / effPad) * 1.1;
+      }
+    }
+
+    // Soft cap to prevent jumps
+    minScaleY = Math.min(1024, Math.log(rows + Math.E) * minScaleY); // Log for extremes
+
+    this.expandScaleY = Math.ceil(minScaleY / 100) * 100;
   }
+
   defaultSize() {
-    const layers = d3.max(Charity.visibleCharities, (c) => c.layer) + 1;
-    this.expandScaleX = 5 * (layers - 1); // i.e. more or less 100px per layer;
-    this.expandScaleY = 5 * Math.round(this.countGraphRows() / 5); // i.e. more or less 100px per layer;
+    this.resetExpandScaleX();
+    this.resetExpandScaleY();
+    const aspect = this.graphSizeX / this.graphSizeY;
+    let scaleX = this.getExpandScaleX();
+    let scaleY = this.getExpandScaleY();
+    let ratio = scaleX / scaleY;
+
+    // Adjust for aspect, but cap distortion
+    const maxDistort = 4; // e.g., no more than 4x viewport aspect
+    if (Math.abs(ratio - aspect) > 0.2) {
+      const targetRatio = aspect;
+      if (ratio > targetRatio) {
+        scaleY = Math.min(MAX_EXPAND_SCALE, scaleY * (ratio / targetRatio));
+      } else {
+        scaleX = Math.min(MAX_EXPAND_SCALE, scaleX * (targetRatio / ratio));
+      }
+      ratio = scaleX / scaleY; // Recalc
+      if (ratio > maxDistort * aspect) scaleX = scaleY * maxDistort * aspect; // Cap wide
+      if (ratio < aspect / maxDistort) scaleY = scaleX / (aspect / maxDistort); // Cap tall
+    }
+    this.setExpandScaleX(scaleX);
+    this.setExpandScaleY(scaleY);
   }
 
   setExpandScaleY(scale) {
@@ -856,6 +937,7 @@ export class BrowseViewModel {
       this.expandScaleX / EXPAND_FACTOR
     );
   }
+
   setGraphScale(scale) {
     if (scale != this.POWER_LAW) {
       this.POWER_LAW = scale;
@@ -908,8 +990,13 @@ export class BrowseViewModel {
     delete this.showList[id];
     const c = Charity.getCharity(id);
     if (c) {
+      const tests = viewModel.buildSearchRegexes();
+      if (tests.length && c.searchMatch(tests))
+        // see if this was a keyword match we're getting rid of
+        this.addToHideList(id);
       c.clearVisibility();
     }
+    this.computeAndSaveURLParams(); // make sure it sticks
   }
 
   getShowList() {
@@ -985,11 +1072,22 @@ export class BrowseViewModel {
 
   /** keep track of search keywords */
   addToKeywords(word) {
-    this.keywords[word.toLowerCase()] = 1;
+    const trimmed = word.trim();
+    if (trimmed.startsWith("/") && trimmed.endsWith("/")) {
+      this.keywords[trimmed] = 1;
+    } else {
+      this.keywords[trimmed.toLowerCase()] = 1;
+    }
   }
 
+  // Modify removeFromKeywords:
   removeFromKeywords(word) {
-    delete this.keywords[word.toLowerCase()];
+    const trimmed = word.trim();
+    const key =
+      trimmed.startsWith("/") && trimmed.endsWith("/")
+        ? trimmed
+        : trimmed.toLowerCase();
+    delete this.keywords[key];
   }
 
   clearKeywordList() {
@@ -1000,14 +1098,53 @@ export class BrowseViewModel {
     return Object.keys(this.keywords).sort();
   }
 
+  // Modify setKeywordList:
   setKeywordList(list) {
-    this.keywords = Object.fromEntries(list.map((key) => [key, 1]));
+    this.keywords = {};
+    list.forEach((kw) => {
+      if (kw.startsWith("/") && kw.endsWith("/")) {
+        this.keywords[kw] = 1;
+      } else {
+        this.keywords[kw.toLowerCase()] = 1;
+      }
+    });
+  }
+
+  // Add new method:
+  buildSearchRegexes() {
+    const stringKws = [];
+    const regexKws = [];
+    this.getKeywordList().forEach((kw) => {
+      if (kw.startsWith("/") && kw.endsWith("/")) {
+        const pat = kw.slice(1, -1);
+        try {
+          regexKws.push(new RegExp(pat, "i"));
+        } catch (e) {
+          console.warn(`Invalid regex: ${kw}`);
+        }
+      } else {
+        stringKws.push(kw);
+      }
+    });
+    const allRegexes = [...regexKws];
+    if (stringKws.length > 0) {
+      const pat = stringKws.join("|");
+      allRegexes.push(new RegExp(pat, "i"));
+    }
+    return allRegexes;
+  }
+
+  // Add escapeRegExp function if not present (can add globally or in file):
+  escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   /** match Charities against search terms */
   matchKeys() {
-    return Object.values(Charity.charityLookup).filter((c) =>
-      c.searchMatch(Object.keys(this.keywords))
+    const regexes = this.buildSearchRegexes();
+    return Object.values(Charity.charityLookup).filter(
+      (c) =>
+        !this.shouldHide(c.id) && c.searchMatch(regexes) && !c.desiredVisible
     );
   }
 
@@ -1036,7 +1173,13 @@ export class BrowseViewModel {
     this.getHideList().forEach((ein) => delete visibleMap[ein]);
     Object.values(visibleMap).forEach((e) => params.append("e", e));
     this.getHideList().forEach((e) => params.append("n", e));
-    this.getKeywordList().forEach((k) => params.append("k", k));
+    this.getKeywordList().forEach((k) => {
+      let urlK = k;
+      if (urlK.startsWith("/") && urlK.endsWith("/")) {
+        urlK = `~${urlK.slice(1, -1)}~`;
+      }
+      params.append("k", urlK);
+    });
     params.append("s", this.POWER_LAW);
     params.append("X", this.getExpandScaleX());
     params.append("Y", this.getExpandScaleY());
@@ -1061,7 +1204,15 @@ export class BrowseViewModel {
     this.showList = {};
     this.setShowList(this.parseParamsWithOldNew(params, "ein", "e"));
     this.setHideList(this.parseParamsWithOldNew(params, "nein", "n"));
-    this.setKeywordList(this.parseParamsWithOldNew(params, "keywords", "k"));
+    const rawKs = this.parseParamsWithOldNew(params, "keywords", "k");
+    const processed = rawKs.map((k) => {
+      if (k.startsWith("~") && k.endsWith("~")) {
+        return `/${k.slice(1, -1)}/`;
+      } else {
+        return k;
+      }
+    });
+    this.setKeywordList(processed);
     const scale = parseInt(params.get("s") || params.get("scale") || "0", 10);
     if (scale) this.setGraphScale(scale);
     const expandX = parseFloat(
@@ -1101,51 +1252,70 @@ export class BrowseViewModel {
     updateStatus("", "green", false);
     if (DEBUGLOG)
       console.log("ShowList before processing:", this.getShowList());
-    Charity.visibleCharities.forEach((c) => {
-      c.desiredVisible = false;
-      c.impliedVisible = 0;
-    });
-    this.getShowList().forEach((ein) => {
-      const parts = ein.split(/[:~]/);
-      const id = parts[0];
-      let ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
-      if (parts[1] && parts[1] == "0") ups = 0; // || confuses things
-      let downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
-      if (parts[2] && parts[2] == "0") downs = 0; // || confuses things
-      const charity = Charity.getCharity(id);
-      if (charity && !this.shouldHide(id)) {
-        if (!(charity.impliedVisible > 1)) charity.place(ups, downs); // circular grants suck
-        if (DEBUGLOG)
-          console.log(
-            `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
-          );
-      } else {
-        if (DEBUGLOG) console.error(`no match for ${ein} in match`);
-      }
-    });
-    this.getHideList().forEach((ein) => {
-      const c = Charity.getCharity(ein);
-      if (c) c.desiredVisible = false;
-    });
+    let regexes = [];
+    let visibleKeywordMatches = 0;
     if (this.getKeywordList().length) {
-      const matches = Charity.invisibleCharities.filter(
-        (c) =>
-          !this.shouldHide(c.id) &&
-          c.searchMatch(Object.keys(this.keywords)) &&
-          !c.desiredVisible
-      );
+      regexes = this.buildSearchRegexes();
+      visibleKeywordMatches = Array.from(Charity.visibleCharities).filter(
+        (c) => !this.shouldHide(c.id) && c.searchMatch(regexes)
+      ).length;
 
-      const limitedMatches = matches.slice(0, MAX_KEYWORD_NODES);
-      if (matches.length > MAX_KEYWORD_NODES) {
-        updateStatus(
-          `<span>Note: Graph limited to first ${MAX_KEYWORD_NODES} of ${matches.length} matching results</span>`,
-          "orange"
-        );
-      }
-
-      limitedMatches.forEach((c) => {
-        c.place(1, 1); // avoid sankey explosion
+      Charity.visibleCharities.forEach((c) => {
+        c.desiredVisible = false;
+        c.impliedVisible = 0;
       });
+      this.getShowList().forEach((ein) => {
+        const parts = ein.split(/[:~]/);
+        const id = parts[0];
+        let ups = parseInt(parts[1] || `${START_REVEAL}`, 10) || START_REVEAL;
+        if (parts[1] && parts[1] == "0") ups = 0; // || confuses things
+        let downs = parseInt(parts[2] || `${START_REVEAL}`, 10) || START_REVEAL;
+        if (parts[2] && parts[2] == "0") downs = 0; // || confuses things
+        const charity = Charity.getCharity(id);
+        if (charity && !this.shouldHide(id)) {
+          if (!(charity.impliedVisible > 1)) charity.place(ups, downs); // circular grants suck
+          if (DEBUGLOG)
+            console.log(
+              `Matched EIN ${ein}, placed ${id}, grants out: ${charity.grants.length}, in: ${charity.grantsIn.length}`
+            );
+        } else {
+          if (DEBUGLOG) console.error(`no match for ${ein} in match`);
+        }
+      });
+      this.getHideList().forEach((ein) => {
+        const c = Charity.getCharity(ein);
+        if (c) c.desiredVisible = false;
+      });
+
+      if (regexes.length) {
+        const remainingSlots = Math.max(
+          0,
+          MAX_KEYWORD_NODES - visibleKeywordMatches
+        );
+
+        if (remainingSlots > 0) {
+          const invisibleMatches = Charity.invisibleCharities
+            .filter(
+              (c) =>
+                !this.shouldHide(c.id) &&
+                c.searchMatch(regexes) &&
+                !c.desiredVisible
+            )
+            .sort((a, b) => b.denominator - a.denominator);
+
+          if (invisibleMatches.length > remainingSlots) {
+            updateStatus(
+              `<span>Note: Graph limited to ${MAX_KEYWORD_NODES} largest orgs matching keyworks (${visibleKeywordMatches} visible + ${remainingSlots} new)</span>`,
+              "orange"
+            );
+          }
+          const limitedMatches = invisibleMatches.slice(0, remainingSlots);
+
+          limitedMatches.forEach((c) => {
+            c.place(1, 1); // avoid sankey explosion
+          });
+        }
+      }
     }
     this.computeImpliedVisibility(null, true, true);
     if (DEBUGLOG)
@@ -1994,6 +2164,12 @@ export class Charity {
     return Object.values(Charity.charityLookup).filter((c) => !c.isVisible);
   }
 
+  static get allCharities() {
+    return Object.values(Charity.charityLookup)
+      .filter((c) => !c.isVisible)
+      .sort((a, b) => b.denominator - a.denominator);
+  }
+
   static get impliedCharities() {
     return Object.values(Charity.charityLookup).filter(
       (c) => c.impliedVisible > 0
@@ -2749,12 +2925,9 @@ export class Charity {
    * @param {*} keywords
    * @returns
    */
-  searchMatch(keywords) {
-    const lowerStr = this.name.toLowerCase();
-    return keywords
-      .map((kw) => kw.trim().toLowerCase())
-      .filter((kw) => kw !== "")
-      .some((kw) => lowerStr.includes(kw));
+
+  searchMatch(regexes) {
+    return regexes.some((r) => r.test(this.name));
   }
 
   /**
@@ -2860,9 +3033,17 @@ export class Charity {
     const params = new URLSearchParams();
     params.set(
       "q",
-      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit?`
+      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro an con.`
     );
-    return `<a href="https://grok.com/search?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+    return `<a href="https://grok.com/?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+  }
+
+  charityNavigatorLink(message) {
+    return `<a href="https://www.charitynavigator.org/ein/${this.ein}" target="_blank">${message}</a>`;
+  }
+
+  guideStarLink(message) {
+    return `<a href="https://www.guidestar.org/profile/${this.longEIN}" target="_blank">${message}</a>`;
   }
 }
 

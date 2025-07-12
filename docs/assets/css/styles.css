@@ -1728,6 +1728,9 @@ body > div#main-content {
 .mt-8 {
   margin-top: 2rem;
 }
+.-ml-\[112px\] {
+  margin-left: -112px;
+}
 .block {
   display: block;
 }
@@ -1893,6 +1896,9 @@ body > div#main-content {
 }
 .w-screen {
   width: 100vw;
+}
+.w-\[112px\] {
+  width: 112px;
 }
 .min-w-0 {
   min-width: 0px;
