@@ -6,8 +6,7 @@ import {
   BrowseViewModel,
   getColorForEIN,
   getTextColorForEIN,
-  interpolateDarkRainbow,
-  interpolateRainbow,
+  interpolateBandIndex,
 } from "./models.js";
 
 import {
@@ -37,10 +36,17 @@ let isRedrawing = false;
 function updateScaledConstants() {
   boundaryScaleFactorX = viewModel.getExpandScaleX();
   boundaryScaleFactorY = viewModel.getExpandScaleY();
+  const maxRows = viewModel.countGraphRows(); // From models.js
   NODE_WIDTH = 50 * boundaryScaleFactorX;
   OTHER_WIDTH = 30 * boundaryScaleFactorX;
-  NODE_PADDING = 25 * boundaryScaleFactorY;
-  MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
+  NODE_PADDING = Math.max(
+    5,
+    (25 * boundaryScaleFactorY) / Math.sqrt(Math.max(1, maxRows))
+  ); // Dynamic: compress for many rows, min 5
+  MIN_LINK_HEIGHT = Math.max(
+    2,
+    (5 * boundaryScaleFactorY) / Math.sqrt(Math.max(1, maxRows))
+  ); // Similarly for links
   FONT_SIZE = 12 * boundaryScaleFactorY;
 }
 
@@ -346,7 +352,7 @@ function addEINFromInput() {
   updateQueryParams();
   generateGraph();
 }
-
+/*Dead code*/
 function renderColorPicker() {
   let boxes = [];
   for (let t = 0; t < 1; t += 0.02) {
@@ -589,33 +595,37 @@ function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
 
 function calculateRegularPosition(node, scale, height) {
   let scaleFactor = 100;
-  // note, this are using only the visible grants.
   const sankeyHeight = node.y1 - node.y0;
+  const maxRowsInColumn = viewModel.countGraphRows(); // Approx; could compute per-column if needed
+  const dynamicMin = Math.max(5, sankeyHeight / maxRowsInColumn / 2); // Allocate ~half for mins, prevent squish
+
   if (node.grantsInLogTotal > node.grantsLogTotal)
     scaleFactor = sankeyHeight / node.grantsInLogTotal;
   else scaleFactor = sankeyHeight / node.grantsLogTotal;
-  node.outflowHeight = Math.min(
-    sankeyHeight,
-    node.grantsLogTotal * scaleFactor
+
+  node.outflowHeight = Math.max(
+    dynamicMin,
+    Math.min(sankeyHeight, node.grantsLogTotal * scaleFactor)
   );
-  node.inflowHeight = Math.min(
-    sankeyHeight,
-    node.grantsInLogTotal * scaleFactor
+  node.inflowHeight = Math.max(
+    dynamicMin,
+    Math.min(sankeyHeight, node.grantsInLogTotal * scaleFactor)
   );
+
   if (node.grantsLogTotal === 0) {
     node.inflowHeight = sankeyHeight;
-    node.outflowHeight = 5;
+    node.outflowHeight = dynamicMin; // Use dynamic min instead of fixed 5
   }
   if (node.grantsInLogTotal === 0) {
-    node.inflowHeight = 5;
+    node.inflowHeight = dynamicMin;
     node.outflowHeight = sankeyHeight;
   }
   if (!isFinite(node.outflowHeight) || !isFinite(node.inflowHeight)) {
     console.error(
       `Invalid heights for ${node.filer_ein}: outflow=${node.outflowHeight}, inflow=${node.inflowHeight}`
     );
-    node.outflowHeight = 50;
-    node.inflowHeight = 50;
+    node.outflowHeight = dynamicMin * 10; // Fallback larger
+    node.inflowHeight = dynamicMin * 10;
   }
 }
 
@@ -964,6 +974,15 @@ function generateGraph() {
           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
       );
   }, 1000);*/
+  document.getElementById("layoutScaleResetXY").onclick = () => {
+    if (isRedrawing) return;
+    isRedrawing = true;
+    viewModel.defaultSize();
+    boundaryScaleFactorX = viewModel.getExpandScaleX();
+    boundaryScaleFactorY = viewModel.getExpandScaleY();
+    refresh();
+    setTimeout(() => (isRedrawing = false), 1000);
+  };
   document.getElementById("expandLayoutX").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
@@ -1766,7 +1785,9 @@ function showControlPanel(type, data, element) {
         <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
         <p>${node.propublicaLink("Take me to Propublica")}</p>
         <p>${node.googleLink("Google")}</p>
-        <!--<p>${node.grokLink("Grok")}</p>-->
+        <p>${node.grokLink("Grok")}</p>
+        <p>${node.guideStarLink("Guide Star")}</p>
+        <p>${node.charityNavigatorLink("Charity Navigator")}</p>
       `;
     }
 

@@ -185,14 +185,14 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     <div class="flex flex-col gap-2">
       {% include input.html label="Block EIN(s)" id="einHideInput"
       placeholder="XX-XXXXXXX or 9 digits" buttonLabel="Block EIN"
-      buttonId="hideEinBtn" actions="<button id='clearEINsBtnShow' class='frameless'>Unblock All</button>" %}
+      buttonId="hideEinBtn" actions="<button id='clearEINsBtnHide' class='frameless'>Unblock All</button>" %}
       <div id="hideEINs" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
     </div>
 
     <!-- Bulk Add by Keyword -->
     <div class="flex flex-col gap-2">
       {% include input.html label="Bulk add orgs by keyword" id="keywordInput"
-      placeholder="Keyword or phrase..." buttonLabel="Add"
+      placeholder="Keyword, phrase, /regex/ ..." buttonLabel="Add"
       buttonId="addFilterBtn" %}
       <div
         id="activeFilters"
@@ -208,150 +208,80 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 >
   <!-- Controls and Status Row -->
   <div class="flex justify-between items-start">
-    <!-- Control Panel: 2 rows of buttons, 1 row of text -->
-    <div class="ml-4 mt-4 bg-gray-100 p-4 rounded-md">
-      <div class="flex flex-col">
-        <!-- First Row: 3 buttons, spacer, 3 buttons -->
-        <div class="flex space-x-4 mb-4">
-          <div class="flex space-x-2">
-            <button
-              id="zoomIn"
-              title="Zoom In"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 mr-0"
+    <!-- Control Panel: 2 rows of buttons, 1 row of text, trailing button -->
+    <div class="ml-4 mt-4 bg-gray-100 p-4 rounded-md flex space-x-4">
+      <div class="flex flex-col space-y-4">
+        <div class="flex space-x-2">
+          <button
+            id="zoomIn"
+            title="Zoom In"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 mr-0"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 512 512"
+              style="margin-left: -2px; margin-top: -2px"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 512 512"
-                style="margin-left: -2px; margin-top: -2px"
-              >
-                <!--!Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.-->
-                <path
-                  fill="currentColor"
-                  d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM184 296c0 13.3 10.7 24 24 24s24-10.7 24-24l0-64 64 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-64 0 0-64c0-13.3-10.7-24-24-24s-24 10.7-24 24l0 64-64 0c-13.3 0-24 10.7-24 24s10.7 24 24 24l64 0 0 64z"
-                />
-              </svg>
-            </button>
-            <button
-              id="zoomOut"
-              title="Zoom Out"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+              <path
+                fill="currentColor"
+                d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM184 296c0 13.3 10.7 24 24 24s24-10.7 24-24l0-64 64 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-64 0 0-64c0-13.3-10.7-24-24-24s-24 10.7-24 24l0 64-64 0c-13.3 0-24 10.7-24 24s10.7 24 24 24l64 0 0 64z"
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="zoomOut"
+            title="Zoom Out"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 512 512"
+              style="margin-left: -2px; margin-top: -2px"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 512 512"
-                style="margin-left: -2px; margin-top: -2px"
-              >
-                <!--!Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.-->
-                <path
-                  fill="currentColor"
-                  d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM136 184c-13.3 0-24 10.7-24 24s10.7 24 24 24l144 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-144 0z"
-                />
-              </svg>
-            </button>
-            <button
-              id="zoomFit"
-              title="Fit to Screen"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+              <path
+                fill="currentColor"
+                d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM136 184c-13.3 0-24 10.7-24 24s10.7 24 24 24l144 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-144 0z"
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="zoomFit"
+            title="Fit to Screen"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 448 512"
+              style="margin-left: -2px; margin-top: -2px"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 448 512"
-                style="margin-left: -2px; margin-top: -2px"
-              >
-                <!--!Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.-->
-                <path
-                  fill="currentColor"
-                  d="M32 32C14.3 32 0 46.3 0 64l0 96c0 17.7 14.3 32 32 32s32-14.3 32-32l0-64 64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L32 32zM64 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7 14.3 32 32 32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0 0-64zM320 32c-17.7 0-32 14.3-32 32s14.3 32 32 32l64 0 0 64c0 17.7 14.3 32 32 32s32-14.3 32-32l0-96c0-17.7-14.3-32-32-32l-96 0zM448 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64-64 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l96 0c17.7 0 32-14.3 32-32l0-96z"
-                />
-              </svg>
-            </button>
-          </div>
-          <div class="flex space-x-2">
-            <button
-              id="expandLayoutX"
-              title="Expand Layout H"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="margin-left: -8px; margin-top: -9px"
-              >
-                <polyline points="9.625,6 3.625,12 9.625,18" />
-                <polyline points="14.375,6 20.375,12 14.375,18" />
-              </svg>
-            </button>
-            <button
-              id="shrinkLayoutX"
-              title="Shrink Layout H"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="margin-left: -8px; margin-top: -9px"
-              >
-                <polyline points="4,6 9.625,12 4,18" />
-                <polyline points="20,6 14.375,12 20,18" />
-              </svg>
-            </button>
-            <button
-              id="layoutScaleResetX"
-              title="Reset Layout Scale H"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="margin-left: -8px; margin-top: -9px"
-              >
-                <circle cx="12" cy="12" r="6" />
-                <line x1="3.5" y1="12" x2="20.5" y2="12" />
-              </svg>
-            </button>
-          </div>
+              <path
+                fill="currentColor"
+                d="M32 32C14.3 32 0 46.3 0 64l0 96c0 17.7 14.3 32 32 32s32-14.3 32-32l0-64 64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L32 32zM64 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7 14.3 32 32 32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0 0-64zM320 32c-17.7 0-32 14.3-32 32s14.3 32 32 32l64 0 0 64c0 17.7 14.3 32 32 32s32-14.3 32-32l0-96c0-17.7-14.3-32-32-32l-96 0zM448 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64-64 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l96 0c17.7 0 32-14.3 32-32l0-96z"
+              ></path>
+            </svg>
+          </button>
         </div>
-        <!-- Second Row: 3 buttons, spacer, 3 buttons -->
-        <div class="flex space-x-4 mb-4">
-          <div class="flex space-x-2">
-            <button
-              id="scaleUp"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-              title="Expand Flows"
+        <div class="flex space-x-2">
+          <button
+            id="scaleUp"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+            title="Expand Flows"
+          >
+            <svg
+              class="w-8 h-8"
+              fill="none"
+              stroke="black"
+              viewBox="0 0 24 24"
+              style="margin-top: -11px; margin-left: -7px"
             >
-              <svg
-                class="w-8 h-8"
-                fill="none"
-                stroke="black"
-                viewBox="0 0 24 24"
-                style="margin-top: -11px; margin-left: -7px"
-              >
-                <path
-                  d="M12.0,12.0 L12.11,12.01 L12.21,12.04
+              <path
+                d="M12.0,12.0 L12.11,12.01 L12.21,12.04
 L12.3,12.09 L12.39,12.17 L12.47,12.25 L12.53,12.36
 L12.57,12.48 L12.59,12.61 L12.59,12.75 L12.57,12.89
 L12.53,13.04 L12.46,13.19 L12.37,13.33 L12.25,13.46
@@ -373,26 +303,26 @@ L13.25,20.07 L12.45,20.26 L11.61,20.37 L10.76,20.4
 L9.91,20.34 L9.05,20.18 L8.2,19.95 L7.37,19.62 L6.57,19.2
 L5.81,18.7 L5.09,18.12 L4.43,17.46 L3.83,16.73 L3.3,15.94
 L2.85,15.08 L2.48,14.18 L2.21,13.23 L2.03,12.25"
-                  stroke="white"
-                  stroke-width=".75"
-                  fill="none"
-                ></path>
-              </svg>
-            </button>
-            <button
-              id="scaleDown"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-              title="Compact Flows"
-            >
-              <svg
-                class="w-8 h-8"
+                stroke="white"
+                stroke-width=".75"
                 fill="none"
-                stroke="black"
-                viewBox="0 0 24 24"
-                style="margin-top: -8px; margin-left: -9px"
-              >
-                <path
-                  d="M12.0,12.0 L12.03,12.0 L12.06,12.01
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="scaleDown"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+            title="Compact Flows"
+          >
+            <svg
+              class="w-8 h-8"
+              fill="none"
+              stroke="black"
+              viewBox="0 0 24 24"
+              style="margin-top: -8px; margin-left: -9px"
+            >
+              <path
+                d="M12.0,12.0 L12.03,12.0 L12.06,12.01
   L12.09,12.03 L12.12,12.05 L12.14,12.08 L12.16,12.11 L12.17,12.14
   L12.18,12.18 L12.18,12.22 L12.17,12.27 L12.16,12.31 L12.14,12.36
   L12.11,12.4 L12.08,12.44 L12.03,12.48 L11.99,12.51 L11.93,12.54
@@ -454,27 +384,27 @@ L2.85,15.08 L2.48,14.18 L2.21,13.23 L2.03,12.25"
   L9.71,2.86 L10.63,2.65 L11.57,2.52 L12.52,2.5 L13.47,2.56
   L14.42,2.73 L15.34,2.99 L16.24,3.34 L17.1,3.78 L17.91,4.3
   L18.67,4.91 L19.37,5.59 L20.0,6.34 L20.56,7.15 L21.03,8.01
-  L21.41,8.92 L21.7,9.87 L21.9,10.85 L21.99,11.84"
-                  stroke="white"
-                  stroke-width=".75"
-                  fill="none"
-                ></path>
-              </svg>
-            </button>
-            <button
-              id="scaleReset"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-              title="Default Flows (3)"
-            >
-              <svg
-                class="w-8 h-8"
+  L21.41,8.92 L21.7,9.87 L21.9,10.85 L21.96,11.84"
+                stroke="white"
+                stroke-width=".75"
                 fill="none"
-                stroke="black"
-                viewBox="0 0 24 24"
-                style="margin-left: -9px; margin-top: -7px"
-              >
-                <path
-                  d="M12.0,12.0 L12.05,12.01 L12.1,12.02
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="scaleReset"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+            title="Default Flows (3)"
+          >
+            <svg
+              class="w-8 h-8"
+              fill="none"
+              stroke="black"
+              viewBox="0 0 24 24"
+              style="margin-left: -9px; margin-top: -7px"
+            >
+              <path
+                d="M12.0,12.0 L12.05,12.01 L12.1,12.02
 L12.15,12.05 L12.2,12.08 L12.23,12.13 L12.26,12.18
 L12.28,12.24 L12.3,12.3 L12.3,12.37 L12.29,12.45
 L12.26,12.52 L12.23,12.59 L12.18,12.66 L12.13,12.73
@@ -518,86 +448,171 @@ L13.12,2.84 L14.04,2.94 L14.95,3.14 L15.84,3.43 L16.7,3.81
 L17.53,4.28 L18.31,4.83 L19.03,5.46 L19.69,6.16 L20.28,6.93
 L20.79,7.76 L21.22,8.64 L21.56,9.56 L21.81,10.52
 L21.96,11.51"
-                  stroke="white"
-                  stroke-width=".75"
-                  fill="none"
-                ></path>
-              </svg>
-            </button>
-          </div>
-          <div class="flex space-x-2">
-            <button
-              id="expandLayoutY"
-              title="Expand Layout V"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
                 stroke="white"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="margin-left: -8px; margin-top: -9px"
-              >
-                <polyline points="6,9.625 12,3.625 18,9.625" />
-                <polyline points="6,14.375 12,20.375 18,14.375" />
-              </svg>
-            </button>
-            <button
-              id="shrinkLayoutY"
-              title="Shrink Layout V"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
+                stroke-width=".75"
                 fill="none"
-                stroke="white"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="margin-left: -8px; margin-top: -9px"
-              >
-                <polyline points="6,4 12,9.625 18,4" />
-                <polyline points="6,20 12,14.375 18,20" />
-              </svg></button
-            ><button
-              id="layoutScaleResetY"
-              title="Reset Layout Scale"
-              class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="margin-left: -8px; margin-top: -9px"
-              >
-                <circle cx="12" cy="12" r="6" />
-                <line x1="12" y1="3.5" x2="12" y2="20.5" />
-              </svg>
-            </button>
-          </div>
+              ></path>
+            </svg>
+          </button>
         </div>
-        <!-- Third Row: Text span centered under second column -->
-        <div class="flex justify-end">
-          <div class="flex justify-center w-[104px] -ml-[104px]">
-            <span id="layoutScaleDisplayX" class="text-sm text-gray-600"
-              >42</span
+      </div>
+      <div class="flex flex-col space-y-4">
+        <div class="flex space-x-2">
+          <button
+            id="expandLayoutX"
+            title="Expand Layout to spread columns"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="margin-left: -8px; margin-top: -9px"
             >
-            <span id="layoutScaleDisplayY" class="text-sm text-gray-600 ml-4"
-              >99</span
+              <polyline points="9.625,6 3.625,12 9.625,18"></polyline>
+              <polyline points="14.375,6 20.375,12 14.375,18"></polyline>
+            </svg>
+          </button>
+          <button
+            id="shrinkLayoutX"
+            title="Shrink Layout to narrow columns"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="margin-left: -8px; margin-top: -9px"
             >
-          </div>
+              <polyline points="4,6 9.625,12 4,18"></polyline>
+              <polyline points="20,6 14.375,12 20,18"></polyline>
+            </svg>
+          </button>
+          <button
+            id="layoutScaleResetX"
+            title="Reset Layout so labels fit horizontally"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="margin-left: -8px; margin-top: -9px"
+            >
+              <circle cx="12" cy="12" r="6"></circle>
+              <line x1="3.5" y1="12" x2="20.5" y2="12"></line>
+            </svg>
+          </button>
         </div>
+        <div class="flex space-x-2">
+          <button
+            id="expandLayoutY"
+            title="Expand Layout V to make more spaces between nodes"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="margin-left: -8px; margin-top: -9px"
+            >
+              <polyline points="6,9.625 12,3.625 18,9.625"></polyline>
+              <polyline points="6,14.375 12,20.375 18,14.375"></polyline>
+            </svg>
+          </button>
+          <button
+            id="shrinkLayoutY"
+            title="Shrink Layout V so less space between nodes"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="margin-left: -8px; margin-top: -9px"
+            >
+              <polyline points="6,4 12,9.625 18,4"></polyline>
+              <polyline points="6,20 12,14.375 18,20"></polyline>
+            </svg>
+          </button>
+          <button
+            id="layoutScaleResetY"
+            title="Reset Layout Scale V so nodes fit nicely in columns"
+            class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="margin-left: -8px; margin-top: -9px"
+            >
+              <circle cx="12" cy="12" r="6"></circle>
+              <line x1="12" y1="3.5" x2="12" y2="20.5"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="flex justify-center">
+          <span id="layoutScaleDisplayX" class="text-sm text-gray-600"
+            >500.0x</span
+          >
+          <span id="layoutScaleDisplayY" class="text-sm text-gray-600 ml-4">
+            300.0x</span
+          >
+        </div>
+      </div>
+      <div class="flex flex-col justify-center space-y-4">
+        <button
+          id="layoutScaleResetXY"
+          title="Auto scale layout for nodes and labels that don't overlap"
+          class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px]"
+        >
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            style="margin-left: -8px; margin-top: -9px"
+          >
+            <circle cx="12" cy="12" r="6"></circle>
+            <line x1="3.5" y1="12" x2="20.5" y2="12"></line>
+            <line x1="12" y1="3.5" x2="12" y2="20.5"></line>
+          </svg>
+        </button>
+        <div class="h-5"></div>
       </div>
     </div>
     <!-- Status Box: Flushed right -->
