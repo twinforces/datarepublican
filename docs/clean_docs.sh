@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Get list of all directories in root, excluding docs, assets, and .git
+# Get list of all directories in root, excluding docs, excluding docs, assets, and .git
 dirs=$(find . -maxdepth 1 -type d -not -path './docs' -not -path './assets' -not -path . -not -path './.git' | sed 's|^\./||')
 
 # Check if any directories exist
@@ -27,8 +27,23 @@ for dir in $dirs; do
     find "docs/$dir" -type f | while read -r doc_file; do
         # Convert /docs/$dir path to equivalent root $dir path
         root_file=${doc_file/docs\//}
-        # Check if the file is tracked in the root directory
-        if ! echo "$tracked_files" | grep -Fx "$root_file" > /dev/null; then
+        is_tracked=0
+
+        # Check if the exact root_file is tracked
+        if echo "$tracked_files" | grep -Fx "$root_file" > /dev/null; then
+            is_tracked=1
+        fi
+
+        # If not tracked and it's an .html file, check for corresponding .md
+        if [ $is_tracked -eq 0 ] && [[ "$doc_file" == *.html ]]; then
+            root_md="${root_file%.html}.md"
+            if echo "$tracked_files" | grep -Fx "$root_md" > /dev/null; then
+                is_tracked=1
+            fi
+        fi
+
+        # If still not tracked, remove
+        if [ $is_tracked -eq 0 ]; then
             echo "Removing $doc_file (untracked in $root_file)"
             # Delete the file from the filesystem
             if [ -f "$doc_file" ]; then

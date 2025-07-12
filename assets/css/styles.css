@@ -1647,9 +1647,6 @@ body > div#main-content {
 .-mb-4 {
   margin-bottom: -1rem;
 }
-.-ml-\[104px\] {
-  margin-left: -104px;
-}
 .-mr-1 {
   margin-right: -0.25rem;
 }
@@ -1727,9 +1724,6 @@ body > div#main-content {
 }
 .mt-8 {
   margin-top: 2rem;
-}
-.-ml-\[112px\] {
-  margin-left: -112px;
 }
 .block {
   display: block;
@@ -1885,9 +1879,6 @@ body > div#main-content {
 .w-96 {
   width: 24rem;
 }
-.w-\[104px\] {
-  width: 104px;
-}
 .w-\[calc\(100\%-1rem\)\] {
   width: calc(100% - 1rem);
 }
@@ -1896,9 +1887,6 @@ body > div#main-content {
 }
 .w-screen {
   width: 100vw;
-}
-.w-\[112px\] {
-  width: 112px;
 }
 .min-w-0 {
   min-width: 0px;
