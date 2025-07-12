@@ -56,7 +56,7 @@ def find_and_generate_tests(root_dir="../"):
             continue
 
         print(f"Scanning directory: {norm_root}")
-        if "index.html" in files:
+        if "index.html" in files or "index.md" in files:
             html_path = os.path.join(root, "index.html")
             print(f"Found index.html: {html_path}")
             test_filename, test_content = generate_test_content(html_path)
