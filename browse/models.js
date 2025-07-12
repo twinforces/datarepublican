@@ -71,7 +71,6 @@ export function formatNumber(num) {
  * As they say in Highlander, there can be only one
  */
 let viewModel = null;
-
 function hashEIN(ein) {
   let hash = 2862953042; // so 001 is greenish
   const paddedEin = ein.length === 3 ? ein.padEnd(9, "0") : ein; // Pad 3-digit EINs
@@ -83,53 +82,45 @@ function hashEIN(ein) {
   return (hash % 1000000) / 1000000;
 }
 
-export function interpolateRainbow(t) {
-  return (
-    (t = (t + 0.2) % 1),
-    d3.cubehelix(
-      360 * t - 100,
-      1.5 - 1.5 * Math.abs(t - 0.5),
-      0.8 - 0.9 * Math.abs(t - 0.5)
-    )
+function interpolateBand(t, baseBrightness, mod_brightness) {
+  const abs_diff = Math.abs(t - 0.5);
+  const brightness = Math.max(0.05, baseBrightness - mod_brightness * abs_diff); // Clamp min brightness
+  const saturation = 1.5 - 1.5 * abs_diff; // Original fixed saturation
+  return d3.cubehelix(
+    360 * t - 65, // Tuned offset to make 001 (t~0.55) hue ~133 (forest green)
+    saturation,
+    brightness
   );
 }
 
-export function interpolateDarkRainbow(t) {
-  return (
-    (t = (t + 0.2) % 1),
-    d3.cubehelix(
-      360 * t - 100,
-      1.5 - 1.5 * Math.abs(t - 0.5),
-      0.5 - 0.9 * Math.abs(t - 0.5)
-    )
-  );
-}
+const brightnessBands = [
+  { base: 0.9, mod: 0.8 }, // 0: pastel (light)
+  { base: 0.7, mod: 0.6 }, // 1: medium
+  { base: 0.45, mod: 0.3 }, // 2: dark (~0.3 center)
+  { base: 0.3, mod: 0.2 }, // 3: extra dark (~0.23 center)
+];
 
-// Cubehelix function
-function cubehelix2(t) {
-  const start = 240; // Start hue adjusted to align green near t=0.123456
-  const rotations = 1.5; // Keep 1.5 rotations for variety
-  const saturation = 0.2 + 0.3 * Math.sin(t * 2 * Math.PI + Math.PI / 2); // 0.2–0.5, peaks near t=0.125
-  const gamma = 0.9; // Slightly darker brightness
-  const angle = 2 * Math.PI * (start / 360 + rotations * t);
-  const amp = saturation * (1 - t) * t * 2;
-  const r = t + amp * (-0.14861 * Math.cos(angle) + 1.78277 * Math.sin(angle));
-  const g = t + amp * (-0.29227 * Math.cos(angle) - 0.90649 * Math.sin(angle));
-  const b = t + amp * (1.97294 * Math.cos(angle));
-  return d3.rgb(
-    Math.max(0, Math.min(1, r ** gamma)) * 255,
-    Math.max(0, Math.min(1, g ** gamma)) * 255,
-    Math.max(0, Math.min(1, b ** gamma)) * 255
-  );
-}
+const bandOffset = 1; // Tuned: lastDigit=1 +1 %4=2 -> dark for node
 
-// Color function
 export function getColorForEIN(ein) {
-  return interpolateRainbow(hashEIN(ein));
+  let t = hashEIN(ein);
+  const lastDigit = parseInt(ein.slice(-1), 10);
+  let bandIndex = (lastDigit + bandOffset) % 4;
+  const brightBand = brightnessBands[bandIndex];
+  return interpolateBand(t, brightBand.base, brightBand.mod);
 }
+
 export function getTextColorForEIN(ein) {
-  // same hue/sat but darker so more texty.
-  return interpolateDarkRainbow(hashEIN(ein));
+  let t = hashEIN(ein);
+  const lastDigit = parseInt(ein.slice(-1), 10);
+  let bandIndex = ((lastDigit + bandOffset) % 4) + 1; // One darker
+  bandIndex = Math.min(3, bandIndex); // Cap at extra dark (no wrap to light for contrast)
+  const brightBand = brightnessBands[bandIndex];
+  return interpolateBand(t, brightBand.base, brightBand.mod);
+}
+
+export function interpolateBandIndex(t, band) {
+  return interpolateBand(t, colorBands[band].base, colorBands[band].mod);
 }
 
 // Initialize IndexedDB
@@ -803,6 +794,22 @@ export class BrowseViewModel {
     if (a > b) {
       minScaleX = Math.max(2, (c_val / (a - b)) * 1.1);
     }
+
+    // Clamp for effective sizes (iterate for convergence, max 2x)
+    const minFont = 8; // Pixels
+    let iterations = 0;
+    while (iterations++ < 2) {
+      // Estimate zoom: approx 0.9 / minScaleX if X-limited
+      const estZoom = 0.9 / minScaleX;
+      const effFont = 12 * scaleY * estZoom;
+      if (effFont < minFont) {
+        minScaleX /= (minFont / effFont) * 1.1; // Reduce scaleX to increase zoom
+      }
+    }
+
+    // Soft cap to prevent jumps
+    minScaleX = Math.min(1024, Math.log(layers + Math.E) * minScaleX); // Log for extremes
+
     this.expandScaleX = Math.ceil(minScaleX / 100) * 100;
   }
 
@@ -815,11 +822,32 @@ export class BrowseViewModel {
     const height = this.graphSizeY;
     const scaleX = this.getExpandScaleX();
     const baseFont = 12;
-    const nodeHeight = baseFont * 1.5;
+    const nodeHeight = baseFont * 1.5; // 18
     const padY = 25 * scaleX;
     const minH = (height - 100) / rows;
     let temp = ((nodeHeight + padY) / minH) * 1.1;
     let minScaleY = Math.max(2, temp);
+
+    // Clamp for effective sizes (iterate for convergence, max 2x)
+    const minFont = 8; // Pixels
+    const minPad = 5;
+    let iterations = 0;
+    while (iterations++ < 2) {
+      // Estimate zoom: approx min(1, height / (height * minScaleY)) if Y-dom, but conservative
+      const estZoom = Math.min(1, 0.9 / minScaleY); // Y-limited assumption
+      const effFont = baseFont * minScaleY * estZoom;
+      const effPad = 25 * minScaleY * estZoom;
+      if (effFont < minFont) {
+        minScaleY *= (minFont / effFont) * 1.1; // Boost
+      }
+      if (effPad < minPad) {
+        minScaleY *= (minPad / effPad) * 1.1;
+      }
+    }
+
+    // Soft cap to prevent jumps
+    minScaleY = Math.min(1024, Math.log(rows + Math.E) * minScaleY); // Log for extremes
+
     this.expandScaleY = Math.ceil(minScaleY / 100) * 100;
   }
 
@@ -827,24 +855,25 @@ export class BrowseViewModel {
     this.resetExpandScaleX();
     this.resetExpandScaleY();
     const aspect = this.graphSizeX / this.graphSizeY;
-    const scaleX = this.getExpandScaleX();
-    const scaleY = this.getExpandScaleY();
-    const ratio = scaleX / scaleY;
+    let scaleX = this.getExpandScaleX();
+    let scaleY = this.getExpandScaleY();
+    let ratio = scaleX / scaleY;
+
+    // Adjust for aspect, but cap distortion
+    const maxDistort = 4; // e.g., no more than 4x viewport aspect
     if (Math.abs(ratio - aspect) > 0.2) {
       const targetRatio = aspect;
       if (ratio > targetRatio) {
-        this.expandScaleY = Math.min(
-          MAX_EXPAND_SCALE,
-          scaleY * (ratio / targetRatio)
-        );
+        scaleY = Math.min(MAX_EXPAND_SCALE, scaleY * (ratio / targetRatio));
       } else {
-        this.expandScaleX = Math.min(
-          MAX_EXPAND_SCALE,
-          scaleX * (targetRatio / ratio)
-        );
+        scaleX = Math.min(MAX_EXPAND_SCALE, scaleX * (targetRatio / ratio));
       }
+      ratio = scaleX / scaleY; // Recalc
+      if (ratio > maxDistort * aspect) scaleX = scaleY * maxDistort * aspect; // Cap wide
+      if (ratio < aspect / maxDistort) scaleY = scaleX / (aspect / maxDistort); // Cap tall
     }
-    //zoomToFit();
+    this.setExpandScaleX(scaleX);
+    this.setExpandScaleY(scaleY);
   }
 
   setExpandScaleY(scale) {
@@ -1276,7 +1305,7 @@ export class BrowseViewModel {
 
           if (invisibleMatches.length > remainingSlots) {
             updateStatus(
-              `<span>Note: Graph limited to ${MAX_KEYWORD_NODES} largest orgs matching results (${visibleKeywordMatches} visible + ${remainingSlots} new)</span>`,
+              `<span>Note: Graph limited to ${MAX_KEYWORD_NODES} largest orgs matching keyworks (${visibleKeywordMatches} visible + ${remainingSlots} new)</span>`,
               "orange"
             );
           }
@@ -3004,9 +3033,17 @@ export class Charity {
     const params = new URLSearchParams();
     params.set(
       "q",
-      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit?`
+      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro an con.`
     );
-    return `<a href="https://grok.com/search?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+    return `<a href="https://grok.com/?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+  }
+
+  charityNavigatorLink(message) {
+    return `<a href="https://www.charitynavigator.org/ein/${this.ein}" target="_blank">${message}</a>`;
+  }
+
+  guideStarLink(message) {
+    return `<a href="https://www.guidestar.org/profile/${this.longEIN}" target="_blank">${message}</a>`;
   }
 }
 

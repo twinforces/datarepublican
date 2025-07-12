@@ -185,7 +185,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     <div class="flex flex-col gap-2">
       {% include input.html label="Block EIN(s)" id="einHideInput"
       placeholder="XX-XXXXXXX or 9 digits" buttonLabel="Block EIN"
-      buttonId="hideEinBtn" actions="<button id='clearEINsBtnShow' class='frameless'>Unblock All</button>" %}
+      buttonId="hideEinBtn" actions="<button id='clearEINsBtnHide' class='frameless'>Unblock All</button>" %}
       <div id="hideEINs" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
     </div>
 
@@ -460,7 +460,7 @@ L21.96,11.51"
         <div class="flex space-x-2">
           <button
             id="expandLayoutX"
-            title="Expand Layout H"
+            title="Expand Layout to spread columns"
             class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
           >
             <svg
@@ -480,7 +480,7 @@ L21.96,11.51"
           </button>
           <button
             id="shrinkLayoutX"
-            title="Shrink Layout H"
+            title="Shrink Layout to narrow columns"
             class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
           >
             <svg
@@ -500,7 +500,7 @@ L21.96,11.51"
           </button>
           <button
             id="layoutScaleResetX"
-            title="Reset Layout Scale H"
+            title="Reset Layout so labels fit horizontally"
             class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
           >
             <svg
@@ -522,7 +522,7 @@ L21.96,11.51"
         <div class="flex space-x-2">
           <button
             id="expandLayoutY"
-            title="Expand Layout V"
+            title="Expand Layout V to make more spaces between nodes"
             class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
           >
             <svg
@@ -542,7 +542,7 @@ L21.96,11.51"
           </button>
           <button
             id="shrinkLayoutY"
-            title="Shrink Layout V"
+            title="Shrink Layout V so less space between nodes"
             class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
           >
             <svg
@@ -562,7 +562,7 @@ L21.96,11.51"
           </button>
           <button
             id="layoutScaleResetY"
-            title="Reset Layout Scale V"
+            title="Reset Layout Scale V so nodes fit nicely in columns"
             class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px] mr-0"
           >
             <svg
@@ -593,7 +593,7 @@ L21.96,11.51"
       <div class="flex flex-col justify-center space-y-4">
         <button
           id="layoutScaleResetXY"
-          title="Reset Layout Scale XY"
+          title="Auto scale layout for nodes and labels that don't overlap"
           class="p-2 rounded min-w-0 w-8 h-8 text-white border border-gray-700 text-[11px]"
         >
           <svg
