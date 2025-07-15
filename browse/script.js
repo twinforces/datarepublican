@@ -479,7 +479,7 @@ function renderActiveKeywords() {
 }
 
 function downloadSVG() {
-  const svgEl = document.querySelector("#graph-container svg");
+  const svgEl = document.querySelector("#graph");
   if (!svgEl) {
     alert("No SVG to download yet.");
     return;
