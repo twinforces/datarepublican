@@ -1453,7 +1453,8 @@ export class BrowseViewModel {
    */
   porkClick(ein) {
     const c = Charity.getCharity(`${ein}`);
-    if (c) c.porkClick();
+    if (c) return c.porkClick();
+    return { depth: 0, reveal: 0 };
   }
 
   /** Clicking on the Money Bags emoji recurses upstards setting any node on the path
@@ -2361,63 +2362,55 @@ export class Charity {
   }
 
   findAllPaths(startNode, maxDepth = 5) {
-    const markedYes = new Set(); // Nodes on USG paths
-    const visited = new Set(); // Nodes checked to avoid cycles
+    const markedYes = new Set();
+    const memo = new Map();
+    const depths = new Map();
+    // states
+    const states = new Map();
 
     function dfs(node, depth = 0) {
-      if (depth > maxDepth) {
-        if (DEBUGLOG)
-          console.log(`Max depth ${maxDepth} reached at node ${node.ein}`);
-        return;
+      if (depth > maxDepth) return false;
+      const ein = node.ein;
+      if (memo.has(ein)) return memo.get(ein);
+
+      if (node.govDepth === Infinity) {
+        memo.set(ein, false);
+        return false;
       }
 
-      if (visited.has(node.ein)) {
-        return;
+      if (node.govDepth > maxDepth - depth) {
+        memo.set(ein, false);
+        return false;
       }
 
-      visited.add(node.ein);
+      let state = states.get(ein) || 0;
+      if (state === 1) return false;
 
-      // Pruning: Skip if no grantsIn and not USG-funded
-      if (node.grantsIn.length < 1 && node.govt_amt <= 0) {
-        if (DEBUGLOG)
-          console.log(`Skipped ${node.ein}: no grantsIn and not USG-funded`);
-        return;
-      }
+      states.set(ein, 1);
 
-      // Mark if on USG path
-      if (node.govDepth !== Infinity) {
-        markedYes.add(node.ein);
-        if (DEBUGLOG)
-          console.log(`Marked ${node.ein} as YES, govDepth: ${node.govDepth}`);
-      }
+      let found = node.govt_amt > 0;
 
-      // Filter grantsIn for shortest path filers
-      const targetGovDepth = node.govt_amt > 0 ? 0 : node.govDepth - 1;
-      const neighbors = node.grantsIn.filter(
-        (grant) => grant.filer.govDepth === targetGovDepth
-      );
-
-      // Explore viable neighbors
-      for (const grant of neighbors) {
+      for (const grant of node.grantsIn) {
         const neighbor = grant.filer;
-        if (neighbor.govDepth > maxDepth - depth) {
-          if (DEBUGLOG)
-            console.log(
-              `Skipped neighbor ${neighbor.ein}: govDepth ${
-                neighbor.govDepth
-              } > ${maxDepth - depth}`
-            );
-          continue;
-        }
-        if (!visited.has(neighbor.ein)) {
-          dfs(neighbor, depth + 1);
-        }
+        if (neighbor.govDepth === Infinity) continue;
+        if (neighbor.govDepth > maxDepth - depth - 1) continue;
+
+        const subFound = dfs(neighbor, depth + 1);
+        if (subFound) found = true;
       }
+
+      if (found && depth > 0) {
+        markedYes.add(ein);
+        depths.set(ein, node.govDepth);
+      }
+
+      memo.set(ein, found);
+      states.set(ein, 2);
+      return found;
     }
 
     dfs(startNode);
-
-    if (DEBUGLOG) console.log(`Total marked nodes: ${markedYes.size}`);
+    console.log("depths:", depths);
     return markedYes;
   }
 
@@ -2426,11 +2419,16 @@ export class Charity {
    */
   porkClick() {
     const paths = this.findAllPaths(this, this.getMaxDepth());
+    let reveal = 0;
     for (const ein of paths) {
       const c = Charity.getCharity(ein);
-      if (c) c.desiredVisible = true;
+      if (c) {
+        if (!c.desiredVisible) reveal++;
+        c.desiredVisible = true;
+      }
     }
     this.maxDepth = this.getMaxDepth() + 1;
+    return { depth: this.maxDepth, reveal: reveal };
   }
 
   billionarieClick() {
@@ -3080,8 +3078,8 @@ export class Grant {
     // work backwards from visible charities
     const visibleGrants = new Set();
     for (const c of Charity.visibleCharities) {
-      for (const g of c.grants) if (g.isLooseVisible) visibleGrants.add(g.id);
-      for (const g of c.grantsIn) if (g.isLooseVisible) visibleGrants.add(g.id);
+      for (const g of c.grants) if (g.isVisible) visibleGrants.add(g.id);
+      for (const g of c.grantsIn) if (g.isVisible) visibleGrants.add(g.id);
     }
     let result = [];
     for (const id of visibleGrants) {
@@ -3202,7 +3200,7 @@ export class Grant {
   /** see Charity for the split visibility explanation */
   get isVisible() {
     return (
-      this.isLooseVisible && this.filer.isVisible && this.grantee.isVisible
+      this.isLooseVisible || (this.filer.isVisible && this.grantee.isVisible)
     );
   }
 

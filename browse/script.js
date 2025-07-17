@@ -386,8 +386,9 @@ function renderActiveEINs() {
     const $tag = $(
       `<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>`
     );
-    $tag.on("click", function () {
+    $tag.on("click", function (event) {
       flashNode(c.ein);
+      event.stopPropagation();
     });
     // Add color box
     const $colorBox = $(
@@ -1116,6 +1117,8 @@ function scrollToNode(dataId) {
 
 function flashNode(dataId) {
   const $element = $(`[data-id="${dataId}"]`);
+  const $elementOutLinks = $(`[data-source-id="${dataId}"]`);
+  const $elementInLinks = $(`[data-target-id="${dataId}"]`);
 
   // Check if element exists
   if ($element.length === 0) {
@@ -1132,6 +1135,21 @@ function flashNode(dataId) {
     .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
     .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
     .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+  $elementOutLinks
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+  $elementInLinks
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+  showControlPanel("node", d3.select($element[0]).datum(), this);
 }
 
 function renderFocusedSankey(
@@ -1154,6 +1172,9 @@ function renderFocusedSankey(
   const edgeCount = currentData.links.length;
   const edgeTotal = formatNumber(
     currentData.links.reduce((sum, g) => sum + g.amt, 0)
+  );
+  const nodeGov = formatNumber(
+    currentData.nodes.reduce((sum, n) => sum + n.govt_amt, 0)
   );
   dataLoaded(true);
 
@@ -1216,6 +1237,8 @@ function renderFocusedSankey(
     .attr("d", sankeyLinkHorizontalTrapezoid())
     .attr("stroke", (d) => getColorForEIN(d.source.id))
     .style("stroke-opacity", "0.3")
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
     .attr("stroke-width", 0);
 
   link
@@ -1274,6 +1297,8 @@ function renderFocusedSankey(
   let circularLinks = graph.links.filter((d) => d.circular);
   const circularLink = circularLinkGroup
     .selectAll(".circular-link")
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
     .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   circularLink
@@ -1288,6 +1313,8 @@ function renderFocusedSankey(
     .append("path")
     .attr("class", "circular-link")
     .attr("d", (d) => d.path)
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
     .attr("fill", "none")
     .attr("stroke", "rgba(255, 105, 180, 0.5)")
     .attr("stroke-opacity", "0.5")
@@ -1298,6 +1325,8 @@ function renderFocusedSankey(
     .transition()
     .duration(ANIM_LINK)
     .attr("d", (d) => d.path)
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
     .attr("stroke", "rgba(255, 105, 180, 0.5)")
     .attr("stroke-opacity", 0.5);
 
@@ -1554,7 +1583,9 @@ function renderFocusedSankey(
 
   viewModel.cleanAfterRender();
   dataLoaded(true);
-  updateStatus(`Orgs: ${nodeCount} Flows:${edgeCount} $:${edgeTotal}`);
+  updateStatus(
+    `Orgs: ${nodeCount} USG$: ${nodeGov} Flows:${edgeCount} $:${edgeTotal}`
+  );
 
   const post = encodeURIComponent(
     `Hey, @twinforces @datarepublican, Check this out because:`
@@ -1695,7 +1726,16 @@ function refresh() {
 }
 
 window.porkClick = function (ein) {
-  viewModel.porkClick(ein);
+  try {
+    const result = viewModel.porkClick(ein);
+    let done = "";
+    if (result.reveal == 0) {
+      done = "-done";
+    }
+    $("#porkDepth").text(`${result.depth}${done}`);
+  } catch {
+    alert("sorry there was too much grift");
+  }
   refresh();
 };
 window.billClick = function (ein) {
@@ -1773,12 +1813,18 @@ function showControlPanel(type, data, element) {
         outflows = `<p>Outflows: $${formatNumber(
           node.visibleGrantsTotal
         )} visible (${node.visibleGrants.length} grants)</p> ${hiddenOutflows}`;
+      const bacon = "<span>&#x1F953;</span>";
+      const stop = "<span>&#x1F6D1;</span>";
+      let pork = '<span class="emoji">&#x1F437;</span>';
+      if (node.govDepth > 0) pork = bacon;
+      if (node.govDepth == Infinity) pork = stop; // no path to USG
+
       links = `
         <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
-        <p>Find indirect sources: 
+        <p>Find indirect USG sources: 
            <a onClick="porkClick(${
              node.ein
-           })" title="Show USG Indirect (each click does one more level)"><span class="emoji">&#x1F437;</span></a>
+           })" title="Show USG Indirect (each click does one more level)">${pork}<span id="porkDepth"></span></a>
            </p>
         <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
         <p><a href="${node.officersLink()}">Show me the Officers</a></p>
