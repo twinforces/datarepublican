@@ -98,11 +98,11 @@ function sankeyWithCircles() {
   let nodes = defaultNodes;
   let links = defaultLinks;
   let iterations = 6;
-  let circularLinkGap = 5;
+  let circularLinkGap = 2;
 
   // Constants for circular link calculations
-  const verticalMargin = 10;
-  const baseRadius = 5;
+  const verticalMargin = 25;
+  const baseRadius = 10;
 
   function computeLinkBreadths({ nodes }) {
     for (const node of nodes) {
@@ -539,7 +539,6 @@ function sankeyWithCircles() {
       }
     });
   }
-  sankeyWithCircles.createCircularPathStringArc = createCircularPathStringArc;
 
   function selectCircularLinkTypes(graph, id) {
     graph.links.forEach((link) => {
@@ -605,6 +604,17 @@ function sankeyWithCircles() {
     // add the base data for each link
     graph.links.forEach(function (link) {
       if (link.circular) {
+        let swapped = false;
+        if (link.source.layer < link.target.layer) {
+          swapped = true;
+          const temp = link.source;
+          link.source = link.target;
+          link.target = temp;
+          const tempY = link.y0;
+          link.y0 = link.y1;
+          link.y1 = tempY;
+        }
+
         link.circularPathData.arcRadius = link.width + baseRadius;
         link.circularPathData.targetNodeBuffer = buffer;
         link.circularPathData.sourceNodeBuffer = buffer;
@@ -779,12 +789,83 @@ function sankeyWithCircles() {
               link.circularPathData.sourceLargeArcRadius;
           }
         }
-      }
 
-      if (link.circular) {
         link.path = createCircularPathStringArc(link);
+
+        if (swapped) {
+          const temp = link.source;
+          link.source = link.target;
+          link.target = temp;
+          const tempY = link.y0;
+          link.y0 = link.y1;
+          link.y1 = tempY;
+          link.path = reversePath(link.path);
+        }
       }
     });
+  }
+
+  function reversePath(d) {
+    const tokens = d.match(/([MLAHVZQCS])([^MLAHVZQCS]*)/g) || [];
+    const reversed = [];
+    const points = [];
+
+    // Collect all end points
+    let currentX = 0,
+      currentY = 0;
+    tokens.forEach((token) => {
+      const cmd = token[0];
+      const args = token
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+      switch (cmd) {
+        case "M":
+          currentX = args[0];
+          currentY = args[1];
+          points.push([currentX, currentY]);
+          break;
+        case "L":
+          currentX = args[0];
+          currentY = args[1];
+          points.push([currentX, currentY]);
+          break;
+        case "A":
+          currentX = args[5];
+          currentY = args[6];
+          points.push([currentX, currentY]);
+          break;
+        // Add other commands if needed
+      }
+    });
+
+    // Now reverse
+    currentX = points[points.length - 1][0];
+    currentY = points[points.length - 1][1];
+    reversed.push(`M${currentX},${currentY}`);
+    for (let i = tokens.length - 1; i >= 1; i--) {
+      const cmd = tokens[i][0];
+      const args = tokens[i]
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+      const prevPoint = points[i - 1];
+      if (cmd === "L") {
+        reversed.push(`L${prevPoint[0]},${prevPoint[1]}`);
+      } else if (cmd === "A") {
+        const rx = args[0];
+        const ry = args[1];
+        const xAxisRotation = args[2];
+        const largeArc = args[3];
+        const sweep = 1 - args[4]; // Flip sweep
+        reversed.push(
+          `A${rx} ${ry} ${xAxisRotation} ${largeArc} ${sweep} ${prevPoint[0]} ${prevPoint[1]}`
+        );
+      }
+    }
+    return reversed.join("");
   }
 
   function calcVerticalBuffer(links, circularLinkGap, id) {
@@ -800,7 +881,9 @@ function sankeyWithCircles() {
         for (let j = 0; j < i; j++) {
           if (circularLinksCross(links[i], links[j])) {
             const bufferOverThisLink =
-              links[j].circularPathData.verticalBuffer + circularLinkGap;
+              links[j].circularPathData.verticalBuffer +
+              links[j].width +
+              circularLinkGap;
             buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
           }
         }
@@ -1009,6 +1092,8 @@ function sankeyWithCircles() {
 
     return pathString;
   }
+
+  sankeyWithCircles.createCircularPathStringArc = createCircularPathStringArc;
 
   function unidentifyCircles(graph, id, sort) {
     // Post-process links to unmark cheaper side of cycles
