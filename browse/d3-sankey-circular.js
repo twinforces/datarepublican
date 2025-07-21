@@ -109,11 +109,11 @@ function sankeyWithCircles() {
       let y0 = node.y0;
       let y1 = y0;
       for (const link of node.sourceLinks) {
-        link.y0 = y0 + link.width / 2;
+        link.y0 = y0 + link.width;
         y0 += link.width;
       }
       for (const link of node.targetLinks) {
-        link.y1 = y1 + link.width / 2;
+        link.y1 = y1 + link.width;
         y1 += link.width;
       }
     }
@@ -667,9 +667,9 @@ function sankeyWithCircles() {
         if (!buffersT[link.target.layer])
           buffersT[link.target.layer] = circularLinkGap;
         link.circularPathData.horizontalSourceBuffer =
-          buffersS[link.source.layer] + link.width + circularLinkGap;
+          buffersS[link.source.layer];
         link.circularPathData.horizontalTargetBuffer =
-          buffersT[link.target.layer] + link.width + circularLinkGap;
+          buffersT[link.target.layer];
         buffersS[link.source.layer] += link.width + circularLinkGap;
         buffersT[link.target.layer] += link.width + circularLinkGap;
       }
@@ -970,7 +970,7 @@ function createCircularPathStringSquare(link) {
         x: link.circularPathData.sourceBarRight,
         y: link.circularPathData.exitTop,
       };
-      p12 = { x: link.source.x1, y: link.circularPathData.exitTop + width };
+      p12 = { x: link.source.x1, y: link.circularPathData.exitTop };
     } else {
       p1 = { x: link.source.x1, y: link.circularPathData.exitTop + width };
       p2 = {
@@ -979,11 +979,11 @@ function createCircularPathStringSquare(link) {
       }; // shoot right
       p3 = {
         x: link.circularPathData.sourceBarLeft,
-        y: link.circularPathData.bottom,
+        y: link.circularPathData.bottom - width,
       }; // up to bottom of cross bar
       p4 = {
         x: link.circularPathData.targetBarRight,
-        y: link.circularPathData.bottom,
+        y: link.circularPathData.bottom - width,
       };
       p5 = {
         x: link.circularPathData.targetBarRight,
@@ -997,11 +997,11 @@ function createCircularPathStringSquare(link) {
       };
       p9 = {
         x: link.circularPathData.targetBarLeft,
-        y: link.circularPathData.bottom - width,
+        y: link.circularPathData.bottom,
       };
       p10 = {
         x: link.circularPathData.sourceBarRight,
-        y: link.circularPathData.bottom - width,
+        y: link.circularPathData.bottom,
       };
       p11 = {
         x: link.circularPathData.sourceBarRight,
@@ -1090,6 +1090,7 @@ function generatePlusPath(d) {
 function adjustCircularLink(link) {
   // fix path if we moved it.
   link.circularPathData.sourceY = link.y0;
+  link.circularPathData.targetY = link.y1;
   link.path = sankeyWithCircles.createCircularPathStringSquare(link);
 }
 export {
