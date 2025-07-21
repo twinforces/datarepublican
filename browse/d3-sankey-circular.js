@@ -98,10 +98,10 @@ function sankeyWithCircles() {
   let nodes = defaultNodes;
   let links = defaultLinks;
   let iterations = 6;
-  let circularLinkGap = 10;
+  let circularLinkGap = dx / 2;
 
   // Constants for circular link calculations
-  const verticalMargin = 25;
+  const verticalMargin = dx;
   const baseRadius = 10;
 
   function computeLinkBreadths({ nodes }) {
@@ -597,8 +597,8 @@ function sankeyWithCircles() {
       }
     });
 
-    calcVerticalBuffer(graph.links, circularLinkGap * scaleY, id);
-    calcHorizontalBuffer(graph.links, circularLinkGap * scaleY, id);
+    calcVerticalBuffer(graph.links, (dx * scaleY) / 2, id);
+    calcHorizontalBuffer(graph.links, (dx * scaleY) / 2, id);
 
     // add the base data for each link
     graph.links.forEach(function (link) {
