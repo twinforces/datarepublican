@@ -1152,6 +1152,29 @@ function flashNode(dataId) {
   showControlPanel("node", d3.select($element[0]).datum(), this);
 }
 
+function saveJsonToFile(data, filename = "data.json") {
+  const jsonString = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonString], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+function buildDebugData(currentData) {
+  const debugData = {};
+  debugData.links = currentData.links.map((g) => ({
+    source_id: g.filer.id,
+    target_id: g.grantee.id,
+  }));
+  debugData.nodes = currentData.nodes.map((n) => ({ name: n.name, id: n.id }));
+  saveJsonToFile(debugData, "debugData.json");
+}
+
 function renderFocusedSankey(
   g,
   sankey,
@@ -1168,6 +1191,7 @@ function renderFocusedSankey(
   dataLoaded(false);
 
   let currentData = viewModel.buildSankeyData();
+  //buildDebugData(currentData);
   const nodeCount = currentData.nodes.length;
   const edgeCount = currentData.links.length;
   const edgeTotal = formatNumber(
@@ -1310,25 +1334,24 @@ function renderFocusedSankey(
 
   const circularLinkEnter = circularLink
     .enter()
-    .append("path")
+    .append("polygon")
     .attr("class", "circular-link")
-    .attr("d", (d) => d.path)
+    .attr("points", (d) => d.path)
     .attr("data-source-id", (d) => d.source.id)
     .attr("data-target-id", (d) => d.target.id)
-    .attr("fill", "none")
-    .attr("stroke", "rgba(255, 105, 180, 0.5)")
-    .attr("stroke-opacity", "0.5")
+    .attr("fill", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke", "none")
     .attr("stroke-width", (d) => d.width);
 
   circularLink
     .merge(circularLinkEnter)
     .transition()
     .duration(ANIM_LINK)
-    .attr("d", (d) => d.path)
+    .attr("points", (d) => d.path)
+    .attr("fill", "rgba(255, 105, 180, 0.5)")
     .attr("data-source-id", (d) => d.source.id)
     .attr("data-target-id", (d) => d.target.id)
-    .attr("stroke", "rgba(255, 105, 180, 0.5)")
-    .attr("stroke-opacity", 0.5);
+    .attr("stroke", "none");
 
   /*// Add debug points for each circular link
   circularLink.merge(circularLinkEnter).each(function (d) {
@@ -1816,7 +1839,13 @@ function showControlPanel(type, data, element) {
       const bacon = "<span>&#x1F953;</span>";
       const stop = "<span>&#x1F6D1;</span>";
       let pork = '<span class="emoji">&#x1F437;</span>';
-      if (node.govDepth > 0) pork = bacon;
+      if (node.govDepth > 0) {
+        pork = bacon;
+        for (const i = 1; i < node.govDepth; i++) {
+          // bacon is 1 step removed from a pig, 2 back is 2 step.
+          pork = `${pork}${bacon}`;
+        }
+      }
       if (node.govDepth == Infinity) pork = stop; // no path to USG
 
       links = `

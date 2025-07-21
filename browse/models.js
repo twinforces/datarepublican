@@ -872,6 +872,12 @@ export class BrowseViewModel {
       if (ratio > maxDistort * aspect) scaleX = scaleY * maxDistort * aspect; // Cap wide
       if (ratio < aspect / maxDistort) scaleY = scaleX / (aspect / maxDistort); // Cap tall
     }
+    if (scaleX > MAX_EXPAND_SCALE / 10 || scaleY > MAX_EXPAND_SCALE / 10) {
+      const newMax = Math.max(scaleX, scaleY);
+      const resetRatio = 10 / newMax;
+      scaleX *= resetRatio;
+      scaleY *= resetRatio;
+    }
     this.setExpandScaleX(scaleX);
     this.setExpandScaleY(scaleY);
   }
@@ -2723,7 +2729,6 @@ export class Charity {
     if (grant instanceof Grant) {
       this.grants.push(grant);
       this.isOrganized = false;
-      this.govDepth = Math.min(this.govDepth, grant.filer.govDepth + 1);
     } else {
       console.error("Error: Can only add Grant objects.");
     }
@@ -2733,6 +2738,10 @@ export class Charity {
     if (grant instanceof Grant) {
       this.grantsIn.push(grant);
       this.isOrganized = false;
+      if (grant.filer.govDepth < this.govDepth) {
+        this.govDepth = Math.min(this.govDepth, grant.filer.govDepth + 1);
+        //console.log(grant.filer.name, "is USG to", this.name);
+      }
     } else {
       console.error("Error: Can only add Grant objects.");
     }
@@ -2972,13 +2981,25 @@ export class Charity {
    * @returns
    */
   toolTipText() {
+    const bacon = "\u{1F953}";
+    const stop = "\u{1F6D1}"; //stop sign
+    let pork = "\u{1F437}"; // pig emoji
+    if (this.govDepth > 0 && this.govDepth != Infinity) {
+      pork = "";
+      for (let i = 0; i < this.govDepth; i++) {
+        // bacon is 1 step removed from a pig, 2 back is 2 step.
+        pork += bacon;
+      }
+    }
+    if (this.govDepth == Infinity) pork = stop; // no path to USG
+
     let outFlows = this.grantsTotal
       ? `\ngrants out: $${formatNumber(this.grantsTotal)}`
       : `\nout: N/A`;
     let inFlows = this.grantsInTotal
       ? `\ngrants in: $${formatNumber(this.grantsInTotal)}`
       : `\nin: N/A`;
-    return `${this.name}\n${this.orgShort}\n${this.longEIN}${inFlows}${outFlows}`;
+    return `${this.name}\n${this.orgShort}\n${this.longEIN}${inFlows}${outFlows}\n${pork}`;
   }
 
   get griftRating() {
