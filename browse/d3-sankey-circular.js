@@ -109,11 +109,13 @@ function sankeyWithCircles() {
       let y0 = node.y0;
       let y1 = y0;
       for (const link of node.sourceLinks) {
-        link.y0 = y0 + link.width;
+        if (!link.circular) link.y0 = y0 + link.width / 2;
+        else link.y0 = y0;
         y0 += link.width;
       }
       for (const link of node.targetLinks) {
-        link.y1 = y1 + link.width;
+        if (!link.circular) link.y1 = y1 + link.width / 2;
+        else link.y1 = y1;
         y1 += link.width;
       }
     }
@@ -575,8 +577,10 @@ function sankeyWithCircles() {
     bottomLinks.sort((a, b) => b.y0 - a.y0);
   }
   function addCircularPathData(graph, circularLinkGap, id) {
+    const { scaleY, margin } = scaleSankeySize(graph);
+
     //var baseRadius = 10
-    var buffer = 25; // target/source buffer, need room for hats.
+    var buffer = 25 * scaleY; // target/source buffer, need room for hats.
     //var verticalMargin = 25
 
     var minY = d3Array.min(graph.links, function (link) {
@@ -593,8 +597,8 @@ function sankeyWithCircles() {
       }
     });
 
-    calcVerticalBuffer(graph.links, circularLinkGap, id);
-    calcHorizontalBuffer(graph.links, circularLinkGap, id);
+    calcVerticalBuffer(graph.links, circularLinkGap * scaleY, id);
+    calcHorizontalBuffer(graph.links, circularLinkGap * scaleY, id);
 
     // add the base data for each link
     graph.links.forEach(function (link) {
