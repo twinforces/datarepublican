@@ -8,6 +8,7 @@ from html import unescape
 DEFAULT_HOST = "http://localhost:4000"  # Default for tests if process.env.HOST is unset
 TEST_DIR = "."  # Save tests in current directory (tests/)
 PLAYWRIGHT_IMPORT = "const { test, expect } = require('@playwright/test');\n\n"
+CUL_DE_SAC_PATHS = ['/pa/']  # Paths not linked in navigation, case-insensitive
 
 def create_test_dir():
     """Create the tests directory if it doesn't exist."""
@@ -18,19 +19,33 @@ def sanitize_filename(name):
     name = re.sub(r'[^\w\-]', '_', name)
     return name.strip('_')
 
+def is_cul_de_sac(file_path, docs_root="../docs"):
+    """Check if the page is a cul-de-sac (not linked in navigation)."""
+    project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
+    relative_path = os.path.relpath(file_path, start=project_root).replace(os.sep, '/')
+    return any(cul_de_sac.lower() in relative_path.lower() for cul_de_sac in CUL_DE_SAC_PATHS)
+
 def get_title_content(file_path, docs_root="../docs"):
     """Extract the <title> content from corresponding docs/ folder index.html or source file."""
     try:
+        if is_cul_de_sac(file_path, docs_root):
+            print(f"Skipping cul-de-sac page: {file_path}")
+            return None
+
         project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
         relative_path = os.path.relpath(file_path, start=project_root).replace(os.sep, '/')
-        docs_html_path = os.path.join(docs_root, relative_path.replace('.md', '.html'))
+        possible_docs_paths = [
+            os.path.join(docs_root, relative_path.replace('.md', '.html')),
+            os.path.join(docs_root, relative_path.replace('pennsylvania', 'pa').replace('.md', '.html'))
+        ]
         
-        if os.path.exists(docs_html_path):
-            with open(docs_html_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE | re.DOTALL)
-            if match:
-                return unescape(match.group(1).strip())
+        for docs_html_path in possible_docs_paths:
+            if os.path.exists(docs_html_path):
+                with open(docs_html_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE | re.DOTALL)
+                if match:
+                    return unescape(match.group(1).strip())
         
         # Fallback to source file title
         if file_path.endswith('.md'):
@@ -62,11 +77,12 @@ def generate_test_content(file_path):
     test_filename = f"test_{test_name}.spec.js"  # Use .spec.js for Playwright
 
     title = get_title_content(file_path)
-    title_assertion = ""
-    if title:
-        title = title.replace("'", "\\'")  # Escape single quotes
-        # Add wait for title to handle dynamic updates
-        title_assertion = f"  await page.waitForFunction('document.title !== \"\"');\n  await expect(page).toHaveTitle('{title}');\n"
+    if title is None:
+        print(f"No valid title found for {file_path}, skipping test generation.")
+        return None, None
+
+    title = title.replace("'", "\\'")  # Escape single quotes
+    title_assertion = f"  await page.waitForFunction('document.title !== \"\"');\n  await expect(page).toHaveTitle('{title}');\n"
 
     test_content = f"{PLAYWRIGHT_IMPORT}test('{test_name} loads correctly', async ({{ page }}) => {{\n  const response = await page.goto({full_url});\n  expect(response.status()).toBe(200);\n{title_assertion}  // Add more assertions here\n}});"
 
@@ -92,12 +108,12 @@ def find_and_generate_tests(root_dir="../"):
                 file_path = os.path.join(root, file_name)
                 print(f"Found {file_name}: {file_path}")
                 test_filename, test_content = generate_test_content(file_path)
-                test_filepath = os.path.join(TEST_DIR, test_filename)
-                
-                with open(test_filepath, "w", encoding="utf-8") as f:
-                    f.write(test_content)
-                print(f"Created test file: {test_filepath}")
-                test_files_created += 1
+                if test_filename and test_content:
+                    test_filepath = os.path.join(TEST_DIR, test_filename)
+                    with open(test_filepath, "w", encoding="utf-8") as f:
+                        f.write(test_content)
+                    print(f"Created test file: {test_filepath}")
+                    test_files_created += 1
 
     if test_files_created == 0:
         print("No index.html or index.md files found in the parent directory hierarchy (excluding /docs and /node_modules).")

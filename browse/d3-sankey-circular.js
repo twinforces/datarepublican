@@ -1,4 +1,4 @@
-import { findCircuits } from "./circleMath.js";
+// import { findCircuits } from "./circleMath.js";
 
 // Use global d3 from CDN
 const d3Array = window.d3;
@@ -107,8 +107,8 @@ function sankeyWithCircles() {
   function computeLinkBreadths({ nodes }) {
     for (const node of nodes) {
       calcHeights(node);
-      let y0 = node.entryTop || node.y0;
-      let y1 = node.exitTop || node.y0;
+      let y0 = node.exitTop || node.y0;
+      let y1 = node.entryTop || node.y0;
       for (const link of node.sourceLinks) {
         if (!link.circular) link.y0 = y0 + link.width / 2;
         else link.y0 = y0;
@@ -480,8 +480,8 @@ function sankeyWithCircles() {
     node.inflowHeight = d3.sum(node.targetLinks, (link) => link.width);
     node.outflowHeight = d3.sum(node.sourceLinks, (link) => link.width);
     const midpoint = (node.y0 + node.y1) / 2;
-    node.exitTop = midpoint - node.outflowHeight / 4;
-    node.entryTop = midpoint - node.inflowHeight / 4;
+    node.exitTop = midpoint - node.outflowHeight / 2;
+    node.entryTop = midpoint - node.inflowHeight / 2;
   }
 
   function identifyCircles(graph) {
