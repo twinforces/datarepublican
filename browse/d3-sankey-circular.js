@@ -30,7 +30,7 @@ function center(node) {
   return node.targetLinks.length
     ? node.depth
     : node.sourceLinks.length
-    ? d3Array.min(node.sourceLinks, targetDepth) - 1
+    ? d3Array.min(node.sourceLinks, (d) => d.targetDepth) - 1
     : 0;
 }
 
@@ -98,16 +98,17 @@ function sankeyWithCircles() {
   let nodes = defaultNodes;
   let links = defaultLinks;
   let iterations = 6;
-  let circularLinkGap = dx / 2;
+  let circularLinkGap = dy / 10;
 
   // Constants for circular link calculations
-  const verticalMargin = dx;
+  const verticalMargin = dx / 2;
   const baseRadius = 10;
 
   function computeLinkBreadths({ nodes }) {
     for (const node of nodes) {
-      let y0 = node.y0;
-      let y1 = y0;
+      calcHeights(node);
+      let y0 = node.entryTop || node.y0;
+      let y1 = node.exitTop || node.y0;
       for (const link of node.sourceLinks) {
         if (!link.circular) link.y0 = y0 + link.width / 2;
         else link.y0 = y0;
@@ -157,8 +158,8 @@ function sankeyWithCircles() {
       node.value =
         node.fixedValue === undefined
           ? Math.max(
-              d3Array.sum(node.sourceLinks, value),
-              d3Array.sum(node.targetLinks, value)
+              d3Array.sum(node.sourceLinks, (d) => d.value),
+              d3Array.sum(node.targetLinks, (d) => d.value)
             )
           : node.fixedValue;
       node.sourceLinks.forEach(function (link) {
@@ -283,7 +284,9 @@ function sankeyWithCircles() {
 
   function initializeNodeBreadths(columns) {
     const ky = d3Array.min(columns, (c) =>
-      c ? (y1 - y0 - (c.length - 1) * py) / d3Array.sum(c, value) : Infinity
+      c
+        ? (y1 - y0 - (c.length - 1) * py) / d3Array.sum(c, (d) => d.value)
+        : Infinity
     );
     for (const nodes of columns) {
       if (!nodes) continue;
@@ -473,6 +476,14 @@ function sankeyWithCircles() {
     return y;
   }
 
+  function calcHeights(node) {
+    node.inflowHeight = d3.sum(node.targetLinks, (link) => link.width);
+    node.outflowHeight = d3.sum(node.sourceLinks, (link) => link.width);
+    const midpoint = (node.y0 + node.y1) / 2;
+    node.exitTop = midpoint - node.outflowHeight / 4;
+    node.entryTop = midpoint - node.inflowHeight / 4;
+  }
+
   function identifyCircles(graph) {
     graph.links.forEach((link) => {
       if (link.value === undefined) link.value = 1;
@@ -565,22 +576,12 @@ function sankeyWithCircles() {
         }
       }
     });
-
-    // Optionally sort links to avoid overlap (already handled in addCircularPathData)
-    const topLinks = graph.links.filter(
-      (l) => l.circular && l.circularLinkType === "top"
-    );
-    const bottomLinks = graph.links.filter(
-      (l) => l.circular && l.circularLinkType === "bottom"
-    );
-    topLinks.sort((a, b) => a.y0 - b.y0);
-    bottomLinks.sort((a, b) => b.y0 - a.y0);
   }
   function addCircularPathData(graph, circularLinkGap, id) {
     const { scaleY, margin } = scaleSankeySize(graph);
 
     //var baseRadius = 10
-    var buffer = 25 * scaleY; // target/source buffer, need room for hats.
+    var buffer = circularLinkGap * 2; //25 * scaleY; // target/source buffer, need room for hats.
     //var verticalMargin = 25
 
     var minY = d3Array.min(graph.links, function (link) {
@@ -1036,6 +1037,12 @@ function createCircularPathStringSquare(link) {
 }
 function generateTrapezoidPath(d) {
   const midY = (d.y0 + d.y1) / 2;
+  const dx = d.x1 - d.x0;
+
+  if (d.inflowHeight < dx && d.outflowHeight < dx) {
+    d.inflowHeight = dx / 2;
+    d.outflowHeight = dx / 2;
+  }
   const y0In = midY - d.inflowHeight / 2;
   const y1In = midY + d.inflowHeight / 2;
   const y0Out = midY - d.outflowHeight / 2;
@@ -1044,10 +1051,11 @@ function generateTrapezoidPath(d) {
 }
 
 function generateOctagonPath(d) {
-  const radius = d.inflowHeight / 2 || 10;
   const cx = d.x0;
+  const dx = d.x1 - d.x0;
   const cy = (d.y0 + d.y1) / 2;
-  const r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
+  let r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
+  r = Math.max(r, dx / 4); //minimum height is node width tall
 
   const c = Math.sqrt(2 + Math.SQRT2) / 2;
   const s = Math.sqrt(2 - Math.SQRT2) / 2;

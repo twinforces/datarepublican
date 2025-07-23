@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: nofooter
 title: Charity explorer - Sankey chart of NGOs and their flows
 ---
 
@@ -23,6 +23,9 @@ title: Charity explorer - Sankey chart of NGOs and their flows
   :root {
     --panel-shown: none;
     --panel-hidden: block;
+    --controls-shown: block;
+    --controls-shown-grid: grid;
+    --controls-hidden: none;
     --web-load: none;
     --db-load: none;
   }
@@ -62,6 +65,10 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     display: var(--panel-shown, none);
   }
 
+  .show-when-panel-grid {
+    display: var(--panel-grid, none);
+  }
+
   .show-web-load {
     display: var(--web-load, block);
   }
@@ -84,7 +91,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 
 <div id="topbar" class="container mx-auto p-4 bg-white shadow-md rounded-lg">
   <!-- Top Buttons Row -->
-  <div id="top-buttons" class="flex justify-between items-center mb-6">
+  <div id="top-buttons" class="flex justify-between items-center">
     <div class="flex items-center gap-4">
       <button
         id="howItWorksBtn"
@@ -96,7 +103,14 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         id="showPresetsBtn"
         class="h-8 px-3 show-when-panel-hidden bg-blue-500 hover:bg-black-800 text-white text-[11px]"
       >
-        Show Presets
+        Show Controls
+      </button>
+      <button
+        id="ngopreset-toggle"
+        class="ngopreset-toggle-btn show-when-panel-shown"
+        style="font-size: 11px"
+      >
+        Hide Controls
       </button>
     </div>
     <span id="downloadPanel" class="flex gap-2 hidden">
@@ -117,7 +131,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
     </span>
   </div>
 
-  <div id="howItWorksList" class="hidden mt-4">
+  <div id="howItWorksList" class="hidden mt-2">
     <h3 class="text-sm font-semibold">How It Works</h3>
     <p class="text-xs">
       Unlike the other tool, this tool is designed for browsing. It's not
@@ -164,39 +178,36 @@ title: Charity explorer - Sankey chart of NGOs and their flows
   </div>
 
   <!-- Presets Panel Row -->
-  <div id="presets-panel">
+  <div id="presets-panel" class="show-when-panel-shown">
     <div id="ngo-popup"></div>
   </div>
 
   <!-- Input Sections -->
-  <div
-    id="controls"
-    class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6"
-  >
+  <div id="controls" class="grid grid-cols-3 gap-4 show-when-panel-grid"">
     <!-- Add EIN(s) --><!-- prettier-ignore -->
-    <div class="flex flex-col gap-2">
+    <div class="col-span-1 flex flex-col gap-2">
       {% include input.html label="Add EIN(s)" id="einShowInput"
       placeholder="XX-XXXXXXX or 9 digits" buttonLabel="Add EIN"
       buttonId="addEinBtn" actions="<button id='clearEINsBtnShow' class='frameless'>Reset</button>"%}
-      <div id="activeEINs" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
+      <div id="activeEINs" class="max-h-36 overflow-y-auto bg-gray-50"></div>
     </div>
 
     <!-- Block EIN(s) --><!-- prettier-ignore -->
-    <div class="flex flex-col gap-2">
+    <div class="col-span-1 flex flex-col gap-2">
       {% include input.html label="Block EIN(s)" id="einHideInput"
       placeholder="XX-XXXXXXX or 9 digits" buttonLabel="Block EIN"
       buttonId="hideEinBtn" actions="<button id='clearEINsBtnHide' class='frameless'>Unblock All</button>" %}
-      <div id="hideEINs" class="max-h-36 overflow-y-auto p-4 bg-gray-50"></div>
+      <div id="hideEINs" class="max-h-36 overflow-y-auto bg-gray-50"></div>
     </div>
 
     <!-- Bulk Add by Keyword -->
-    <div class="flex flex-col gap-2">
+    <div class="col-span-1 flex flex-col gap-2">
       {% include input.html label="Bulk add orgs by keyword" id="keywordInput"
       placeholder="Keyword, phrase, /regex/ ..." buttonLabel="Add"
       buttonId="addFilterBtn" %}
       <div
         id="activeFilters"
-        class="max-h-36 overflow-y-auto p-4 bg-gray-50"
+        class="max-h-36 overflow-y-auto bg-gray-50"
       ></div>
     </div>
   </div>
@@ -204,10 +215,12 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 
 <div
   id="graph-container"
-  class="border-y md:border-x border-gray-200 rounded-md bg-white min-h-[75vh] h-full flex flex-col flex-grow"
+  class="relative border-y md:border-x border-gray-200 rounded-md bg-white min-h-[calc(100vh-135px)] h-full flex flex-col flex-grow"
 >
   <!-- Controls and Status Row -->
-  <div class="flex justify-between items-start">
+  <div
+    class="absolute top-0 left-0 w-full z-10 flex justify-between items-start"
+  >
     <!-- Control Panel: 2 rows of buttons, 1 row of text, trailing button -->
     <div class="ml-4 mt-4 bg-gray-100 p-4 rounded-md flex space-x-4">
       <div class="flex flex-col space-y-4">
@@ -617,7 +630,7 @@ L21.96,11.51"
     </div>
     <!-- Status Box: Flushed right -->
     <div
-      class="h-16 bg-gray-100 rounded flex items-center justify-center mr-4 mt-6"
+      class="h-16 bg-gray-100 rounded flex items-center justify-center mr-4 mt-6 min-w-[250px]"
     >
       <div
         id="status-container"
@@ -689,9 +702,23 @@ L21.96,11.51"
         take a few seconds.
       </p>
       <p class="text-sm mb-4">
-        All code is open source, hosted at
+        All code/data is open source, hosted at
         <a href="https://github.com/twinforces" target="_blank">github</a>. Data
         can be downlaoded from the Export Database link once complete.
+      </p>
+    </div>
+  </div>
+  <div id="nonodes" class="mt-4 w-96 mx-auto p-4 rounded shadow-lg flex hidden">
+    <div class="prose prose-sm flex-1">
+      <p class="text-sm mb-4">
+        Thank you for your patience. All data is now successfully loaded, choose
+        a preset above to get started.
+      </p>
+      <p class="text-sm mb-4">
+        All code/data is open source, hosted at
+        <a href="https://github.com/twinforces" target="_blank">github</a>. Data
+        can be downloaded from the Export Database link above, its local and
+        quick.
       </p>
     </div>
   </div>

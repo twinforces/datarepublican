@@ -22,6 +22,9 @@ const CHARITY_STORE = "charities";
 const GRANT_STORE = "grants";
 const METADATA_STORE = "metadata";
 const DATA_VERSION = "2025-06-25";
+const BALANCELIMIT = 20;
+const PER_COL = 3;
+const PER_ROW = 3;
 
 import { DATA_FILES } from "./data_files.js"; // Adjust path if needed
 
@@ -35,6 +38,7 @@ let DEBUGSTOP = false;
 
 let GOV_NODE = null; // I use this when debugging.
 let colorOffest = 0;
+const d3Array = window.d3;
 
 /**
  * Tried logarithmic scaling, but it was too drastic 1M vs. 1B was 3. 
@@ -463,7 +467,7 @@ async function fetchAndStoreTSV(db, files) {
                 receipt_amt: parseInt(row.receipt_amt || "0", 10) || 0,
                 govt_amt: parseInt(row.govt_amt || "0", 10) || 0,
                 contrib_amt: parseInt(row.contrib_amt || "0", 10) || 0,
-                tax_year: row.tax_year ? parseInt(row.tax_year, 10) : null,
+                tax_year: row.tax_year ? parseInt(row.tax_year, 10) : "N/A",
                 org_type: row.org_type || null,
                 total_assets: row.total_assets
                   ? parseFloat(row.total_assets)
@@ -759,102 +763,80 @@ export class BrowseViewModel {
   static COLUMN_SIZE = 500; // graph sizing tweaks
   countGraphRows() {
     const slots = {};
-    let max = 0;
+    let maxSlots = 0;
+    let minY = 0;
+    let maxY = viewModel.graphSizeY;
     for (const c of Charity.visibleCharities) {
       const slot = c.layer + 1;
       slots[slot] = (slots[slot] || 0) + 1;
-      if (slots[slot] > max) max = slots[slot];
+      if (slots[slot] > maxSlots) maxSlots = slots[slot];
+      if (c.y0 && c.y0 < minY) minY = c.y0;
+      if (c.y1 && c.y1 > maxY) maxY = c.y1;
     }
-    return max;
+    const circularGrants = Grant.visibleGrants.filter((g) => g.circular);
+    const nodesHeight = maxY - minY;
+    if (circularGrants.length) {
+      const topCircles = circularGrants.filter(
+        (g) => g.circularLinkType == "top"
+      );
+      const bottomCircles = circularGrants.filter(
+        (g) => g.circularLinkType == "bottom"
+      );
+      let bottomHeight = 0;
+      if (bottomCircles.length)
+        bottomHeight =
+          d3Array.max(bottomCircles, (d) => d.circularPathData.bottom) - maxY;
+      let topHeight = 0;
+      if (topCircles.length)
+        topHeight =
+          -d3Array.min(topCircles, (d) => d.circularPathData.top) - minY;
+      const pixels_per_slot = nodesHeight / maxSlots;
+      maxSlots += (topHeight + bottomHeight) / pixels_per_slot; // add the effective number of rows of the circular grants
+    }
+    return maxSlots;
+  }
+
+  balanceScales() {
+    const xyRatio = this.expandScaleX / this.expandScaleY;
+    const graphRatio = this.graphSizeX / this.graphSizeY;
+    if (this.expandScaleX > BALANCELIMIT || this.expandScaleY > BALANCELIMIT) {
+      if (this.expandScaleX > this.expandScaleY) {
+        this.expandScaleX = BALANCELIMIT;
+        this.expandScaleY = BALANCELIMIT / xyRatio / graphRatio;
+      } else {
+        this.expandScaleX = BALANCELIMIT * xyRatio * graphRatio;
+        this.expandScaleY = BALANCELIMIT;
+      }
+    }
+  }
+  countGraphColumns() {
+    let layers =
+      d3.max(Array.from(Charity.visibleCharities), (c) => c.layer) + 1;
+    if (layers < 2) {
+      layers = 2;
+      return;
+    }
+    return layers;
   }
 
   resetExpandScaleX() {
-    const layers =
-      d3.max(Array.from(Charity.visibleCharities), (c) => c.layer) + 1;
-    if (layers < 2) {
-      this.expandScaleX = 2;
-      return;
-    }
-    const width = this.graphSizeX;
-    const scaleY = this.getExpandScaleY();
-    const fontSize = 12 * scaleY;
-    const charWidth = fontSize * 0.6;
-    let maxLen = 0;
-    Charity.visibleCharities.forEach((c) => {
-      if (c.name.length > maxLen) maxLen = c.name.length;
-    });
-    const maxW = maxLen * charWidth;
-    const pad = 20;
-    const labelGap = 12;
-    const maxPair = maxW * 2;
-    const c_val = labelGap + maxPair + pad;
-    const a = (width - 100) / (layers - 1);
-    const b = 50;
-    let minScaleX = 2;
-    if (a > b) {
-      minScaleX = Math.max(2, (c_val / (a - b)) * 1.1);
-    }
-
-    // Clamp for effective sizes (iterate for convergence, max 2x)
-    const minFont = 8; // Pixels
-    let iterations = 0;
-    while (iterations++ < 2) {
-      // Estimate zoom: approx 0.9 / minScaleX if X-limited
-      const estZoom = 0.9 / minScaleX;
-      const effFont = 12 * scaleY * estZoom;
-      if (effFont < minFont) {
-        minScaleX /= (minFont / effFont) * 1.1; // Reduce scaleX to increase zoom
-      }
-    }
-
-    // Soft cap to prevent jumps
-    minScaleX = Math.min(1024, Math.log(layers + Math.E) * minScaleX); // Log for extremes
-
-    this.expandScaleX = Math.ceil(minScaleX / 100) * 100;
+    this.expandScaleX = this.countGraphColumns() * PER_COL;
+    this.balanceScales();
   }
 
   resetExpandScaleY() {
-    const rows = this.countGraphRows();
-    if (rows < 2) {
-      this.expandScaleY = 2;
-      return;
-    }
-    const height = this.graphSizeY;
-    const scaleX = this.getExpandScaleX();
-    const baseFont = 12;
-    const nodeHeight = baseFont * 1.5; // 18
-    const padY = 25 * scaleX;
-    const minH = (height - 100) / rows;
-    let temp = ((nodeHeight + padY) / minH) * 1.1;
-    let minScaleY = Math.max(2, temp);
-
-    // Clamp for effective sizes (iterate for convergence, max 2x)
-    const minFont = 8; // Pixels
-    const minPad = 5;
-    let iterations = 0;
-    while (iterations++ < 2) {
-      // Estimate zoom: approx min(1, height / (height * minScaleY)) if Y-dom, but conservative
-      const estZoom = Math.min(1, 0.9 / minScaleY); // Y-limited assumption
-      const effFont = baseFont * minScaleY * estZoom;
-      const effPad = 25 * minScaleY * estZoom;
-      if (effFont < minFont) {
-        minScaleY *= (minFont / effFont) * 1.1; // Boost
-      }
-      if (effPad < minPad) {
-        minScaleY *= (minPad / effPad) * 1.1;
-      }
-    }
-
-    // Soft cap to prevent jumps
-    minScaleY = Math.min(1024, Math.log(rows + Math.E) * minScaleY); // Log for extremes
-
-    this.expandScaleY = Math.ceil(minScaleY / 100) * 100;
+    const rows = this.countGraphRows() * PER_ROW;
+    this.expandScaleY = rows;
+    this.balanceScales();
   }
 
   defaultSize() {
-    this.resetExpandScaleX();
-    this.resetExpandScaleY();
-    const aspect = this.graphSizeX / this.graphSizeY;
+    const rows = this.countGraphRows();
+    const layers = this.countGraphColumns();
+    this.expandScaleX = layers * PER_COL;
+    this.expandScaleY = rows * PER_ROW;
+    this.balanceScales();
+    /*const aspect = this.graphSizeX / this.graphSizeY;
     let scaleX = this.getExpandScaleX();
     let scaleY = this.getExpandScaleY();
     let ratio = scaleX / scaleY;
@@ -879,7 +861,7 @@ export class BrowseViewModel {
       scaleY *= resetRatio;
     }
     this.setExpandScaleX(scaleX);
-    this.setExpandScaleY(scaleY);
+    this.setExpandScaleY(scaleY);*/
   }
 
   setExpandScaleY(scale) {
@@ -2229,7 +2211,7 @@ export class Charity {
       receipt_amt: rAmt,
       govt_amt: gAmt,
       contrib_amt: cAmt,
-      tax_year: row.tax_year || null,
+      tax_year: row.tax_year || "N/A",
       org_type: row.org_type || null,
       total_assets: row.total_assets || null,
       form_type: row.form_type || null,
@@ -2424,14 +2406,13 @@ export class Charity {
    * Compute all the paths to the USG from this charity, and set them to desired visible
    */
   porkClick() {
-    const paths = this.findAllPaths(this, this.getMaxDepth());
+    const choices = this.grantsIn.filter(
+      (g) => g.filer.govDepth == this.govDepth - 1
+    );
     let reveal = 0;
-    for (const ein of paths) {
-      const c = Charity.getCharity(ein);
-      if (c) {
-        if (!c.desiredVisible) reveal++;
-        c.desiredVisible = true;
-      }
+    for (const g of choices) {
+      if (!g.filer.desiredVisible) reveal++;
+      g.filer.desiredVisible = true;
     }
     this.maxDepth = this.getMaxDepth() + 1;
     return { depth: this.maxDepth, reveal: reveal };
@@ -2985,11 +2966,7 @@ export class Charity {
     const stop = "\u{1F6D1}"; //stop sign
     let pork = "\u{1F437}"; // pig emoji
     if (this.govDepth > 0 && this.govDepth != Infinity) {
-      pork = "";
-      for (let i = 0; i < this.govDepth; i++) {
-        // bacon is 1 step removed from a pig, 2 back is 2 step.
-        pork += bacon;
-      }
+      pork = `${bacon} ${this.govDepth}`;
     }
     if (this.govDepth == Infinity) pork = stop; // no path to USG
 
@@ -2999,7 +2976,9 @@ export class Charity {
     let inFlows = this.grantsInTotal
       ? `\ngrants in: $${formatNumber(this.grantsInTotal)}`
       : `\nin: N/A`;
-    return `${this.name}\n${this.orgShort}\n${this.longEIN}${inFlows}${outFlows}\n${pork}`;
+    return `${this.name} (${this.tax_year || "N/A"})\n${this.orgShort}\n${
+      this.longEIN
+    }${inFlows}${outFlows}\n${pork}`;
   }
 
   get griftRating() {
