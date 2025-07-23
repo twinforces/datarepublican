@@ -8,7 +8,6 @@ export default [
       "521338892",
       "521398742",
       "521340267",
-      "521774272",
       "131656647",
     ],
     url: "/browse/?ein=521344831&ein=521943638&ein=521527835&ein=521338892&ein=521398742&ein=521340267&ein=521774272&ein=943027961",
@@ -302,6 +301,13 @@ export default [
     title: "Politicians",
     subcategories: [
       {
+        title: "Bush",
+        eins: ["416017815", "204119317"],
+        url: "/browse/?ein=800835023",
+        description: "Bush's foundations",
+        type: "501(c)(3)",
+      },
+      {
         title: "Clinton",
         eins: [
           "311580204",
@@ -330,14 +336,6 @@ export default [
         url: "/browse/?ein=311580204&ein=300046638&ein=131275970&ein=133137461&ein=271414646",
         description:
           "Obama Foundation, focused on civic engagement and leadership",
-        type: "501(c)(3)",
-      },
-      {
-        title: "Turning Point (Charlie Kirk)",
-        eins: ["800835023"],
-        url: "/browse/?ein=800835023",
-        description:
-          "Conservative advocacy group led by Charlie Kirk, targeting youth",
         type: "501(c)(3)",
       },
     ],

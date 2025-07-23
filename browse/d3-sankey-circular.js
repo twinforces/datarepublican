@@ -1,4 +1,4 @@
-import { findCircuits } from "./circleMath.js";
+// import { findCircuits } from "./circleMath.js";
 
 // Use global d3 from CDN
 const d3Array = window.d3;
@@ -30,7 +30,7 @@ function center(node) {
   return node.targetLinks.length
     ? node.depth
     : node.sourceLinks.length
-    ? d3Array.min(node.sourceLinks, targetDepth) - 1
+    ? d3Array.min(node.sourceLinks, (d) => d.targetDepth) - 1
     : 0;
 }
 
@@ -98,22 +98,25 @@ function sankeyWithCircles() {
   let nodes = defaultNodes;
   let links = defaultLinks;
   let iterations = 6;
-  let circularLinkGap = 5;
+  let circularLinkGap = dy / 10;
 
   // Constants for circular link calculations
-  const verticalMargin = 10;
-  const baseRadius = 5;
+  const verticalMargin = dx / 2;
+  const baseRadius = 10;
 
   function computeLinkBreadths({ nodes }) {
     for (const node of nodes) {
-      let y0 = node.y0;
-      let y1 = y0;
+      calcHeights(node);
+      let y0 = node.exitTop || node.y0;
+      let y1 = node.entryTop || node.y0;
       for (const link of node.sourceLinks) {
-        link.y0 = y0 + link.width / 2;
+        if (!link.circular) link.y0 = y0 + link.width / 2;
+        else link.y0 = y0;
         y0 += link.width;
       }
       for (const link of node.targetLinks) {
-        link.y1 = y1 + link.width / 2;
+        if (!link.circular) link.y1 = y1 + link.width / 2;
+        else link.y1 = y1;
         y1 += link.width;
       }
     }
@@ -155,8 +158,8 @@ function sankeyWithCircles() {
       node.value =
         node.fixedValue === undefined
           ? Math.max(
-              d3Array.sum(node.sourceLinks, value),
-              d3Array.sum(node.targetLinks, value)
+              d3Array.sum(node.sourceLinks, (d) => d.value),
+              d3Array.sum(node.targetLinks, (d) => d.value)
             )
           : node.fixedValue;
       node.sourceLinks.forEach(function (link) {
@@ -281,7 +284,9 @@ function sankeyWithCircles() {
 
   function initializeNodeBreadths(columns) {
     const ky = d3Array.min(columns, (c) =>
-      c ? (y1 - y0 - (c.length - 1) * py) / d3Array.sum(c, value) : Infinity
+      c
+        ? (y1 - y0 - (c.length - 1) * py) / d3Array.sum(c, (d) => d.value)
+        : Infinity
     );
     for (const nodes of columns) {
       if (!nodes) continue;
@@ -471,71 +476,82 @@ function sankeyWithCircles() {
     return y;
   }
 
-  function identifyCircles(graph, id, sortNodes) {
-    let circularLinkID = 0;
-    const adjList = [];
-    let processedLinks = 0;
-    for (const link of graph.links) {
-      processedLinks++;
-      if (!link.source || !link.target) {
-        link.circular = false;
-        continue;
-      }
-      const source = link.source.index;
-      const target = link.target.index;
-      if (source === undefined || target === undefined) {
-        link.circular = false;
-        continue;
-      }
+  function calcHeights(node) {
+    node.inflowHeight = d3.sum(node.targetLinks, (link) => link.width);
+    node.outflowHeight = d3.sum(node.sourceLinks, (link) => link.width);
+    const midpoint = (node.y0 + node.y1) / 2;
+    node.exitTop = midpoint - node.outflowHeight / 2;
+    node.entryTop = midpoint - node.inflowHeight / 2;
+  }
 
-      if (!adjList[source]) adjList[source] = [];
-      if (!adjList[target]) adjList[target] = [];
-      if (adjList[source].indexOf(target) === -1) {
-        adjList[source].push(target);
-      } else {
-        console.log(
-          `Edge ${source} -> ${target} already exists in adjList[${source}]:`,
-          adjList[source]
-        );
-      }
-    }
-    const cycles = findCircuits(adjList);
-
-    // Assign a unique circularLinkID to each cycle
-    const cycleToId = new Map();
-    const cycleEdgesMap = new Map(); // Map cycle ID to its edges
-    cycles.forEach((cycle, cycleIndex) => {
-      const cycleId = cycleIndex; // Use cycle index as the unique ID
-      cycleToId.set(cycle.join(","), cycleId);
-      const cycleEdges = new Set();
-      for (let i = 0; i < cycle.length - 1; i++) {
-        const source = cycle[i];
-        const target = cycle[i + 1];
-        cycleEdges.add(`${source},${target}`);
-      }
-      cycleEdgesMap.set(cycleId, cycleEdges);
+  function identifyCircles(graph) {
+    graph.links.forEach((link) => {
+      if (link.value === undefined) link.value = 1;
     });
+    graph.links.sort((a, b) => b.value - a.value);
+    const idToIndex = new Map();
+    graph.nodes.forEach((node, index) => {
+      idToIndex.set(node.id, index);
+      node.index = index;
+    });
+    const n = graph.nodes.length;
+    const adj_current = Array.from({ length: n }, () => []);
+    const cycles = new Map();
+    let cycleId = 0;
 
     graph.links.forEach((link) => {
-      if (!link.source || !link.target) {
-        link.circular = false;
-        return;
-      }
-      const source = link.source.index;
-      const target = link.target.index;
-      let foundCycleId = null;
-      for (const [cycleId, edges] of cycleEdgesMap) {
-        if (edges.has(`${source},${target}`)) {
-          foundCycleId = cycleId;
-          break;
+      const u = idToIndex.get(link.source.id);
+      const v = idToIndex.get(link.target.id);
+      let has_path = false;
+      let parent = new Array(n).fill(-1);
+
+      if (u === v) {
+        has_path = true;
+      } else {
+        const visited = new Array(n).fill(false);
+        const queue = [v];
+        visited[v] = true;
+        let head = 0;
+
+        while (head < queue.length && !has_path) {
+          const curr = queue[head++];
+          for (let neigh of adj_current[curr]) {
+            if (neigh === u) {
+              has_path = true;
+              parent[neigh] = curr; // set parent for the found edge
+              break;
+            }
+            if (!visited[neigh]) {
+              visited[neigh] = true;
+              parent[neigh] = curr;
+              queue.push(neigh);
+            }
+          }
         }
       }
-      if (foundCycleId !== null) {
+
+      if (has_path) {
         link.circular = true;
-        link.circularLinkID = foundCycleId; // Assign the cycle ID
+        let path = [];
+        let current = u;
+        while (current !== v && current !== -1) {
+          path.push(current);
+          current = parent[current];
+        }
+        if (current === v) {
+          path.push(v);
+        }
+        path.reverse(); // now v to u
+        const cycleNodes = [...new Set(path)];
+        cycleNodes.sort((a, b) => a - b);
+        const cycleKey = cycleNodes.join(",");
+        if (!cycles.has(cycleKey)) {
+          cycles.set(cycleKey, cycleId++);
+        }
+        link.circularLinkId = cycles.get(cycleKey);
       } else {
         link.circular = false;
-        link.circularLinkID = undefined;
+        adj_current[u].push(v);
       }
     });
   }
@@ -560,20 +576,12 @@ function sankeyWithCircles() {
         }
       }
     });
-
-    // Optionally sort links to avoid overlap (already handled in addCircularPathData)
-    const topLinks = graph.links.filter(
-      (l) => l.circular && l.circularLinkType === "top"
-    );
-    const bottomLinks = graph.links.filter(
-      (l) => l.circular && l.circularLinkType === "bottom"
-    );
-    topLinks.sort((a, b) => a.y0 - b.y0);
-    bottomLinks.sort((a, b) => b.y0 - a.y0);
   }
   function addCircularPathData(graph, circularLinkGap, id) {
+    const { scaleY, margin } = scaleSankeySize(graph);
+
     //var baseRadius = 10
-    var buffer = 20; // target/source buffer, need room for hats.
+    var buffer = circularLinkGap * 2; //25 * scaleY; // target/source buffer, need room for hats.
     //var verticalMargin = 25
 
     var minY = d3Array.min(graph.links, function (link) {
@@ -590,29 +598,29 @@ function sankeyWithCircles() {
       }
     });
 
-    // calc vertical offsets per top/bottom links
-    var topLinks = graph.links.filter(function (l) {
-      return l.circularLinkType == "top";
-    });
-    /* topLinks = */ calcVerticalBuffer(topLinks, circularLinkGap, id);
-
-    var bottomLinks = graph.links.filter(function (l) {
-      return l.circularLinkType == "bottom";
-    });
-    /* bottomLinks = */ calcVerticalBuffer(bottomLinks, circularLinkGap, id);
+    calcVerticalBuffer(graph.links, (dx * scaleY) / 2, id);
+    calcHorizontalBuffer(graph.links, (dx * scaleY) / 2, id);
 
     // add the base data for each link
     graph.links.forEach(function (link) {
+      const width = link.width;
       if (link.circular) {
-        link.circularPathData.arcRadius = link.width + baseRadius;
-        link.circularPathData.targetNodeBuffer = buffer;
-        link.circularPathData.sourceNodeBuffer = buffer;
-        link.circularPathData.sourceWidth = link.source.x1 - link.source.x0;
-        link.circularPathData.sourceX =
-          link.source.x0 + link.circularPathData.sourceWidth;
-        link.circularPathData.targetX = link.target.x0;
-        link.circularPathData.sourceY = link.y0;
-        link.circularPathData.targetY = link.y1;
+        link.circularPathData.exitTop = link.y0;
+        link.circularPathData.entryTop = link.y1; //all same spot for now
+        link.circularPathData.sourceBarLeft =
+          link.source.x1 +
+          buffer +
+          link.circularPathData.horizontalSourceBuffer;
+        link.circularPathData.sourceBarRight =
+          link.circularPathData.sourceBarLeft + width;
+        link.circularPathData.targetBarLeft =
+          link.target.x0 - link.circularPathData.horizontalTargetBuffer - width;
+        link.circularPathData.targetBarRight =
+          link.circularPathData.targetBarLeft + width;
+        link.circularPathData.top =
+          minY - buffer - width - link.circularPathData.verticalBuffer;
+        link.circularPathData.bottom =
+          maxY + buffer + width + link.circularPathData.verticalBuffer;
 
         // else calculate normally
         // add target extent coordinates, based on links with same source column and circularLink type
@@ -625,114 +633,52 @@ function sankeyWithCircles() {
           );
         });
 
-        var radiusOffset = 0;
-        sameColumnLinks.forEach(function (l, i) {
-          if (l.circularLinkID == link.circularLinkID) {
-            link.circularPathData.targetSmallArcRadius =
-              baseRadius + link.width / 2 + radiusOffset;
-            link.circularPathData.targetLargeArcRadius =
-              baseRadius + link.width / 2 + i * circularLinkGap + radiusOffset;
-          }
-          radiusOffset = radiusOffset + l.width;
-        });
-
-        // add source extent coordinates, based on links with same target column and circularLink type
-        thisColumn = link.target.column;
-        sameColumnLinks = graph.links.filter(function (l) {
-          return (
-            l.target.column == thisColumn &&
-            l.circularLinkType == thisCircularLinkType
-          );
-        });
-
-        radiusOffset = 0;
-        sameColumnLinks.forEach(function (l, i) {
-          if (l.circularLinkID == link.circularLinkID) {
-            link.circularPathData.sourceSmallArcRadius =
-              baseRadius + link.width / 2 + radiusOffset;
-            link.circularPathData.sourceLargeArcRadius =
-              baseRadius + link.width / 2 + i * circularLinkGap + radiusOffset;
-          }
-          radiusOffset = radiusOffset + l.width;
-        });
-
-        // bottom links
-        if (link.circularLinkType == "bottom") {
-          link.circularPathData.verticalFullExtent =
-            maxY + verticalMargin + link.circularPathData.verticalBuffer;
-          link.circularPathData.verticaltargetInnerExtent =
-            link.circularPathData.verticalFullExtent -
-            link.circularPathData.targetLargeArcRadius;
-          link.circularPathData.verticalsourceInnerExtent =
-            link.circularPathData.verticalFullExtent -
-            link.circularPathData.sourceLargeArcRadius;
-        } else {
-          // top links
-          link.circularPathData.verticalFullExtent =
-            minY - verticalMargin - link.circularPathData.verticalBuffer;
-          link.circularPathData.verticaltargetInnerExtent =
-            link.circularPathData.verticalFullExtent +
-            link.circularPathData.targetLargeArcRadius;
-          link.circularPathData.verticalsourceInnerExtent =
-            link.circularPathData.verticalFullExtent +
-            link.circularPathData.sourceLargeArcRadius;
+        if (link.circular) {
+          link.path = createCircularPathStringSquare(link);
         }
-
-        // all links
-        link.circularPathData.targetInnerExtent =
-          link.circularPathData.sourceX +
-          link.circularPathData.targetNodeBuffer;
-        link.circularPathData.sourceInnerExtent =
-          link.circularPathData.targetX -
-          link.circularPathData.sourceNodeBuffer;
-        link.circularPathData.targetFullExtent =
-          link.circularPathData.sourceX +
-          link.circularPathData.targetLargeArcRadius +
-          link.circularPathData.targetNodeBuffer;
-        link.circularPathData.sourceFullExtent =
-          link.circularPathData.targetX -
-          link.circularPathData.sourceLargeArcRadius -
-          link.circularPathData.sourceNodeBuffer;
-      }
-
-      if (link.circular) {
-        link.path = createCircularPathStringArc(link);
       }
     });
   }
 
   function calcVerticalBuffer(links, circularLinkGap, id) {
-    links.sort(
-      (a, b) =>
-        b.target.layer - b.source.layer - (a.target.layer - a.source.layer)
-    );
+    links.sort((a, b) => b.width - a.width); // widest closest
+    let botBuffer = circularLinkGap;
+    let topBuffer = circularLinkGap;
     links.forEach((link, i) => {
-      let buffer = 10;
-      if (id(link.source) === id(link.target) && onlyCircularLink(link)) {
-        link.circularPathData.verticalBuffer = buffer + link.width / 2;
-      } else {
-        for (let j = 0; j < i; j++) {
-          if (circularLinksCross(links[i], links[j])) {
-            const bufferOverThisLink =
-              links[j].circularPathData.verticalBuffer +
-              links[j].width / 2 +
-              circularLinkGap;
-            buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
-          }
+      if (link.circular) {
+        let buffer = 0;
+        link.circularPathData = {};
+        if (link.circularLinkType == "top") {
+          const buffer = topBuffer;
+          link.circularPathData.verticalBuffer = buffer;
+          topBuffer += link.width + circularLinkGap;
+        } else {
+          const buffer = botBuffer;
+          link.circularPathData.verticalBuffer = buffer;
+          botBuffer += link.width + circularLinkGap;
         }
-        link.circularPathData.verticalBuffer = buffer + link.width / 2;
       }
     });
   }
 
-  function circularLinksCross(link1, link2) {
-    if (link1.source.layer < link2.target.layer) {
-      return false;
-    } else if (link1.target.layer > link2.source.layer) {
-      return false;
-    } else {
-      return true;
-    }
+  function calcHorizontalBuffer(links, circularLinkGap, id) {
+    links.sort((a, b) => b.width - a.width); // widest closest
+    let buffersS = {};
+    let buffersT = {};
+    links.forEach((link, i) => {
+      if (link.circular) {
+        if (!buffersS[link.source.layer])
+          buffersS[link.source.layer] = circularLinkGap;
+        if (!buffersT[link.target.layer])
+          buffersT[link.target.layer] = circularLinkGap;
+        link.circularPathData.horizontalSourceBuffer =
+          buffersS[link.source.layer];
+        link.circularPathData.horizontalTargetBuffer =
+          buffersT[link.target.layer];
+        buffersS[link.source.layer] += link.width + circularLinkGap;
+        buffersT[link.target.layer] += link.width + circularLinkGap;
+      }
+    });
   }
 
   function onlyCircularLink(link) {
@@ -749,100 +695,12 @@ function sankeyWithCircles() {
     return sourceCount <= 1 && targetCount <= 1;
   }
 
-  function createCircularPathStringSquare(graph, link) {
-    // Compute padding adjustments based on the link's position in the list of circular links
-    const circularLinks = link.source.sourceLinks.filter(
-      (l) => l.circular && l.circularLinkType === link.circularLinkType
-    ); // All circular links from the source that match bottom/top
-    const linkIndex = link.source.sourceLinks.indexOf(link); // Index of this link among circular links
-    const basePadding = 10; // Base padding value
-
-    const { sourceX, targetX } = link.circularPathData;
-    const Fexit0 = link.y0; // Starting y-position
-    const Nentry0 = link.y1; // Top of target trapezoid
-    let Fx1 = link.source.x1; // Right edge of FIDELITY trapezoid
-    let Nx0 = targetX; // Left edge of target trapezoid
-    if (sourceX < targetX) {
-      // this doesn't work have to switch trap sides.
-      // reverse draw
-      Fx1 = targetX;
-      Nx0 = sourceX;
-    }
-    const W = link.width || link.amt || 10; // Ensure width is defined
-    const graphTop = d3Array.min(graph.nodes, (n) => n.y0);
-    const graphBottom = d3Array.max(graph.nodes, (n) => n.y1);
-
-    // Compute offset for this link based on its position (links after it)
-    let offsetBefore = basePadding;
-    circularLinks.forEach((otherLink, idx) => {
-      const otherW = otherLink.width || otherLink.amt || 0;
-      if (idx < linkIndex) {
-        // Links after this one (outer)
-        offsetBefore += otherW + basePadding; // Width/height of outer links
-      }
-    });
-    //offsetBefore -= basePadding; // reverse the last padding
-    const outerWidth = offsetBefore + W;
-    // Compute outermost corners (maxX1, minX0, minY0)
-    const maxX1 = Fx1 + outerWidth; // FIDELITY x1 + padding + total width + padding
-    const minX0 = Nx0 - outerWidth; // c01 x - total width - padding
-    const minY0 = graphTop - outerWidth; // FIDELITY y0 - total height - padding
-    const minY1 = graphTop - offsetBefore; //crossbarBottom
-    const entryBottom = Nentry0 + W;
-
-    // Compute positions
-    const leftX = Nx0 - outerWidth;
-
-    // Forward path points (based on your suggestion)
-    const p1 = { x: Fx1, y: Fexit0 }; // Exit point top (Fx1, Fexit0)
-    const p2 = { x: Fx1, y: Fexit0 + W }; // down across face
-    let p3 = { x: maxX1, y: Fexit0 + W }; // bottom-right
-    let p4 = { x: maxX1, y: minY0 }; // Top-right corner
-    let p5 = { x: minX0, y: minY0 }; // top-left corner at target
-    let p6 = { x: minX0, y: entryBottom }; // Bottom-left corner at target
-    const p7 = { x: Nx0, y: entryBottom }; // touch target
-    const p8 = { x: Nx0, y: Nentry0 }; // Touch target trap (top)
-    let p9 = { x: Nx0 - offsetBefore, y: Nentry0 }; // Back from target
-    let p10 = { x: Nx0 - offsetBefore, y: minY1 }; // Up to crossbar bottom
-    let p11 = { x: maxX1 - W, y: minY1 }; // accross crossbar bottom
-    let p12 = { x: maxX1 - W, y: Fexit0 }; // Down to trap level
-    const p13 = { x: Fx1, y: Fexit0 }; // Touch source at start
-
-    /*if (link.circularLinkType == "bottom") {
-      p3.x -= -W;
-      p5.y += W;
-      p6.x += W;
-      p9.y -= W;
-      p10.y -= W;
-      p11.y -= W;
-      p12.x = maxX1;
-    }*/
-
-    // Create a string of points for the polygon
-    const points = [
-      `${p1.x},${p1.y}`,
-      `${p2.x},${p2.y}`,
-      `${p3.x},${p3.y}`,
-      `${p4.x},${p4.y}`,
-      `${p5.x},${p5.y}`,
-      `${p6.x},${p6.y}`,
-      `${p7.x},${p7.y}`,
-      `${p8.x},${p8.y}`,
-      `${p9.x},${p9.y}`,
-      `${p10.x},${p10.y}`,
-      `${p11.x},${p11.y}`,
-      `${p12.x},${p12.y}`,
-      `${p13.x},${p13.y}`,
-    ].join(" ");
-
-    return points;
-  }
   function unidentifyCircles(graph, id, sort) {
     // Post-process links to unmark cheaper side of cycles
     const cycles = new Map();
     graph.links.forEach((link) => {
       if (link.circular) {
-        const cycleId = link.circularLinkID;
+        const cycleId = link.circularLinkId;
         if (!cycles.has(cycleId)) {
           cycles.set(cycleId, []);
         }
@@ -861,13 +719,15 @@ function sankeyWithCircles() {
         links.forEach((link) => {
           if (link !== maxWidthLink) {
             link.circular = false; // Unmark as circular
-            link.circularLinkID = undefined; // Clear circular metadata
+            link.circularLinkId = undefined; // Clear circular metadata
             link.circularLinkType = undefined;
           }
         });
       }
     });
   }
+  sankeyWithCircles.createCircularPathStringSquare =
+    createCircularPathStringSquare;
 
   function sankey() {
     const inputData = arguments[0]; // Assuming data is the first argument
@@ -880,7 +740,7 @@ function sankeyWithCircles() {
     computeNodeLinks(graph);
     computeNodeValues(graph);
     identifyCircles(graph, id, sort);
-    unidentifyCircles(graph, id, sort);
+    //unidentifyCircles(graph, id, sort);
     computeNodeDepths(graph);
     computeNodeHeights(graph);
     const margin = computeNodeBreadths(graph);
@@ -977,185 +837,212 @@ function sankeyLinkHorizontal() {
 }
 
 // create a d path using the addCircularPathData
-function createCircularPathStringArc(link) {
-  var pathString = "";
-  // 'pathData' is assigned a value but never used
-  // var pathData = {}
-
+function createCircularPathStringSquare(link) {
+  let p1 = {};
+  let p2 = {};
+  let p3 = {};
+  let p4 = {};
+  let p5 = {};
+  let p6 = {};
+  let p7 = {};
+  let p8 = {};
+  let p9 = {};
+  let p10 = {};
+  let p11 = {};
+  let p12 = {};
+  const width = link.width;
   if (link.circularLinkType == "top") {
-    pathString =
-      // start at the source of the source node
-      "M" +
-      link.circularPathData.sourceX +
-      " " +
-      link.circularPathData.sourceY +
-      " " +
-      // line source to buffer point
-      "L" +
-      link.circularPathData.targetInnerExtent +
-      " " +
-      link.circularPathData.sourceY +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.targetLargeArcRadius +
-      " " +
-      link.circularPathData.targetSmallArcRadius +
-      " 0 0 0 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.targetFullExtent +
-      " " +
-      (link.circularPathData.sourceY -
-        link.circularPathData.targetSmallArcRadius) +
-      " " + // End of arc X
-      // line up to buffer point
-      "L" +
-      link.circularPathData.targetFullExtent +
-      " " +
-      link.circularPathData.verticaltargetInnerExtent +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.targetLargeArcRadius +
-      " " +
-      link.circularPathData.targetLargeArcRadius +
-      " 0 0 0 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.targetInnerExtent +
-      " " +
-      link.circularPathData.verticalFullExtent +
-      " " + // End of arc X
-      // line target to buffer point
-      "L" +
-      link.circularPathData.sourceInnerExtent +
-      " " +
-      link.circularPathData.verticalFullExtent +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.sourceLargeArcRadius +
-      " " +
-      link.circularPathData.sourceLargeArcRadius +
-      " 0 0 0 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.sourceFullExtent +
-      " " +
-      link.circularPathData.verticalsourceInnerExtent +
-      " " + // End of arc X
-      // line down
-      "L" +
-      link.circularPathData.sourceFullExtent +
-      " " +
-      (link.circularPathData.targetY -
-        link.circularPathData.sourceSmallArcRadius) +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.sourceLargeArcRadius +
-      " " +
-      link.circularPathData.sourceSmallArcRadius +
-      " 0 0 0 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.sourceInnerExtent +
-      " " +
-      link.circularPathData.targetY +
-      " " + // End of arc X
-      // line to end
-      "L" +
-      link.circularPathData.targetX +
-      " " +
-      link.circularPathData.targetY;
-  } else {
-    // bottom path
-    pathString =
-      // start at the source of the source node
-      "M" +
-      link.circularPathData.sourceX +
-      " " +
-      link.circularPathData.sourceY +
-      " " +
-      // line source to buffer point
-      "L" +
-      link.circularPathData.targetInnerExtent +
-      " " +
-      link.circularPathData.sourceY +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.targetLargeArcRadius +
-      " " +
-      link.circularPathData.targetSmallArcRadius +
-      " 0 0 1 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.targetFullExtent +
-      " " +
-      (link.circularPathData.sourceY +
-        link.circularPathData.targetSmallArcRadius) +
-      " " + // End of arc X
-      // line down to buffer point
-      "L" +
-      link.circularPathData.targetFullExtent +
-      " " +
-      link.circularPathData.verticaltargetInnerExtent +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.targetLargeArcRadius +
-      " " +
-      link.circularPathData.targetLargeArcRadius +
-      " 0 0 1 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.targetInnerExtent +
-      " " +
-      link.circularPathData.verticalFullExtent +
-      " " + // End of arc X
-      // line target to buffer point
-      "L" +
-      link.circularPathData.sourceInnerExtent +
-      " " +
-      link.circularPathData.verticalFullExtent +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.sourceLargeArcRadius +
-      " " +
-      link.circularPathData.sourceLargeArcRadius +
-      " 0 0 1 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.sourceFullExtent +
-      " " +
-      link.circularPathData.verticalsourceInnerExtent +
-      " " + // End of arc X
-      // line up
-      "L" +
-      link.circularPathData.sourceFullExtent +
-      " " +
-      (link.circularPathData.targetY +
-        link.circularPathData.sourceSmallArcRadius) +
-      " " +
-      // Arc around: Centre of arc X and  //Centre of arc Y
-      "A" +
-      link.circularPathData.sourceLargeArcRadius +
-      " " +
-      link.circularPathData.sourceSmallArcRadius +
-      " 0 0 1 " +
-      // End of arc X //End of arc Y
-      link.circularPathData.sourceInnerExtent +
-      " " +
-      link.circularPathData.targetY +
-      " " + // End of arc X
-      // line to end
-      "L" +
-      link.circularPathData.targetX +
-      " " +
-      link.circularPathData.targetY;
+    // top
+
+    if (link.source.layer < link.target.layer) {
+      // L->R
+      p1 = { x: link.source.x1, y: link.circularPathData.exitTop + link.width };
+      p2 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.exitTop + link.width,
+      }; // shoot right
+      p3 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.top + width,
+      }; // up to bottom of cross bar
+      p4 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.top + width,
+      };
+      p5 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.entryTop + width,
+      };
+      p6 = { x: link.target.x0, y: link.circularPathData.entryTop + width };
+      p7 = { x: link.target.x0, y: link.circularPathData.entryTop };
+      p8 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.entryTop,
+      };
+      p9 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.top,
+      };
+      p10 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.top,
+      };
+      p11 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.exitTop,
+      };
+      p11 = { x: link.source.x1, y: link.circularPathData.exitTop };
+      p12 = {
+        x: link.source.x1,
+        y: link.circularPathData.exitTop + link.width,
+      };
+    } else {
+      //R -> L
+      p1 = { x: link.source.x1, y: link.circularPathData.exitTop };
+      p2 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.exitTop,
+      }; // shoot right
+      p3 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.top + width,
+      }; // up to bottom of cross bar
+      p4 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.top + width,
+      };
+      p5 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.entryTop,
+      };
+      p6 = { x: link.target.x0, y: link.circularPathData.entryTop };
+      p7 = { x: link.target.x0, y: link.circularPathData.entryTop + width };
+      p8 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.entryTop + width,
+      };
+      p9 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.top,
+      };
+      p10 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.top,
+      };
+      p11 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.exitTop + width,
+      };
+      p12 = { x: link.source.x1, y: link.circularPathData.exitTop + width };
+    }
+  }
+  if (link.circularLinkType == "bottom") {
+    // bottom R->L
+
+    if (link.source.layer >= link.target.layer) {
+      p1 = { x: link.source.x1, y: link.circularPathData.exitTop + width };
+      p2 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.exitTop + width,
+      }; // shoot right
+      p3 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.bottom - width,
+      }; // up to bottom of cross bar
+      p4 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.bottom - width,
+      };
+      p5 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.entryTop + width,
+      };
+      p6 = { x: link.target.x0, y: link.circularPathData.entryTop + width };
+      p7 = { x: link.target.x0, y: link.circularPathData.entryTop };
+      p8 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.entryTop,
+      };
+      p9 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.bottom,
+      };
+      p10 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.bottom,
+      };
+      p11 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.exitTop,
+      };
+      p12 = { x: link.source.x1, y: link.circularPathData.exitTop };
+    } else {
+      p1 = { x: link.source.x1, y: link.circularPathData.exitTop + width };
+      p2 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.exitTop + width,
+      }; // shoot right
+      p3 = {
+        x: link.circularPathData.sourceBarLeft,
+        y: link.circularPathData.bottom - width,
+      }; // up to bottom of cross bar
+      p4 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.bottom - width,
+      };
+      p5 = {
+        x: link.circularPathData.targetBarRight,
+        y: link.circularPathData.entryTop + width,
+      };
+      p6 = { x: link.target.x0, y: link.circularPathData.entryTop + width };
+      p7 = { x: link.target.x0, y: link.circularPathData.entryTop };
+      p8 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.entryTop,
+      };
+      p9 = {
+        x: link.circularPathData.targetBarLeft,
+        y: link.circularPathData.bottom,
+      };
+      p10 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.bottom,
+      };
+      p11 = {
+        x: link.circularPathData.sourceBarRight,
+        y: link.circularPathData.exitTop,
+      };
+      p12 = { x: link.source.x1, y: link.circularPathData.exitTop };
+    }
   }
 
-  return pathString;
-}
+  // Create a string of points for the polygon
+  const points = [
+    `${p1.x},${p1.y}`,
+    `${p2.x},${p2.y}`,
+    `${p3.x},${p3.y}`,
+    `${p4.x},${p4.y}`,
+    `${p5.x},${p5.y}`,
+    `${p6.x},${p6.y}`,
+    `${p7.x},${p7.y}`,
+    `${p8.x},${p8.y}`,
+    `${p9.x},${p9.y}`,
+    `${p10.x},${p10.y}`,
+    `${p11.x},${p11.y}`,
+    `${p12.x},${p12.y}`, // always return to first point
+    `${p1.x},${p1.y}`,
+  ].join(" ");
 
+  return points;
+}
 function generateTrapezoidPath(d) {
   const midY = (d.y0 + d.y1) / 2;
+  const dx = d.x1 - d.x0;
+
+  if (d.inflowHeight < dx && d.outflowHeight < dx) {
+    d.inflowHeight = dx / 2;
+    d.outflowHeight = dx / 2;
+  }
   const y0In = midY - d.inflowHeight / 2;
   const y1In = midY + d.inflowHeight / 2;
   const y0Out = midY - d.outflowHeight / 2;
@@ -1164,10 +1051,11 @@ function generateTrapezoidPath(d) {
 }
 
 function generateOctagonPath(d) {
-  const radius = d.inflowHeight / 2 || 10;
   const cx = d.x0;
+  const dx = d.x1 - d.x0;
   const cy = (d.y0 + d.y1) / 2;
-  const r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
+  let r = d.inflowHeight / ((2 * Math.sqrt(2 + Math.SQRT2)) / 2);
+  r = Math.max(r, dx / 4); //minimum height is node width tall
 
   const c = Math.sqrt(2 + Math.SQRT2) / 2;
   const s = Math.sqrt(2 - Math.SQRT2) / 2;
@@ -1214,7 +1102,8 @@ function generatePlusPath(d) {
 function adjustCircularLink(link) {
   // fix path if we moved it.
   link.circularPathData.sourceY = link.y0;
-  link.path = createCircularPathStringArc(link);
+  link.circularPathData.targetY = link.y1;
+  link.path = sankeyWithCircles.createCircularPathStringSquare(link);
 }
 export {
   sankeyWithCircles,
