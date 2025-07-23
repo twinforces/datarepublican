@@ -1,9 +1,9 @@
 const { test, expect } = require('@playwright/test');
 
-
 test('pennsylvania_index_html loads correctly', async ({ page }) => {
   const response = await page.goto(`${process.env.HOST || 'http://localhost:4000'}/pennsylvania/index.html`);
   expect(response.status()).toBe(200);
-  await expect(page).toHaveTitle(/.+/);
-  // Add more assertions here (e.g., await expect(page.locator('h1')).toBeVisible());
+  await page.waitForFunction('document.title !== ""');
+  await expect(page).toHaveTitle('Pennsylvania early voting statistics | DataRepublican');
+  // Add more assertions here
 });

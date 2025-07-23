@@ -23,12 +23,13 @@ let zoom = null;
 let boundaryScaleFactorX = 2;
 let boundaryScaleFactorY = 2;
 const MAX_SCALE = 10;
+const BASE_FONT = 24;
 
-let NODE_WIDTH = 50 * boundaryScaleFactorX;
-let OTHER_WIDTH = 30 * boundaryScaleFactorY;
-let NODE_PADDING = 25 * boundaryScaleFactorX;
+let NODE_WIDTH = 24 * boundaryScaleFactorX;
+let OTHER_WIDTH = 30 * boundaryScaleFactorX;
+let NODE_PADDING = 25 * boundaryScaleFactorY;
 let MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
-let FONT_SIZE = 12 * boundaryScaleFactorY;
+let FONT_SIZE = BASE_FONT * boundaryScaleFactorY;
 const VERT_SCALE_RATIO = 1.5; // better to scale vertically faster with a sankey
 const FONT_CONSTANT = 4;
 let isRedrawing = false;
@@ -37,17 +38,13 @@ function updateScaledConstants() {
   boundaryScaleFactorX = viewModel.getExpandScaleX();
   boundaryScaleFactorY = viewModel.getExpandScaleY();
   const maxRows = viewModel.countGraphRows(); // From models.js
-  NODE_WIDTH = 50 * boundaryScaleFactorX;
+  NODE_WIDTH = 24 * boundaryScaleFactorX;
   OTHER_WIDTH = 30 * boundaryScaleFactorX;
-  NODE_PADDING = Math.max(
-    5,
-    (25 * boundaryScaleFactorY) / Math.sqrt(Math.max(1, maxRows))
-  ); // Dynamic: compress for many rows, min 5
-  MIN_LINK_HEIGHT = Math.max(
-    2,
-    (5 * boundaryScaleFactorY) / Math.sqrt(Math.max(1, maxRows))
-  ); // Similarly for links
-  FONT_SIZE = 12 * boundaryScaleFactorY;
+  NODE_PADDING = 25 * boundaryScaleFactorY;
+  MIN_LINK_HEIGHT = 5 * boundaryScaleFactorY;
+
+  FONT_SIZE = BASE_FONT * boundaryScaleFactorY;
+  updateLayoutButtons();
 }
 
 function updateStatus(message, color = "black") {
@@ -89,7 +86,6 @@ function renderPopup() {
       <div class="ngopreset-columns">
         <div class="toggle-row">
           <div class="button-group-column">
-            <button id="ngopreset-toggle" class="ngopreset-toggle-btn " style="font-size: 11px;">Hide Presets</button>
             <div class="ngopreset-mode-switch">
               <span class="toggle-label toggle-label-add">Preset will add</span>
               <div class="toggle-switch">
@@ -209,6 +205,16 @@ function renderPopup() {
   });
 
   // Wire up the toggle buttons
+  const showCtlBtn = document.getElementById("showControlsBtn");
+  const hideCtlBtn = document.getElementById("hideControlsBtn");
+  if (showCtlBtn) {
+    showCtlBtn.addEventListener("click", showControls);
+  }
+  if (hideCtlBtn) {
+    hideCtlBtn.addEventListener("click", hideControls);
+  }
+
+  // Wire up the toggle buttons
   const showBtn = document.getElementById("showPresetsBtn");
   const hideBtn = document.getElementById("ngopreset-toggle");
   if (showBtn) {
@@ -227,6 +233,7 @@ function renderPopup() {
 // show and hide controls implementation
 window.collapseControls = function () {
   document.documentElement.style.setProperty("--controls-shown", "none");
+  document.documentElement.style.setProperty("--controls-shown-grid", "none");
   document.documentElement.style.setProperty("--controls-hidden", "block");
   console.log("Controls shown");
 };
@@ -237,15 +244,30 @@ window.expandControls = function () {
   console.log("Controls hidden");
 };
 // Show Presets and Hide Presets implementations
+window.showControls = function () {
+  document.documentElement.style.setProperty("--controls-shown", "block");
+  document.documentElement.style.setProperty("--controls-hidden", "none");
+  console.log("controls shown");
+};
+
+window.hideControls = function () {
+  document.documentElement.style.setProperty("--controls-shown", "none");
+  document.documentElement.style.setProperty("--controls-hidden", "block");
+  console.log("Controls hidden");
+};
+// Show Presets and Hide Presets implementations
 window.showPresets = function () {
   document.documentElement.style.setProperty("--panel-shown", "block");
   document.documentElement.style.setProperty("--panel-hidden", "none");
+  document.documentElement.style.setProperty("--panel-grid", "grid");
+
   console.log("Panel shown");
 };
 
 window.hidePresets = function () {
   document.documentElement.style.setProperty("--panel-shown", "none");
   document.documentElement.style.setProperty("--panel-hidden", "block");
+  document.documentElement.style.setProperty("--panel-grid", "none");
   console.log("Panel hidden");
 };
 
@@ -262,7 +284,6 @@ $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
   const params = new URLSearchParams(window.location.search);
-  const boundaryScale = viewModel.getExpandScaleX();
 
   updateStatus("Loading Data...");
 
@@ -386,8 +407,9 @@ function renderActiveEINs() {
     const $tag = $(
       `<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>`
     );
-    $tag.on("click", function () {
-      flashNode(c.ein);
+    $tag.on("click", function (event) {
+      flashNodeAndShow(c.ein);
+      event.stopPropagation();
     });
     // Add color box
     const $colorBox = $(
@@ -401,7 +423,7 @@ function renderActiveEINs() {
         .slice(2)}"></span>`
     ).text(name);
     const $rm = $(
-      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
+      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1" style=" cursor:pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
     ).attr("data-ein", ein);
     $rm.on("click", function () {
       viewModel.removeFromShowList(ein);
@@ -479,7 +501,7 @@ function renderActiveKeywords() {
 }
 
 function downloadSVG() {
-  const svgEl = document.querySelector("#graph-container svg");
+  const svgEl = document.querySelector("#graph");
   if (!svgEl) {
     alert("No SVG to download yet.");
     return;
@@ -593,10 +615,9 @@ function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
   };
 }
 
-function calculateRegularPosition(node, scale, height) {
+function calculateRegularPosition(node, scale, height, maxRowsInColumn) {
   let scaleFactor = 100;
   const sankeyHeight = node.y1 - node.y0;
-  const maxRowsInColumn = viewModel.countGraphRows(); // Approx; could compute per-column if needed
   const dynamicMin = Math.max(5, sankeyHeight / maxRowsInColumn / 2); // Allocate ~half for mins, prevent squish
 
   if (node.grantsInLogTotal > node.grantsLogTotal)
@@ -626,11 +647,14 @@ function calculateRegularPosition(node, scale, height) {
     );
     node.outflowHeight = dynamicMin * 10; // Fallback larger
     node.inflowHeight = dynamicMin * 10;
+    node.entryTop = (node.y0 + node.y1) / 2 - node.inflowHeight;
+    node.exitTop = (node.y0 + node.y1) / 2 - node.outflowHeight;
   }
 }
 
 function calculateNodePositions(nodes, scale, height) {
-  nodes.forEach((d) => calculateRegularPosition(d, scale, height));
+  const nRows = viewModel.countGraphRows();
+  nodes.forEach((d) => calculateRegularPosition(d, scale, height, nRows));
 }
 
 function normalizeStrokeWidths(sankey) {
@@ -747,6 +771,18 @@ function bindEvents(g) {
       event.stopPropagation();
       viewModel.doubleClickGrant(event, d, refresh);
     });
+
+  g.selectAll(".circular-link")
+    .on("click", (event, d) => {
+      console.log("Circular Link clicked:", d.id);
+      event.stopPropagation();
+      showControlPanel("link", d, this);
+    })
+    .on("dblclick", (event, d) => {
+      console.log("Link double-clicked:", d.id);
+      event.stopPropagation();
+      viewModel.doubleClickGrant(event, d, refresh);
+    });
   /*.on("touchstart", function (event) {
       event.preventDefault(); // Prevent default right-click behavior
       const timer = setTimeout(() => {
@@ -791,10 +827,10 @@ function zoomToFit() {
   }
   const container = document.getElementById("graph-container");
   const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.75;
+  const height = container.offsetHeight || window.innerHeight * 0.9;
   const dx = bounds.x;
   const dy = bounds.y;
-  const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
+  const scale = 0.95 / Math.max(bounds.width / width, bounds.height / height);
   svg
     .transition()
     .duration(750)
@@ -814,6 +850,7 @@ function generateGraph() {
     alert("Data not loaded yet. Please wait.");
     return;
   }
+  updateScaledConstants();
 
   $("#graph").empty();
   updateStatus("Generating Graph...");
@@ -865,7 +902,8 @@ function generateGraph() {
     });
 
   svg.call(zoom);
-
+  viewModel.rememberGraphSize(width, height);
+  viewModel.parseQueryParams(new URLSearchParams(window.location.search));
   updateScaledConstants();
   const sankey = sankeyWithCircles()
     .nodeId((d) => d.ein)
@@ -879,12 +917,14 @@ function generateGraph() {
       (height - 100) * viewModel.getExpandScaleY(),
     ]);
 
-  viewModel.rememberGraphSize(width, height);
-
-  viewModel.parseQueryParams();
   if (viewModel.matchURL() === 0) {
     showPresets();
+    $("#nonodes").removeClass("hidden");
+    $("#loading").addClass("hidden");
+
     return;
+  } else {
+    $("#nonodes").addClass("hidden");
   }
   try {
     $("#statusSpinner").show();
@@ -1116,6 +1156,8 @@ function scrollToNode(dataId) {
 
 function flashNode(dataId) {
   const $element = $(`[data-id="${dataId}"]`);
+  const $elementOutLinks = $(`[data-source-id="${dataId}"]`);
+  const $elementInLinks = $(`[data-target-id="${dataId}"]`);
 
   // Check if element exists
   if ($element.length === 0) {
@@ -1132,6 +1174,49 @@ function flashNode(dataId) {
     .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
     .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
     .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+  $elementOutLinks
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+  $elementInLinks
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
+    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
+    .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
+}
+
+function flashNodeAndShow(dataId) {
+  flashNode(dataId);
+  const $element = $(`[data-id="${dataId}"]`);
+  showControlPanel("node", d3.select($element[0]).datum(), this);
+}
+
+function saveJsonToFile(data, filename = "data.json") {
+  const jsonString = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonString], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+function buildDebugData(currentData) {
+  const debugData = {};
+  debugData.links = currentData.links.map((g) => ({
+    source_id: g.filer.id,
+    target_id: g.grantee.id,
+  }));
+  debugData.nodes = currentData.nodes.map((n) => ({ name: n.name, id: n.id }));
+  saveJsonToFile(debugData, "debugData.json");
 }
 
 function renderFocusedSankey(
@@ -1150,10 +1235,14 @@ function renderFocusedSankey(
   dataLoaded(false);
 
   let currentData = viewModel.buildSankeyData();
+  //buildDebugData(currentData);
   const nodeCount = currentData.nodes.length;
   const edgeCount = currentData.links.length;
   const edgeTotal = formatNumber(
     currentData.links.reduce((sum, g) => sum + g.amt, 0)
+  );
+  const nodeGov = formatNumber(
+    currentData.nodes.reduce((sum, n) => sum + n.govt_amt, 0)
   );
   dataLoaded(true);
 
@@ -1167,10 +1256,6 @@ function renderFocusedSankey(
   const graph = sankey(currentData);
 
   const scale = calculateScale(graph, width, height);
-  calculateNodePositions(graph.nodes, scale, height);
-  adjustCircularLinks(graph);
-  normalizeStrokeWidths(graph);
-
   calculateNodePositions(graph.nodes, scale, height);
   adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
@@ -1216,6 +1301,8 @@ function renderFocusedSankey(
     .attr("d", sankeyLinkHorizontalTrapezoid())
     .attr("stroke", (d) => getColorForEIN(d.source.id))
     .style("stroke-opacity", "0.3")
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
     .attr("stroke-width", 0);
 
   link
@@ -1274,6 +1361,8 @@ function renderFocusedSankey(
   let circularLinks = graph.links.filter((d) => d.circular);
   const circularLink = circularLinkGroup
     .selectAll(".circular-link")
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
     .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   circularLink
@@ -1285,21 +1374,27 @@ function renderFocusedSankey(
 
   const circularLinkEnter = circularLink
     .enter()
-    .append("path")
+    .append("polygon")
     .attr("class", "circular-link")
-    .attr("d", (d) => d.path)
-    .attr("fill", "none")
-    .attr("stroke", "rgba(255, 105, 180, 0.5)")
-    .attr("stroke-opacity", "0.5")
-    .attr("stroke-width", (d) => d.width);
+    .attr("points", (d) => d.path)
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
+    .attr("fill", "rgba(255, 105, 180, 0.5)")
+    .attr("stroke", "pink")
+    .attr("stroke-opacity", "0.6")
+    .attr("stroke-width", (d) => 0.1 * d.width);
 
   circularLink
     .merge(circularLinkEnter)
     .transition()
     .duration(ANIM_LINK)
-    .attr("d", (d) => d.path)
-    .attr("stroke", "rgba(255, 105, 180, 0.5)")
-    .attr("stroke-opacity", 0.5);
+    .attr("points", (d) => d.path)
+    .attr("fill", "rgba(255, 105, 180, 0.5)")
+    .attr("data-source-id", (d) => d.source.id)
+    .attr("data-target-id", (d) => d.target.id)
+    .attr("stroke", "pink")
+    .attr("stroke-opacity", "0.6")
+    .attr("stroke-width", (d) => 0.1 * d.width);
 
   /*// Add debug points for each circular link
   circularLink.merge(circularLinkEnter).each(function (d) {
@@ -1554,7 +1649,9 @@ function renderFocusedSankey(
 
   viewModel.cleanAfterRender();
   dataLoaded(true);
-  updateStatus(`Orgs: ${nodeCount} Flows:${edgeCount} $:${edgeTotal}`);
+  updateStatus(
+    `Orgs: ${nodeCount} USG$: ${nodeGov} Flows:${edgeCount} $:${edgeTotal}`
+  );
 
   const post = encodeURIComponent(
     `Hey, @twinforces @datarepublican, Check this out because:`
@@ -1691,12 +1788,26 @@ function refresh() {
   updateQueryParams();
   renderActiveEINs();
   renderHideEINs();
+  updateScaledConstants();
   generateGraph();
 }
 
 window.porkClick = function (ein) {
-  viewModel.porkClick(ein);
+  try {
+    const result = viewModel.porkClick(ein);
+    let done = "";
+    if (result.reveal == 0) {
+      done = "-done";
+    }
+    $("#porkDepth").text(`${result.depth}${done}`);
+  } catch {
+    alert("sorry there was too much grift");
+  }
   refresh();
+};
+
+window.flashNode = function (ein) {
+  flashNode(ein);
 };
 window.billClick = function (ein) {
   viewModel.billClick(ein);
@@ -1773,12 +1884,20 @@ function showControlPanel(type, data, element) {
         outflows = `<p>Outflows: $${formatNumber(
           node.visibleGrantsTotal
         )} visible (${node.visibleGrants.length} grants)</p> ${hiddenOutflows}`;
+      const bacon = "<span>&#x1F953;</span>";
+      const stop = "<span>&#x1F6D1;</span>";
+      let pork = '<span class="emoji">&#x1F437;</span>';
+      if (node.govDepth > 0) {
+        pork = `${bacon} ${node.govDepth}`;
+      }
+      if (node.govDepth == Infinity) pork = stop; // no path to USG
+
       links = `
         <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
-        <p>Find indirect sources: 
-           <a onClick="porkClick(${
+        <p>Find indirect USG sources: 
+           <a onClick="porkClick('${
              node.ein
-           })" title="Show USG Indirect (each click does one more level)"><span class="emoji">&#x1F437;</span></a>
+           }')" title="Show USG Indirect (each click does one more level)" style="cursor:pointer">${pork}<span id="porkDepth"></span></a>
            </p>
         <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
         <p><a href="${node.officersLink()}">Show me the Officers</a></p>
@@ -1793,7 +1912,7 @@ function showControlPanel(type, data, element) {
 
     return `
       <div class="bg-blue-500 text-white flex-col p-4 text-center">
-        <h3>${node.name}</h3>
+        <h3>${node.name} <a onClick="flashNode('${node.ein}')" title="Flash" style="cursor:pointer"><span>&#128294;</span></a></h3>
         <p>EIN: ${node.longEIN}</p>
       </div>
       <div class="flex flex-row gap-4">
