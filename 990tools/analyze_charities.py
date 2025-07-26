@@ -18,7 +18,8 @@ TSV_COLUMNS = [
     "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
     "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
     "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
-    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
+    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name",
+    "eating_seed_corn"
 ]
 
 PERCENTILE_COLS = {
@@ -34,7 +35,7 @@ REPORT_COLS = [
     "grift_ratio", "grift", "denominator", "filer_ein", "filer_name", "tax_year", "total_exp", "officer_comp", 
     "comp_pct", "comp_ptile", "travel_amt", "travel_pct", "travel_ptile", "conferences_amt", "conferences_pct", 
     "conferences_ptile", "grants_to_others", "grants_pct", "grants_ptile", "foreign_expenses", 
-    "foreign_expenses_pct", "foreign_expenses_ptile", "total_assets"
+    "foreign_expenses_pct", "foreign_expenses_ptile", "total_assets", "eating_seed_corn"
 ]
 
 # Setup logging
@@ -84,8 +85,8 @@ def compute_percentiles(values, metric, exclude_zeros=False):
     percentile_map = {val: rank for val, rank in zip(valid_values, ranks)}
     percentiles = np.array([percentile_map.get(v, np.nan) if (v > 0 if exclude_zeros else v != 0) else np.nan for v in values], dtype=np.float64)
 
-    # Handle negative and >1000 (for grift_ratio) or >100 (for _pct metrics) values
-    max_value = 1000.0 if metric == "grift_ratio" else 100.0
+    # Handle negative and >101 values
+    max_value = 101.0
     negative_count = sum(1 for v in values if v < 0)
     over_max_count = sum(1 for v in values if v > max_value)
     valid_values = np.array([v for v in valid_values if 0 <= v <= max_value], dtype=np.float64)
@@ -140,7 +141,6 @@ def compute_percentiles(values, metric, exclude_zeros=False):
         total_valid = len(valid_values)
         for i in range(len(percentiles_range) - 1):
             cum_pct = percentiles_range[i]
-            next_cum_pct = percentiles_range[i + 1]
             lower_bound = percentile_values[i]
             upper_bound = percentile_values[i + 1]
             bin_values = valid_values[(valid_values >= lower_bound) & (valid_values < upper_bound if i < len(percentiles_range) - 2 else valid_values <= upper_bound)]
@@ -160,14 +160,17 @@ def clamp_value(value):
         return "0.00"
     if value < 0:
         return "-0"
-    if value > 100:
-        return "+100"
+    if value > 101:
+        return "+101"
     return f"{value:.2f}"
 
 def compute_percentage(numerator, denominator):
-    if denominator == 0 or numerator == 0:
+    num = abs(numerator)
+    den = abs(denominator) if denominator != 0 else 0
+    if den == 0 or num == 0:
         return 0.0
-    return (numerator / denominator) * 100
+    pct = (num / den) * 100
+    return min(pct, 101.0)
 
 def process_file(file_path, output_dir, histograms, top_bottom, lock):
     line_count = get_file_line_count(file_path)
@@ -192,6 +195,10 @@ def process_file(file_path, output_dir, histograms, top_bottom, lock):
     logger.debug(f"Columns in {file_path}: {list(df.columns)}")
 
     # Recompute percentages from raw amounts
+    df['receipt_amt'] = df['receipt_amt'].apply(parse_float)
+    df['govt_amt'] = df['govt_amt'].apply(parse_float)
+    df['contrib_amt'] = df['contrib_amt'].apply(parse_float)
+    df['total_income'] = df['receipt_amt'] + df['govt_amt'] + df['contrib_amt']
     df['total_exp'] = df['total_exp'].apply(parse_float)
     df['prog_exp'] = df['prog_exp'].apply(parse_float)
     df['officer_comp'] = df['officer_comp'].apply(parse_float)
@@ -207,19 +214,15 @@ def process_file(file_path, output_dir, histograms, top_bottom, lock):
     df['grants_pct'] = df.apply(lambda x: compute_percentage(x['grants_to_others'], x['total_exp']), axis=1)
     df['foreign_expenses_pct'] = df.apply(lambda x: compute_percentage(x['foreign_expenses'], x['total_exp']), axis=1)
     df['grift'] = df['officer_comp'] + df['travel_amt'] + df['conferences_amt']
-    df['grift_ratio'] = df.apply(
-        lambda x: min(compute_percentage(x['grift'], 
-                                         max(x['denominator'], 1000 if x['denominator'] > 0 else x['total_exp'] if x['total_exp'] > 0 else 1000)), 
-                      1000.0),  # Cap at 1000%
-        axis=1
-    )
+    df['grift_ratio'] = df.apply(lambda x: compute_percentage(x['grift'], x['total_income']), axis=1)
+    df['eating_seed_corn'] = (df['total_exp'] > df['total_income']).astype(int)
 
-    # Log denominator statistics
-    denom_stats = df['denominator'].describe()
-    logger.info(f"Denominator stats for {file_path}: {denom_stats.to_string()}")
-    problem_rows = df[df['denominator'] < 1000][['filer_ein', 'officer_comp', 'travel_amt', 'conferences_amt', 'grift', 'denominator', 'total_exp', 'grift_ratio']]
+    # Log income statistics
+    income_stats = df['total_income'].describe()
+    logger.info(f"Income stats for {file_path}: {income_stats.to_string()}")
+    problem_rows = df[df['total_income'] <= 0][['filer_ein', 'officer_comp', 'travel_amt', 'conferences_amt', 'grift', 'total_income', 'total_exp', 'grift_ratio']]
     if not problem_rows.empty:
-        logger.warning(f"Low denominator values (< 1000) in {file_path}:\n{problem_rows.to_string()}")
+        logger.warning(f"Low income values (<= 0) in {file_path}:\n{problem_rows.to_string()}")
 
     # Compute percentiles and tables
     metrics = {}

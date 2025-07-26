@@ -1,20 +1,21 @@
+# parse_990.py
 import sys
 from lxml import etree
 from io import BytesIO
 import logging
 import re
 from nameparser import HumanName
-from xpaths_990 import XPATHS_990
-from parse_utils import parse_int_field, parse_string_field, parse_total, parse_schedule, clean_name, MONEY_PATTERN
+from parse_utils import parse_int_field, parse_string_field, parse_schedule, clean_name, MONEY_PATTERN
+from xpaths import XPATHS_990, NAMESPACES
 
-# Setup logging
 logger = None
 log_error = None
 verbose = False
 DEBUG_EINS = set()
 
-# XPaths are precompiled in xpaths_990.py
-NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
+ORG_TYPE_SUFFIXES = frozenset([
+    "Organization501c3Ind", "Organization501cInd", "Organization4947a1NotPFInd"
+])
 
 def set_logger(new_logger, new_log_error, is_verbose=False, debug_eins=None):
     global logger, log_error, verbose, DEBUG_EINS
@@ -78,12 +79,6 @@ def parse_org_type_990(root, field, namespaces, xml_filename, context, xpath_cac
     return org_type
 
 def parse_officer_comp_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    """
-    Parse officer compensation and names, returning total and individual entries.
-    
-    Returns:
-        Tuple of (total compensation, list of officer entries)
-    """
     form_type = context.get('form_type', 'Unknown')
     total = 0
     officer_entries = []
@@ -130,37 +125,12 @@ def parse_officer_comp_990(root, field, namespaces, xml_filename, context, xpath
     return total, officer_entries
 
 def parse_grants_to_others_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    total = 0
-    debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
-
-    schedule_f_total = parse_schedule(root, XPATHS_990, "grant_elements_f", "grant_sub_elements_f", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
-    total += schedule_f_total
-
-    schedule_i_total = parse_schedule(root, XPATHS_990, "grant_elements_i", "grant_sub_elements_i", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
-    total += schedule_i_total
-
-    if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
-        log_error("Non-zero grants_to_others ${} for EIN {}, Name {}, TaxYear {}, XML {}", 
-                  total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename, 
-                  ein=context.get('filer_ein', 'Unknown'))
-    elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
-        return_data = parse_string_field(root, XPATHS_990, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
-        child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
-        log_error("Zero grants_to_others for EIN {}, Name {}, File {}. ReturnData children: {}", 
-                  context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags, 
-                  ein=context.get('filer_ein', 'Unknown'))
+    total = parse_schedule(root, XPATHS_990, "grant_elements_f", "grant_sub_elements_f", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins={"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"})
+    total += parse_schedule(root, XPATHS_990, "grant_elements_i", "grant_sub_elements_i", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins={"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"})
     return total
 
 def parse_foreign_expenses_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = parse_schedule(root, XPATHS_990, "foreign_exp_elements", "foreign_exp_sub_elements", "foreign_exp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins={"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"})
-    
-    debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
-    if total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
-        return_data = parse_string_field(root, XPATHS_990, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
-        child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
-        log_error("Zero foreign_expenses for EIN {}, Name {}, File {}. ReturnData children: {}", 
-                  context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags, 
-                  ein=context.get('filer_ein', 'Unknown'))
     return total
 
 def parse_receipt_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
@@ -180,16 +150,15 @@ def parse_prog_exp_990(root, field, namespaces, xml_filename, context, xpath_cac
 
 def parse_travel_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    schedule_field = "schedule_o"
     travel_xpaths = [xpath for xpath in XPATHS_990["schedule_o"] if "TravelGrp" in xpath.path]
     for xpath in travel_xpaths:
-        schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        schedule_o = parse_string_field(root, XPATHS_990, "schedule_o", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if schedule_o is not None:
             desc = parse_string_field(schedule_o, XPATHS_990, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             if desc is not None:
                 desc_text = desc.upper()
                 if "TRAVEL" in desc_text:
-                    match = MONEY_PATTERN.search( desc)
+                    match = MONEY_PATTERN.search(desc)
                     if match:
                         amount = int(float(match.group(1).replace('$', '')))
                         total += amount
@@ -201,16 +170,15 @@ def parse_travel_990(root, field, namespaces, xml_filename, context, xpath_cache
 
 def parse_conferences_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    schedule_field = "schedule_o"
     conferences_xpaths = [xpath for xpath in XPATHS_990["schedule_o"] if "ConferencesMeetingsGrp" in xpath.path]
     for xpath in conferences_xpaths:
-        schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        schedule_o = parse_string_field(root, XPATHS_990, "schedule_o", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if schedule_o is not None:
             desc = parse_string_field(schedule_o, XPATHS_990, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             if desc is not None:
                 desc_text = desc.upper()
                 if "CONFERENCE" in desc_text or "MEETING" in desc_text:
-                    match = MONEY_PATTERN.search( desc)
+                    match = MONEY_PATTERN.search(desc)
                     if match:
                         amount = int(float(match.group(1).replace('$', '')))
                         total += amount
