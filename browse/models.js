@@ -2957,6 +2957,18 @@ export class Charity {
 
     return `${orgLookup.shortDescription} ${this.org_type.replace("501", "")}`;
   }
+  usgIndirectGrift() {
+    let grift = 0;
+    const griftMap = {};
+    for (const grant of this.grantsIn) {
+      if (grant.filer.govDepth < Infinity && !grant.filer.isGov) {
+        grift += grant.amt;
+        griftMap[grant.filer.govDepth] =
+          (griftMap[grant.filer.govDepth] || 0) + grant.amt;
+      }
+    }
+    return { grift, griftMap };
+  }
   /**
    * Technically a VM responsibility, but we just do it here.
    * @returns
@@ -2976,9 +2988,16 @@ export class Charity {
     let inFlows = this.grantsInTotal
       ? `\ngrants in: $${formatNumber(this.grantsInTotal)}`
       : `\nin: N/A`;
+    let gov = "";
+    if (this.govt_amt > 0) {
+      gov = `\nUSG ${formatNumber(this.govt_amt)}`;
+      const { grift } = this.usgIndirectGrift();
+      if (grift > 0) gov += `\nInd. USG ${formatNumber(grift)}`;
+    }
+
     return `${this.name} (${this.tax_year || "N/A"})\n${this.orgShort}\n${
       this.longEIN
-    }${inFlows}${outFlows}\n${pork}`;
+    }${gov}${inFlows}${outFlows}\n${pork}`;
   }
 
   get griftRating() {
@@ -3031,7 +3050,7 @@ export class Charity {
     const params = new URLSearchParams();
     params.set(
       "q",
-      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro an con.`
+      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro and con and provide sources.`
     );
     return `<a href="https://grok.com/?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
@@ -3042,6 +3061,10 @@ export class Charity {
 
   guideStarLink(message) {
     return `<a href="https://www.guidestar.org/profile/${this.longEIN}" target="_blank">${message}</a>`;
+  }
+
+  grantSearchLink(message) {
+    return `<a href="/award_search/?keywords=${this.longEIN}" target="_blank">${message}</a>`;
   }
 }
 
