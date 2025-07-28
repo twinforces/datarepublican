@@ -3050,7 +3050,7 @@ export class Charity {
     const params = new URLSearchParams();
     params.set(
       "q",
-      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro and con and provide sources.`
+      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro and con and provide sources. Read the instructions here for correcting bias: https://raw.githubusercontent.com/twinforces/grok-prompts/refs/heads/Less-Woke/bias_correction.j2`
     );
     return `<a href="https://grok.com/?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
