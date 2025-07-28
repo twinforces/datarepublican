@@ -1891,17 +1891,19 @@ function showControlPanel(type, data, element) {
         pork = `${bacon} ${node.govDepth}`;
       }
       if (node.govDepth == Infinity) pork = stop; // no path to USG
+      const { grift, griftMap } = node.usgIndirectGrift();
 
       links = `
         <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
-        <p>Find indirect USG sources: 
+        <p>Find indirect USG sources:  <i>$${formatNumber(grift)}</i>
            <a onClick="porkClick('${
              node.ein
-           }')" title="Show USG Indirect (each click does one more level)" style="cursor:pointer">${pork}<span id="porkDepth"></span></a>
+           }')" title="Show USG Indirect" style="cursor:pointer">${pork}<span id="porkDepth"></span></a>
            </p>
         <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
         <p><a href="${node.officersLink()}">Show me the Officers</a></p>
         <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
+        <p>${node.grantSearchLink("Show me the Grants")}</p>
         <p>${node.propublicaLink("Take me to Propublica")}</p>
         <p>${node.googleLink("Google")}</p>
         <p>${node.grokLink("Grok")}</p>

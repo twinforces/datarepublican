@@ -1,19 +1,17 @@
+# parse_990ez.py
 import sys
 from lxml import etree
 from io import BytesIO
 import logging
 import re
 from nameparser import HumanName
-from xpaths_990ez import XPATHS_990EZ
-from parse_utils import parse_int_field, parse_string_field, parse_total, parse_schedule, clean_name, MONEY_PATTERN
+from parse_utils import parse_int_field, parse_string_field, parse_schedule, clean_name, MONEY_PATTERN
+from xpaths import XPATHS_990EZ, NAMESPACES
 
-# Setup logging
 logger = None
 log_error = None
 verbose = False
 DEBUG_EINS = set()
-
-NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 
 ORG_TYPE_SUFFIXES = frozenset([
     "Organization501c3Ind", "Organization501c4Ind", "Organization501c5Ind",
@@ -113,12 +111,6 @@ def parse_org_type_990ez(root, field, namespaces, xml_filename, context, xpath_c
     return org_type
 
 def parse_officer_comp_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    """
-    Parse officer compensation and names, returning total and individual entries.
-    
-    Returns:
-        Tuple of (total, list of officer entries)
-    """
     form_type = context.get('form_type', 'Unknown')
     total = 0
     officer_entries = []
@@ -168,28 +160,9 @@ def parse_grants_to_others_990ez(root, field, namespaces, xml_filename, context,
     total = 0
     debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
 
-    schedule_field = "schedule_o"
-    for xpath in XPATHS_990EZ["grant_elements_o"]:
-        schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
-        if schedule_o is not None:
-            desc = parse_string_field(schedule_o, XPATHS_990EZ, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-            if desc is not None and "DISBURSEMENT" in desc.upper():
-                match = MONEY_PATTERN.search( desc)
-                if match:
-                    amount = int(float(match.group(1).replace('$', '')))
-                    total += amount
-                    if verbose:
-                        log_error("Parsed grants_to_others ${} from Schedule O DISBURSEMENT in {}", 
-                                  amount, xml_filename, 
-                                  ein=context.get('filer_ein', 'Unknown'))
+    total += parse_schedule(root, XPATHS_990EZ, "grant_elements_i", "grant_sub_elements_i", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
 
-    # Parse grants from Schedule I
-    schedule_i_total = parse_schedule(root, XPATHS_990EZ, "grant_elements_i", "grant_sub_elements_i", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
-    total += schedule_i_total
-
-    # Parse grants from Schedule F
-    schedule_f_total = parse_schedule(root, XPATHS_990EZ, "grant_elements_f", "grant_sub_elements_f", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
-    total += schedule_f_total
+    total += parse_schedule(root, XPATHS_990EZ, "grant_elements_f", "grant_sub_elements_f", "grant_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, debug_eins=debug_eins)
 
     if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
         log_error("Non-zero grants_to_others ${} for EIN {}, Name {}, TaxYear {}, XML {}", 
@@ -205,16 +178,14 @@ def parse_grants_to_others_990ez(root, field, namespaces, xml_filename, context,
 
 def parse_travel_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    schedule_field = "schedule_o"
     for xpath in XPATHS_990EZ["schedule_o"]:
-        # Use parse_string_field with return_element=True to get the element
-        schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        schedule_o = parse_string_field(root, XPATHS_990EZ, "schedule_o", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if schedule_o is not None:
             desc = parse_string_field(schedule_o, XPATHS_990EZ, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             if desc is not None:
                 desc_text = desc.upper()
                 if "TRAVEL" in desc_text:
-                    match = MONEY_PATTERN.search( desc)
+                    match = MONEY_PATTERN.search(desc)
                     if match:
                         amount = int(float(match.group(1).replace('$', '')))
                         total += amount
@@ -226,16 +197,14 @@ def parse_travel_990ez(root, field, namespaces, xml_filename, context, xpath_cac
 
 def parse_conferences_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    schedule_field = "schedule_o"
     for xpath in XPATHS_990EZ["schedule_o"]:
-        # Use parse_string_field with return_element=True to get the element
-        schedule_o = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        schedule_o = parse_string_field(root, XPATHS_990EZ, "schedule_o", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if schedule_o is not None:
             desc = parse_string_field(schedule_o, XPATHS_990EZ, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             if desc is not None:
                 desc_text = desc.upper()
                 if "CONFERENCE" in desc_text or "MEETING" in desc_text:
-                    match = MONEY_PATTERN.search( desc)
+                    match = MONEY_PATTERN.search(desc)
                     if match:
                         amount = int(float(match.group(1).replace('$', '')))
                         total += amount
