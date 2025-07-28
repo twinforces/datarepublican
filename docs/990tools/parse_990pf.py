@@ -1,21 +1,17 @@
+# parse_990pf.py
 import sys
 from lxml import etree
 from io import BytesIO
 import logging
 from nameparser import HumanName
-from xpaths_990pf import XPATHS_990PF
-from parse_utils import parse_int_field, parse_string_field, parse_total, parse_schedule, clean_name, MONEY_PATTERN
+from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN
+from xpaths import XPATHS_990PF, NAMESPACES
 
-# Setup logging
 logger = None
 log_error = None
 verbose = False
 DEBUG_EINS = set()
 
-# Namespaces
-NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
-
-# Constant set for org_type tag suffixes
 ORG_TYPE_SUFFIXES = frozenset([
     "Organization501c3ExemptPFInd", "Organization501c3TaxablePFInd",
     "Organization4947a1NotExemptCharitableTrustInd", "Organization4947a1Ind",
@@ -82,12 +78,6 @@ def parse_org_type_990pf(root, field, namespaces, xml_filename, context, xpath_c
     return org_type
 
 def parse_officer_comp_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    """
-    Parse officer compensation and names, returning total and individual entries.
-    
-    Returns:
-        Tuple of (total, list of officer entries)
-    """
     form_type = context.get('form_type', 'Unknown')
     total = 0
     officer_entries = []
@@ -151,9 +141,8 @@ def parse_grants_to_others_990pf(root, field, namespaces, xml_filename, context,
 
 def parse_travel_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    schedule_field = "schedule_expenses"
     for xpath in XPATHS_990PF["schedule_expenses"]:
-        expense_elem = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        expense_elem = parse_string_field(root, XPATHS_990PF, "schedule_expenses", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if expense_elem is not None:
             desc = parse_string_field(expense_elem, XPATHS_990PF, "expense_desc", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             amount = parse_int_field(expense_elem, XPATHS_990PF, "expense_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
@@ -169,9 +158,8 @@ def parse_travel_990pf(root, field, namespaces, xml_filename, context, xpath_cac
 
 def parse_conferences_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = 0
-    schedule_field = "schedule_expenses"
     for xpath in XPATHS_990PF["schedule_expenses"]:
-        expense_elem = parse_string_field(root, {schedule_field: [xpath]}, schedule_field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        expense_elem = parse_string_field(root, XPATHS_990PF, "schedule_expenses", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         if expense_elem is not None:
             desc = parse_string_field(expense_elem, XPATHS_990PF, "expense_desc", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             amount = parse_int_field(expense_elem, XPATHS_990PF, "expense_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
@@ -257,6 +245,13 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["travel_pct"] = calculate_percentage(data["travel"], data["total_exp"])
     data["conferences_pct"] = calculate_percentage(data["conferences"], data["total_exp"])
     data["grants_pct"] = calculate_percentage(data["grants_to_others"], data["total_exp"])
+    data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
+
+    data["denominator"] = data["total_assets"] + data["receipt"]
+    data["comp_ptile"] = "n/y"
+    data["travel_ptile"] = "n/y"
+    data["conferences_ptile"] = "n/y"
+    data["grants_ptile"] = "n/y"
     data["foreign_expenses_pct"] = "n/a"
     data["foreign_expenses"] = "n/a"
     data["foreign_office"] = "n/a"
@@ -267,7 +262,6 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["travel_ptile"] = "n/y"
     data["conferences_ptile"] = "n/y"
     data["grants_ptile"] = "n/y"
-    data["foreign_expenses_ptile"] = "n/a"
     data["govt_grants"] = "n/a"
     data["contributions"] = "n/a"
     data["domestic_misrep_flag"] = False
