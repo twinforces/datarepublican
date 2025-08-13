@@ -932,39 +932,36 @@ function generateGraph() {
       }
       console.log("Brush ended with selection:", event.selection);
 
-      const [[x0, y0], [x1, y1]] = event.selection;
-      // Account for initial translate(50, 50) in <g class="main">
-      const sankeyScale = calculateScale(
-        viewModel.buildSankeyData(),
-        width,
-        height
-      );
-      const adjustedX0 = (x0 - 50) / sankeyScale;
-      const adjustedX1 = (x1 - 50) / sankeyScale;
-      const adjustedY0 = (y0 - 50) / sankeyScale;
-      const adjustedY1 = (y1 - 50) / sankeyScale;
+      // Get current zoom transform
+      const currentTransform = d3.zoomTransform(svg.node());
 
-      const scale = Math.min(
-        (width - 100) / (adjustedX1 - adjustedX0),
-        (height - 100) / (adjustedY1 - adjustedY0)
-      );
-      const newScale = Math.min(Math.max(scale * sankeyScale, 0.1), 4);
+      // Invert brush selection corners to chart coordinates
+      const [x0, y0] = currentTransform.invert([
+        event.selection[0][0],
+        event.selection[0][1],
+      ]);
+      const [x1, y1] = currentTransform.invert([
+        event.selection[1][0],
+        event.selection[1][1],
+      ]);
 
-      const translateX =
-        (width - newScale * (adjustedX0 + adjustedX1)) / 2 + 50;
-      const translateY =
-        (height - newScale * (adjustedY0 + adjustedY1)) / 2 + 50;
+      // Calculate new scale to fit the selected chart area
+      const k_new = Math.min(width / (x1 - x0), height / (y1 - y0));
 
-      console.log("Zoom parameters:", {
-        scale,
-        newScale,
-        translateX,
-        translateY,
-      });
+      // Clamp to scaleExtent
+      const newScale = Math.min(Math.max(k_new, 0.1), 4);
 
-      const transform = d3.zoomIdentity
-        .translate(translateX, translateY)
-        .scale(newScale);
+      // Calculate midpoint in chart coordinates
+      const mx = (x0 + x1) / 2;
+      const my = (y0 + y1) / 2;
+
+      // Calculate new translate to center the midpoint in viewport
+      const tx = width / 2 - mx * newScale;
+      const ty = height / 2 - my * newScale;
+
+      console.log("Zoom parameters:", { k_new, newScale, tx, ty });
+
+      const transform = d3.zoomIdentity.translate(tx, ty).scale(newScale);
 
       svg.transition().duration(750).call(zoom.transform, transform);
 
