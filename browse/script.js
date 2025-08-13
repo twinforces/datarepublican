@@ -874,7 +874,7 @@ function generateGraph() {
   }
 
   svg
-    .attr("width", "100%") // Ensure attributes are set in case SVG was cleared
+    .attr("width", "100%")
     .attr("height", "100%")
     .style("display", "block")
     .style("background", "#fff")
@@ -890,18 +890,101 @@ function generateGraph() {
     .extent([
       [0, 0],
       [width, height],
-    ]) // Match renderFocusedSankey extent
-    .scaleExtent([0.1, 4]) // Match original range
+    ])
+    .scaleExtent([0.1, 4])
     .filter(
       (event) =>
         event.type === "wheel" ||
-        (event.type === "mousedown" && event.button === 0)
-    ) // Match renderFocusedSankey filter
+        (event.type === "mousedown" && event.button === 0 && !event.shiftKey)
+    )
     .on("zoom", (event) => {
-      svg.select("g.main").attr("transform", event.transform); // Target g.main
+      svg.select("g.main").attr("transform", event.transform);
+    })
+    .on("start", (event) => {
+      // Clear brush only for non-brush actions
+      if (!event.sourceEvent || !event.sourceEvent.shiftKey) {
+        brushGroup.call(brush.move, null);
+      }
     });
 
   svg.call(zoom);
+
+  // Add brush for rectangular zoom
+  const brush = d3
+    .brush()
+    .extent([
+      [0, 0],
+      [width, height],
+    ])
+    .filter((event) => event.shiftKey && !event.ctrlKey && !event.button)
+    .on("start", () => {
+      console.log("Brush started");
+    })
+    .on("brush", (event) => {
+      if (event.selection) {
+        console.log("Brushing selection:", event.selection);
+      }
+    })
+    .on("end", (event) => {
+      if (!event.selection) {
+        console.log("Brush ended with no selection");
+        return;
+      }
+      console.log("Brush ended with selection:", event.selection);
+
+      const [[x0, y0], [x1, y1]] = event.selection;
+      // Account for initial translate(50, 50) in <g class="main">
+      const sankeyScale = calculateScale(
+        viewModel.buildSankeyData(),
+        width,
+        height
+      );
+      const adjustedX0 = (x0 - 50) / sankeyScale;
+      const adjustedX1 = (x1 - 50) / sankeyScale;
+      const adjustedY0 = (y0 - 50) / sankeyScale;
+      const adjustedY1 = (y1 - 50) / sankeyScale;
+
+      const scale = Math.min(
+        (width - 100) / (adjustedX1 - adjustedX0),
+        (height - 100) / (adjustedY1 - adjustedY0)
+      );
+      const newScale = Math.min(Math.max(scale * sankeyScale, 0.1), 4);
+
+      const translateX =
+        (width - newScale * (adjustedX0 + adjustedX1)) / 2 + 50;
+      const translateY =
+        (height - newScale * (adjustedY0 + adjustedY1)) / 2 + 50;
+
+      console.log("Zoom parameters:", {
+        scale,
+        newScale,
+        translateX,
+        translateY,
+      });
+
+      const transform = d3.zoomIdentity
+        .translate(translateX, translateY)
+        .scale(newScale);
+
+      svg.transition().duration(750).call(zoom.transform, transform);
+
+      brushGroup.call(brush.move, null);
+    });
+
+  const brushGroup = svg.append("g").attr("class", "brush").call(brush);
+
+  // Style brush overlay for visibility
+  brushGroup
+    .select(".overlay")
+    .style("cursor", "crosshair")
+    .style("pointer-events", "all");
+
+  // Style brush overlay for visibility and feedback
+  brushGroup
+    .select(".overlay")
+    .style("cursor", "crosshair")
+    .style("pointer-events", "all");
+
   viewModel.rememberGraphSize(width, height);
   viewModel.parseQueryParams(new URLSearchParams(window.location.search));
   updateScaledConstants();
@@ -931,7 +1014,7 @@ function generateGraph() {
     viewModel.previousData = renderFocusedSankey(
       g,
       sankey,
-      svg, // Use global svg instead of svgRef
+      svg,
       width,
       height,
       viewModel.getShowList().length
@@ -952,7 +1035,7 @@ function generateGraph() {
   document.getElementById("zoomOut").onclick = () =>
     svg.transition().duration(300).call(zoom.scaleBy, 0.7);
   document.getElementById("zoomFit").onclick = () => {
-    const g = svg.select("g.main"); // Select g.main dynamically
+    const g = svg.select("g.main");
     const bounds = g.node().getBBox();
     if (
       !isFinite(bounds.width) ||
@@ -989,31 +1072,31 @@ function generateGraph() {
   };
 
   /*setTimeout(() => {
-    const g = svg.select("g.main");
-    const bounds = g.node().getBBox();
-    if (
-      !isFinite(bounds.width) ||
-      bounds.width <= 0 ||
-      !isFinite(bounds.height) ||
-      bounds.height <= 0
-    ) {
-      console.error("Invalid bounds for zoom:", bounds);
-      return;
-    }
-    const dx = bounds.x;
-    const dy = bounds.y;
-    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
-    svg
-      .transition()
-      .duration(750)
-      .call(
-        zoom.transform,
-        d3.zoomIdentity
-          .translate(width / 2, height / 2)
-          .scale(scale)
-          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
-      );
-  }, 1000);*/
+     const g = svg.select("g.main");
+     const bounds = g.node().getBBox();
+     if (
+       !isFinite(bounds.width) ||
+       bounds.width <= 0 ||
+       !isFinite(bounds.height) ||
+       bounds.height <= 0
+     ) {
+       console.error("Invalid bounds for zoom:", bounds);
+       return;
+     }
+     const dx = bounds.x;
+     const dy = bounds.y;
+     const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+     svg
+       .transition()
+       .duration(750)
+       .call(
+         zoom.transform,
+         d3.zoomIdentity
+           .translate(width / 2, height / 2)
+           .scale(scale)
+           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+       );
+   }, 1000);*/
   document.getElementById("layoutScaleResetXY").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
@@ -1235,7 +1318,6 @@ function renderFocusedSankey(
   dataLoaded(false);
 
   let currentData = viewModel.buildSankeyData();
-  //buildDebugData(currentData);
   const nodeCount = currentData.nodes.length;
   const edgeCount = currentData.links.length;
   const edgeTotal = formatNumber(
@@ -1260,17 +1342,8 @@ function renderFocusedSankey(
   adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
 
-  if (!previousData) {
-    svg.selectAll("*").remove();
-  }
-
-  g = svg
-    .selectAll("g.main")
-    .data([0])
-    .join("g")
-    .attr("class", "main")
-    .attr("transform", `translate(50, 50) scale(${scale})`);
-
+  // Remove redundant SVG clear; rely on generateGraph's setup
+  // g is already passed as <g class="main"> from generateGraph
   const masterGroup = g
     .selectAll(".graph-group")
     .data([0])
@@ -1319,12 +1392,11 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
-  // Function to extract points from an SVG path string
+  // Function to extract points from path (unchanged)
   function extractPointsFromPath(pathString) {
     const points = [];
     let currentPoint = { x: 0, y: 0 };
-    const commands = pathString.split(/(?=[MLAZ])/); // Split on M, L, A, Z
-
+    const commands = pathString.split(/(?=[MLAZ])/);
     commands.forEach((command) => {
       const type = command[0];
       const values = command
@@ -1332,7 +1404,6 @@ function renderFocusedSankey(
         .trim()
         .split(/[\s,]+/)
         .map(parseFloat);
-
       if (type === "M") {
         currentPoint = { x: values[0], y: values[1] };
         points.push({ ...currentPoint });
@@ -1340,15 +1411,13 @@ function renderFocusedSankey(
         currentPoint = { x: values[0], y: values[1] };
         points.push({ ...currentPoint });
       } else if (type === "A") {
-        // For arcs, the endpoint is the last two values (x, y)
         currentPoint = { x: values[5], y: values[6] };
         points.push({ ...currentPoint });
       }
-      // Ignore Z (close path) for now since our paths are open
     });
-
     return points;
-  } // Circular links
+  }
+
   // Circular links
   const circularLinkGroup = masterGroup
     .selectAll("g.circular-links")
@@ -1361,8 +1430,6 @@ function renderFocusedSankey(
   let circularLinks = graph.links.filter((d) => d.circular);
   const circularLink = circularLinkGroup
     .selectAll(".circular-link")
-    .attr("data-source-id", (d) => d.source.id)
-    .attr("data-target-id", (d) => d.target.id)
     .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   circularLink
@@ -1390,33 +1457,9 @@ function renderFocusedSankey(
     .duration(ANIM_LINK)
     .attr("points", (d) => d.path)
     .attr("fill", "rgba(255, 105, 180, 0.5)")
-    .attr("data-source-id", (d) => d.source.id)
-    .attr("data-target-id", (d) => d.target.id)
     .attr("stroke", "pink")
     .attr("stroke-opacity", "0.6")
     .attr("stroke-width", (d) => 0.1 * d.width);
-
-  /*// Add debug points for each circular link
-  circularLink.merge(circularLinkEnter).each(function (d) {
-    const path = d.path;
-    const points = extractPointsFromPath(path);
-
-    // Append circles for each point within the same group
-    d3.select(this.parentNode)
-      .selectAll("circle.debug-point-" + d.source.id + "-" + d.target.id)
-      .data(points)
-      .enter()
-      .append("circle")
-      .attr("class", "debug-point-" + d.source.id + "-" + d.target.id)
-      .attr("cx", (p) => p.x)
-      .attr("cy", (p) => p.y)
-      .attr("r", 3)
-      .attr("fill", "black")
-      .attr("stroke", "white")
-      .attr("stroke-width", 1)
-      .append("title")
-      .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
-  });*/
 
   circularLinkEnter
     .append("title")
@@ -1427,7 +1470,7 @@ function renderFocusedSankey(
         )} (Circular)`
     );
 
-  // Node rendering (unchanged)
+  // Node rendering
   const nodeGroup = masterGroup
     .selectAll("g.nodes")
     .data([0])
@@ -1482,7 +1525,13 @@ function renderFocusedSankey(
       .text((d) => d.toolTipText());
   });
 
-  nodeEnter.transition().duration(ANIM_NODE).style("opacity", 1);
+  // Fallback if transition fails
+  try {
+    nodeEnter.transition().duration(ANIM_NODE).style("opacity", 1);
+  } catch (e) {
+    console.error("Transition failed:", e);
+    nodeEnter.style("opacity", 1); // Fallback to set opacity directly
+  }
 
   nodeElements
     .merge(nodeEnter)
@@ -1494,6 +1543,7 @@ function renderFocusedSankey(
       d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d)
     );
 
+  // Hat and text rendering (unchanged for brevity, but ensure transitions are safe)
   const hatGroup = masterGroup
     .selectAll("g.expand-hats")
     .data([0])
@@ -1533,22 +1583,40 @@ function renderFocusedSankey(
     .append("title")
     .text("expand more inflows");
 
-  leftHats
-    .merge(leftHatEnter)
-    .transition()
-    .duration(ANIM_HAT)
-    .style("opacity", (d) =>
-      d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
-        ? 1
-        : d.hasLeftHat &&
-          !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
-        ? 0
-        : 1
-    )
-    .select("path")
-    .attr("d", (d) =>
-      generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
-    );
+  try {
+    leftHats
+      .merge(leftHatEnter)
+      .transition()
+      .duration(ANIM_HAT)
+      .style("opacity", (d) =>
+        d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
+          ? 1
+          : d.hasLeftHat &&
+            !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) =>
+        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+      );
+  } catch (e) {
+    console.error("Left hats transition failed:", e);
+    leftHats
+      .merge(leftHatEnter)
+      .style("opacity", (d) =>
+        d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
+          ? 1
+          : d.hasLeftHat &&
+            !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) =>
+        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+      );
+  }
 
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
@@ -1582,27 +1650,50 @@ function renderFocusedSankey(
     .append("title")
     .text("expand more outflows");
 
-  rightHats
-    .merge(rightHatEnter)
-    .transition()
-    .duration(ANIM_HAT)
-    .style("opacity", (d) =>
-      !d.isTerminal &&
-      d.canExpandOutflows &&
-      d.invisibleGrants.length > 0 &&
-      !d.hasRightHat
-        ? 1
-        : d.hasRightHat &&
-          !(
-            !d.isTerminal &&
-            d.canExpandOutflows &&
-            d.invisibleGrants.length > 0
-          )
-        ? 0
-        : 1
-    )
-    .select("path")
-    .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+  try {
+    rightHats
+      .merge(rightHatEnter)
+      .transition()
+      .duration(ANIM_HAT)
+      .style("opacity", (d) =>
+        !d.isTerminal &&
+        d.canExpandOutflows &&
+        d.invisibleGrants.length > 0 &&
+        !d.hasRightHat
+          ? 1
+          : d.hasRightHat &&
+            !(
+              !d.isTerminal &&
+              d.canExpandOutflows &&
+              d.invisibleGrants.length > 0
+            )
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+  } catch (e) {
+    console.error("Right hats transition failed:", e);
+    rightHats
+      .merge(rightHatEnter)
+      .style("opacity", (d) =>
+        !d.isTerminal &&
+        d.canExpandOutflows &&
+        d.invisibleGrants.length > 0 &&
+        !d.hasRightHat
+          ? 1
+          : d.hasRightHat &&
+            !(
+              !d.isTerminal &&
+              d.canExpandOutflows &&
+              d.invisibleGrants.length > 0
+            )
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+  }
 
   const textGroup = masterGroup
     .selectAll("g.text")
@@ -1625,25 +1716,39 @@ function renderFocusedSankey(
     )
     .style("cursor", "crosshair")
     .attr("class", "nodeLabel")
-
     .attr("fill", (d) => getTextColorForEIN(d.ein))
     .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`);
 
-  text
-    .merge(textEnter)
-    .transition()
-    .duration(ANIM_TEXT)
-    .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
-    .attr("y", (d) => (d.y0 + d.y1) / 2)
-    .attr("text-anchor", (d) =>
-      d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
-    )
-    .style("cursor", "crosshair")
-    .attr("class", "nodeLabel")
-
-    .attr("fill", (d) => getTextColorForEIN(d.ein))
-    .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
-    .text((d) => d.name);
+  try {
+    text
+      .merge(textEnter)
+      .transition()
+      .duration(ANIM_TEXT)
+      .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
+      .attr("y", (d) => (d.y0 + d.y1) / 2)
+      .attr("text-anchor", (d) =>
+        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+      )
+      .style("cursor", "crosshair")
+      .attr("class", "nodeLabel")
+      .attr("fill", (d) => getTextColorForEIN(d.ein))
+      .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
+      .text((d) => d.name);
+  } catch (e) {
+    console.error("Text transition failed:", e);
+    text
+      .merge(textEnter)
+      .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
+      .attr("y", (d) => (d.y0 + d.y1) / 2)
+      .attr("text-anchor", (d) =>
+        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+      )
+      .style("cursor", "crosshair")
+      .attr("class", "nodeLabel")
+      .attr("fill", (d) => getTextColorForEIN(d.ein))
+      .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
+      .text((d) => d.name);
+  }
 
   bindEvents(g);
 
