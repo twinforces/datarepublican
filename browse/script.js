@@ -878,7 +878,8 @@ function generateGraph() {
     .attr("height", "100%")
     .style("display", "block")
     .style("background", "#fff")
-    .attr("class", "flex-1");
+    .attr("class", "flex-1")
+    .style("user-select", "none"); // Prevent text selection during drag
 
   let g = svg
     .append("g")
@@ -916,21 +917,32 @@ function generateGraph() {
       [0, 0],
       [width, height],
     ])
-    .filter((event) => event.shiftKey && !event.ctrlKey && !event.button)
+    .keyModifiers(false) // Disable Shift key locking to x/y axis
+    .filter(
+      (event) =>
+        event.type !== "mousedown" ||
+        (event.shiftKey && !event.ctrlKey && !event.button)
+    )
     .on("start", () => {
-      console.log("Brush started");
+      //console.log("Brush started");
+      // Force SVG redraw on start
+      svg.attr("data-brush-start", Date.now());
     })
     .on("brush", (event) => {
-      if (event.selection) {
-        console.log("Brushing selection:", event.selection);
+      if (!event.selection) {
+        //console.log("Brush: No selection during drag");
+        return;
       }
+      //console.log("Brush:", event.selection);
+      // Force SVG redraw during drag
+      svg.attr("data-brush-update", Date.now());
     })
     .on("end", (event) => {
       if (!event.selection) {
-        console.log("Brush ended with no selection");
+        //console.log("Brush end: No selection");
         return;
       }
-      console.log("Brush ended with selection:", event.selection);
+      //console.log("Brush end:", event.selection);
 
       // Get current zoom transform
       const currentTransform = d3.zoomTransform(svg.node());
@@ -959,7 +971,7 @@ function generateGraph() {
       const tx = width / 2 - mx * newScale;
       const ty = height / 2 - my * newScale;
 
-      console.log("Zoom parameters:", { k_new, newScale, tx, ty });
+      //console.log("Zoom:", { k_new, newScale, tx, ty });
 
       const transform = d3.zoomIdentity.translate(tx, ty).scale(newScale);
 
@@ -970,17 +982,47 @@ function generateGraph() {
 
   const brushGroup = svg.append("g").attr("class", "brush").call(brush);
 
-  // Style brush overlay for visibility
+  // Style brush overlay for interaction
   brushGroup
     .select(".overlay")
     .style("cursor", "crosshair")
-    .style("pointer-events", "all");
+    .style("pointer-events", "none"); // Start with none to allow pass-through
 
-  // Style brush overlay for visibility and feedback
+  // Toggle overlay pointer-events based on Shift key
+  d3.select(window)
+    .on("keydown.brush", function (event) {
+      if (event.key === "Shift") {
+        brushGroup.select(".overlay").style("pointer-events", "all");
+      }
+    })
+    .on("keyup.brush", function (event) {
+      if (event.key === "Shift") {
+        brushGroup.select(".overlay").style("pointer-events", "none");
+      }
+    });
+
+  // Style brush selection for real-time visibility
   brushGroup
-    .select(".overlay")
-    .style("cursor", "crosshair")
-    .style("pointer-events", "all");
+    .select(".selection")
+    .style("fill", "steelblue")
+    .style("fill-opacity", 0.3)
+    .style("stroke", "white")
+    .style("stroke-opacity", 0.6)
+    .style("display", "none"); // Start hidden, let handlers show it
+
+  // Add CSS to ensure brush selection visibility
+  const style = document.createElement("style");
+  style.textContent = `
+    .brush .selection {
+      display: block !important;
+      visibility: visible !important;
+      fill: steelblue !important;
+      fill-opacity: 0.3 !important;
+      stroke: white !important;
+      stroke-opacity: 0.6 !important;
+    }
+  `;
+  document.head.appendChild(style);
 
   viewModel.rememberGraphSize(width, height);
   viewModel.parseQueryParams(new URLSearchParams(window.location.search));
@@ -1069,31 +1111,31 @@ function generateGraph() {
   };
 
   /*setTimeout(() => {
-     const g = svg.select("g.main");
-     const bounds = g.node().getBBox();
-     if (
-       !isFinite(bounds.width) ||
-       bounds.width <= 0 ||
-       !isFinite(bounds.height) ||
-       bounds.height <= 0
-     ) {
-       console.error("Invalid bounds for zoom:", bounds);
-       return;
-     }
-     const dx = bounds.x;
-     const dy = bounds.y;
-     const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
-     svg
-       .transition()
-       .duration(750)
-       .call(
-         zoom.transform,
-         d3.zoomIdentity
-           .translate(width / 2, height / 2)
-           .scale(scale)
-           .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
-       );
-   }, 1000);*/
+    const g = svg.select("g.main");
+    const bounds = g.node().getBBox();
+    if (
+      !isFinite(bounds.width) ||
+      bounds.width <= 0 ||
+      !isFinite(bounds.height) ||
+      bounds.height <= 0
+    ) {
+      console.error("Invalid bounds for zoom:", bounds);
+      return;
+    }
+    const dx = bounds.x;
+    const dy = bounds.y;
+    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+    svg
+      .transition()
+      .duration(750)
+      .call(
+        zoom.transform,
+        d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+      );
+  }, 1000);*/
   document.getElementById("layoutScaleResetXY").onclick = () => {
     if (isRedrawing) return;
     isRedrawing = true;
@@ -1132,7 +1174,6 @@ function generateGraph() {
     boundaryScaleFactorY = viewModel.expandScaleYUp();
     updateLayoutButtons();
     refresh();
-
     setTimeout(() => (isRedrawing = false), 1000);
   };
   document.getElementById("shrinkLayoutY").onclick = () => {
@@ -1141,7 +1182,6 @@ function generateGraph() {
     boundaryScaleFactorY = viewModel.expandScaleYDown();
     updateLayoutButtons();
     refresh();
-
     setTimeout(() => (isRedrawing = false), 1000);
   };
   document.getElementById("layoutScaleResetY").onclick = () => {
@@ -1150,7 +1190,6 @@ function generateGraph() {
     viewModel.resetExpandScaleY();
     updateLayoutButtons();
     refresh();
-
     setTimeout(() => (isRedrawing = false), 1000);
   };
   renderActiveEINs();
