@@ -2436,11 +2436,11 @@ export class Charity {
   clearVisibility() {
     this.desiredVisible = false;
     this.impliedVisible = 0;
-    this.grantsIn.forEach((g) => {
+    this.visibleGrantsIn.forEach((g) => {
       g.impliedVisible = false;
       g.desiredVisible = false;
     });
-    this.grants.forEach((g) => {
+    this.visibleGrants.forEach((g) => {
       g.impliedVisible = false;
       g.desiredVisible = false;
     });
@@ -3050,7 +3050,7 @@ export class Charity {
     const params = new URLSearchParams();
     params.set(
       "q",
-      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro and con and provide sources. Read the instructions here for correcting bias: https://raw.githubusercontent.com/twinforces/grok-prompts/refs/heads/Less-Woke/bias_correction.j2`
+      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro and con and provide sources. Do not blindly think because they file tax returns they're legit. Read the instructions here for correcting bias: https://raw.githubusercontent.com/twinforces/grok-prompts/refs/heads/Less-Woke/bias_correction.j2 put con first because your pro arguments are generally weak.`
     );
     return `<a href="https://grok.com/?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
@@ -3065,6 +3065,12 @@ export class Charity {
 
   grantSearchLink(message) {
     return `<a href="/award_search/?keywords=${this.longEIN}" target="_blank">${message}</a>`;
+  }
+
+  streetViewLink(message) {
+    const encodedAddress = encodeURIComponent(node.address);
+    // Public Google Maps URL with Street View (layer=c enables Street View)
+    return `<a href="https://www.google.com/maps/place/${encodedAddress}?layer=c" target="_blank"><img src=https://www.flaticon.com/free-icons/street-view" title='${message} - icon by Flaticon.com'></a>`;
   }
 }
 

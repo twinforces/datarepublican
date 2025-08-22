@@ -213,6 +213,14 @@ function renderPopup() {
   if (hideCtlBtn) {
     hideCtlBtn.addEventListener("click", hideControls);
   }
+  const showCircularBtn = document.getElementById("showCircularBtn");
+  const hideCircularBtn = document.getElementById("hideCircularBtn");
+  if (showCircularBtn) {
+    showCircularBtn.addEventListener("click", showCircular);
+  }
+  if (hideCircularBtn) {
+    hideCircularBtn.addEventListener("click", hideCircular);
+  }
 
   // Wire up the toggle buttons
   const showBtn = document.getElementById("showPresetsBtn");
@@ -255,6 +263,23 @@ window.hideControls = function () {
   document.documentElement.style.setProperty("--controls-hidden", "block");
   console.log("Controls hidden");
 };
+
+// Show Presets and Hide Presets implementations
+window.showCircular = function () {
+  $("#showCircularBtn").addClass("hidden");
+  $("#hideCircularBtn").removeClass("hidden");
+  $("#circular-links").removeClass("hidden");
+
+  console.log("circular links shown");
+};
+
+window.hideCircular = function () {
+  $("#showCircularBtn").removeClass("hidden");
+  $("#hideCircularBtn").addClass("hidden");
+  $("#circular-links").addClass("hidden");
+  console.log("Circular Links hidden");
+};
+
 // Show Presets and Hide Presets implementations
 window.showPresets = function () {
   document.documentElement.style.setProperty("--panel-shown", "block");
@@ -892,7 +917,7 @@ function generateGraph() {
       [0, 0],
       [width, height],
     ])
-    .scaleExtent([0.1, 4])
+    .scaleExtent([0.01, 10])
     .filter(
       (event) =>
         event.type === "wheel" ||
@@ -905,10 +930,14 @@ function generateGraph() {
       // Clear brush only for non-brush actions
       if (!event.sourceEvent || !event.sourceEvent.shiftKey) {
         brushGroup.call(brush.move, null);
+        brushGroup.select(".selection").style("visibility", "hidden");
       }
     });
 
   svg.call(zoom);
+
+  let isShiftDown = false;
+  let isBrushing = false;
 
   // Add brush for rectangular zoom
   const brush = d3
@@ -918,31 +947,25 @@ function generateGraph() {
       [width, height],
     ])
     .keyModifiers(false) // Disable Shift key locking to x/y axis
-    .filter(
-      (event) =>
-        event.type !== "mousedown" ||
-        (event.shiftKey && !event.ctrlKey && !event.button)
-    )
     .on("start", () => {
-      //console.log("Brush started");
+      isBrushing = true;
+      brushGroup.select(".selection").style("visibility", "visible");
       // Force SVG redraw on start
       svg.attr("data-brush-start", Date.now());
     })
     .on("brush", (event) => {
       if (!event.selection) {
-        //console.log("Brush: No selection during drag");
         return;
       }
-      //console.log("Brush:", event.selection);
       // Force SVG redraw during drag
       svg.attr("data-brush-update", Date.now());
     })
     .on("end", (event) => {
+      isBrushing = false;
       if (!event.selection) {
-        //console.log("Brush end: No selection");
+        brushGroup.select(".selection").style("visibility", "hidden");
         return;
       }
-      //console.log("Brush end:", event.selection);
 
       // Get current zoom transform
       const currentTransform = d3.zoomTransform(svg.node());
@@ -971,13 +994,18 @@ function generateGraph() {
       const tx = width / 2 - mx * newScale;
       const ty = height / 2 - my * newScale;
 
-      //console.log("Zoom:", { k_new, newScale, tx, ty });
-
       const transform = d3.zoomIdentity.translate(tx, ty).scale(newScale);
 
-      svg.transition().duration(750).call(zoom.transform, transform);
-
-      brushGroup.call(brush.move, null);
+      svg
+        .transition()
+        .duration(750)
+        .call(zoom.transform, transform)
+        .on("end", () => {
+          brushGroup.call(brush.move, null);
+          brushGroup.select(".selection").style("visibility", "hidden");
+          brushGroup.select(".overlay").style("pointer-events", "none");
+          svg.call(zoom);
+        });
     });
 
   const brushGroup = svg.append("g").attr("class", "brush").call(brush);
@@ -988,16 +1016,26 @@ function generateGraph() {
     .style("cursor", "crosshair")
     .style("pointer-events", "none"); // Start with none to allow pass-through
 
+  // Initially hide selection
+  brushGroup.select(".selection").style("visibility", "hidden");
+
   // Toggle overlay pointer-events based on Shift key
   d3.select(window)
     .on("keydown.brush", function (event) {
       if (event.key === "Shift") {
+        isShiftDown = true;
+        svg.on(".zoom", null); // Disable zoom
         brushGroup.select(".overlay").style("pointer-events", "all");
       }
     })
     .on("keyup.brush", function (event) {
       if (event.key === "Shift") {
-        brushGroup.select(".overlay").style("pointer-events", "none");
+        isShiftDown = false;
+        if (!isBrushing) {
+          brushGroup.select(".overlay").style("pointer-events", "none");
+          brushGroup.select(".selection").style("visibility", "hidden");
+          svg.call(zoom); // Re-enable zoom
+        }
       }
     });
 
@@ -1007,15 +1045,12 @@ function generateGraph() {
     .style("fill", "steelblue")
     .style("fill-opacity", 0.3)
     .style("stroke", "white")
-    .style("stroke-opacity", 0.6)
-    .style("display", "none"); // Start hidden, let handlers show it
+    .style("stroke-opacity", 0.6);
 
-  // Add CSS to ensure brush selection visibility
+  // Add CSS to ensure brush selection styles
   const style = document.createElement("style");
   style.textContent = `
     .brush .selection {
-      display: block !important;
-      visibility: visible !important;
       fill: steelblue !important;
       fill-opacity: 0.3 !important;
       stroke: white !important;
@@ -1460,6 +1495,7 @@ function renderFocusedSankey(
     .data([0])
     .join("g")
     .attr("class", "circular-links")
+    .attr("id", "circular-links")
     .attr("fill", "none")
     .attr("stroke-opacity", 0.5);
 
