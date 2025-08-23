@@ -9,8 +9,8 @@
       src="https://platform.twitter.com/widgets.js"
       charset="utf-8"
     ></script>
-    <link rel="stylesheet" href="/assets/css/styles.css?v=1753678808">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1753678808">
+    <link rel="stylesheet" href="/assets/css/styles.css?v=1755971298">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1755971298">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1111,7 +1111,7 @@ $(document).ready(function() {
   </div>
 
   <!-- Input Sections -->
-  <div id="controls" class="grid grid-cols-3 gap-4 show-when-panel-grid"">
+  <div id="controls" class="grid grid-cols-4 gap-4 show-when-panel-grid"">
     <!-- Add EIN(s) --><!-- prettier-ignore -->
     <div class="col-span-1 flex flex-col gap-2">
       <div class="inline-flex flex-col gap-1">
@@ -1146,6 +1146,17 @@ $(document).ready(function() {
 </div>
 
       <div id="hideEINs" class="max-h-36 overflow-y-auto bg-gray-50"></div>
+    </div>
+
+    <!-- Block EIN(s) --><!-- prettier-ignore -->
+    <div class="col-span-1 flex flex-col gap-2">
+      <button id="hideCircularBtn" class="max-w-fit" title="Informative, but cluttery">Hide Circular Links</button>
+      <button id="showCircularBtn" class="hidden max-w-fit" title="Information over beauty">Show Circular Links</button>
+      <ul class="text-xs list-disc">
+        <li>Drag to pan</li>
+        <li>Wheel to zoom</li>
+        <li>Shift Drag to zoom select</li>
+      </ul>
     </div>
 
     <!-- Bulk Add by Keyword -->

@@ -1939,6 +1939,10 @@ body > div#main-content {
 .max-w-sm {
   max-width: 24rem;
 }
+.max-w-fit {
+  max-width: -moz-fit-content;
+  max-width: fit-content;
+}
 .flex-1 {
   flex: 1 1 0%;
 }
@@ -2042,6 +2046,9 @@ body > div#main-content {
 }
 .grid-cols-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .flex-row {
   flex-direction: row;
