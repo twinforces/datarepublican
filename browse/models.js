@@ -98,9 +98,9 @@ function interpolateBand(t, baseBrightness, mod_brightness) {
 }
 
 const brightnessBands = [
-  { base: 0.9, mod: 0.8 }, // 0: pastel (light)
-  { base: 0.7, mod: 0.6 }, // 1: medium
-  { base: 0.45, mod: 0.3 }, // 2: dark (~0.3 center)
+  { base: 0.7, mod: 0.8 }, // 0: pastel (light)
+  { base: 0.5, mod: 0.6 }, // 1: medium
+  { base: 0.4, mod: 0.3 }, // 2: dark (~0.3 center)
   { base: 0.3, mod: 0.2 }, // 3: extra dark (~0.23 center)
 ];
 
@@ -1147,6 +1147,20 @@ export class BrowseViewModel {
     }
   }
 
+  setZoom(zoom_x, zoom_y, zoom_k) {
+    this.zoom_k = zoom_k;
+    this.zoom_x = zoom_x;
+    this.zoom_y = zoom_y;
+  }
+
+  setHideCircularLinks(value) {
+    this.hideCircularLinks = value;
+  }
+
+  getHideCircularLinks() {
+    return this.hideCircularLinks;
+  }
+
   /** Given a model in a given state, calculate the minimum URL necessary to replicate that
    * state. Since visibility can be direct (called desired in the model) or implied, we
    * only need to include the desired charities, not the implied.
@@ -1171,6 +1185,12 @@ export class BrowseViewModel {
     params.append("s", this.POWER_LAW);
     params.append("X", this.getExpandScaleX());
     params.append("Y", this.getExpandScaleY());
+    if (this.zoom_x && this.zoom_y && this.zoom_k) {
+      params.append("zk", this.zoom_k);
+      params.append("zx", this.zoom_x);
+      params.append("zy", this.zoom_y);
+    }
+    if (this.getHideCircularLinks()) params.append("hc", 1);
     if (DEBUGLOG) params.append("D", 1); //make it sticky
     if (DEBUGSTOP) params.append("d", 1); //make it sticky
     return params;
@@ -2274,6 +2294,7 @@ export class Charity {
     this.sourceLinks = [];
     this.targetLinks = [];
     this.govDepth = Infinity;
+    this.isGov = this.ein == GOV_EIN;
     if (this.govt_amt > 0) {
       Charity.usgDirect.add(this);
       this.govDepth = 0;

@@ -269,7 +269,8 @@ window.showCircular = function () {
   $("#showCircularBtn").addClass("hidden");
   $("#hideCircularBtn").removeClass("hidden");
   $("#circular-links").removeClass("hidden");
-
+  viewModel.setHideCircularLinks(false);
+  viewModel.computeAndSaveURLParams();
   console.log("circular links shown");
 };
 
@@ -277,6 +278,8 @@ window.hideCircular = function () {
   $("#showCircularBtn").removeClass("hidden");
   $("#hideCircularBtn").addClass("hidden");
   $("#circular-links").addClass("hidden");
+  viewModel.setHideCircularLinks(true);
+  viewModel.computeAndSaveURLParams();
   console.log("Circular Links hidden");
 };
 
@@ -309,7 +312,16 @@ $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
   const params = new URLSearchParams(window.location.search);
-
+  if (params.has("zx") && params.has("zy") && params.has("zk")) {
+    viewModel.setZoom(
+      parseFloat(params.get("zx")),
+      parseFloat(params.get("zy")),
+      parseFloat(params.get("zk"))
+    );
+  }
+  if (params.has("hc")) {
+    viewModel.setHideCircularLinks(true);
+  }
   updateStatus("Loading Data...");
 
   // Initialize the select on page load
@@ -932,6 +944,19 @@ function generateGraph() {
         brushGroup.call(brush.move, null);
         brushGroup.select(".selection").style("visibility", "hidden");
       }
+    })
+    .on("end", () => {
+      const transform = d3.zoomTransform(svg.node());
+      const params = new URLSearchParams(window.location.search);
+      params.set("zk", transform.k.toFixed(4));
+      params.set("zx", transform.x.toFixed(4));
+      params.set("zy", transform.y.toFixed(4));
+      viewModel.setZoom(
+        transform.x.toFixed(4),
+        transform.y.toFixed(4),
+        transform.k.toFixed(4)
+      );
+      history.replaceState(null, "", `?${params.toString()}`);
     });
 
   svg.call(zoom);
@@ -984,7 +1009,7 @@ function generateGraph() {
       const k_new = Math.min(width / (x1 - x0), height / (y1 - y0));
 
       // Clamp to scaleExtent
-      const newScale = Math.min(Math.max(k_new, 0.1), 4);
+      const newScale = Math.min(Math.max(k_new, 0.01), 10);
 
       // Calculate midpoint in chart coordinates
       const mx = (x0 + x1) / 2;
@@ -1231,9 +1256,44 @@ function generateGraph() {
   renderActiveKeywords();
   renderActiveEINs();
   renderHideEINs();
+  if (viewModel.getHideCircularLinks()) {
+    hideCircular();
+  } else {
+    showCircular();
+  }
 
   dataLoaded(true);
-  zoomToFit();
+
+  // Apply initial zoom from URL or fit
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("zk") && params.has("zx") && params.has("zy")) {
+    const k = parseFloat(params.get("zk"));
+    const x = parseFloat(params.get("zx"));
+    const y = parseFloat(params.get("zy"));
+    if (!isNaN(k) && !isNaN(x) && !isNaN(y)) {
+      svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(k));
+    }
+  } else {
+    const g = svg.select("g.main");
+    const bounds = g.node().getBBox();
+    if (
+      !isFinite(bounds.width) ||
+      bounds.width <= 0 ||
+      !isFinite(bounds.height) ||
+      bounds.height <= 0
+    )
+      return;
+    const dx = bounds.x;
+    const dy = bounds.y;
+    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+    svg.call(
+      zoom.transform,
+      d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(scale)
+        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+    );
+  }
 }
 
 function adjustCircularLinks(graph) {

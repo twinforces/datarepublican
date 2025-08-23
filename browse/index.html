@@ -201,8 +201,13 @@ title: Charity explorer - Sankey chart of NGOs and their flows
 
     <!-- Block EIN(s) --><!-- prettier-ignore -->
     <div class="col-span-1 flex flex-col gap-2">
-      <button id="hideCircularBtn" class="max-w-fit">Hide Circular Links</button>
-      <button id="showCircularBtn" class="hidden max-w-fit">Show Circular Links</button>
+      <button id="hideCircularBtn" class="max-w-fit" title="Informative, but cluttery">Hide Circular Links</button>
+      <button id="showCircularBtn" class="hidden max-w-fit" title="Information over beauty">Show Circular Links</button>
+      <ul class="text-xs list-disc">
+        <li>Drag to pan</li>
+        <li>Wheel to zoom</li>
+        <li>Shift Drag to zoom select</li>
+      </ul>
     </div>
 
     <!-- Bulk Add by Keyword -->
