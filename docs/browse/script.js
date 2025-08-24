@@ -213,6 +213,14 @@ function renderPopup() {
   if (hideCtlBtn) {
     hideCtlBtn.addEventListener("click", hideControls);
   }
+  const showCircularBtn = document.getElementById("showCircularBtn");
+  const hideCircularBtn = document.getElementById("hideCircularBtn");
+  if (showCircularBtn) {
+    showCircularBtn.addEventListener("click", showCircular);
+  }
+  if (hideCircularBtn) {
+    hideCircularBtn.addEventListener("click", hideCircular);
+  }
 
   // Wire up the toggle buttons
   const showBtn = document.getElementById("showPresetsBtn");
@@ -255,6 +263,26 @@ window.hideControls = function () {
   document.documentElement.style.setProperty("--controls-hidden", "block");
   console.log("Controls hidden");
 };
+
+// Show Presets and Hide Presets implementations
+window.showCircular = function () {
+  $("#showCircularBtn").addClass("hidden");
+  $("#hideCircularBtn").removeClass("hidden");
+  $("#circular-links").removeClass("hidden");
+  viewModel.setHideCircularLinks(false);
+  viewModel.computeAndSaveURLParams();
+  console.log("circular links shown");
+};
+
+window.hideCircular = function () {
+  $("#showCircularBtn").removeClass("hidden");
+  $("#hideCircularBtn").addClass("hidden");
+  $("#circular-links").addClass("hidden");
+  viewModel.setHideCircularLinks(true);
+  viewModel.computeAndSaveURLParams();
+  console.log("Circular Links hidden");
+};
+
 // Show Presets and Hide Presets implementations
 window.showPresets = function () {
   document.documentElement.style.setProperty("--panel-shown", "block");
@@ -284,7 +312,16 @@ $(document).ready(function () {
   if (viewModel.dataReady) viewModel.parseQueryParams();
 
   const params = new URLSearchParams(window.location.search);
-
+  if (params.has("zx") && params.has("zy") && params.has("zk")) {
+    viewModel.setZoom(
+      parseFloat(params.get("zx")),
+      parseFloat(params.get("zy")),
+      parseFloat(params.get("zk"))
+    );
+  }
+  if (params.has("hc")) {
+    viewModel.setHideCircularLinks(true);
+  }
   updateStatus("Loading Data...");
 
   // Initialize the select on page load
@@ -874,11 +911,12 @@ function generateGraph() {
   }
 
   svg
-    .attr("width", "100%") // Ensure attributes are set in case SVG was cleared
+    .attr("width", "100%")
     .attr("height", "100%")
     .style("display", "block")
     .style("background", "#fff")
-    .attr("class", "flex-1");
+    .attr("class", "flex-1")
+    .style("user-select", "none"); // Prevent text selection during drag
 
   let g = svg
     .append("g")
@@ -890,18 +928,162 @@ function generateGraph() {
     .extent([
       [0, 0],
       [width, height],
-    ]) // Match renderFocusedSankey extent
-    .scaleExtent([0.1, 4]) // Match original range
+    ])
+    .scaleExtent([0.01, 10])
     .filter(
       (event) =>
         event.type === "wheel" ||
-        (event.type === "mousedown" && event.button === 0)
-    ) // Match renderFocusedSankey filter
+        (event.type === "mousedown" && event.button === 0 && !event.shiftKey)
+    )
     .on("zoom", (event) => {
-      svg.select("g.main").attr("transform", event.transform); // Target g.main
+      svg.select("g.main").attr("transform", event.transform);
+    })
+    .on("start", (event) => {
+      // Clear brush only for non-brush actions
+      if (!event.sourceEvent || !event.sourceEvent.shiftKey) {
+        brushGroup.call(brush.move, null);
+        brushGroup.select(".selection").style("visibility", "hidden");
+      }
+    })
+    .on("end", () => {
+      const transform = d3.zoomTransform(svg.node());
+      const params = new URLSearchParams(window.location.search);
+      params.set("zk", transform.k.toFixed(4));
+      params.set("zx", transform.x.toFixed(4));
+      params.set("zy", transform.y.toFixed(4));
+      viewModel.setZoom(
+        transform.x.toFixed(4),
+        transform.y.toFixed(4),
+        transform.k.toFixed(4)
+      );
+      history.replaceState(null, "", `?${params.toString()}`);
     });
 
   svg.call(zoom);
+
+  let isShiftDown = false;
+  let isBrushing = false;
+
+  // Add brush for rectangular zoom
+  const brush = d3
+    .brush()
+    .extent([
+      [0, 0],
+      [width, height],
+    ])
+    .keyModifiers(false) // Disable Shift key locking to x/y axis
+    .on("start", () => {
+      isBrushing = true;
+      brushGroup.select(".selection").style("visibility", "visible");
+      // Force SVG redraw on start
+      svg.attr("data-brush-start", Date.now());
+    })
+    .on("brush", (event) => {
+      if (!event.selection) {
+        return;
+      }
+      // Force SVG redraw during drag
+      svg.attr("data-brush-update", Date.now());
+    })
+    .on("end", (event) => {
+      isBrushing = false;
+      if (!event.selection) {
+        brushGroup.select(".selection").style("visibility", "hidden");
+        return;
+      }
+
+      // Get current zoom transform
+      const currentTransform = d3.zoomTransform(svg.node());
+
+      // Invert brush selection corners to chart coordinates
+      const [x0, y0] = currentTransform.invert([
+        event.selection[0][0],
+        event.selection[0][1],
+      ]);
+      const [x1, y1] = currentTransform.invert([
+        event.selection[1][0],
+        event.selection[1][1],
+      ]);
+
+      // Calculate new scale to fit the selected chart area
+      const k_new = Math.min(width / (x1 - x0), height / (y1 - y0));
+
+      // Clamp to scaleExtent
+      const newScale = Math.min(Math.max(k_new, 0.01), 10);
+
+      // Calculate midpoint in chart coordinates
+      const mx = (x0 + x1) / 2;
+      const my = (y0 + y1) / 2;
+
+      // Calculate new translate to center the midpoint in viewport
+      const tx = width / 2 - mx * newScale;
+      const ty = height / 2 - my * newScale;
+
+      const transform = d3.zoomIdentity.translate(tx, ty).scale(newScale);
+
+      svg
+        .transition()
+        .duration(750)
+        .call(zoom.transform, transform)
+        .on("end", () => {
+          brushGroup.call(brush.move, null);
+          brushGroup.select(".selection").style("visibility", "hidden");
+          brushGroup.select(".overlay").style("pointer-events", "none");
+          svg.call(zoom);
+        });
+    });
+
+  const brushGroup = svg.append("g").attr("class", "brush").call(brush);
+
+  // Style brush overlay for interaction
+  brushGroup
+    .select(".overlay")
+    .style("cursor", "crosshair")
+    .style("pointer-events", "none"); // Start with none to allow pass-through
+
+  // Initially hide selection
+  brushGroup.select(".selection").style("visibility", "hidden");
+
+  // Toggle overlay pointer-events based on Shift key
+  d3.select(window)
+    .on("keydown.brush", function (event) {
+      if (event.key === "Shift") {
+        isShiftDown = true;
+        svg.on(".zoom", null); // Disable zoom
+        brushGroup.select(".overlay").style("pointer-events", "all");
+      }
+    })
+    .on("keyup.brush", function (event) {
+      if (event.key === "Shift") {
+        isShiftDown = false;
+        if (!isBrushing) {
+          brushGroup.select(".overlay").style("pointer-events", "none");
+          brushGroup.select(".selection").style("visibility", "hidden");
+          svg.call(zoom); // Re-enable zoom
+        }
+      }
+    });
+
+  // Style brush selection for real-time visibility
+  brushGroup
+    .select(".selection")
+    .style("fill", "steelblue")
+    .style("fill-opacity", 0.3)
+    .style("stroke", "white")
+    .style("stroke-opacity", 0.6);
+
+  // Add CSS to ensure brush selection styles
+  const style = document.createElement("style");
+  style.textContent = `
+    .brush .selection {
+      fill: steelblue !important;
+      fill-opacity: 0.3 !important;
+      stroke: white !important;
+      stroke-opacity: 0.6 !important;
+    }
+  `;
+  document.head.appendChild(style);
+
   viewModel.rememberGraphSize(width, height);
   viewModel.parseQueryParams(new URLSearchParams(window.location.search));
   updateScaledConstants();
@@ -931,7 +1113,7 @@ function generateGraph() {
     viewModel.previousData = renderFocusedSankey(
       g,
       sankey,
-      svg, // Use global svg instead of svgRef
+      svg,
       width,
       height,
       viewModel.getShowList().length
@@ -952,7 +1134,7 @@ function generateGraph() {
   document.getElementById("zoomOut").onclick = () =>
     svg.transition().duration(300).call(zoom.scaleBy, 0.7);
   document.getElementById("zoomFit").onclick = () => {
-    const g = svg.select("g.main"); // Select g.main dynamically
+    const g = svg.select("g.main");
     const bounds = g.node().getBBox();
     if (
       !isFinite(bounds.width) ||
@@ -1052,7 +1234,6 @@ function generateGraph() {
     boundaryScaleFactorY = viewModel.expandScaleYUp();
     updateLayoutButtons();
     refresh();
-
     setTimeout(() => (isRedrawing = false), 1000);
   };
   document.getElementById("shrinkLayoutY").onclick = () => {
@@ -1061,7 +1242,6 @@ function generateGraph() {
     boundaryScaleFactorY = viewModel.expandScaleYDown();
     updateLayoutButtons();
     refresh();
-
     setTimeout(() => (isRedrawing = false), 1000);
   };
   document.getElementById("layoutScaleResetY").onclick = () => {
@@ -1070,16 +1250,50 @@ function generateGraph() {
     viewModel.resetExpandScaleY();
     updateLayoutButtons();
     refresh();
-
     setTimeout(() => (isRedrawing = false), 1000);
   };
   renderActiveEINs();
   renderActiveKeywords();
   renderActiveEINs();
   renderHideEINs();
+  if (viewModel.getHideCircularLinks()) {
+    hideCircular();
+  } else {
+    showCircular();
+  }
 
   dataLoaded(true);
-  zoomToFit();
+
+  // Apply initial zoom from URL or fit
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("zk") && params.has("zx") && params.has("zy")) {
+    const k = parseFloat(params.get("zk"));
+    const x = parseFloat(params.get("zx"));
+    const y = parseFloat(params.get("zy"));
+    if (!isNaN(k) && !isNaN(x) && !isNaN(y)) {
+      svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(k));
+    }
+  } else {
+    const g = svg.select("g.main");
+    const bounds = g.node().getBBox();
+    if (
+      !isFinite(bounds.width) ||
+      bounds.width <= 0 ||
+      !isFinite(bounds.height) ||
+      bounds.height <= 0
+    )
+      return;
+    const dx = bounds.x;
+    const dy = bounds.y;
+    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+    svg.call(
+      zoom.transform,
+      d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(scale)
+        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+    );
+  }
 }
 
 function adjustCircularLinks(graph) {
@@ -1235,7 +1449,6 @@ function renderFocusedSankey(
   dataLoaded(false);
 
   let currentData = viewModel.buildSankeyData();
-  //buildDebugData(currentData);
   const nodeCount = currentData.nodes.length;
   const edgeCount = currentData.links.length;
   const edgeTotal = formatNumber(
@@ -1260,17 +1473,8 @@ function renderFocusedSankey(
   adjustCircularLinks(graph);
   normalizeStrokeWidths(graph);
 
-  if (!previousData) {
-    svg.selectAll("*").remove();
-  }
-
-  g = svg
-    .selectAll("g.main")
-    .data([0])
-    .join("g")
-    .attr("class", "main")
-    .attr("transform", `translate(50, 50) scale(${scale})`);
-
+  // Remove redundant SVG clear; rely on generateGraph's setup
+  // g is already passed as <g class="main"> from generateGraph
   const masterGroup = g
     .selectAll(".graph-group")
     .data([0])
@@ -1319,12 +1523,11 @@ function renderFocusedSankey(
       (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
     );
 
-  // Function to extract points from an SVG path string
+  // Function to extract points from path (unchanged)
   function extractPointsFromPath(pathString) {
     const points = [];
     let currentPoint = { x: 0, y: 0 };
-    const commands = pathString.split(/(?=[MLAZ])/); // Split on M, L, A, Z
-
+    const commands = pathString.split(/(?=[MLAZ])/);
     commands.forEach((command) => {
       const type = command[0];
       const values = command
@@ -1332,7 +1535,6 @@ function renderFocusedSankey(
         .trim()
         .split(/[\s,]+/)
         .map(parseFloat);
-
       if (type === "M") {
         currentPoint = { x: values[0], y: values[1] };
         points.push({ ...currentPoint });
@@ -1340,29 +1542,26 @@ function renderFocusedSankey(
         currentPoint = { x: values[0], y: values[1] };
         points.push({ ...currentPoint });
       } else if (type === "A") {
-        // For arcs, the endpoint is the last two values (x, y)
         currentPoint = { x: values[5], y: values[6] };
         points.push({ ...currentPoint });
       }
-      // Ignore Z (close path) for now since our paths are open
     });
-
     return points;
-  } // Circular links
+  }
+
   // Circular links
   const circularLinkGroup = masterGroup
     .selectAll("g.circular-links")
     .data([0])
     .join("g")
     .attr("class", "circular-links")
+    .attr("id", "circular-links")
     .attr("fill", "none")
     .attr("stroke-opacity", 0.5);
 
   let circularLinks = graph.links.filter((d) => d.circular);
   const circularLink = circularLinkGroup
     .selectAll(".circular-link")
-    .attr("data-source-id", (d) => d.source.id)
-    .attr("data-target-id", (d) => d.target.id)
     .data(circularLinks, (d) => `${d.source.id}-${d.target.id}`);
 
   circularLink
@@ -1390,33 +1589,9 @@ function renderFocusedSankey(
     .duration(ANIM_LINK)
     .attr("points", (d) => d.path)
     .attr("fill", "rgba(255, 105, 180, 0.5)")
-    .attr("data-source-id", (d) => d.source.id)
-    .attr("data-target-id", (d) => d.target.id)
     .attr("stroke", "pink")
     .attr("stroke-opacity", "0.6")
     .attr("stroke-width", (d) => 0.1 * d.width);
-
-  /*// Add debug points for each circular link
-  circularLink.merge(circularLinkEnter).each(function (d) {
-    const path = d.path;
-    const points = extractPointsFromPath(path);
-
-    // Append circles for each point within the same group
-    d3.select(this.parentNode)
-      .selectAll("circle.debug-point-" + d.source.id + "-" + d.target.id)
-      .data(points)
-      .enter()
-      .append("circle")
-      .attr("class", "debug-point-" + d.source.id + "-" + d.target.id)
-      .attr("cx", (p) => p.x)
-      .attr("cy", (p) => p.y)
-      .attr("r", 3)
-      .attr("fill", "black")
-      .attr("stroke", "white")
-      .attr("stroke-width", 1)
-      .append("title")
-      .text((p) => `Point (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
-  });*/
 
   circularLinkEnter
     .append("title")
@@ -1427,7 +1602,7 @@ function renderFocusedSankey(
         )} (Circular)`
     );
 
-  // Node rendering (unchanged)
+  // Node rendering
   const nodeGroup = masterGroup
     .selectAll("g.nodes")
     .data([0])
@@ -1482,7 +1657,13 @@ function renderFocusedSankey(
       .text((d) => d.toolTipText());
   });
 
-  nodeEnter.transition().duration(ANIM_NODE).style("opacity", 1);
+  // Fallback if transition fails
+  try {
+    nodeEnter.transition().duration(ANIM_NODE).style("opacity", 1);
+  } catch (e) {
+    console.error("Transition failed:", e);
+    nodeEnter.style("opacity", 1); // Fallback to set opacity directly
+  }
 
   nodeElements
     .merge(nodeEnter)
@@ -1494,6 +1675,7 @@ function renderFocusedSankey(
       d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d)
     );
 
+  // Hat and text rendering (unchanged for brevity, but ensure transitions are safe)
   const hatGroup = masterGroup
     .selectAll("g.expand-hats")
     .data([0])
@@ -1533,22 +1715,40 @@ function renderFocusedSankey(
     .append("title")
     .text("expand more inflows");
 
-  leftHats
-    .merge(leftHatEnter)
-    .transition()
-    .duration(ANIM_HAT)
-    .style("opacity", (d) =>
-      d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
-        ? 1
-        : d.hasLeftHat &&
-          !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
-        ? 0
-        : 1
-    )
-    .select("path")
-    .attr("d", (d) =>
-      generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
-    );
+  try {
+    leftHats
+      .merge(leftHatEnter)
+      .transition()
+      .duration(ANIM_HAT)
+      .style("opacity", (d) =>
+        d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
+          ? 1
+          : d.hasLeftHat &&
+            !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) =>
+        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+      );
+  } catch (e) {
+    console.error("Left hats transition failed:", e);
+    leftHats
+      .merge(leftHatEnter)
+      .style("opacity", (d) =>
+        d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
+          ? 1
+          : d.hasLeftHat &&
+            !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) =>
+        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+      );
+  }
 
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
@@ -1582,27 +1782,50 @@ function renderFocusedSankey(
     .append("title")
     .text("expand more outflows");
 
-  rightHats
-    .merge(rightHatEnter)
-    .transition()
-    .duration(ANIM_HAT)
-    .style("opacity", (d) =>
-      !d.isTerminal &&
-      d.canExpandOutflows &&
-      d.invisibleGrants.length > 0 &&
-      !d.hasRightHat
-        ? 1
-        : d.hasRightHat &&
-          !(
-            !d.isTerminal &&
-            d.canExpandOutflows &&
-            d.invisibleGrants.length > 0
-          )
-        ? 0
-        : 1
-    )
-    .select("path")
-    .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+  try {
+    rightHats
+      .merge(rightHatEnter)
+      .transition()
+      .duration(ANIM_HAT)
+      .style("opacity", (d) =>
+        !d.isTerminal &&
+        d.canExpandOutflows &&
+        d.invisibleGrants.length > 0 &&
+        !d.hasRightHat
+          ? 1
+          : d.hasRightHat &&
+            !(
+              !d.isTerminal &&
+              d.canExpandOutflows &&
+              d.invisibleGrants.length > 0
+            )
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+  } catch (e) {
+    console.error("Right hats transition failed:", e);
+    rightHats
+      .merge(rightHatEnter)
+      .style("opacity", (d) =>
+        !d.isTerminal &&
+        d.canExpandOutflows &&
+        d.invisibleGrants.length > 0 &&
+        !d.hasRightHat
+          ? 1
+          : d.hasRightHat &&
+            !(
+              !d.isTerminal &&
+              d.canExpandOutflows &&
+              d.invisibleGrants.length > 0
+            )
+          ? 0
+          : 1
+      )
+      .select("path")
+      .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
+  }
 
   const textGroup = masterGroup
     .selectAll("g.text")
@@ -1625,25 +1848,39 @@ function renderFocusedSankey(
     )
     .style("cursor", "crosshair")
     .attr("class", "nodeLabel")
-
     .attr("fill", (d) => getTextColorForEIN(d.ein))
     .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`);
 
-  text
-    .merge(textEnter)
-    .transition()
-    .duration(ANIM_TEXT)
-    .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
-    .attr("y", (d) => (d.y0 + d.y1) / 2)
-    .attr("text-anchor", (d) =>
-      d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
-    )
-    .style("cursor", "crosshair")
-    .attr("class", "nodeLabel")
-
-    .attr("fill", (d) => getTextColorForEIN(d.ein))
-    .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
-    .text((d) => d.name);
+  try {
+    text
+      .merge(textEnter)
+      .transition()
+      .duration(ANIM_TEXT)
+      .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
+      .attr("y", (d) => (d.y0 + d.y1) / 2)
+      .attr("text-anchor", (d) =>
+        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+      )
+      .style("cursor", "crosshair")
+      .attr("class", "nodeLabel")
+      .attr("fill", (d) => getTextColorForEIN(d.ein))
+      .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
+      .text((d) => d.name);
+  } catch (e) {
+    console.error("Text transition failed:", e);
+    text
+      .merge(textEnter)
+      .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
+      .attr("y", (d) => (d.y0 + d.y1) / 2)
+      .attr("text-anchor", (d) =>
+        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+      )
+      .style("cursor", "crosshair")
+      .attr("class", "nodeLabel")
+      .attr("fill", (d) => getTextColorForEIN(d.ein))
+      .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
+      .text((d) => d.name);
+  }
 
   bindEvents(g);
 
