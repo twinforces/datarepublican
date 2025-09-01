@@ -5,11 +5,15 @@
 set -e
 
 # Input TSV files and required columns
-TSV_FILES=("charities.tsv" "grants_final.tsv" "grants.pf.tsv")
-CHARITY_COLUMNS="filer_ein,filer_name,xml_name,receipt_amt,govt_amt,contrib_amt,tax_year,org_type,total_assets,form_type,denominator"
+TSV_FILES=("charities.tsv" "grants_final.tsv" "grants.pf.tsv" "contractors.tsv" "political_contributions.tsv")
+CHARITY_COLUMNS="filer_ein,filer_name,xml_name,receipt_amt,govt_amt,contrib_amt,tax_year,org_type,total_assets,form_type,denominator,canonical_address"
 GRANT_COLUMNS="filer_ein,grant_ein,grant_amt"
+CONTRACTOR_COLUMNS="filer_ein,name,amount,ein,address,zip_code,po_box,tax_year"
+POLITICAL_COLUMNS="filer_ein,recipient,amount,recipient_address,recipient_zip,recipient_po_box,tax_year"
 CHARITY_CHUNK_SIZE=10000
 GRANT_CHUNK_SIZE=50000
+CONTRACTOR_CHUNK_SIZE=25000
+POLITICAL_CHUNK_SIZE=25000
 OUTPUT_DIR="tsv_chunks"
 DATA_FILES_FILE="data_files.js"
 
@@ -55,16 +59,28 @@ DATA_FILES=()
 
 for TSV_FILE in "${TSV_FILES[@]}"; do
   if [ ! -f "$TSV_FILE" ]; then
-    echo "Error: $TSV_FILE not found" >&2
-    exit 1
+    echo "Warning: $TSV_FILE not found, skipping" >&2
+    continue
   fi
 
   # Select columns, header, and chunk size based on file type
   if [[ "$TSV_FILE" == "charities.tsv" ]]; then
     COLUMNS="$CHARITY_COLUMNS"
-    HEADER="filer_ein\tfiler_name\txml_name\treceipt_amt\tgovt_amt\tcontrib_amt\ttax_year\torg_type\ttotal_assets\tform_type\tdenominator"
+    HEADER="filer_ein\tfiler_name\txml_name\treceipt_amt\tgovt_amt\tcontrib_amt\ttax_year\torg_type\ttotal_assets\tform_type\tdenominator\tcanonical_address"
     CHUNK_SIZE="$CHARITY_CHUNK_SIZE"
     TYPE="charities"
+    GRANT_TYPE=""
+  elif [[ "$TSV_FILE" == "contractors.tsv" ]]; then
+    COLUMNS="$CONTRACTOR_COLUMNS"
+    HEADER="filer_ein\tname\tamount\tein\taddress\tzip_code\tpo_box\ttax_year"
+    CHUNK_SIZE="$CONTRACTOR_CHUNK_SIZE"
+    TYPE="contractors"
+    GRANT_TYPE=""
+  elif [[ "$TSV_FILE" == "political_contributions.tsv" ]]; then
+    COLUMNS="$POLITICAL_COLUMNS"
+    HEADER="filer_ein\trecipient\tamount\trecipient_address\trecipient_zip\trecipient_po_box\ttax_year"
+    CHUNK_SIZE="$POLITICAL_CHUNK_SIZE"
+    TYPE="political"
     GRANT_TYPE=""
   else
     COLUMNS="$GRANT_COLUMNS"
@@ -104,7 +120,7 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
             exit 1;
           }
         }
-      } 
+      }
       {
         for (i=1; i<=length(arr); i++) {
           idx = arr[i];
@@ -115,6 +131,62 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
             printf "%s", ($idx == "" ? "" : $idx);
           }
           printf "%s", (i == length(arr) ? "\n" : "\t");
+        }
+      }' > "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+  elif [[ "$TSV_FILE" == "contractors.tsv" ]]; then
+    # Filter out contractors with zero amounts or empty names
+    tail -n +2 "$TSV_FILE" | awk -F'\t' -v cols="$COLUMN_INDICES" '
+      BEGIN {
+        split(cols, arr, ",");
+        for (i in arr) {
+          if (arr[i] == 0) {
+            print "Error: Invalid column index 0 for column " i > "/dev/stderr";
+            exit 1;
+          }
+        }
+      }
+      {
+        name = $arr[2];
+        amount = $arr[3];
+        if (name != "" && amount != "0" && amount != "") {
+          for (i=1; i<=length(arr); i++) {
+            idx = arr[i];
+            if (idx > NF) {
+              print "Error: Row " NR " has " NF " columns, expected at least " idx " for column " i > "/dev/stderr";
+              printf "";
+            } else {
+              printf "%s", ($idx == "" ? "" : $idx);
+            }
+            printf "%s", (i == length(arr) ? "\n" : "\t");
+          }
+        }
+      }' > "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
+  elif [[ "$TSV_FILE" == "political_contributions.tsv" ]]; then
+    # Filter out political contributions with zero amounts or empty recipients
+    tail -n +2 "$TSV_FILE" | awk -F'\t' -v cols="$COLUMN_INDICES" '
+      BEGIN {
+        split(cols, arr, ",");
+        for (i in arr) {
+          if (arr[i] == 0) {
+            print "Error: Invalid column index 0 for column " i > "/dev/stderr";
+            exit 1;
+          }
+        }
+      }
+      {
+        recipient = $arr[2];
+        amount = $arr[3];
+        if (recipient != "" && amount != "0" && amount != "") {
+          for (i=1; i<=length(arr); i++) {
+            idx = arr[i];
+            if (idx > NF) {
+              print "Error: Row " NR " has " NF " columns, expected at least " idx " for column " i > "/dev/stderr";
+              printf "";
+            } else {
+              printf "%s", ($idx == "" ? "" : $idx);
+            }
+            printf "%s", (i == length(arr) ? "\n" : "\t");
+          }
         }
       }' > "${OUTPUT_DIR}/${TSV_FILE%.tsv}_filtered.tsv"
   else
@@ -128,7 +200,7 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
             exit 1;
           }
         }
-      } 
+      }
       {
         filer_ein = $arr[1];
         grant_ein = $arr[2];
@@ -197,8 +269,20 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
   fi
 
   # Add to DATA_FILES
+  if [[ "$TSV_FILE" == "charities.tsv" ]]; then
+    STATUS_TEXT="Charities"
+  elif [[ "$TSV_FILE" == "contractors.tsv" ]]; then
+    STATUS_TEXT="Contractors"
+  elif [[ "$TSV_FILE" == "political_contributions.tsv" ]]; then
+    STATUS_TEXT="Political Contributions"
+  elif [[ "$TSV_FILE" == "grants_final.tsv" ]]; then
+    STATUS_TEXT="501 Grants"
+  else
+    STATUS_TEXT="Private Foundation Grants"
+  fi
+
   DATA_FILES+=("{
-    status: \"Loading $( [[ "$TSV_FILE" == "charities.tsv" ]] && echo "Charities" || echo "$( [[ "$TSV_FILE" == "grants_final.tsv" ]] && echo "501 Grants" || echo "Private Foundation Grants" )")\",
+    status: \"Loading $STATUS_TEXT\",
     baseFile: \"./tsv_chunks/${TSV_FILE%.tsv}_chunk_\",
     tsvFilePrefix: \"${TSV_FILE%.tsv}_chunk_\",
     type: \"$TYPE\",

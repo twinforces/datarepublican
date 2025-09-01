@@ -564,13 +564,9 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         if form_type == "990":
             row, officer_entries, contractors, political_contributions = parse_990.parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
         elif form_type == "990EZ":
-            row, officer_entries = parse_990ez.parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
-            contractors = []
-            political_contributions = []
+            row, officer_entries, contractors, political_contributions = parse_990ez.parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
         elif form_type == "990PF":
-            row, officer_entries = parse_990pf.parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
-            contractors = []
-            political_contributions = []
+            row, officer_entries, contractors, political_contributions = parse_990pf.parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
         else:
             log_error("Unsupported form type {} in {}, skipping", form_type, xml_filename)
             file_counter_local.skipped += 1
@@ -579,7 +575,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         if row is None:
             log_error("Parsing returned None for {}, skipping", xml_filename)
             file_counter_local.skipped += 1
-            return [], None, xml_filename, []
+            return [], None, xml_filename, [], [], []
         tax_year = row[0]
         org_type = row[6]
         total_exp = float(row[7]) if row[7] else 0
@@ -594,7 +590,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
     except Exception as e:
         log_error("Error processing {}: {}", xml_filename, str(e), exc_info=True, ein=None)
         file_counter_local.skipped += 1
-        return [], None, xml_filename, []
+        return [], None, xml_filename, [], [], []
 
 def process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size):
     initialize_thread_local_counters()

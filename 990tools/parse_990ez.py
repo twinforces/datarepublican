@@ -310,9 +310,9 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
         data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],
         data["grants_ptile"], data["foreign_expenses_pct"], data["foreign_expenses_ptile"], data["grift_ratio"],
         data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
-        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename
+        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename, ""
     ]
-    return row, officer_entries
+    return row, officer_entries, [], []
 
 def main():
     if len(sys.argv) != 2:
