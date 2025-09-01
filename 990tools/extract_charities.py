@@ -34,9 +34,12 @@ TSV_COLUMNS = [
     "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
     "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
     "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
-    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name"
+    "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name",
+    "canonical_address"
 ]
 OFFICER_MAPPING_FILE = "officer_mapping.json"
+CONTRACTORS_FILE = "contractors.tsv"
+POLITICAL_CONTRIBUTIONS_FILE = "political_contributions.tsv"
 QUEUE_SIZE = 20000
 
 # Precompile XPaths used in parse_xml_file
@@ -74,6 +77,8 @@ done_queuing = False  # Flag to signal when main thread is done queuing tasks
 # Queue for TSV writes with increased size
 tsv_write_queue = queue.Queue(maxsize=20000)
 officer_queue = queue.Queue(maxsize=QUEUE_SIZE)
+contractors_queue = queue.Queue(maxsize=QUEUE_SIZE)
+political_queue = queue.Queue(maxsize=QUEUE_SIZE)
 
 # Setup queue-based logging
 log_queue = queue.Queue(-1)  # Unlimited size
@@ -418,6 +423,91 @@ def officer_writer_thread(writer_id):
     except Exception as e:
         log_error("Error writing officer mapping file {}: {}", OFFICER_MAPPING_FILE, str(e), exc_info=True)
 
+def contractors_writer_thread(writer_id):
+    """Write contractors data to TSV file."""
+    global done_queuing, contractors_queue
+    contractors_data = []
+
+    while True:
+        try:
+            item = contractors_queue.get(timeout=0.1)
+            if item is None:
+                log_error("Contractors writer thread {} received shutdown signal", writer_id)
+                break
+            contractors_data.extend(item)
+        except queue.Empty:
+            if done_queuing and contractors_queue.empty():
+                log_error("Contractors writer thread {} exiting, queue empty and main thread done queuing", writer_id)
+                break
+            continue
+        finally:
+            if item is not None:
+                contractors_queue.task_done()
+
+    # Write contractors data
+    if contractors_data:
+        try:
+            contractors_path = os.path.join(args.output_dir, CONTRACTORS_FILE)
+            with open(contractors_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f, delimiter='\t')
+                writer.writerow(['filer_ein', 'name', 'amount', 'ein', 'address', 'zip_code', 'po_box', 'tax_year'])
+                for contractor in contractors_data:
+                    writer.writerow([
+                        contractor.get('filer_ein', ''),
+                        contractor.get('name', ''),
+                        contractor.get('amount', 0),
+                        contractor.get('ein', ''),
+                        contractor.get('address', ''),
+                        contractor.get('zip_code', ''),
+                        contractor.get('po_box', ''),
+                        contractor.get('tax_year', '')
+                    ])
+            log_error("Wrote {} contractor records to {}", len(contractors_data), CONTRACTORS_FILE)
+        except Exception as e:
+            log_error("Error writing contractors file {}: {}", CONTRACTORS_FILE, str(e), exc_info=True)
+
+def political_contributions_writer_thread(writer_id):
+    """Write political contributions data to TSV file."""
+    global done_queuing, political_queue
+    political_data = []
+
+    while True:
+        try:
+            item = political_queue.get(timeout=0.1)
+            if item is None:
+                log_error("Political contributions writer thread {} received shutdown signal", writer_id)
+                break
+            political_data.extend(item)
+        except queue.Empty:
+            if done_queuing and political_queue.empty():
+                log_error("Political contributions writer thread {} exiting, queue empty and main thread done queuing", writer_id)
+                break
+            continue
+        finally:
+            if item is not None:
+                political_queue.task_done()
+
+    # Write political contributions data
+    if political_data:
+        try:
+            political_path = os.path.join(args.output_dir, POLITICAL_CONTRIBUTIONS_FILE)
+            with open(political_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f, delimiter='\t')
+                writer.writerow(['filer_ein', 'recipient', 'amount', 'recipient_address', 'recipient_zip', 'recipient_po_box', 'tax_year'])
+                for contribution in political_data:
+                    writer.writerow([
+                        contribution.get('filer_ein', ''),
+                        contribution.get('recipient', ''),
+                        contribution.get('amount', 0),
+                        contribution.get('recipient_address', ''),
+                        contribution.get('recipient_zip', ''),
+                        contribution.get('recipient_po_box', ''),
+                        contribution.get('tax_year', '')
+                    ])
+            log_error("Wrote {} political contribution records to {}", len(political_data), POLITICAL_CONTRIBUTIONS_FILE)
+        except Exception as e:
+            log_error("Error writing political contributions file {}: {}", POLITICAL_CONTRIBUTIONS_FILE, str(e), exc_info=True)
+
 def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
     initialize_thread_local_counters()
     xpath_cache = {}
@@ -468,17 +558,21 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         if filer_ein == "Unknown":
             log_error("Missing Filer EIN in {}", xml_filename)
             file_counter_local.skipped += 1
-            return [], None, xml_filename, []
+            return [], None, xml_filename, [], [], []
         if form_type == "990":
-            row, officer_entries = parse_990.parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            row, officer_entries, contractors, political_contributions = parse_990.parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
         elif form_type == "990EZ":
             row, officer_entries = parse_990ez.parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            contractors = []
+            political_contributions = []
         elif form_type == "990PF":
             row, officer_entries = parse_990pf.parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            contractors = []
+            political_contributions = []
         else:
             log_error("Unsupported form type {} in {}, skipping", form_type, xml_filename)
             file_counter_local.skipped += 1
-            return [], None, xml_filename
+            return [], None, xml_filename, [], [], []
 
         if row is None:
             log_error("Parsing returned None for {}, skipping", xml_filename)
@@ -494,7 +588,7 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         row[-1] = f"{zip_path}/{xml_filename}"
         results = [row]
         log_error("Finished processing XML {}, took {:.2f} seconds, memory usage: {}%", xml_filename, time.time() - start_time, psutil.virtual_memory().percent, ein=ein)
-        return results, org_type, f"{zip_path}/{xml_filename}", officer_entries
+        return results, org_type, f"{zip_path}/{xml_filename}", officer_entries, contractors, political_contributions
     except Exception as e:
         log_error("Error processing {}: {}", xml_filename, str(e), exc_info=True, ein=None)
         file_counter_local.skipped += 1
@@ -541,12 +635,12 @@ def process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size)
                             for future, xml_filename in futures:
                                 try:
                                     result = future.result(timeout=300)
-                                    if not isinstance(result, tuple) or len(result) != 4:
-                                        log_error("Invalid return value from parse_xml_file for {}: expected 4-tuple, got {}", xml_filename, result)
+                                    if not isinstance(result, tuple) or len(result) != 6:
+                                        log_error("Invalid return value from parse_xml_file for {}: expected 6-tuple, got {}", xml_filename, result)
                                         file_counter_local.skipped += 1
                                         pbar.update(1)
                                         continue
-                                    results, org_type, xml_name, officer_entries = result
+                                    results, org_type, xml_name, officer_entries, contractors, political_contributions = result
                                     if results is None or org_type is None:
                                         log_error("Parsing failed for {}, skipping", xml_filename)
                                         file_counter_local.skipped += 1
@@ -570,6 +664,22 @@ def process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size)
                                         except queue.Full:
                                             log_error("Officer queue full, waiting to put entry for {} {}", entry["first_name"], entry["last_name"])
                                             officer_queue.put(entry, block=True)
+
+                                    # Queue contractors data
+                                    if contractors:
+                                        try:
+                                            contractors_queue.put_nowait(contractors)
+                                        except queue.Full:
+                                            log_error("Contractors queue full, waiting to put {} contractor records", len(contractors))
+                                            contractors_queue.put(contractors, block=True)
+
+                                    # Queue political contributions data
+                                    if political_contributions:
+                                        try:
+                                            political_queue.put_nowait(political_contributions)
+                                        except queue.Full:
+                                            log_error("Political contributions queue full, waiting to put {} records", len(political_contributions))
+                                            political_queue.put(political_contributions, block=True)
                                     pbar.update(1)
                                 except TimeoutError:
                                     log_error("Timeout processing XML {} in {}", xml_filename, zip_path)
@@ -657,7 +767,111 @@ def cleanup_empty_tsv_files():
             os.remove(tsv_path)
             log_error("Removed empty TSV file {}", tsv_path)
 
-def main():
+def main(start_year=None, end_year=None, input_dir=".", output_dir=".", eins=None,
+         verbose=False, quiet=False, write_buffer_size=10000, worker_threads=16,
+         batch_size=500, writer_threads=1):
+    """Main function for extracting charity data from IRS 990 XML files."""
+    global args
+    # Create a mock args object for compatibility
+    class MockArgs:
+        pass
+
+    args = MockArgs()
+    args.start_year = start_year
+    args.end_year = end_year
+    args.input_dir = input_dir
+    args.output_dir = output_dir
+    args.eins = eins
+    args.verbose = verbose
+    args.quiet = quiet
+    args.write_buffer_size = write_buffer_size
+    args.worker_threads = worker_threads
+    args.batch_size = batch_size
+    args.writer_threads = writer_threads
+
+    # Validate arguments
+    if start_year is None or end_year is None:
+        raise ValueError("start_year and end_year are required")
+    if write_buffer_size < 1:
+        raise ValueError("Write buffer size must be at least 1")
+    if worker_threads < 1:
+        raise ValueError("Number of worker threads must be at least 1")
+    if batch_size < 1:
+        raise ValueError("Batch size must be at least 1")
+    if writer_threads < 1:
+        raise ValueError("Number of writer threads must be at least 1")
+    if not os.path.isdir(input_dir):
+        raise ValueError(f"Input directory {input_dir} does not exist")
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        log_error("Created output directory {}", output_dir)
+
+    # Set global variables
+    global DEBUG_EINS
+    if eins:
+        DEBUG_EINS = set(eins.split(','))
+        log_error("Set DEBUG_EINS for extra logging: {}", ",".join(DEBUG_EINS))
+
+    if not quiet:
+        print(f"DEBUG: verbose is set to {verbose}")
+
+    parse_990.set_logger(logger, log_error, verbose, DEBUG_EINS)
+    parse_990ez.set_logger(logger, log_error, verbose, DEBUG_EINS)
+    parse_990pf.set_logger(logger, log_error, verbose, DEBUG_EINS)
+    initialize_xpath_stats()
+
+    zip_files = sorted(glob.glob(os.path.join(input_dir, "*.zip")))
+    if not zip_files:
+        if not quiet:
+            print(f"No ZIP files found in {input_dir}")
+        return
+
+    tsv_files = preallocate_tsv_files(start_year, end_year)
+    writer_threads_list = []
+    buffers = [defaultdict(list) for _ in range(writer_threads)]
+    for i in range(writer_threads):
+        thread = threading.Thread(target=tsv_writer_thread, args=(tsv_files, f"writer-{i}", buffers[i], write_buffer_size))
+        thread.start()
+        writer_threads_list.append(thread)
+
+    # Start writer threads
+    officer_writer = threading.Thread(target=officer_writer_thread, args=(f"officer-writer-0",))
+    officer_writer.start()
+
+    contractors_writer = threading.Thread(target=contractors_writer_thread, args=(f"contractors-writer-0",))
+    contractors_writer.start()
+
+    political_writer = threading.Thread(target=political_contributions_writer_thread, args=(f"political-writer-0",))
+    political_writer.start()
+
+    try:
+        for zip_path in zip_files:
+            process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size)
+    finally:
+        global done_queuing
+        done_queuing = True
+        for _ in range(writer_threads):
+            tsv_write_queue.put(None)
+        officer_queue.put(None)
+        contractors_queue.put(None)
+        political_queue.put(None)
+        for thread in writer_threads_list:
+            thread.join()
+        officer_writer.join()
+        contractors_writer.join()
+        political_writer.join()
+        for tsv_file in tsv_files.values():
+            tsv_file.close()
+        cleanup_empty_tsv_files()
+        save_xpath_stats()
+        reorder_xpaths()
+        listener.stop()
+
+    if not quiet:
+        print(f"Total entries processed: {total_entries}")
+
+def main_cli():
+    """Command-line interface for extract_charities."""
     global verbose, quiet, done_queuing, total_entries, DEBUG_EINS
     global officer_queue
     global args
@@ -674,69 +888,20 @@ def main():
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size for processing futures")
     parser.add_argument("--writer-threads", type=int, default=1, help="Number of TSV writer threads")
     args = parser.parse_args()
-    verbose = args.verbose
-    quiet = args.quiet
-    start_year = args.start_year
-    end_year = args.end_year
-    write_buffer_size = args.write_buffer_size
-    worker_threads = args.worker_threads
-    batch_size = args.batch_size
-    writer_threads = args.writer_threads
-    if write_buffer_size < 1:
-        raise ValueError("Write buffer size must be at least 1")
-    if worker_threads < 1:
-        raise ValueError("Number of worker threads must be at least 1")
-    if batch_size < 1:
-        raise ValueError("Batch size must be at least 1")
-    if writer_threads < 1:
-        raise ValueError("Number of writer threads must be at least 1")
-    if not os.path.isdir(args.input_dir):
-        raise ValueError(f"Input directory {args.input_dir} does not exist")
-    if not os.path.isdir(args.output_dir):
-        os.makedirs(args.output_dir, exist_ok=True)
-        log_error("Created output directory {}", args.output_dir)
-    if args.eins:
-        DEBUG_EINS = set(args.eins.split(','))
-        log_error("Set DEBUG_EINS for extra logging: {}", ",".join(DEBUG_EINS))
-    print(f"DEBUG: verbose is set to {verbose}")
-    parse_990.set_logger(logger, log_error, verbose, DEBUG_EINS)
-    parse_990ez.set_logger(logger, log_error, verbose, DEBUG_EINS)
-    parse_990pf.set_logger(logger, log_error, verbose, DEBUG_EINS)
-    initialize_xpath_stats()
-    zip_files = sorted(glob.glob(os.path.join(args.input_dir, "*.zip")))
-    if not zip_files:
-        print(f"No ZIP files found in {args.input_dir}")
-        return
-    tsv_files = preallocate_tsv_files(start_year, end_year)
-    writer_threads_list = []
-    buffers = [defaultdict(list) for _ in range(writer_threads)]
-    for i in range(writer_threads):
-        thread = threading.Thread(target=tsv_writer_thread, args=(tsv_files, f"writer-{i}", buffers[i], write_buffer_size))
-        thread.start()
-        writer_threads_list.append(thread)
-    
-    # Start officer writer thread
-    officer_writer = threading.Thread(target=officer_writer_thread, args=(f"officer-writer-0",))
-    officer_writer.start()
-    
-    try:
-        for zip_path in zip_files:
-            process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size)
-    finally:
-        done_queuing = True
-        for _ in range(writer_threads):
-            tsv_write_queue.put(None)
-        officer_queue.put(None)
-        for thread in writer_threads_list:
-            thread.join()
-        officer_writer.join()
-        for tsv_file in tsv_files.values():
-            tsv_file.close()
-        cleanup_empty_tsv_files()
-        save_xpath_stats()
-        reorder_xpaths()
-        listener.stop()
-    print(f"Total entries processed: {total_entries}")
+
+    main(
+        start_year=args.start_year,
+        end_year=args.end_year,
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        eins=args.eins,
+        verbose=args.verbose,
+        quiet=args.quiet,
+        write_buffer_size=args.write_buffer_size,
+        worker_threads=args.worker_threads,
+        batch_size=args.batch_size,
+        writer_threads=args.writer_threads
+    )
 
 if __name__ == "__main__":
-    main()
+    main_cli()

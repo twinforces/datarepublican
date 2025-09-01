@@ -13,6 +13,9 @@ This module transforms the collection of individual Python scripts into a cohesi
 - **Configuration Management**: JSON-based configuration with sensible defaults
 - **Error Handling**: Proper exception handling and progress reporting
 - **Extensible**: Easy to add new processing stages
+- **Enhanced Data Extraction**: Contractors, consultants, political contributions, and canonical addresses
+- **Google Street View Integration**: Canonical addresses for location-based analysis
+- **PAC Data Linking**: EIN and name/address data for joining with political action committee data
 
 ## Installation
 
@@ -173,12 +176,41 @@ python irs990tools.py --config my_config.json run-all
 
 The pipeline generates several output files:
 
-- `charity_latest.tsv/csv` - Latest charity filings
+- `charity_latest.tsv/csv` - Latest charity filings (now includes canonical_address column)
 - `grants_latest.tsv/csv` - Grant data
 - `backfill.tsv/csv` - Backfill data for unknown EINs
 - `charity_latest_with_backfill.tsv/csv` - Charities with backfill data
 - `grants_final.tsv/csv` - Final filtered grant data
+- `contractors.tsv` - Contractors and consultants data (filer_ein, name, amount, ein, tax_year)
+- `political_contributions.tsv` - Political contributions data (filer_ein, recipient, amount, tax_year)
 - Various analysis reports and logs
+
+## New Data Extraction Features
+
+### Contractors and Consultants
+Extracts data from Schedule L including:
+- **EIN**: If available in the XML
+- **Name**: Business name or person name
+- **Amount**: Transaction/compensation amount
+- **Relationship Type**: Business relationship, loans, business transactions
+
+### Political Contributions
+Extracts data from Schedule C including:
+- **Recipient**: Who received the contribution
+- **Amount**: Contribution amount
+- **Purpose**: Political campaign activity details
+
+### Canonical Addresses
+- **Full Address**: Standardized address format for Google Street View
+- **Address Components**: Parsed street, city, state, ZIP
+- **Geocoding Ready**: Formatted for location services integration
+
+### PAC Data Linking
+All extracted data includes:
+- **EIN**: For direct matching with PAC databases
+- **Name/Address**: For fuzzy matching when EIN is unavailable
+- **Tax Year**: For temporal analysis
+- **Filer EIN**: Links back to the charity organization
 
 ## Dependencies
 

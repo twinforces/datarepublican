@@ -26,7 +26,7 @@ TSV_COLUMNS = [
     "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
     "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
     "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag",
-    "xml_name", "grift"
+    "xml_name", "grift", "canonical_address"
 ]
 GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"]
 BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]

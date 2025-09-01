@@ -144,7 +144,152 @@ XPATHS_990 = {
         etree.XPath(".//irs:ReturnData", namespaces=NAMESPACES),
         etree.XPath(".//ReturnData", namespaces=NAMESPACES),
     ],
+    # Contractors and Consultants (Schedule L)
+    "contractors_schedule_l": [
+        etree.XPath(".//irs:IRS990ScheduleL", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleL", namespaces=NAMESPACES),
+    ],
+    "contractor_elements": [
+        etree.XPath(".//irs:BusinessRelationshipWithOrganizationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:LoansFromOrganizationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:BusinessTransactionsWithOrganizationGrp", namespaces=NAMESPACES),
+    ],
+    "contractor_name": [
+        etree.XPath("irs:PersonNm", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:OrganizationBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+    ],
+    "contractor_amount": [
+        etree.XPath("irs:TransactionAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:AmountInvolvedAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:CompensationAmt", namespaces=NAMESPACES),
+    ],
+    "contractor_ein": [
+        etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    ],
+    # Political Contributions (Schedule C)
+    "political_schedule_c": [
+        etree.XPath(".//irs:IRS990ScheduleC", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleC", namespaces=NAMESPACES),
+    ],
+    "political_contributions": [
+        etree.XPath(".//irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:PoliticalCampaignActivitiesGrp", namespaces=NAMESPACES),
+    ],
+    "political_amount": [
+        etree.XPath("irs:Amount", namespaces=NAMESPACES),
+        etree.XPath("irs:ExpenditureAmt", namespaces=NAMESPACES),
+    ],
+    "political_recipient": [
+        etree.XPath("irs:RecipientNm", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientName", namespaces=NAMESPACES),
+    ],
+    # Organization Addresses
+    "business_address": [
+        etree.XPath(".//irs:Filer/irs:BusinessAddress", namespaces=NAMESPACES),
+        etree.XPath(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/BusinessAddress", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress", namespaces=NAMESPACES),
+    ],
+    "address_line_1": [
+        etree.XPath("irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:AddressLine1", namespaces=NAMESPACES),
+    ],
+    "address_line_2": [
+        etree.XPath("irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:AddressLine2", namespaces=NAMESPACES),
+    ],
+    "city": [
+        etree.XPath("irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath("irs:City", namespaces=NAMESPACES),
+    ],
+    "state": [
+        etree.XPath("irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath("irs:State", namespaces=NAMESPACES),
+    ],
+    "zip_code": [
+        etree.XPath("irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath("irs:ZIPCode", namespaces=NAMESPACES),
+    ],
 }
+
+# Grant-related XPaths (used by parse_utils.py)
+GRANT_XPATHS = {
+    "990": [
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleF/irs:GrantsToOrgOutsideUSGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleF/irs:GrantsToOrganizationsOutsideUS", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleF/irs:GrantsToOrgsOutsideUS", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleF/irs:ForeignIndividualsGrantsGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleI/irs:RecipientTable", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleI/irs:GrantsOtherAsstToIndivInUSGrp", namespaces=NAMESPACES),
+    ],
+    "990EZ": [
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleF/irs:GrantsToOrgOutsideUSGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleF/irs:GrantsToOrganizationsOutsideUS", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleF/irs:GrantsToOrgsOutsideUS", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleF/irs:ForeignIndividualsGrantsGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleI/irs:RecipientTable", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:IRS990ScheduleI/irs:GrantsOtherAsstToIndivInUSGrp", namespaces=NAMESPACES),
+    ],
+    "990PF": [
+        etree.XPath(".//irs:IRS990PF/irs:SupplementaryInformationGrp/irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:SupplementaryInformationGrp/irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),
+    ],
+}
+
+GRANT_EIN_XPATHS = [
+    etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientBusinessName/irs:EIN", namespaces=NAMESPACES),
+]
+
+GRANT_NAME_XPATHS = [
+    etree.XPath("irs:RecipientNameBusiness", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+    etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+]
+
+GRANT_AMOUNT_XPATHS = [
+    etree.XPath("irs:CashGrantAmt", namespaces=NAMESPACES),
+    etree.XPath("irs:TotalGrantOrContriPdDurYrAmt", namespaces=NAMESPACES),
+    etree.XPath("irs:GrantOrContributionAmt", namespaces=NAMESPACES),
+    etree.XPath("irs:Amount", namespaces=NAMESPACES),
+]
+
+GRANT_FOREIGN_ADDRESS_XPATH = etree.XPath("irs:RecipientForeignAddress", namespaces=NAMESPACES)
+GRANT_COUNTRY_XPATH = etree.XPath("irs:RecipientForeignAddress/irs:CountryCd", namespaces=NAMESPACES)
+GRANT_US_ADDRESS_XPATH = etree.XPath("irs:USAddress/*", namespaces=NAMESPACES)
+
+# Schedule C (Political Contributions) XPaths
+SCHEDULE_C_XPATHS = {
+    "990": [
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActivitiesGrp", namespaces=NAMESPACES),
+    ],
+    "990EZ": [
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActivitiesGrp", namespaces=NAMESPACES),
+    ],
+    "990PF": [
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActivitiesGrp", namespaces=NAMESPACES),
+    ],
+}
+
+SCHEDULE_C_AMOUNT_XPATHS = [
+    etree.XPath("irs:Amount", namespaces=NAMESPACES),
+    etree.XPath("irs:ExpenditureAmt", namespaces=NAMESPACES),
+]
+
+SCHEDULE_C_RECIPIENT_XPATHS = [
+    etree.XPath("irs:RecipientNm", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientName", namespaces=NAMESPACES),
+]
+
+SCHEDULE_C_EIN_XPATHS = [
+    etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
+]
 
 XPATHS_990EZ = {
     "form_type": [
@@ -261,6 +406,73 @@ XPATHS_990EZ = {
         etree.XPath(".//irs:ReturnData", namespaces=NAMESPACES),
         etree.XPath(".//ReturnData", namespaces=NAMESPACES),
     ],
+    # Contractors and Consultants (Schedule L)
+    "contractors_schedule_l": [
+        etree.XPath(".//irs:IRS990ScheduleL", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleL", namespaces=NAMESPACES),
+    ],
+    "contractor_elements": [
+        etree.XPath(".//irs:BusinessRelationshipWithOrganizationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:LoansFromOrganizationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:BusinessTransactionsWithOrganizationGrp", namespaces=NAMESPACES),
+    ],
+    "contractor_name": [
+        etree.XPath("irs:PersonNm", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:OrganizationBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+    ],
+    "contractor_amount": [
+        etree.XPath("irs:TransactionAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:AmountInvolvedAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:CompensationAmt", namespaces=NAMESPACES),
+    ],
+    "contractor_ein": [
+        etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    ],
+    # Political Contributions (Schedule C)
+    "political_schedule_c": [
+        etree.XPath(".//irs:IRS990ScheduleC", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleC", namespaces=NAMESPACES),
+    ],
+    "political_contributions": [
+        etree.XPath(".//irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:PoliticalCampaignActivitiesGrp", namespaces=NAMESPACES),
+    ],
+    "political_amount": [
+        etree.XPath("irs:Amount", namespaces=NAMESPACES),
+        etree.XPath("irs:ExpenditureAmt", namespaces=NAMESPACES),
+    ],
+    "political_recipient": [
+        etree.XPath("irs:RecipientNm", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientName", namespaces=NAMESPACES),
+    ],
+    # Organization Addresses
+    "business_address": [
+        etree.XPath(".//irs:Filer/irs:BusinessAddress", namespaces=NAMESPACES),
+        etree.XPath(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/BusinessAddress", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress", namespaces=NAMESPACES),
+    ],
+    "address_line_1": [
+        etree.XPath("irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:AddressLine1", namespaces=NAMESPACES),
+    ],
+    "address_line_2": [
+        etree.XPath("irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:AddressLine2", namespaces=NAMESPACES),
+    ],
+    "city": [
+        etree.XPath("irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath("irs:City", namespaces=NAMESPACES),
+    ],
+    "state": [
+        etree.XPath("irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath("irs:State", namespaces=NAMESPACES),
+    ],
+    "zip_code": [
+        etree.XPath("irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath("irs:ZIPCode", namespaces=NAMESPACES),
+    ],
 }
 
 XPATHS_990PF = {
@@ -337,5 +549,72 @@ XPATHS_990PF = {
     "return_data": [
         etree.XPath(".//irs:ReturnData", namespaces=NAMESPACES),
         etree.XPath(".//ReturnData", namespaces=NAMESPACES),
+    ],
+    # Contractors and Consultants (Schedule L)
+    "contractors_schedule_l": [
+        etree.XPath(".//irs:IRS990ScheduleL", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleL", namespaces=NAMESPACES),
+    ],
+    "contractor_elements": [
+        etree.XPath(".//irs:BusinessRelationshipWithOrganizationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:LoansFromOrganizationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:BusinessTransactionsWithOrganizationGrp", namespaces=NAMESPACES),
+    ],
+    "contractor_name": [
+        etree.XPath("irs:PersonNm", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:OrganizationBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+    ],
+    "contractor_amount": [
+        etree.XPath("irs:TransactionAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:AmountInvolvedAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:CompensationAmt", namespaces=NAMESPACES),
+    ],
+    "contractor_ein": [
+        etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    ],
+    # Political Contributions (Schedule C)
+    "political_schedule_c": [
+        etree.XPath(".//irs:IRS990ScheduleC", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ReturnData/irs:IRS990ScheduleC", namespaces=NAMESPACES),
+    ],
+    "political_contributions": [
+        etree.XPath(".//irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:PoliticalCampaignActivitiesGrp", namespaces=NAMESPACES),
+    ],
+    "political_amount": [
+        etree.XPath("irs:Amount", namespaces=NAMESPACES),
+        etree.XPath("irs:ExpenditureAmt", namespaces=NAMESPACES),
+    ],
+    "political_recipient": [
+        etree.XPath("irs:RecipientNm", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientName", namespaces=NAMESPACES),
+    ],
+    # Organization Addresses
+    "business_address": [
+        etree.XPath(".//irs:Filer/irs:BusinessAddress", namespaces=NAMESPACES),
+        etree.XPath(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/BusinessAddress", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress", namespaces=NAMESPACES),
+    ],
+    "address_line_1": [
+        etree.XPath("irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:AddressLine1", namespaces=NAMESPACES),
+    ],
+    "address_line_2": [
+        etree.XPath("irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:AddressLine2", namespaces=NAMESPACES),
+    ],
+    "city": [
+        etree.XPath("irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath("irs:City", namespaces=NAMESPACES),
+    ],
+    "state": [
+        etree.XPath("irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath("irs:State", namespaces=NAMESPACES),
+    ],
+    "zip_code": [
+        etree.XPath("irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath("irs:ZIPCode", namespaces=NAMESPACES),
     ],
 }

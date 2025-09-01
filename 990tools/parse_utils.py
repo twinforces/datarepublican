@@ -8,6 +8,7 @@ from xpaths import NAMESPACES, XPATHS_990EZ, XPATHS_990, XPATHS_990PF, GRANT_XPA
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
 from xpath_utils import find_element
 MONEY_PATTERN = re.compile(r'\$([\d,]+(?:\.\d{2})?)')
+ORG_TYPE_PATTERN = re.compile(r'501\(c\)\((\d+)\)')
 
 def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False):
     elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)

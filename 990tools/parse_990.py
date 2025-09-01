@@ -195,6 +195,221 @@ def parse_foreign_office_990(root, field, namespaces, xml_filename, context, xpa
     elem = parse_string_field(root, XPATHS_990, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
     return elem.strip().upper() == 'X' if elem is not None else False
 
+def parse_contractors_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+    """Parse contractors and consultants from Schedule L."""
+    contractors = []
+
+    # Find Schedule L
+    schedule_l = parse_string_field(root, XPATHS_990, "contractors_schedule_l", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+
+    if schedule_l is not None:
+        # Find contractor elements
+        contractor_elements = parse_string_field(schedule_l, XPATHS_990, "contractor_elements", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+
+        if contractor_elements:
+            if not isinstance(contractor_elements, list):
+                contractor_elements = [contractor_elements]
+
+            for elem in contractor_elements:
+                contractor_name = parse_string_field(elem, XPATHS_990, "contractor_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+                contractor_amount = parse_int_field(elem, XPATHS_990, "contractor_amount", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+                contractor_ein = parse_string_field(elem, XPATHS_990, "contractor_ein", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+
+                # Try to extract address information for the contractor
+                contractor_address = ""
+                contractor_zip = ""
+                contractor_po_box = ""
+
+                # Look for address elements in the contractor record
+                address_elem = elem.find(".//{http://www.irs.gov/efile}USAddress")
+                if address_elem is None:
+                    address_elem = elem.find(".//USAddress")
+
+                if address_elem is not None:
+                    # Extract address components
+                    addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
+                    if addr_line_1 is None:
+                        addr_line_1 = address_elem.find(".//AddressLine1Txt")
+
+                    addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
+                    if addr_line_2 is None:
+                        addr_line_2 = address_elem.find(".//AddressLine2Txt")
+
+                    city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
+                    if city is None:
+                        city = address_elem.find(".//City")
+
+                    state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
+                    if state is None:
+                        state = address_elem.find(".//State")
+
+                    zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
+                    if zip_code is None:
+                        zip_code = address_elem.find(".//ZIPCode")
+
+                    # Build address string
+                    address_parts = []
+                    if addr_line_1 is not None and addr_line_1.text:
+                        address_parts.append(addr_line_1.text.strip())
+                    if addr_line_2 is not None and addr_line_2.text:
+                        address_parts.append(addr_line_2.text.strip())
+                    if city is not None and city.text:
+                        if state is not None and state.text:
+                            address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
+                        else:
+                            address_parts.append(city.text.strip())
+                    if zip_code is not None and zip_code.text:
+                        contractor_zip = zip_code.text.strip()
+
+                    contractor_address = " ".join(address_parts)
+
+                    # Check for PO Box
+                    if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
+                        contractor_po_box = addr_line_1.text.strip()
+
+                if contractor_name or contractor_amount:
+                    contractors.append({
+                        'name': contractor_name,
+                        'amount': contractor_amount or 0,
+                        'ein': contractor_ein,
+                        'address': contractor_address,
+                        'zip_code': contractor_zip,
+                        'po_box': contractor_po_box,
+                        'filer_ein': context.get('filer_ein', ''),
+                        'tax_year': context.get('tax_year', '')
+                    })
+
+    return contractors
+
+def parse_political_contributions_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+    """Parse political contributions from Schedule C."""
+    contributions = []
+
+    # Find Schedule C
+    schedule_c = parse_string_field(root, XPATHS_990, "political_schedule_c", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+
+    if schedule_c is not None:
+        # Find political contribution elements
+        political_elements = parse_string_field(schedule_c, XPATHS_990, "political_contributions", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+
+        if political_elements:
+            if not isinstance(political_elements, list):
+                political_elements = [political_elements]
+
+            for elem in political_elements:
+                recipient = parse_string_field(elem, XPATHS_990, "political_recipient", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+                amount = parse_int_field(elem, XPATHS_990, "political_amount", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+
+                # Try to extract address information for the recipient
+                recipient_address = ""
+                recipient_zip = ""
+                recipient_po_box = ""
+
+                # Look for address elements in the contribution
+                address_elem = elem.find(".//{http://www.irs.gov/efile}USAddress")
+                if address_elem is None:
+                    address_elem = elem.find(".//USAddress")
+
+                if address_elem is not None:
+                    # Extract address components
+                    addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
+                    if addr_line_1 is None:
+                        addr_line_1 = address_elem.find(".//AddressLine1Txt")
+
+                    addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
+                    if addr_line_2 is None:
+                        addr_line_2 = address_elem.find(".//AddressLine2Txt")
+
+                    city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
+                    if city is None:
+                        city = address_elem.find(".//City")
+
+                    state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
+                    if state is None:
+                        state = address_elem.find(".//State")
+
+                    zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
+                    if zip_code is None:
+                        zip_code = address_elem.find(".//ZIPCode")
+
+                    # Build address string
+                    address_parts = []
+                    if addr_line_1 is not None and addr_line_1.text:
+                        address_parts.append(addr_line_1.text.strip())
+                    if addr_line_2 is not None and addr_line_2.text:
+                        address_parts.append(addr_line_2.text.strip())
+                    if city is not None and city.text:
+                        if state is not None and state.text:
+                            address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
+                        else:
+                            address_parts.append(city.text.strip())
+                    if zip_code is not None and zip_code.text:
+                        recipient_zip = zip_code.text.strip()
+
+                    recipient_address = " ".join(address_parts)
+
+                    # Check for PO Box
+                    if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
+                        recipient_po_box = addr_line_1.text.strip()
+
+                if recipient or amount:
+                    contributions.append({
+                        'recipient': recipient,
+                        'amount': amount or 0,
+                        'recipient_address': recipient_address,
+                        'recipient_zip': recipient_zip,
+                        'recipient_po_box': recipient_po_box,
+                        'filer_ein': context.get('filer_ein', ''),
+                        'tax_year': context.get('tax_year', '')
+                    })
+
+    return contributions
+
+def parse_organization_address_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+    """Parse organization address for Google Street View."""
+    address_parts = {}
+
+    # Find business address
+    business_address = parse_string_field(root, XPATHS_990, "business_address", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+
+    if business_address is not None:
+        address_line_1 = parse_string_field(business_address, XPATHS_990, "address_line_1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        address_line_2 = parse_string_field(business_address, XPATHS_990, "address_line_2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        city = parse_string_field(business_address, XPATHS_990, "city", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        state = parse_string_field(business_address, XPATHS_990, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        zip_code = parse_string_field(business_address, XPATHS_990, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+
+        # Create canonical address
+        address_parts = {
+            'address_line_1': address_line_1,
+            'address_line_2': address_line_2,
+            'city': city,
+            'state': state,
+            'zip_code': zip_code
+        }
+
+        # Create full address string
+        full_address = []
+        if address_line_1:
+            full_address.append(address_line_1)
+        if address_line_2:
+            full_address.append(address_line_2)
+        city_state_zip = []
+        if city:
+            city_state_zip.append(city)
+        if state:
+            city_state_zip.append(state)
+        if zip_code:
+            city_state_zip.append(zip_code)
+        if city_state_zip:
+            full_address.append(", ".join(city_state_zip))
+
+        canonical_address = " ".join(full_address) if full_address else ""
+
+        return canonical_address, address_parts
+
+    return "", {}
+
 def parse_filer_name_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     return parse_string_field(root, XPATHS_990, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="Unknown")
 
@@ -227,15 +442,32 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         ("foreign_expenses", parse_foreign_expenses_990),
         ("total_assets", parse_total_assets_990),
         ("org_type", parse_org_type_990),
-        ("foreign_office", parse_foreign_office_990)
+        ("foreign_office", parse_foreign_office_990),
+        ("contractors", parse_contractors_990),
+        ("political_contributions", parse_political_contributions_990),
+        ("organization_address", parse_organization_address_990)
     ]
     data = {}
     officer_entries = []
+    contractors = []
+    political_contributions = []
+    canonical_address = ""
+    address_parts = {}
+
     for field, func in fields:
         if field == "officer_comp":
             total, entries = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
             data[field] = total
             officer_entries.extend(entries)
+        elif field == "contractors":
+            contractors = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            data[field] = contractors
+        elif field == "political_contributions":
+            political_contributions = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            data[field] = political_contributions
+        elif field == "organization_address":
+            canonical_address, address_parts = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            data[field] = canonical_address
         else:
             data[field] = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
@@ -266,9 +498,10 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],
         data["grants_ptile"], data["foreign_expenses_pct"], data["foreign_expenses_ptile"], data["grift_ratio"],
         data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
-        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename
+        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename,
+        canonical_address
     ]
-    return row, officer_entries
+    return row, officer_entries, contractors, political_contributions
 
 def main():
     if len(sys.argv) != 2:
@@ -331,7 +564,7 @@ def main():
             break
     filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
-    row, _ = parse_990(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
+    row, _, contractors, political_contributions = parse_990(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
     if row:
         row_str = [str(x).replace('\t', ' ').replace('\n', ' ') for x in row]
         print('\t'.join(row_str))

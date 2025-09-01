@@ -234,8 +234,18 @@ def main():
             recompress_main(zips_dir=args.zips_dir, verbose=verbose, quiet=quiet)
         elif args.command == 'extract-charities':
             from extract_charities import main as extract_main
-            # This will need modification to accept args instead of parsing
-            extract_main()
+            extract_main(
+                start_year=args.start_year,
+                end_year=args.end_year,
+                input_dir=args.input_dir,
+                output_dir=args.output_dir,
+                verbose=verbose,
+                quiet=quiet,
+                write_buffer_size=args.write_buffer_size,
+                worker_threads=args.worker_threads,
+                batch_size=args.batch_size,
+                writer_threads=args.writer_threads
+            )
         elif args.command == 'analyze-charities':
             from analyze_charities import main as analyze_main
             analyze_main()
@@ -293,8 +303,15 @@ def run_all_pipeline(args):
         # Step 3: Extract charity data
         print("\n=== Step 3: Extracting charity data ===")
         from extract_charities import main as extract_main
-        # Note: extract_charities.main() currently doesn't accept args, needs refactoring
-        print("Note: extract-charities step needs individual command for now")
+        extract_main(
+            start_year=args.start_year,
+            end_year=args.end_year,
+            input_dir=args.zips_dir,
+            output_dir=args.tsvs_dir,
+            verbose=args.verbose,
+            quiet=args.quiet,
+            worker_threads=args.worker_threads
+        )
 
         # Step 4: Analyze charities
         print("\n=== Step 4: Analyzing charity data ===")

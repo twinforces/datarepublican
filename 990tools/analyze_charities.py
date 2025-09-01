@@ -19,7 +19,7 @@ TSV_COLUMNS = [
     "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
     "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
     "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name",
-    "eating_seed_corn"
+    "eating_seed_corn", "canonical_address"
 ]
 
 PERCENTILE_COLS = {
