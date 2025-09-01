@@ -79,24 +79,20 @@ def process_backfill_rows(sorted_backfill_file, charity_header):
             log_error("Processed {} backfill rows, selected {} unique EINs", backfill_count, len(unique_rows))
     return unique_rows
 
-def main():
+def main(charity_tsv=None, backfill_tsv=None, output_dir=".", verbose=False, quiet=False):
+    """Main function for adding backfill data to charity records."""
     global args
-    parser = argparse.ArgumentParser(
-        description=(
-            "Combine charity_latest.tsv with backfill.tsv to produce charity_latest_with_backfill.tsv/csv.\n"
-            "Selects the longest name per EIN from backfill.tsv and appends to the output without loading charity_latest.tsv into memory."
-        )
-    )
-    parser.add_argument("--charity-tsv", type=str, default=None, help="Path to charity_latest.tsv or directory")
-    parser.add_argument("--backfill-tsv", type=str, default=None, help="Path to backfill.tsv or directory")
-    parser.add_argument("--output-dir", type=str, default=".", help="Directory for output TSV and CSV files")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--quiet", action="store_true", help="Disable all logging")
-    args = parser.parse_args()
 
-    # Normalize file paths
-    args.charity_tsv = cu.normalize_file_path(args.charity_tsv, 'charity_latest.tsv', args.output_dir)
-    args.backfill_tsv = cu.normalize_file_path(args.backfill_tsv, 'backfill.tsv', args.output_dir)
+    # Create a mock args object for compatibility with existing functions
+    class MockArgs:
+        def __init__(self, charity_tsv, backfill_tsv, output_dir, verbose, quiet):
+            self.charity_tsv = cu.normalize_file_path(charity_tsv, 'charity_latest.tsv', output_dir)
+            self.backfill_tsv = cu.normalize_file_path(backfill_tsv, 'backfill.tsv', output_dir)
+            self.output_dir = output_dir
+            self.verbose = verbose
+            self.quiet = quiet
+
+    args = MockArgs(charity_tsv, backfill_tsv, output_dir, verbose, quiet)
 
     # Validate arguments
     if not os.path.isfile(args.charity_tsv):
@@ -107,6 +103,9 @@ def main():
         os.makedirs(args.output_dir)
 
     logger = setup_logging(args.output_dir, args.verbose, args.quiet)
+
+    if not quiet:
+        print("Adding backfill data to charity records...")
 
     try:
         # Read charity_latest.tsv header
@@ -154,13 +153,29 @@ def main():
         if os.path.exists(temp_dir) and not os.listdir(temp_dir):
             os.rmdir(temp_dir)
 
-        print(f"Appended {backfill_count} backfill rows to charity data")
-        print(f"Output written to {output_tsv} and {output_csv}")
-        print(f"Log file written to {os.path.join(args.output_dir, 'add_backfill_log.txt')}")
+        if not quiet:
+            print(f"Appended {backfill_count} backfill rows to charity data")
+            print(f"Output written to {output_tsv} and {output_csv}")
+            print(f"Log file written to {os.path.join(args.output_dir, 'add_backfill_log.txt')}")
 
     except Exception as e:
         log_error("Error during processing: {}", str(e), exc_info=True)
         raise
 
 if __name__ == "__main__":
-    main()
+    # For backward compatibility when run directly
+    parser = argparse.ArgumentParser(
+        description=(
+            "Combine charity_latest.tsv with backfill.tsv to produce charity_latest_with_backfill.tsv/csv.\n"
+            "Selects the longest name per EIN from backfill.tsv and appends to the output without loading charity_latest.tsv into memory."
+        )
+    )
+    parser.add_argument("--charity-tsv", type=str, default=None, help="Path to charity_latest.tsv or directory")
+    parser.add_argument("--backfill-tsv", type=str, default=None, help="Path to backfill.tsv or directory")
+    parser.add_argument("--output-dir", type=str, default=".", help="Directory for output TSV and CSV files")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--quiet", action="store_true", help="Disable all logging")
+
+    parsed_args = parser.parse_args()
+    main(parsed_args.charity_tsv, parsed_args.backfill_tsv, parsed_args.output_dir,
+         parsed_args.verbose, parsed_args.quiet)

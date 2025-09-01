@@ -167,16 +167,21 @@ def recompress_zip(zip_file, base_dir):
     print(f"Successfully recompressed {zip_file} to {OUTPUT_DIR}/{base_name}")
     return True
 
-def main():
+def main(zips_dir=None, verbose=False, quiet=False):
     """Main function to scan and recompress ZIPs."""
     check_tools()
 
-    # Get base directory (e.g., /Volumes/Data/irs_zips)
-    base_dir = os.getcwd()
+    # Get base directory
+    base_dir = zips_dir if zips_dir else os.getcwd()
+
+    if not quiet:
+        print(f"Recompressing ZIP files in: {base_dir}")
+
     ensure_permissions(base_dir)
 
     # Pass 1: Scan ZIPs
-    print("=== Scan Pass ===")
+    if not quiet:
+        print("=== Scan Pass ===")
     try:
         to_recompress = scan_zips(base_dir)
     except Exception as e:
@@ -184,24 +189,29 @@ def main():
         return
 
     if not to_recompress:
-        print("No ZIP files need recompression.")
+        if not quiet:
+            print("No ZIP files need recompression.")
         return
 
-    print("\nZIP files to recompress:")
-    for zip_file in to_recompress:
-        print(f"  {zip_file}")
+    if not quiet:
+        print("\nZIP files to recompress:")
+        for zip_file in to_recompress:
+            print(f"  {zip_file}")
 
     # Pass 2: Recompress
-    print("\n=== Recompress Pass ===")
+    if not quiet:
+        print("\n=== Recompress Pass ===")
     for zip_file in to_recompress:
         if recompress_zip(zip_file, base_dir):
             continue
         print(f"Failed to recompress {zip_file}. See {ERROR_LOG} for details.")
 
-    print(f"\nProcessing complete. Recompressed ZIPs are in {OUTPUT_DIR}/")
-    print(f"Total recompressed files: {len(list(Path(OUTPUT_DIR).glob('*.zip')))}")
-    if os.path.exists(os.path.join(base_dir, ERROR_LOG)) and os.path.getsize(os.path.join(base_dir, ERROR_LOG)) > 0:
-        print(f"Warnings or errors were logged to {ERROR_LOG}.")
+    if not quiet:
+        print(f"\nProcessing complete. Recompressed ZIPs are in {OUTPUT_DIR}/")
+        print(f"Total recompressed files: {len(list(Path(os.path.join(base_dir, OUTPUT_DIR)).glob('*.zip')))}")
+        if os.path.exists(os.path.join(base_dir, ERROR_LOG)) and os.path.getsize(os.path.join(base_dir, ERROR_LOG)) > 0:
+            print(f"Warnings or errors were logged to {ERROR_LOG}.")
 
 if __name__ == "__main__":
+    # For backward compatibility when run directly
     main()

@@ -25,9 +25,7 @@ from parse_utils import ORG_TYPE_PATTERN
 import parse_990
 import parse_990ez
 import parse_990pf
-from xpaths_990 import XPATHS_990
-from xpaths_990ez import XPATHS_990EZ
-from xpaths_990pf import XPATHS_990PF
+from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF
 
 # Constants
 DEBUG_EINS = set()

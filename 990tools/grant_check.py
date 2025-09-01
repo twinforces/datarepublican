@@ -120,7 +120,26 @@ def index_and_filter(index_file, input_file, output_file, report_file=None, repo
         print(f"Error: {str(e)}")
         sys.exit(1)
 
-def main():
+def main(index_file, input_file, output_file, report_file=None, report_depth=1000, verbose=False, quiet=False):
+    """Main function for checking and filtering grant data."""
+    # Validate input files exist
+    if not Path(index_file).is_file():
+        raise FileNotFoundError(f"Index file '{index_file}' not found")
+    if not Path(input_file).is_file():
+        raise FileNotFoundError(f"Input file '{input_file}' not found")
+
+    if not quiet:
+        print(f"Checking and filtering grants from {input_file}")
+        print(f"Using index file: {index_file}")
+        print(f"Output: {output_file}")
+
+    index_and_filter(index_file, input_file, output_file, report_file, report_depth)
+
+    if not quiet:
+        print("Grant checking complete.")
+
+if __name__ == '__main__':
+    # For backward compatibility when run directly
     parser = argparse.ArgumentParser(description='Filter TSV based on filer_ein index and optionally generate report for filtered-out rows')
     parser.add_argument('--index-file', help='TSV file containing filer_ein to index', required=True)
     parser.add_argument('--input-file', help='TSV file to filter based on grant_ein', required=True)
@@ -129,16 +148,4 @@ def main():
     parser.add_argument('--report-depth', help="Top N", default=1000, type=int)
 
     args = parser.parse_args()
-
-    # Validate input files exist
-    if not Path(args.index_file).is_file():
-        print(f"Error: Index file '{args.index_file}' not found")
-        sys.exit(1)
-    if not Path(args.input_file).is_file():
-        print(f"Error: Input file '{args.input_file}' not found")
-        sys.exit(1)
-
-    index_and_filter(args.index_file, args.input_file, args.output_file, args.report_file, args.report_depth)
-
-if __name__ == '__main__':
-    main()
+    main(args.index_file, args.input_file, args.output_file, args.report_file, args.report_depth)

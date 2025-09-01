@@ -73,25 +73,40 @@ def analyze_tsv(input_df, output_df, output_md):
         print(f"Analysis Error: {str(e)}")
         sys.exit(1)
 
-def main():
+def main(input_file, output_file, filter_column="denominator", filter_value=1000000,
+         columns=None, analysis_md="analysis.md", verbose=False, quiet=False):
+    """Main function for filtering charity TSV files."""
+    if columns is None:
+        columns = ["tax_year", "org_type", "form_type", "total_assets", "denominator",
+                   "xml_name", "filer_ein", "receipt_amt", "govt_amt", "contrib_amt", "filer_name"]
+
+    if not quiet:
+        print(f"Filtering charities from {input_file}")
+        print(f"Filter: {filter_column} > {filter_value}")
+        print(f"Output: {output_file}")
+
+    # Filter TSV and get input/output DataFrames
+    input_df, output_df = filter_tsv(input_file, output_file, filter_column,
+                                    filter_value, columns)
+
+    # Analyze org_type and form_type
+    analyze_tsv(input_df, output_df, analysis_md)
+
+    if not quiet:
+        print("Filtering complete.")
+
+if __name__ == '__main__':
+    # For backward compatibility when run directly
     parser = argparse.ArgumentParser(description='Filter TSV file by column value and select specific columns')
     parser.add_argument('--input-file', help='Input TSV file', required=True)
     parser.add_argument('--output-file', help='Output TSV file', required=True)
     parser.add_argument('--filter-column', help='Column to filter on', default="denominator")
     parser.add_argument('--filter-value', type=float, help='Minimum value for filter column', default=1000000)
-    parser.add_argument('--columns', nargs='+', help='Columns to keep', 
-                      default=["tax_year", "org_type", "form_type", "total_assets", "denominator", 
+    parser.add_argument('--columns', nargs='+', help='Columns to keep',
+                      default=["tax_year", "org_type", "form_type", "total_assets", "denominator",
                                "xml_name", "filer_ein", "receipt_amt", "govt_amt", "contrib_amt", "filer_name"])
     parser.add_argument('--analysis-md', help='Output Markdown file for analysis', default="analysis.md")
 
     args = parser.parse_args()
-
-    # Filter TSV and get input/output DataFrames
-    input_df, output_df = filter_tsv(args.input_file, args.output_file, args.filter_column, 
-                                    args.filter_value, args.columns)
-
-    # Analyze org_type and form_type
-    analyze_tsv(input_df, output_df, args.analysis_md)
-
-if __name__ == '__main__':
-    main()
+    main(args.input_file, args.output_file, args.filter_column,
+         args.filter_value, args.columns, args.analysis_md)

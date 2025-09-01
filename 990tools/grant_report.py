@@ -115,19 +115,26 @@ def generate_report(input_file, report_file):
         print(f"Error: {str(e)}")
         sys.exit(1)
 
-def main():
+def main(input_file, report_file='report.md', verbose=False, quiet=False):
+    """Main function for generating grant reports."""
+    # Validate input file exists
+    if not Path(input_file).is_file():
+        raise FileNotFoundError(f"Input file '{input_file}' not found")
+
+    if not quiet:
+        print(f"Generating grant report from {input_file}")
+        print(f"Output: {report_file}")
+
+    generate_report(input_file, report_file)
+
+    if not quiet:
+        print("Report generation complete.")
+
+if __name__ == '__main__':
+    # For backward compatibility when run directly
     parser = argparse.ArgumentParser(description='Generate report from TSV file')
     parser.add_argument('--input-file', help='Input TSV file', required=True)
     parser.add_argument('--report-file', help='Output Markdown file for report', default='report.md')
 
     args = parser.parse_args()
-
-    # Validate input file exists
-    if not Path(args.input_file).is_file():
-        print(f"Error: Input file '{args.input_file}' not found")
-        sys.exit(1)
-
-    generate_report(args.input_file, args.report_file)
-
-if __name__ == '__main__':
-    main()
+    main(args.input_file, args.report_file)

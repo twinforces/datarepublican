@@ -1,8 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
-# 990 Tools
-#In order of application use —help with any script for additional params:
+# IRS 990 Tools - Unified Pipeline Script
+# This script uses the new irs990tools module instead of calling individual scripts
 
+# Configuration - Edit these paths as needed
 export ZIPS_DIR="/Volumes/Data/irs_zips"
 export OUT_DIR="/Volumes/Data/tsvs"
 export ANAL_DIR="/Volumes/Data/atsvs"
@@ -11,37 +12,48 @@ export DR_ROOT="$HOME/Development/datarepublican"
 export TOOLS=$DR_ROOT/990tools
 export BROWSE=$DR_ROOT/browse
 
-# will download all the zip files from the IRS website the rest of the tools can work directly from the zips, saving a lot of disk spaces and clutter. This is safe to re-run, as it will skip files it already has. 
-python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR
+# Processing parameters
+START_YEAR=2017
+END_YEAR=2025
+MINIMUM_D=0
+WORKER_THREADS=16
 
-#one of the IRS zip files is in a format that can’t be read by python, so this recompresses it. You'll have to move the fixed ones back.
-cd $ZIPS_DIR; python $TOOLS/recompress_irs_zips.py
+echo "=== IRS 990 Tools Pipeline ==="
+echo "Processing years: $START_YEAR to $END_YEAR"
+echo "Zips directory: $ZIPS_DIR"
+echo "Output directory: $FINAL_DIR"
+echo "Worker threads: $WORKER_THREADS"
+echo ""
 
-cd $TOOLS
+# Change to tools directory
+cd "$TOOLS" || exit 1
 
-# this will read all the XML files, and produce .tsv files by org type —quiet makes it go faster. Takes about an hour. This will also output an officer_mapping.json which is anticipating a future feature to find charities by person, it maps last/first/charity.
-python extract_charities.py 2017 2025 --input-dir $ZIPS_DIR --output-dir $OUT_DIR  
+# Run the complete pipeline using the new unified tool
+echo "Running complete IRS 990 processing pipeline..."
+python irs990tools.py run-all \
+  --start-year $START_YEAR \
+  --end-year $END_YEAR \
+  --zips-dir "$ZIPS_DIR" \
+  --tsvs-dir "$OUT_DIR" \
+  --analyzed-dir "$ANAL_DIR" \
+  --final-dir "$FINAL_DIR" \
+  --browse-dir "$BROWSE" \
+  --cache-dir "$ANAL_DIR/_cache" \
+  --minimum-d $MINIMUM_D \
+  --worker-threads $WORKER_THREADS \
+  --verbose
 
-# this will read the previous set of .tsv files, fill in the percentile columns, and do some other analysis looking for grift (the grift part is mostly WIP)
-python analyze_charities.py --start-year 2017 --stop-year 2025 --output-dir $ANAL_DIR --input-dir $OUT_DIR
+# Check if pipeline completed successfully
+if [ $? -ne 0 ]; then
+    echo "Error: Pipeline failed!"
+    exit 1
+fi
 
-# go through the previous set of .tsv files, and find the most recent filing for every charity. These can be filtered by orgTypes you want, orgTypes you don’t want, and a minimum denominator (assets+income used for the percentages). This will write both .tsv and .csv files. After it extracts the latest tax files, it will go back to the zip files and get the grant data, and write that to a .tsv and .csv file. charity_latest and grants_latest will be the files.
-python get_latest.py 2017 2025 --minimumD 0 --source-dir $ANAL_DIR --zip-dir $ZIPS_DIR --output-dir $FINAL_DIR 
+echo ""
+echo "=== Post-processing ==="
 
-#outputs are charity_latest.tsv and backfill.tsv
-
-#  Because private foundations generally don’t report EINs, we have to match addresses to the charities. That's not too bad a problem, as name+ZIP is enough to match most charities, just like last name and Zip is enough to match most people. (Dividing a large number by 42,000 makes it smaller.) PO Box/Zip/Name is even better. So this step extracts the addresses to build the lookup database.
-python extract_addresses.py 2017 2025 --zip-dir $ZIPS_DIR --cache-dir $ANAL_DIR/_cache --output-dir $FINAL_DIR --sample-xml $FINAL_DIR/badxml  --backfill-source $FINAL_DIR/backfill.tsv --force-reprocess
-
-# integrate backfill_data
-python add_backfill.py --charity-tsv $FINAL_DIR/charity_latest.tsv --backfill-tsv $FINAL_DIR/backfill.tsv --output-dir $FINAL_DIR
-
-#  Trim down the list from charity_latest to just orgs with >1M in assets+income. This also trims out a lot of the columns we aren't using let, like the percentiles and percentages.
-#python charity_filter.py  --input-file $FINAL_DIR/charity_latest_with_backfill.tsv --output-file $FINAL_DIR/charites_1M.tsv
-
-# Ok, so we have the latest tax filings from two scripts ago, and we have our address database, now we can go pull the grants to match. Grants to foreign entities are mapped by country, since we don't have data for other countries, deal with it. 
-python extract_grants.py 2017 2025 --zip-dir /Volumes/Data/irs_zips --cache-dir $ANAL_DIR/_cache/ --output-dir $FINAL_DIR --charity-source $FINAL_DIR/charity_latest_with_backfill.tsv
-#python grant_filters.py --input-file $FINAL_DIR/inferred_grants.tsv --output-file $FINAL_DIR/grants_pf.tsv
+# Note: Some shell scripts may still be needed for specific operations
+# that haven't been fully integrated into the Python module yet
 
 
 # this will aggregate grants by the same filer to the same grantee in the same tax year, which usually cuts the file by a half to a third.

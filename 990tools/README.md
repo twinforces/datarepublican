@@ -1,50 +1,279 @@
-# 990 Tools
-In order of application use —help with any script for additional params:
+# IRS 990 Tools
 
-```export ZIPS_DIR="/Volumes/Data/irs_zips"
-export OUT_DIR="/Volumes/Data/tsvs"
-export ANAL_DIR="/Volumes/Data/atsvs"
-export FINAL_DIR= "/Volumes/Data/final"
+A unified Python module for processing IRS 990 tax filings, extracting charity data, analyzing filings, and generating reports.
 
+## Overview
+
+This module transforms the collection of individual Python scripts into a cohesive, command-line tool that can process IRS 990 forms from download to final report generation. It provides both individual stage execution and complete pipeline orchestration.
+
+## Features
+
+- **Unified Interface**: Single command-line tool with consistent arguments
+- **Modular Design**: Run individual stages or complete pipeline
+- **Configuration Management**: JSON-based configuration with sensible defaults
+- **Error Handling**: Proper exception handling and progress reporting
+- **Extensible**: Easy to add new processing stages
+
+## Installation
+
+### Option 1: Install as Package
+```bash
+cd 990tools
+pip install -e .
 ```
 
-`python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR` will download all the zip files from the IRS website the rest of the tools can work directly from the zips, saving a lot of disk spaces and clutter. This is safe to re-run, as it will skip files it already has. 
+### Option 2: Run Directly
+```bash
+cd 990tools
+python irs990tools.py --help
+```
 
-`cd $ZIPS_DIR; python recompress_irs_zips` one of the IRS zip files is in a format that can’t be read by python, so this recompresses it. You'll have to move the fixed ones back.
+## Quick Start
 
-`python extract_charities.py 2017 2025 --input-dir $ZIPS_DIR --output-dir $OUT_DIR` this will read all the XML files, and produce .tsv files by org type `—quiet` makes it go faster. Takes about an hour. This will also output an officer_mapping.json which is anticipating a future feature to find charities by person, it maps last/first/charity.  
+### Run Complete Pipeline
+```bash
+python irs990tools.py run-all \
+  --start-year 2017 \
+  --end-year 2025 \
+  --zips-dir ./irs_zips \
+  --final-dir ./final \
+  --worker-threads 16
+```
 
-`python analyze_charities.py --start-year 2017 --stop-year 2025 --output-dir $ANAL_DIR --input-dir $OUT_DIR` this will read the previous set of .tsv files, fill in the percentile columns, and do some other analysis looking for grift (the grift part is mostly WIP)
+### Individual Commands
 
-`python get_latest.py 2017 2025 --minimumD 0 --source-dir $ANAL_DIR --zip-dir $ZIPS_DIR --output-dir $FINAL_DIR` go through the previous set of .tsv files, and find the most recent filing for every charity. These can be filtered by orgTypes you want, orgTypes you don’t want, and a minimum denominator (assets+income used for the percentages). This will write both .tsv and .csv files. After it extracts the latest tax files, it will go back to the zip files and get the grant data, and write that to a .tsv and .csv file. charity_latest and grants_latest will be the files. 
+#### Download IRS ZIP files
+```bash
+python irs990tools.py download \
+  --start-year 2017 \
+  --end-year 2025 \
+  --dest ./irs_zips
+```
 
-` python extract_addresses.py 2017 2025 --zip-dir $ZIPS_DIR --cache-dir $ANAL_DIR/_cache --output-dir $FINAL_DIR --sample-xml $FINAL_DIR/badxml` Because private foundations generally don’t report EINs, we have to match addresses to the charities. That's not too bad a problem, as name+ZIP is enough to match most charities, just like last name and Zip is enough to match most people. (Dividing a large number by 42,000 makes it smaller.) PO Box/Zip/Name is even better. So this step extracts the addresses to build the lookup database. 
+#### Extract charity data
+```bash
+python irs990tools.py extract-charities \
+  --start-year 2017 \
+  --end-year 2025 \
+  --input-dir ./irs_zips \
+  --output-dir ./tsvs \
+  --worker-threads 16
+```
 
-`python charity_filter.py  --input-file $FINAL_DIR/charity_latest.tsv --output-file $FINAL_DIR/charites_1M.tsv` Trim down the list from charity_latest to just orgs with >1M in assets+income. This also trims out a lot of the columns we aren't using let, like the percentiles and percentages.
+#### Analyze charities
+```bash
+python irs990tools.py analyze-charities \
+  --start-year 2017 \
+  --stop-year 2025 \
+  --input-dir ./tsvs \
+  --output-dir ./analyzed
+```
 
-`python extract_grants.py 2017 2025 --zip-dir /Volumes/Data/irs_zips --cache-dir $ANAL_DIR/_cache/ --output-dir $FINAL_DIR --charity-source $FINAL_DIR/charites_1M.tsv` Ok, so we have the latest tax filings from two scripts ago, and we have our address database, now we can go pull the grants to match. Grants to foreign entities are mapped by country, since we don't have data for other countries, deal with it. 
+#### Get latest filings
+```bash
+python irs990tools.py get-latest \
+  --start-year 2017 \
+  --end-year 2025 \
+  --source-dir ./analyzed \
+  --zip-dir ./irs_zips \
+  --output-dir ./final \
+  --minimum-d 10000000
+```
 
+#### Filter charities
+```bash
+python irs990tools.py filter-charities \
+  --input-file ./final/charity_latest.tsv \
+  --output-file ./final/charities_1M.tsv \
+  --filter-column denominator \
+  --filter-value 1000000
+```
 
-```./combine_grants.sh $FINAL_DIR/grants_latest.tsv $FINAL_DIR/grants_final.tsv
-./combine_grants.sh $FINAL_DIR/inferred_grants.tsv $FINAL_DIR/grants_pf.tsv
-``` this will aggregate grants by the same filer to the same grantee in the same tax year, which usually cuts the file by a half to a third. 
+#### Check grants
+```bash
+python irs990tools.py check-grants \
+  --index-file ./final/charity_latest.tsv \
+  --input-file ./final/grants.tsv \
+  --output-file ./final/grants_final.tsv \
+  --report-file ./final/filter_report.md
+```
 
-```./unfilter_from_grants.py --master $FINAL_DIR/charity_latest.tsv --filtered $FINAL_DIR/charites_1M.tsv --grants $FINAL_DIR/grants_pf.tsv --output $FINAL_DIR/charity_semifinal.tsv
-./extract_rows.sh 
-./unfilter_from_grants.py --master $FINAL_DIR/charity_latest.tsv --filtered $FINAL_DIR/charity_semifinal.tsv --grants $FINAL_DIR/grants_final.tsv --output $FINAL_DIR/charity_final.tsv
-./extract_rows.sh 
-wc -l $FINAL_DIR/*.tsv 
-``` so all that work to filtered out the charities by size? guess what? We over filtered have to copy some charities back so the grants have a destination to go to! Need to do that for both sets of grants, thanks for playing!
+## Configuration
 
-```cd $FINAL_DIR
-zip -o grants_final.tsv.zip grants_final.tsv
-zip -o grants.pf.tsv.zip grants_pf.tsv
-zip -o charities.tsv.zip charity_final.tsv
-``` build final zips.
+### Default Configuration
+The module includes sensible defaults, but you can customize behavior with a configuration file:
 
-``` mv grants_final.tsv.zip grants.pf.tsv.zip charities.tsv.zip ../browse```
+```bash
+# Generate default config
+python -c "from config import save_default_config; save_default_config()"
 
+# Use custom config
+python irs990tools.py --config my_config.json run-all
+```
 
+### Configuration File Format
+```json
+{
+  "directories": {
+    "zips": "./irs_zips",
+    "tsvs": "./tsvs",
+    "analyzed": "./analyzed",
+    "final": "./final",
+    "browse": "./browse",
+    "cache": "./cache"
+  },
+  "processing": {
+    "start_year": 2017,
+    "end_year": 2025,
+    "minimum_d": 10000000,
+    "worker_threads": 16,
+    "batch_size": 500,
+    "write_buffer_size": 10000,
+    "writer_threads": 1
+  },
+  "filters": {
+    "org_types": ["all"],
+    "not_types": [],
+    "filter_column": "denominator",
+    "filter_value": 1000000
+  }
+}
+```
 
+## Pipeline Stages
 
- 
+1. **download** - Download IRS 990 ZIP files from the IRS website
+2. **recompress** - Fix ZIP files with unsupported compression formats
+3. **extract-charities** - Parse XML files and extract charity data to TSV
+4. **analyze-charities** - Compute percentiles and generate analysis reports
+5. **get-latest** - Select most recent filing for each charity EIN
+6. **extract-addresses** - Extract address data for charity matching
+7. **add-backfill** - Add backfill data for unknown EINs
+8. **extract-grants** - Extract grant data from IRS filings
+9. **filter-charities** - Filter charities by specified criteria
+10. **check-grants** - Validate and filter grant data
+11. **run-all** - Execute complete pipeline with dependency management
+
+## Command Line Options
+
+### Global Options
+- `--verbose` - Enable verbose output
+- `--quiet` - Suppress non-error output
+- `--config FILE` - Path to configuration file
+- `--help` - Show help message
+
+### Common Arguments
+- `--start-year YEAR` - Start year for processing
+- `--end-year YEAR` - End year for processing
+- `--input-dir DIR` - Input directory
+- `--output-dir DIR` - Output directory
+- `--worker-threads N` - Number of worker threads
+
+## Output Files
+
+The pipeline generates several output files:
+
+- `charity_latest.tsv/csv` - Latest charity filings
+- `grants_latest.tsv/csv` - Grant data
+- `backfill.tsv/csv` - Backfill data for unknown EINs
+- `charity_latest_with_backfill.tsv/csv` - Charities with backfill data
+- `grants_final.tsv/csv` - Final filtered grant data
+- Various analysis reports and logs
+
+## Dependencies
+
+- Python 3.7+
+- requests
+- beautifulsoup4
+- lxml
+- pandas
+- tqdm
+- mako
+- psutil
+
+## Architecture
+
+### Module Structure
+```
+990tools/
+├── irs990tools.py      # Main CLI entry point
+├── config.py           # Configuration management
+├── xpaths.py           # Merged XPath definitions
+├── extract_utils.py    # Shared utility functions
+├── setup.py            # Package installation
+└── [individual scripts] # Refactored processing modules
+```
+
+### Key Improvements
+
+1. **Unified Interface**: Single command with subcommands vs. multiple scripts
+2. **Consistent Arguments**: Standardized parameter naming and types
+3. **Configuration System**: JSON-based config with environment-specific settings
+4. **Error Handling**: Comprehensive error reporting and recovery
+5. **Modularity**: Individual stages can be run independently for debugging
+6. **Maintainability**: Consolidated common code, eliminated duplication
+
+## Migration from Individual Scripts
+
+### Before (Old Approach)
+```bash
+# Run 15+ separate commands
+python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR
+python extract_charities.py 2017 2025 --input-dir $ZIPS_DIR --output-dir $OUT_DIR
+python analyze_charities.py --start-year 2017 --stop-year 2025 --input-dir $OUT_DIR --output-dir $ANAL_DIR
+# ... 12 more commands
+```
+
+### After (New Approach)
+```bash
+# Single command
+python irs990tools.py run-all --start-year 2017 --end-year 2025 --zips-dir $ZIPS_DIR --final-dir $FINAL_DIR
+```
+
+## Development
+
+### Adding New Commands
+1. Add subparser in `irs990tools.py`
+2. Implement command handler function
+3. Update `run-all` pipeline if needed
+4. Add to configuration if new parameters needed
+
+### Testing
+```bash
+# Test individual commands
+python irs990tools.py download --help
+python irs990tools.py extract-charities --start-year 2020 --end-year 2020 --input-dir ./test_zips --output-dir ./test_output
+
+# Test pipeline
+python irs990tools.py run-all --start-year 2020 --end-year 2020 [other options]
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Import Errors**: Ensure all dependencies are installed
+2. **Path Issues**: Use absolute paths or ensure relative paths are correct
+3. **Memory Issues**: Reduce worker threads or batch sizes
+4. **Permission Errors**: Ensure write access to output directories
+
+### Debug Mode
+```bash
+python irs990tools.py --verbose run-all [options]
+```
+
+## Contributing
+
+1. Follow existing code patterns
+2. Add comprehensive error handling
+3. Update documentation
+4. Test with sample data
+5. Update configuration if new parameters added
+
+## License
+
+This project is part of the Data Republican toolkit for nonprofit data analysis.
+
+---
+
+For questions or issues, please refer to the individual script documentation or check the error logs for detailed information.

@@ -48,14 +48,26 @@ def valid_year(year):
     except ValueError:
         raise argparse.ArgumentTypeError("Year must be an integer.")
 
+def main(start_year, end_year, dest_folder, verbose=False, quiet=False):
+    """Main function for downloading IRS 990 ZIP files."""
+    if start_year > end_year:
+        raise ValueError("Start year must be less than or equal to end year.")
+
+    if not quiet:
+        print(f"Downloading IRS 990 ZIP files for years {start_year} to {end_year}")
+        print(f"Destination: {dest_folder}")
+
+    download_990_zips(start_year, end_year, dest_folder)
+
+    if not quiet:
+        print("Download complete.")
+
 if __name__ == "__main__":
+    # For backward compatibility when run directly
     parser = argparse.ArgumentParser(description="Download IRS 990 ZIP files.")
     parser.add_argument("start_year", type=valid_year, help="Start year (e.g., 2022)")
     parser.add_argument("end_year", type=valid_year, help="End year (e.g., 2024)")
     parser.add_argument("--dest", type=str, default="irs_zips", help="Destination folder (default: irs_zips)")
 
     args = parser.parse_args()
-    if args.start_year > args.end_year:
-        raise argparse.ArgumentError(None, "Start year must be less than or equal to end year.")
-
-    download_990_zips(args.start_year, args.end_year, args.dest)
+    main(args.start_year, args.end_year, args.dest)
