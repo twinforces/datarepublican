@@ -197,87 +197,128 @@ def parse_foreign_office_990(root, field, namespaces, xml_filename, context, xpa
 
 def parse_contractors_990(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     """Parse contractors and consultants from Schedule L."""
+    if verbose:
+        log_error("Starting contractor parsing for EIN {} in {}", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
     contractors = []
 
-    # Find Schedule L
-    schedule_l = parse_string_field(root, XPATHS_990, "contractors_schedule_l", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+    # Find Schedule L or IRS990
+    schedule_l = None
+    for xpath in XPATHS_990["contractors_schedule_l"]:
+        result = xpath(root)
+        if verbose:
+            log_error("Trying contractor container XPath: {} - found {} results for EIN {} in {}", xpath.path, len(result) if result else 0, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
+        if result:
+            schedule_l = result[0] if result else None
+            if verbose:
+                log_error("Found contractor container: {} for EIN {} in {}", schedule_l.tag if schedule_l is not None else None, context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
+            break
 
     if schedule_l is not None:
-        # Find contractor elements
-        contractor_elements = parse_string_field(schedule_l, XPATHS_990, "contractor_elements", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+        # Find contractor elements using all contractor element XPaths
+        contractor_elements = []
+        for xpath in XPATHS_990["contractor_elements"]:
+            result = xpath(schedule_l)
+            contractor_elements.extend(result)
 
-        if contractor_elements:
-            if not isinstance(contractor_elements, list):
-                contractor_elements = [contractor_elements]
+        if verbose:
+            log_error("Found {} contractor elements for EIN {} in {}", len(contractor_elements), context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
-            for elem in contractor_elements:
-                contractor_name = parse_string_field(elem, XPATHS_990, "contractor_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
-                contractor_amount = parse_int_field(elem, XPATHS_990, "contractor_amount", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
-                contractor_ein = parse_string_field(elem, XPATHS_990, "contractor_ein", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        for elem in contractor_elements:
+            contractor_name = ""
+            contractor_amount = 0
+            contractor_ein = ""
 
-                # Try to extract address information for the contractor
-                contractor_address = ""
-                contractor_zip = ""
-                contractor_po_box = ""
+            # Extract contractor name using all name XPaths
+            for name_xpath in XPATHS_990["contractor_name"]:
+                name_results = name_xpath(elem)
+                if name_results:
+                    contractor_name = name_results[0].text.strip() if name_results[0].text else ""
+                    break
 
-                # Look for address elements in the contractor record
-                address_elem = elem.find(".//{http://www.irs.gov/efile}USAddress")
-                if address_elem is None:
-                    address_elem = elem.find(".//USAddress")
+            # Extract contractor amount using all amount XPaths
+            for amount_xpath in XPATHS_990["contractor_amount"]:
+                amount_results = amount_xpath(elem)
+                if amount_results:
+                    try:
+                        contractor_amount = int(amount_results[0].text.strip())
+                        break
+                    except (ValueError, AttributeError):
+                        continue
 
-                if address_elem is not None:
-                    # Extract address components
-                    addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
-                    if addr_line_1 is None:
-                        addr_line_1 = address_elem.find(".//AddressLine1Txt")
+            # Extract contractor EIN using all EIN XPaths
+            for ein_xpath in XPATHS_990["contractor_ein"]:
+                ein_results = ein_xpath(elem)
+                if ein_results:
+                    contractor_ein = ein_results[0].text.strip() if ein_results[0].text else ""
+                    break
 
-                    addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
-                    if addr_line_2 is None:
-                        addr_line_2 = address_elem.find(".//AddressLine2Txt")
+            # Try to extract address information for the contractor
+            contractor_address = ""
+            contractor_zip = ""
+            contractor_po_box = ""
 
-                    city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
-                    if city is None:
-                        city = address_elem.find(".//City")
+            # Look for address elements in the contractor record
+            address_elem = elem.find(".//{http://www.irs.gov/efile}USAddress")
+            if address_elem is None:
+                address_elem = elem.find(".//USAddress")
+            if address_elem is None:
+                address_elem = elem.find(".//{http://www.irs.gov/efile}ForeignAddress")
+            if address_elem is None:
+                address_elem = elem.find(".//ForeignAddress")
 
-                    state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
-                    if state is None:
-                        state = address_elem.find(".//State")
+            if address_elem is not None:
+                # Extract address components
+                addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
+                if addr_line_1 is None:
+                    addr_line_1 = address_elem.find(".//AddressLine1Txt")
 
-                    zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
-                    if zip_code is None:
-                        zip_code = address_elem.find(".//ZIPCode")
+                addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
+                if addr_line_2 is None:
+                    addr_line_2 = address_elem.find(".//AddressLine2Txt")
 
-                    # Build address string
-                    address_parts = []
-                    if addr_line_1 is not None and addr_line_1.text:
-                        address_parts.append(addr_line_1.text.strip())
-                    if addr_line_2 is not None and addr_line_2.text:
-                        address_parts.append(addr_line_2.text.strip())
-                    if city is not None and city.text:
-                        if state is not None and state.text:
-                            address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
-                        else:
-                            address_parts.append(city.text.strip())
-                    if zip_code is not None and zip_code.text:
-                        contractor_zip = zip_code.text.strip()
+                city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
+                if city is None:
+                    city = address_elem.find(".//City")
 
-                    contractor_address = " ".join(address_parts)
+                state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
+                if state is None:
+                    state = address_elem.find(".//State")
 
-                    # Check for PO Box
-                    if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
-                        contractor_po_box = addr_line_1.text.strip()
+                zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
+                if zip_code is None:
+                    zip_code = address_elem.find(".//ZIPCode")
 
-                if contractor_name or contractor_amount:
-                    contractors.append({
-                        'name': contractor_name,
-                        'amount': contractor_amount or 0,
-                        'ein': contractor_ein,
-                        'address': contractor_address,
-                        'zip_code': contractor_zip,
-                        'po_box': contractor_po_box,
-                        'filer_ein': context.get('filer_ein', ''),
-                        'tax_year': context.get('tax_year', '')
-                    })
+                # Build address string
+                address_parts = []
+                if addr_line_1 is not None and addr_line_1.text:
+                    address_parts.append(addr_line_1.text.strip())
+                if addr_line_2 is not None and addr_line_2.text:
+                    address_parts.append(addr_line_2.text.strip())
+                if city is not None and city.text:
+                    if state is not None and state.text:
+                        address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
+                    else:
+                        address_parts.append(city.text.strip())
+                if zip_code is not None and zip_code.text:
+                    contractor_zip = zip_code.text.strip()
+
+                contractor_address = " ".join(address_parts)
+
+                # Check for PO Box
+                if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
+                    contractor_po_box = addr_line_1.text.strip()
+
+            if contractor_name or contractor_amount:
+                contractors.append({
+                    'name': contractor_name,
+                    'amount': contractor_amount or 0,
+                    'ein': contractor_ein,
+                    'address': contractor_address,
+                    'zip_code': contractor_zip,
+                    'po_box': contractor_po_box,
+                    'filer_ein': context.get('filer_ein', ''),
+                    'tax_year': context.get('tax_year', '')
+                })
 
     return contractors
 
@@ -460,6 +501,8 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
             data[field] = total
             officer_entries.extend(entries)
         elif field == "contractors":
+            if verbose:
+                log_error("Calling contractor parsing function for EIN {} in {}", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
             contractors = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
             data[field] = contractors
         elif field == "political_contributions":

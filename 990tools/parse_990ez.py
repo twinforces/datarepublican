@@ -240,6 +240,51 @@ def parse_prog_exp_990ez(root, field, namespaces, xml_filename, context, xpath_c
 def parse_filer_name_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     return parse_string_field(root, XPATHS_990EZ, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="Unknown")
 
+def parse_organization_address_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+    """Parse organization address for Google Street View."""
+    address_parts = {}
+
+    # Find business address
+    business_address = parse_string_field(root, XPATHS_990EZ, "business_address", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
+
+    if business_address is not None:
+        address_line_1 = parse_string_field(business_address, XPATHS_990EZ, "address_line_1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        address_line_2 = parse_string_field(business_address, XPATHS_990EZ, "address_line_2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        city = parse_string_field(business_address, XPATHS_990EZ, "city", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        state = parse_string_field(business_address, XPATHS_990EZ, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+        zip_code = parse_string_field(business_address, XPATHS_990EZ, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="")
+
+        # Create canonical address
+        address_parts = {
+            'address_line_1': address_line_1,
+            'address_line_2': address_line_2,
+            'city': city,
+            'state': state,
+            'zip_code': zip_code
+        }
+
+        # Create full address string
+        full_address = []
+        if address_line_1:
+            full_address.append(address_line_1)
+        if address_line_2:
+            full_address.append(address_line_2)
+        city_state_zip = []
+        if city:
+            city_state_zip.append(city)
+        if state:
+            city_state_zip.append(state)
+        if zip_code:
+            city_state_zip.append(zip_code)
+        if city_state_zip:
+            full_address.append(", ".join(city_state_zip))
+
+        canonical_address = " ".join(full_address) if full_address else ""
+
+        return canonical_address, address_parts
+
+    return "", {}
+
 def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None):
     namespaces = {'irs': 'http://www.irs.gov/efile'}
     context = {
@@ -267,15 +312,22 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
         ("total_assets", parse_total_assets_990ez),
         ("travel", parse_travel_990ez),
         ("conferences", parse_conferences_990ez),
-        ("org_type", parse_org_type_990ez)
+        ("org_type", parse_org_type_990ez),
+        ("organization_address", parse_organization_address_990ez)
     ]
     data = {}
     officer_entries = []
+    canonical_address = ""
+    address_parts = {}
+
     for field, func in fields:
         if field == "officer_comp":
             total, entries = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
             data[field] = total
             officer_entries.extend(entries)
+        elif field == "organization_address":
+            canonical_address, address_parts = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            data[field] = canonical_address
         else:
             data[field] = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
@@ -310,7 +362,8 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
         data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],
         data["grants_ptile"], data["foreign_expenses_pct"], data["foreign_expenses_ptile"], data["grift_ratio"],
         data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
-        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename, ""
+        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename,
+        canonical_address
     ]
     return row, officer_entries, [], []
 

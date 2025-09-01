@@ -228,8 +228,8 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
         logging.info(msg_format, *args, exc_info=exc_info)
 
 # Assign the master logger and log_error to each parse module
-parse_990.set_logger(logger, log_error)
-parse_990ez.set_logger(logger, log_error)
+parse_990.set_logger(logger, log_error, verbose, DEBUG_EINS)
+parse_990ez.set_logger(logger, log_error, verbose, DEBUG_EINS)
 parse_990pf.set_logger(logger, log_error, verbose, DEBUG_EINS)
 
 def initialize_thread_local_counters():
