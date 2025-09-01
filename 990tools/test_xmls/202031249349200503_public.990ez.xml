@@ -1,0 +1,321 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return returnVersion="2019v5.0" xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.irs.gov/efile">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2020-05-03T22:40:38-05:00</ReturnTs>
+    <TaxPeriodEndDt>2019-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmEIN>823085289</PreparerFirmEIN>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>LIPOCK'S ACCOUNTING SERVICES INC</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>1360 Valley Vista Drive Ste 106</AddressLine1Txt>
+        <CityNm>Diamond Bar</CityNm>
+        <StateAbbreviationCd>CA</StateAbbreviationCd>
+        <ZIPCd>917653911</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990EZ</ReturnTypeCd>
+    <TaxPeriodBeginDt>2019-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>471203726</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>AMERICA CARITAS UNIVERSITY</BusinessNameLine1Txt>
+      </BusinessName>
+      <InCareOfNm>% Michael Malone</InCareOfNm>
+      <BusinessNameControlTxt>AMER</BusinessNameControlTxt>
+      <USAddress>
+        <AddressLine1Txt>930 N Orange Street</AddressLine1Txt>
+        <CityNm>Riverside</CityNm>
+        <StateAbbreviationCd>CA</StateAbbreviationCd>
+        <ZIPCd>92501</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>MICHAEL MALONE</PersonNm>
+      <PersonTitleTxt>CEO</PersonTitleTxt>
+      <PhoneNum>6263188895</PhoneNum>
+      <SignatureDt>2020-05-03</SignatureDt>
+      <DiscussWithPaidPreparerInd>true</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>WENDY Y TONG CPA</PreparerPersonNm>
+      <PTIN>P01663207</PTIN>
+      <PhoneNum>6264168911</PhoneNum>
+      <PreparationDt>2020-05-03</PreparationDt>
+    </PreparerPersonGrp>
+    <TaxYr>2019</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="5">
+    <IRS990EZ documentId="IRS990EZ-19-1" softwareId="19009653" softwareVersionNum="ta19mefv1.0" referenceDocumentId="IRS990ScheduleO-83-1">
+      <AddressChangeInd>X</AddressChangeInd>
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <ScheduleBNotRequiredInd>X</ScheduleBNotRequiredInd>
+      <Organization501c3Ind referenceDocumentId="IRS990ScheduleA-57-1">X</Organization501c3Ind>
+      <TypeOfOrganizationCorpInd>X</TypeOfOrganizationCorpInd>
+      <GrossReceiptsAmt>3599</GrossReceiptsAmt>
+      <ContributionsGiftsGrantsEtcAmt>400</ContributionsGiftsGrantsEtcAmt>
+      <ProgramServiceRevenueAmt>3199</ProgramServiceRevenueAmt>
+      <TotalRevenueAmt>3599</TotalRevenueAmt>
+      <SalariesOtherCompEmplBnftAmt>26083</SalariesOtherCompEmplBnftAmt>
+      <FeesAndOtherPymtToIndCntrctAmt>3380</FeesAndOtherPymtToIndCntrctAmt>
+      <OtherExpensesTotalAmt>1692</OtherExpensesTotalAmt>
+      <TotalExpensesAmt>31155</TotalExpensesAmt>
+      <ExcessOrDeficitForYearAmt>-27556</ExcessOrDeficitForYearAmt>
+      <NetAssetsOrFundBalancesBOYAmt>7020</NetAssetsOrFundBalancesBOYAmt>
+      <NetAssetsOrFundBalancesEOYAmt>-20536</NetAssetsOrFundBalancesEOYAmt>
+      <CashSavingsAndInvestmentsGrp>
+        <BOYAmt>7020</BOYAmt>
+        <EOYAmt>2973</EOYAmt>
+      </CashSavingsAndInvestmentsGrp>
+      <LandAndBuildingsGrp>
+        <BOYAmt>0</BOYAmt>
+        <EOYAmt>0</EOYAmt>
+      </LandAndBuildingsGrp>
+      <OtherAssetsTotalDetail>
+        <BOYAmt>0</BOYAmt>
+        <EOYAmt>0</EOYAmt>
+      </OtherAssetsTotalDetail>
+      <Form990TotalAssetsGrp>
+        <BOYAmt>7020</BOYAmt>
+        <EOYAmt>2973</EOYAmt>
+      </Form990TotalAssetsGrp>
+      <SumOfTotalLiabilitiesGrp>
+        <BOYAmt>0</BOYAmt>
+        <EOYAmt>23508</EOYAmt>
+      </SumOfTotalLiabilitiesGrp>
+      <NetAssetsOrFundBalancesGrp>
+        <BOYAmt>7020</BOYAmt>
+        <EOYAmt>-20535</EOYAmt>
+      </NetAssetsOrFundBalancesGrp>
+      <PrimaryExemptPurposeTxt>Provide Christian education to the public</PrimaryExemptPurposeTxt>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>Teches Christian education to the general public</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>25836</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <TotalProgramServiceExpensesAmt>25836</TotalProgramServiceExpensesAmt>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>MICHAEL M MALONE</PersonNm>
+        <TitleTxt>CEO</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>40.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>25836</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>YING WANG</PersonNm>
+        <TitleTxt>Secretary</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>20.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>BRENDON F MA</PersonNm>
+        <TitleTxt>CFO</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>20.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+      <ChgMadeToOrgnzngDocNotRptInd>false</ChgMadeToOrgnzngDocNotRptInd>
+      <OrganizationHadUBIInd>false</OrganizationHadUBIInd>
+      <SubjectToProxyTaxInd>false</SubjectToProxyTaxInd>
+      <OrganizationDissolvedEtcInd>false</OrganizationDissolvedEtcInd>
+      <Form1120PolFiledInd>false</Form1120PolFiledInd>
+      <MadeLoansToFromOfficersInd>true</MadeLoansToFromOfficersInd>
+      <LoansToFromOfficersAmt referenceDocumentId="IRS990ScheduleL-79-1">22301</LoansToFromOfficersAmt>
+      <TaxImposedUnderIRC4911Amt>0</TaxImposedUnderIRC4911Amt>
+      <TaxImposedUnderIRC4912Amt>0</TaxImposedUnderIRC4912Amt>
+      <TaxImposedUnderIRC4955Amt>0</TaxImposedUnderIRC4955Amt>
+      <EngagedInExcessBenefitTransInd referenceDocumentId="IRS990ScheduleL-79-1">false</EngagedInExcessBenefitTransInd>
+      <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+      <StatesWhereCopyOfReturnIsFldCd>CA</StatesWhereCopyOfReturnIsFldCd>
+      <BooksInCareOfDetail>
+        <BusinessName>
+          <BusinessNameLine1Txt>America Caritas University</BusinessNameLine1Txt>
+        </BusinessName>
+        <USAddress>
+          <AddressLine1Txt>930 N Orange Street</AddressLine1Txt>
+          <CityNm>Riverside</CityNm>
+          <StateAbbreviationCd>CA</StateAbbreviationCd>
+          <ZIPCd>92501</ZIPCd>
+        </USAddress>
+        <PhoneNum>6263188895</PhoneNum>
+      </BooksInCareOfDetail>
+      <ForeignFinancialAccountInd>false</ForeignFinancialAccountInd>
+      <ForeignOfficeInd>false</ForeignOfficeInd>
+      <DonorAdvisedFndsInd>false</DonorAdvisedFndsInd>
+      <OperateHospitalInd>false</OperateHospitalInd>
+      <TanningServicesProvidedInd>false</TanningServicesProvidedInd>
+      <RelatedOrganizationCtrlEntInd>false</RelatedOrganizationCtrlEntInd>
+      <TransactionWithControlEntInd>false</TransactionWithControlEntInd>
+      <PoliticalCampaignActyInd>false</PoliticalCampaignActyInd>
+      <LobbyingActivitiesInd>false</LobbyingActivitiesInd>
+      <SchoolOperatingInd referenceDocumentId="IRS990ScheduleE-67-1">true</SchoolOperatingInd>
+      <TrnsfrExmptNonChrtblRltdOrgInd>false</TrnsfrExmptNonChrtblRltdOrgInd>
+      <RelatedOrgSect527OrgInd>false</RelatedOrgSect527OrgInd>
+      <PartVIOfCompOfHghstPdEmplTxt>NONE</PartVIOfCompOfHghstPdEmplTxt>
+      <PartVIHghstPdCntrctProfSrvcTxt>NONE</PartVIHghstPdCntrctProfSrvcTxt>
+      <FiledScheduleAInd>true</FiledScheduleAInd>
+    </IRS990EZ>
+    <IRS990ScheduleA documentId="IRS990ScheduleA-57-1" softwareId="19009653" softwareVersionNum="ta19mefv1.0">
+      <SchoolInd>X</SchoolInd>
+    </IRS990ScheduleA>
+    <IRS990ScheduleE documentId="IRS990ScheduleE-67-1" softwareId="19009653" softwareVersionNum="ta19mefv1.0">
+      <NondiscriminatoryPolicyStmtInd>true</NondiscriminatoryPolicyStmtInd>
+      <PolicyStmtInBrochuresEtcInd>true</PolicyStmtInBrochuresEtcInd>
+      <PlcyPblczdViaBroadcastMediaInd>true</PlcyPblczdViaBroadcastMediaInd>
+      <MaintainRacialCompRecsInd>true</MaintainRacialCompRecsInd>
+      <MaintainScholarshipsRecsInd>true</MaintainScholarshipsRecsInd>
+      <MaintainCpyOfBrochuresEtcInd>true</MaintainCpyOfBrochuresEtcInd>
+      <MaintainCpyOfAllSolInd>true</MaintainCpyOfAllSolInd>
+      <DiscriminateRaceStdntsRghtsInd>false</DiscriminateRaceStdntsRghtsInd>
+      <DiscriminateRaceAdmissPlcyInd>false</DiscriminateRaceAdmissPlcyInd>
+      <DiscriminateRaceEmplmFcultyInd>false</DiscriminateRaceEmplmFcultyInd>
+      <DiscriminateRaceSchsInd>false</DiscriminateRaceSchsInd>
+      <DiscriminateRaceEducPlcyInd>false</DiscriminateRaceEducPlcyInd>
+      <DiscriminateRaceUseOfFcltsInd>false</DiscriminateRaceUseOfFcltsInd>
+      <DiscriminateRaceAthltProgInd>false</DiscriminateRaceAthltProgInd>
+      <DiscriminateRaceOtherActyInd>false</DiscriminateRaceOtherActyInd>
+      <GovernmentFinancialAidRcvdInd>false</GovernmentFinancialAidRcvdInd>
+      <GovernmentFinancialAidRvkdInd>false</GovernmentFinancialAidRvkdInd>
+      <ComplianceWithRevProc7550Ind>true</ComplianceWithRevProc7550Ind>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Part I Line 3</FormAndLineReferenceDesc>
+        <ExplanationTxt>On all the advertisement and pamphlets for new students, we solicit protential students who are interested in the studying of doctoral degrees based on qualification, not by race or any discrimatory factos.</ExplanationTxt>
+      </SupplementalInformationDetail>
+    </IRS990ScheduleE>
+    <IRS990ScheduleL documentId="IRS990ScheduleL-79-1" softwareId="19009653" softwareVersionNum="ta19mefv1.0">
+      <DisqualifiedPersonExBnftTrGrp>
+        <TransactionCorrectedInd>false</TransactionCorrectedInd>
+      </DisqualifiedPersonExBnftTrGrp>
+      <DisqualifiedPersonExBnftTrGrp>
+        <TransactionCorrectedInd>false</TransactionCorrectedInd>
+      </DisqualifiedPersonExBnftTrGrp>
+      <DisqualifiedPersonExBnftTrGrp>
+        <TransactionCorrectedInd>false</TransactionCorrectedInd>
+      </DisqualifiedPersonExBnftTrGrp>
+      <DisqualifiedPersonExBnftTrGrp>
+        <TransactionCorrectedInd>false</TransactionCorrectedInd>
+      </DisqualifiedPersonExBnftTrGrp>
+      <DisqualifiedPersonExBnftTrGrp>
+        <TransactionCorrectedInd>false</TransactionCorrectedInd>
+      </DisqualifiedPersonExBnftTrGrp>
+      <DisqualifiedPersonExBnftTrGrp>
+        <TransactionCorrectedInd>false</TransactionCorrectedInd>
+      </DisqualifiedPersonExBnftTrGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <PersonNm>BRENDON MA</PersonNm>
+        <RelationshipWithOrgTxt>CFO</RelationshipWithOrgTxt>
+        <LoanPurposeTxt>Operation</LoanPurposeTxt>
+        <LoanToOrganizationInd>X</LoanToOrganizationInd>
+        <OriginalPrincipalAmt>22301</OriginalPrincipalAmt>
+        <BalanceDueAmt>22301</BalanceDueAmt>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>true</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <LoansBtwnOrgInterestedPrsnGrp>
+        <DefaultInd>false</DefaultInd>
+        <BoardOrCommitteeApprovalInd>false</BoardOrCommitteeApprovalInd>
+        <WrittenAgreementInd>false</WrittenAgreementInd>
+      </LoansBtwnOrgInterestedPrsnGrp>
+      <TotalBalanceDueAmt>22301</TotalBalanceDueAmt>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+      <BusTrInvolveInterestedPrsnGrp>
+        <SharingOfRevenuesInd>false</SharingOfRevenuesInd>
+      </BusTrInvolveInterestedPrsnGrp>
+    </IRS990ScheduleL>
+    <IRS990ScheduleO documentId="IRS990ScheduleO-84-1" softwareId="19009653" softwareVersionNum="ta19mefv1.0">
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Part I Line 16</FormAndLineReferenceDesc>
+        <ExplanationTxt>Travel $367.00</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Part I Line 16</FormAndLineReferenceDesc>
+        <ExplanationTxt>Insurance $1249.00</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Part I Line 16</FormAndLineReferenceDesc>
+        <ExplanationTxt>Bank fee $76.00</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Part II Line 26</FormAndLineReferenceDesc>
+        <ExplanationTxt>Accounts payable and accrued expenses. Beginning:$0.00 Ending: $1207.00</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Part II Line 26</FormAndLineReferenceDesc>
+        <ExplanationTxt>Loans and other payables. Beginning:$0.00 Ending: $22301.00</ExplanationTxt>
+      </SupplementalInformationDetail>
+    </IRS990ScheduleO>
+  </ReturnData>
+</Return>

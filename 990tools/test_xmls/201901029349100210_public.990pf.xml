@@ -1,0 +1,168 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.irs.gov/efile" returnVersion="2018v3.1">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2019-04-12T12:43:30-00:00</ReturnTs>
+    <TaxPeriodEndDt>2018-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>YI ACCOUNTING INC</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>318 ROEBLING STREET</AddressLine1Txt>
+        <CityNm>BROOKLYN</CityNm>
+        <StateAbbreviationCd>NY</StateAbbreviationCd>
+        <ZIPCd>11211</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990PF</ReturnTypeCd>
+    <TaxPeriodBeginDt>2018-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>832248321</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>Menucha Foundation</BusinessNameLine1Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>MENU</BusinessNameControlTxt>
+      <PhoneNum>3475784468</PhoneNum>
+      <USAddress>
+        <AddressLine1Txt>320 Roebling St Suite 504</AddressLine1Txt>
+        <CityNm>Brooklyn</CityNm>
+        <StateAbbreviationCd>NY</StateAbbreviationCd>
+        <ZIPCd>11211</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>Sheindel Goldberger</PersonNm>
+      <PersonTitleTxt>Trustee</PersonTitleTxt>
+      <SignatureDt>2019-04-12</SignatureDt>
+      <DiscussWithPaidPreparerInd>false</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>HARRY HIRSCHFELD</PreparerPersonNm>
+      <PhoneNum>7187821419</PhoneNum>
+      <PreparationDt>2019-04-12</PreparationDt>
+    </PreparerPersonGrp>
+    <TaxYr>2018</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="3">
+    <IRS990PF documentId="990PF" softwareId="18007340" softwareVersionNum="19.1.1.0">
+      <InitialReturnInd>X</InitialReturnInd>
+      <InitialReturnFormerPubChrtyInd>X</InitialReturnFormerPubChrtyInd>
+      <Organization501c3ExemptPFInd>X</Organization501c3ExemptPFInd>
+      <FMVAssetsEOYAmt>0</FMVAssetsEOYAmt>
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <AnalysisOfRevenueAndExpenses>
+        <ContriRcvdRevAndExpnssAmt>3135</ContriRcvdRevAndExpnssAmt>
+        <ScheduleBNotRequiredInd>X</ScheduleBNotRequiredInd>
+        <CapGainNetIncmNetInvstIncmAmt>0</CapGainNetIncmNetInvstIncmAmt>
+        <TotalRevAndExpnssAmt>3135</TotalRevAndExpnssAmt>
+        <TotalNetInvstIncmAmt>0</TotalNetInvstIncmAmt>
+        <AccountingFeesRevAndExpnssAmt referenceDocumentId="990PF:112">1250</AccountingFeesRevAndExpnssAmt>
+        <TotOprExpensesRevAndExpnssAmt>1250</TotOprExpensesRevAndExpnssAmt>
+        <TotOprExpensesNetInvstIncmAmt>0</TotOprExpensesNetInvstIncmAmt>
+        <TotOprExpensesDsbrsChrtblAmt>0</TotOprExpensesDsbrsChrtblAmt>
+        <ContriPaidRevAndExpnssAmt>0</ContriPaidRevAndExpnssAmt>
+        <ContriPaidDsbrsChrtblAmt>0</ContriPaidDsbrsChrtblAmt>
+        <TotalExpensesRevAndExpnssAmt>1250</TotalExpensesRevAndExpnssAmt>
+        <TotalExpensesNetInvstIncmAmt>0</TotalExpensesNetInvstIncmAmt>
+        <TotalExpensesDsbrsChrtblAmt>0</TotalExpensesDsbrsChrtblAmt>
+        <ExcessRevenueOverExpensesAmt>1885</ExcessRevenueOverExpensesAmt>
+        <NetInvestmentIncomeAmt>0</NetInvestmentIncomeAmt>
+      </AnalysisOfRevenueAndExpenses>
+      <Form990PFBalanceSheetsGrp>
+        <CashEOYAmt>1885</CashEOYAmt>
+        <TotalAssetsEOYAmt>1885</TotalAssetsEOYAmt>
+        <TotalAssetsEOYFMVAmt>0</TotalAssetsEOYFMVAmt>
+        <TotalLiabilitiesEOYAmt>0</TotalLiabilitiesEOYAmt>
+        <RetainedEarningEOYAmt>1885</RetainedEarningEOYAmt>
+        <TotNetAstOrFundBalancesEOYAmt>1885</TotNetAstOrFundBalancesEOYAmt>
+        <TotalLiabilitiesNetAstBOYAmt>0</TotalLiabilitiesNetAstBOYAmt>
+        <TotalLiabilitiesNetAstEOYAmt>1885</TotalLiabilitiesNetAstEOYAmt>
+      </Form990PFBalanceSheetsGrp>
+      <ChgInNetAssetsFundBalancesGrp>
+        <ExcessRevenueOverExpensesAmt>1885</ExcessRevenueOverExpensesAmt>
+        <SubtotalAmt>1885</SubtotalAmt>
+        <TotNetAstOrFundBalancesEOYAmt>1885</TotNetAstOrFundBalancesEOYAmt>
+      </ChgInNetAssetsFundBalancesGrp>
+      <ExciseTaxBasedOnInvstIncmGrp>
+        <InvestmentIncomeExciseTaxAmt>0</InvestmentIncomeExciseTaxAmt>
+      </ExciseTaxBasedOnInvstIncmGrp>
+      <StatementsRegardingActyGrp>
+        <NewSubstantialContributorsInd>false</NewSubstantialContributorsInd>
+        <IndividualWithBooksNm>Sheindel Goldberger</IndividualWithBooksNm>
+        <PhoneNum>3475784468</PhoneNum>
+        <LocationOfBooksUSAddress>
+          <AddressLine1Txt>189 Franklin Ave Apt 5A</AddressLine1Txt>
+          <CityNm>Brooklyn</CityNm>
+          <StateAbbreviationCd>NY</StateAbbreviationCd>
+          <ZIPCd>11205</ZIPCd>
+        </LocationOfBooksUSAddress>
+        <ForeignAccountsQuestionInd>false</ForeignAccountsQuestionInd>
+      </StatementsRegardingActyGrp>
+      <OfficerDirTrstKeyEmplInfoGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>Sheindel Goldberger</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>189 Franklin Ave Apt 5A</AddressLine1Txt>
+            <CityNm>Brooklyn</CityNm>
+            <StateAbbreviationCd>NY</StateAbbreviationCd>
+            <ZIPCd>11205</ZIPCd>
+          </USAddress>
+          <TitleTxt>Trustee</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>000.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>0</CompensationAmt>
+        </OfficerDirTrstKeyEmplGrp>
+      </OfficerDirTrstKeyEmplInfoGrp>
+      <SummaryOfDirectChrtblActyGrp></SummaryOfDirectChrtblActyGrp>
+      <SumOfProgramRelatedInvstGrp></SumOfProgramRelatedInvstGrp>
+      <DistributableAmountGrp>
+        <DistributableAsAdjustedAmt>0</DistributableAsAdjustedAmt>
+      </DistributableAmountGrp>
+      <QualifyingDistriPartXIIGrp>
+        <ExpensesAndContributionsAmt>0</ExpensesAndContributionsAmt>
+      </QualifyingDistriPartXIIGrp>
+      <UndistributedIncomeGrp>
+        <DistributableAsAdjustedAmt>0</DistributableAsAdjustedAmt>
+        <UndistributedIncomeCYAmt>0</UndistributedIncomeCYAmt>
+      </UndistributedIncomeGrp>
+      <SupplementaryInformationGrp>
+        <ContributingManagerNm>Sheindel Goldberger</ContributingManagerNm>
+        <OnlyContriToPreselectedInd>X</OnlyContriToPreselectedInd>
+      </SupplementaryInformationGrp>
+      <TrnsfrTransRlnNonchrtblEOGrp>
+        <TrnsfrOfCashToNonchrtblEOInd>false</TrnsfrOfCashToNonchrtblEOInd>
+        <TrnsfrOtherAssetNonchrtblEOInd>false</TrnsfrOtherAssetNonchrtblEOInd>
+        <SalesOrExchangesOfAssetsInd>false</SalesOrExchangesOfAssetsInd>
+        <PurchaseOfAssetsNonchrtblEOInd>false</PurchaseOfAssetsNonchrtblEOInd>
+        <RentalOfFacilitiesOthAssetsInd>false</RentalOfFacilitiesOthAssetsInd>
+        <ReimbursementArrangementsInd>false</ReimbursementArrangementsInd>
+        <LoansOrLoanGuaranteesInd>false</LoansOrLoanGuaranteesInd>
+        <PerformanceOfServicesEtcInd>false</PerformanceOfServicesEtcInd>
+        <SharingOfFacilitiesEtcInd>false</SharingOfFacilitiesEtcInd>
+        <RelationshipsNonchrtblEOInd>false</RelationshipsNonchrtblEOInd>
+      </TrnsfrTransRlnNonchrtblEOGrp>
+    </IRS990PF>
+    <IRS990ScheduleB documentId="990B" softwareId="18007340" softwareVersionNum="19.1.1.0">
+      <Organization501c3ExemptPFInd>X</Organization501c3ExemptPFInd>
+      <GeneralRuleInd>X</GeneralRuleInd>
+      <ContributorInformationGrp>
+        <ContributorNum>1</ContributorNum>
+        <ContributorPersonNm>Menucha Consulting Trust</ContributorPersonNm>
+        <ContributorUSAddress>
+          <AddressLine1Txt>189 Franklin Ave Apt 5A</AddressLine1Txt>
+          <CityNm>Brooklyn</CityNm>
+          <StateAbbreviationCd>NY</StateAbbreviationCd>
+          <ZIPCd>11205</ZIPCd>
+        </ContributorUSAddress>
+        <TotalContributionsAmt>3135</TotalContributionsAmt>
+        <PersonContributionInd>X</PersonContributionInd>
+      </ContributorInformationGrp>
+    </IRS990ScheduleB>
+    <AccountingFeesSchedule documentId="990PF:112" softwareId="18007340" softwareVersionNum="19.1.1.0">
+      <AccountingFeesDetail>
+        <CategoryTxt>YI Accounting</CategoryTxt>
+        <Amt>1250</Amt>
+      </AccountingFeesDetail>
+    </AccountingFeesSchedule>
+  </ReturnData>
+</Return>

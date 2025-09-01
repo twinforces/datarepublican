@@ -1,0 +1,217 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" xsi:schemaLocation="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" returnVersion="2019v5.0">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2020-05-12T23:57:53-05:00</ReturnTs>
+    <TaxPeriodEndDt>2019-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmEIN>134008324</PreparerFirmEIN>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>PRICEWATERHOUSECOOPERS LLP</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>600 GRANT STREET</AddressLine1Txt>
+        <CityNm>PITTSBURGH</CityNm>
+        <StateAbbreviationCd>PA</StateAbbreviationCd>
+        <ZIPCd>15219</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990EZ</ReturnTypeCd>
+    <TaxPeriodBeginDt>2019-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>376039181</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>ALTON MEMORIAL HOSPITAL - N LEVIS ENDOWMENT</BusinessNameLine1Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>ALTO</BusinessNameControlTxt>
+      <PhoneNum>3144182643</PhoneNum>
+      <USAddress>
+        <AddressLine1Txt>PO BOX 0634</AddressLine1Txt>
+        <CityNm>MILWAUKEE</CityNm>
+        <StateAbbreviationCd>WI</StateAbbreviationCd>
+        <ZIPCd>532010634</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>U S BANK N A BY</PersonNm>
+      <PersonTitleTxt>TRUSTEE</PersonTitleTxt>
+      <PhoneNum>3144182643</PhoneNum>
+      <SignatureDt>2020-05-08</SignatureDt>
+      <DiscussWithPaidPreparerInd>true</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>JOSEPH J CASTRIANO</PreparerPersonNm>
+      <PTIN>P01251603</PTIN>
+      <PhoneNum>4123556000</PhoneNum>
+      <PreparationDt>2020-05-08</PreparationDt>
+      <SelfEmployedInd>X</SelfEmployedInd>
+    </PreparerPersonGrp>
+    <TaxYr>2019</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="3">
+    <IRS990EZ documentId="IRS990EZ" referenceDocumentId="IRS990ScheduleO">
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <ScheduleBNotRequiredInd>X</ScheduleBNotRequiredInd>
+      <WebsiteAddressTxt>N/A</WebsiteAddressTxt>
+      <Organization4947a1NotPFInd referenceDocumentId="IRS990ScheduleA">X</Organization4947a1NotPFInd>
+      <GrossReceiptsAmt>4982</GrossReceiptsAmt>
+      <InfoInScheduleOPartIInd>X</InfoInScheduleOPartIInd>
+      <InvestmentIncomeAmt>4982</InvestmentIncomeAmt>
+      <TotalRevenueAmt>4982</TotalRevenueAmt>
+      <SalariesOtherCompEmplBnftAmt>771</SalariesOtherCompEmplBnftAmt>
+      <OtherExpensesTotalAmt>161</OtherExpensesTotalAmt>
+      <TotalExpensesAmt>932</TotalExpensesAmt>
+      <ExcessOrDeficitForYearAmt>4050</ExcessOrDeficitForYearAmt>
+      <NetAssetsOrFundBalancesBOYAmt>182430</NetAssetsOrFundBalancesBOYAmt>
+      <OtherChangesInNetAssetsAmt>3</OtherChangesInNetAssetsAmt>
+      <NetAssetsOrFundBalancesEOYAmt>186483</NetAssetsOrFundBalancesEOYAmt>
+      <CashSavingsAndInvestmentsGrp>
+        <BOYAmt>182430</BOYAmt>
+        <EOYAmt>186483</EOYAmt>
+      </CashSavingsAndInvestmentsGrp>
+      <LandAndBuildingsGrp>
+        <EOYAmt>0</EOYAmt>
+      </LandAndBuildingsGrp>
+      <OtherAssetsTotalDetail>
+        <EOYAmt>0</EOYAmt>
+      </OtherAssetsTotalDetail>
+      <Form990TotalAssetsGrp>
+        <BOYAmt>182430</BOYAmt>
+        <EOYAmt>186483</EOYAmt>
+      </Form990TotalAssetsGrp>
+      <SumOfTotalLiabilitiesGrp>
+        <BOYAmt>0</BOYAmt>
+        <EOYAmt>0</EOYAmt>
+      </SumOfTotalLiabilitiesGrp>
+      <NetAssetsOrFundBalancesGrp>
+        <BOYAmt>182430</BOYAmt>
+        <EOYAmt>186483</EOYAmt>
+      </NetAssetsOrFundBalancesGrp>
+      <PrimaryExemptPurposeTxt>SUPPORTING ALTON MEMORIAL HOSPITAL</PrimaryExemptPurposeTxt>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>ALTON MEMORIAL HOSPITAL</DescriptionProgramSrvcAccomTxt>
+      </ProgramSrvcAccomplishmentGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <BusinessName>
+          <BusinessNameLine1Txt>US BANK NA</BusinessNameLine1Txt>
+        </BusinessName>
+        <TitleTxt>TRUSTEE</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>1.0</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>771</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <InfoInScheduleOPartVInd>X</InfoInScheduleOPartVInd>
+      <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+      <ChgMadeToOrgnzngDocNotRptInd>false</ChgMadeToOrgnzngDocNotRptInd>
+      <OrganizationHadUBIInd>false</OrganizationHadUBIInd>
+      <SubjectToProxyTaxInd>false</SubjectToProxyTaxInd>
+      <OrganizationDissolvedEtcInd>false</OrganizationDissolvedEtcInd>
+      <Form1120PolFiledInd>false</Form1120PolFiledInd>
+      <MadeLoansToFromOfficersInd>false</MadeLoansToFromOfficersInd>
+      <InitiationFeesAndCapContriAmt>0</InitiationFeesAndCapContriAmt>
+      <GrossReceiptsForPublicUseAmt>0</GrossReceiptsForPublicUseAmt>
+      <TaxImposedUnderIRC4911Amt>0</TaxImposedUnderIRC4911Amt>
+      <TaxImposedUnderIRC4912Amt>0</TaxImposedUnderIRC4912Amt>
+      <TaxImposedUnderIRC4955Amt>0</TaxImposedUnderIRC4955Amt>
+      <TaxImposedOnOrganizationMgrAmt>0</TaxImposedOnOrganizationMgrAmt>
+      <TaxReimbursedByOrganizationAmt>0</TaxReimbursedByOrganizationAmt>
+      <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+      <StatesWhereCopyOfReturnIsFldCd>IL</StatesWhereCopyOfReturnIsFldCd>
+      <BooksInCareOfDetail>
+        <BusinessName>
+          <BusinessNameLine1Txt>US BANK NA</BusinessNameLine1Txt>
+        </BusinessName>
+        <USAddress>
+          <AddressLine1Txt>PO BOX 387</AddressLine1Txt>
+          <CityNm>ST LOUIS</CityNm>
+          <StateAbbreviationCd>MO</StateAbbreviationCd>
+          <ZIPCd>63166</ZIPCd>
+        </USAddress>
+        <PhoneNum>3144182643</PhoneNum>
+      </BooksInCareOfDetail>
+      <ForeignFinancialAccountInd>false</ForeignFinancialAccountInd>
+      <ForeignOfficeInd>false</ForeignOfficeInd>
+      <NECTFilingForm990Ind interestAmt="0">X</NECTFilingForm990Ind>
+      <DonorAdvisedFndsInd>false</DonorAdvisedFndsInd>
+      <OperateHospitalInd>false</OperateHospitalInd>
+      <TanningServicesProvidedInd>false</TanningServicesProvidedInd>
+      <RelatedOrganizationCtrlEntInd>false</RelatedOrganizationCtrlEntInd>
+      <TransactionWithControlEntInd>false</TransactionWithControlEntInd>
+      <PoliticalCampaignActyInd>false</PoliticalCampaignActyInd>
+      <LobbyingActivitiesInd>false</LobbyingActivitiesInd>
+      <SchoolOperatingInd>false</SchoolOperatingInd>
+      <TrnsfrExmptNonChrtblRltdOrgInd>false</TrnsfrExmptNonChrtblRltdOrgInd>
+      <FiledScheduleAInd>true</FiledScheduleAInd>
+    </IRS990EZ>
+    <IRS990ScheduleA documentId="IRS990ScheduleA">
+      <SupportingOrganization509a3Ind>X</SupportingOrganization509a3Ind>
+      <SupportingOrgType1Ind>X</SupportingOrgType1Ind>
+      <SupportedOrganizationsCnt>1</SupportedOrganizationsCnt>
+      <SupportedOrgInformationGrp>
+        <SupportedOrganizationName>
+          <BusinessNameLine1Txt>ALTON MEMORIAL HOSPITAL</BusinessNameLine1Txt>
+        </SupportedOrganizationName>
+        <EIN>370661172</EIN>
+        <OrganizationTypeCd>3</OrganizationTypeCd>
+        <GoverningDocumentListedInd>true</GoverningDocumentListedInd>
+        <SupportAmt>0</SupportAmt>
+        <OtherSupportAmt>0</OtherSupportAmt>
+      </SupportedOrgInformationGrp>
+      <SupportedOrganizationsTotalCnt>1</SupportedOrganizationsTotalCnt>
+      <SupportSumAmt>0</SupportSumAmt>
+      <OtherSupportSumAmt>0</OtherSupportSumAmt>
+      <Form990SchASupportingOrgGrp>
+        <ListedByNameGoverningDocInd>true</ListedByNameGoverningDocInd>
+        <SuprtOrgNoIRSDeterminationInd>false</SuprtOrgNoIRSDeterminationInd>
+        <SupportedOrgSectionC456Ind>false</SupportedOrgSectionC456Ind>
+        <SupportedOrgNotOrganizedUSInd>false</SupportedOrgNotOrganizedUSInd>
+        <OrganizationChangeSuprtOrgInd>false</OrganizationChangeSuprtOrgInd>
+        <SupportNonSupportedOrgInd>false</SupportNonSupportedOrgInd>
+        <PaymentSubstantialContribtrInd>false</PaymentSubstantialContribtrInd>
+        <LoanDisqualifiedPersonInd>false</LoanDisqualifiedPersonInd>
+        <ControlledDisqualifiedPrsnInd>false</ControlledDisqualifiedPrsnInd>
+        <DisqualifiedPrsnControllIntInd>false</DisqualifiedPrsnControllIntInd>
+        <DisqualifiedPrsnOwnrIntInd>false</DisqualifiedPrsnOwnrIntInd>
+        <ExcessBusinessHoldingsRulesInd>false</ExcessBusinessHoldingsRulesInd>
+        <ContributionControllerInd>false</ContributionControllerInd>
+        <ContributionFamilyInd>false</ContributionFamilyInd>
+        <Contribution35ControlledInd>false</Contribution35ControlledInd>
+      </Form990SchASupportingOrgGrp>
+      <Form990SchAType1SuprtOrgGrp>
+        <PowerAppointMajorityDirTrstInd>true</PowerAppointMajorityDirTrstInd>
+        <OperateBenefitNonSuprtOrgInd>false</OperateBenefitNonSuprtOrgInd>
+      </Form990SchAType1SuprtOrgGrp>
+      <DistributableAmountGrp>
+        <CYAdjNetIncomeDistributableAmt>0</CYAdjNetIncomeDistributableAmt>
+        <CYPct85AdjustedNetIncomeAmt>0</CYPct85AdjustedNetIncomeAmt>
+        <CYTotalMinAstDistributableAmt>0</CYTotalMinAstDistributableAmt>
+        <CYGreaterAdjustedMinimumAmt>0</CYGreaterAdjustedMinimumAmt>
+        <CYIncomeTaxImposedPYAmt>0</CYIncomeTaxImposedPYAmt>
+        <CYDistributableAsAdjustedAmt>0</CYDistributableAsAdjustedAmt>
+      </DistributableAmountGrp>
+    </IRS990ScheduleA>
+    <IRS990ScheduleO documentId="IRS990ScheduleO">
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>EXPLANATION FOR FORM 990-EZ, PART V, LINE 33</FormAndLineReferenceDesc>
+        <ExplanationTxt>NOT APPLICABLE</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>EXPLANATION FOR FORM 990-EZ, PART V, LINE 34</FormAndLineReferenceDesc>
+        <ExplanationTxt>NOT APPLICABLE</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>EXPLANATION FOR FORM 990-EZ, PART V, LINE 35b</FormAndLineReferenceDesc>
+        <ExplanationTxt>NOT APPLICABLE</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Form 990-EZ, Part I, Line 16</FormAndLineReferenceDesc>
+        <ExplanationTxt>FOREIGN TAXES PAID 146 STATE FILING FEE 15</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Form 990-EZ, Part I, Line 20</FormAndLineReferenceDesc>
+        <ExplanationTxt>COST BASIS ADJUSTMENT 3</ExplanationTxt>
+      </SupplementalInformationDetail>
+    </IRS990ScheduleO>
+  </ReturnData>
+</Return>

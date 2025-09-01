@@ -1,0 +1,362 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" returnVersion="2018v3.1" xsi:schemaLocation="http://www.irs.gov/efile">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2019-11-15T16:57:18-08:00</ReturnTs>
+    <TaxPeriodEndDt>2018-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmEIN>330890215</PreparerFirmEIN>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>William E Walls CPA JD</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>711 South Brea Blvd</AddressLine1Txt>
+        <CityNm>Brea</CityNm>
+        <StateAbbreviationCd>CA</StateAbbreviationCd>
+        <ZIPCd>928215310</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990PF</ReturnTypeCd>
+    <TaxPeriodBeginDt>2018-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>823093695</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>THE LLOYD &amp; ELISABETH KLEIN LEGACY</BusinessNameLine1Txt>
+        <BusinessNameLine2Txt>FOUNDATION</BusinessNameLine2Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>LLOY</BusinessNameControlTxt>
+      <PhoneNum>7149972195</PhoneNum>
+      <USAddress>
+        <AddressLine1Txt>17853 SANTIAGO BLVD STE 107-277</AddressLine1Txt>
+        <CityNm>VILLA PARK</CityNm>
+        <StateAbbreviationCd>CA</StateAbbreviationCd>
+        <ZIPCd>92861</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>Christine Cross</PersonNm>
+      <PersonTitleTxt>President &amp; CEO</PersonTitleTxt>
+      <SignatureDt>2019-11-15</SignatureDt>
+      <DiscussWithPaidPreparerInd>true</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>William E Walls CPA JD</PreparerPersonNm>
+      <PTIN>P00389082</PTIN>
+      <PhoneNum>7146710422</PhoneNum>
+      <SelfEmployedInd>X</SelfEmployedInd>
+    </PreparerPersonGrp>
+    <TaxYr>2018</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="6">
+    <IRS990PF documentId="IRS990PF" referenceDocumentId="GeneralExplanation" softwareId="18007218" softwareVersionNum="2018v3.1">
+      <InitialReturnInd>X</InitialReturnInd>
+      <Organization501c3ExemptPFInd>X</Organization501c3ExemptPFInd>
+      <FMVAssetsEOYAmt>2839365</FMVAssetsEOYAmt>
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <AnalysisOfRevenueAndExpenses>
+        <ContriRcvdRevAndExpnssAmt>3048415</ContriRcvdRevAndExpnssAmt>
+        <ScheduleBNotRequiredInd>X</ScheduleBNotRequiredInd>
+        <InterestOnSavNetInvstIncmAmt>3122</InterestOnSavNetInvstIncmAmt>
+        <DividendsNetInvstIncmAmt>22011</DividendsNetInvstIncmAmt>
+        <CapGainNetIncmNetInvstIncmAmt>14658</CapGainNetIncmNetInvstIncmAmt>
+        <OtherIncomeNetInvstIncmAmt>41824</OtherIncomeNetInvstIncmAmt>
+        <TotalRevAndExpnssAmt>3048415</TotalRevAndExpnssAmt>
+        <TotalNetInvstIncmAmt>81615</TotalNetInvstIncmAmt>
+        <LegalFeesRevAndExpnssAmt referenceDocumentId="LegalFeesSchedule">2205</LegalFeesRevAndExpnssAmt>
+        <LegalFeesAdjNetIncmAmt>2205</LegalFeesAdjNetIncmAmt>
+        <OtherProfFeesRevAndExpnssAmt referenceDocumentId="OtherProfessionalFeesSchedule">34965</OtherProfFeesRevAndExpnssAmt>
+        <OtherProfFeesNetInvstIncmAmt>34965</OtherProfFeesNetInvstIncmAmt>
+        <InterestRevAndExpnssAmt>22</InterestRevAndExpnssAmt>
+        <InterestNetInvstIncmAmt>22</InterestNetInvstIncmAmt>
+        <OtherExpensesRevAndExpnssAmt referenceDocumentId="OtherExpensesSchedule AmortizationSchedule">1011</OtherExpensesRevAndExpnssAmt>
+        <OtherExpensesNetInvstIncmAmt>18</OtherExpensesNetInvstIncmAmt>
+        <OtherExpensesAdjNetIncmAmt>993</OtherExpensesAdjNetIncmAmt>
+        <TotOprExpensesRevAndExpnssAmt>38203</TotOprExpensesRevAndExpnssAmt>
+        <TotOprExpensesNetInvstIncmAmt>35005</TotOprExpensesNetInvstIncmAmt>
+        <TotOprExpensesAdjNetIncmAmt>3198</TotOprExpensesAdjNetIncmAmt>
+        <TotOprExpensesDsbrsChrtblAmt>0</TotOprExpensesDsbrsChrtblAmt>
+        <ContriPaidRevAndExpnssAmt>170847</ContriPaidRevAndExpnssAmt>
+        <ContriPaidDsbrsChrtblAmt>170847</ContriPaidDsbrsChrtblAmt>
+        <TotalExpensesRevAndExpnssAmt>209050</TotalExpensesRevAndExpnssAmt>
+        <TotalExpensesNetInvstIncmAmt>35005</TotalExpensesNetInvstIncmAmt>
+        <TotalExpensesAdjNetIncmAmt>3198</TotalExpensesAdjNetIncmAmt>
+        <TotalExpensesDsbrsChrtblAmt>170847</TotalExpensesDsbrsChrtblAmt>
+        <ExcessRevenueOverExpensesAmt>2839365</ExcessRevenueOverExpensesAmt>
+        <NetInvestmentIncomeAmt>46610</NetInvestmentIncomeAmt>
+      </AnalysisOfRevenueAndExpenses>
+      <Form990PFBalanceSheetsGrp>
+        <CashEOYAmt>91189</CashEOYAmt>
+        <CashEOYFMVAmt>91189</CashEOYFMVAmt>
+        <CorporateStockEOYAmt referenceDocumentId="InvestmentsCorpStockSchedule">2422581</CorporateStockEOYAmt>
+        <CorporateStockEOYFMVAmt>2422581</CorporateStockEOYFMVAmt>
+        <OtherInvestmentsEOYAmt referenceDocumentId="InvestmentsOtherSchedule2">325595</OtherInvestmentsEOYAmt>
+        <OtherInvestmentsEOYFMVAmt>325595</OtherInvestmentsEOYFMVAmt>
+        <TotalAssetsEOYAmt>2839365</TotalAssetsEOYAmt>
+        <TotalAssetsEOYFMVAmt>2839365</TotalAssetsEOYFMVAmt>
+        <TotalLiabilitiesEOYAmt>0</TotalLiabilitiesEOYAmt>
+        <OrganizationFollowsSFAS117Ind>X</OrganizationFollowsSFAS117Ind>
+        <UnrestrictedEOYAmt>2839365</UnrestrictedEOYAmt>
+        <TotNetAstOrFundBalancesEOYAmt>2839365</TotNetAstOrFundBalancesEOYAmt>
+        <TotalLiabilitiesNetAstBOYAmt>0</TotalLiabilitiesNetAstBOYAmt>
+        <TotalLiabilitiesNetAstEOYAmt>2839365</TotalLiabilitiesNetAstEOYAmt>
+      </Form990PFBalanceSheetsGrp>
+      <ChgInNetAssetsFundBalancesGrp>
+        <ExcessRevenueOverExpensesAmt>2839365</ExcessRevenueOverExpensesAmt>
+        <SubtotalAmt>2839365</SubtotalAmt>
+        <TotNetAstOrFundBalancesEOYAmt>2839365</TotNetAstOrFundBalancesEOYAmt>
+      </ChgInNetAssetsFundBalancesGrp>
+      <CapGainsLossTxInvstIncmDetail>
+        <CapitalGainNetIncomeAmt>14658</CapitalGainNetIncomeAmt>
+      </CapGainsLossTxInvstIncmDetail>
+      <ExciseTaxBasedOnInvstIncmGrp>
+        <InvestmentIncomeExciseTaxAmt>932</InvestmentIncomeExciseTaxAmt>
+        <SubtotalAmt>932</SubtotalAmt>
+        <TaxBasedOnInvestmentIncomeAmt>932</TaxBasedOnInvestmentIncomeAmt>
+        <Form2220AttachedInd referenceDocumentId="IRS2220">X</Form2220AttachedInd>
+        <EsPenaltyAmt>36</EsPenaltyAmt>
+        <TaxDueAmt>968</TaxDueAmt>
+      </ExciseTaxBasedOnInvstIncmGrp>
+      <StatementsRegardingActyGrp>
+        <LegislativePoliticalActyInd>false</LegislativePoliticalActyInd>
+        <MoreThan100SpentInd>false</MoreThan100SpentInd>
+        <Form1120POLFiledInd>false</Form1120POLFiledInd>
+        <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+        <ChangesToArticlesOrBylawsInd>false</ChangesToArticlesOrBylawsInd>
+        <UnrelatedBusIncmOverLimitInd>false</UnrelatedBusIncmOverLimitInd>
+        <Form990TFiledInd>false</Form990TFiledInd>
+        <OrganizationDissolvedEtcInd>false</OrganizationDissolvedEtcInd>
+        <Section508eRqrSatisfiedInd>false</Section508eRqrSatisfiedInd>
+        <AtLeast5000InAssetsInd>true</AtLeast5000InAssetsInd>
+        <Form990PFFiledWithAttyGenInd>true</Form990PFFiledWithAttyGenInd>
+        <PrivateOperatingFoundationInd>false</PrivateOperatingFoundationInd>
+        <NewSubstantialContributorsInd>false</NewSubstantialContributorsInd>
+        <OwnControlledEntityInd>false</OwnControlledEntityInd>
+        <DonorAdvisedFundInd>false</DonorAdvisedFundInd>
+        <ComplyWithPublicInspRqrInd>true</ComplyWithPublicInspRqrInd>
+        <WebsiteAddressTxt>N/A</WebsiteAddressTxt>
+        <PersonsWithBooksName>
+          <BusinessNameLine1Txt>Christine Cross</BusinessNameLine1Txt>
+        </PersonsWithBooksName>
+        <PhoneNum>7149972195</PhoneNum>
+        <LocationOfBooksUSAddress>
+          <AddressLine1Txt>17853 Santiago Blvd Ste 107-277</AddressLine1Txt>
+          <CityNm>Villa Park</CityNm>
+          <StateAbbreviationCd>CA</StateAbbreviationCd>
+          <ZIPCd>92861</ZIPCd>
+        </LocationOfBooksUSAddress>
+        <ForeignAccountsQuestionInd>false</ForeignAccountsQuestionInd>
+      </StatementsRegardingActyGrp>
+      <StatementsRegardingActy4720Grp>
+        <SaleOrExchDisqualifiedPrsnInd>false</SaleOrExchDisqualifiedPrsnInd>
+        <BrrwOrLendDisqualifiedPrsnInd>false</BrrwOrLendDisqualifiedPrsnInd>
+        <FurnGoodsDisqualifiedPrsnInd>false</FurnGoodsDisqualifiedPrsnInd>
+        <PayCompDisqualifiedPrsnInd>false</PayCompDisqualifiedPrsnInd>
+        <TransferAstDisqualifiedPrsnInd>false</TransferAstDisqualifiedPrsnInd>
+        <PaymentToGovernmentOfficialInd>false</PaymentToGovernmentOfficialInd>
+        <ActsFailToQlfyAsExceptionsInd>false</ActsFailToQlfyAsExceptionsInd>
+        <UncorrectedPriorActsInd>false</UncorrectedPriorActsInd>
+        <UndistributedIncomePYInd>false</UndistributedIncomePYInd>
+        <UndistrIncmSect4942a2NotAppInd>false</UndistrIncmSect4942a2NotAppInd>
+        <BusinessHoldingsInd>false</BusinessHoldingsInd>
+        <ExcessBusinessHoldingsInd>false</ExcessBusinessHoldingsInd>
+        <JeopardyInvestmentsInd>false</JeopardyInvestmentsInd>
+        <UncorrectedPYJeopardyInvstInd>false</UncorrectedPYJeopardyInvstInd>
+        <InfluenceLegislationInd>false</InfluenceLegislationInd>
+        <InfluenceElectionInd>false</InfluenceElectionInd>
+        <GrantsToIndividualsInd>false</GrantsToIndividualsInd>
+        <GrantsToOrganizationsInd>false</GrantsToOrganizationsInd>
+        <NoncharitablePurposeInd>false</NoncharitablePurposeInd>
+        <TransactionsFailToQlfyAsExcInd>false</TransactionsFailToQlfyAsExcInd>
+        <MaintainedExpenditureRspnsInd>false</MaintainedExpenditureRspnsInd>
+        <RcvFndsToPayPrsnlBnftCntrctInd>false</RcvFndsToPayPrsnlBnftCntrctInd>
+        <PayPremiumsPrsnlBnftCntrctInd>false</PayPremiumsPrsnlBnftCntrctInd>
+        <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+        <ProceedsOrNetIncomeInd>false</ProceedsOrNetIncomeInd>
+        <SubjToTaxRmnrtnExPrchtPymtInd>false</SubjToTaxRmnrtnExPrchtPymtInd>
+      </StatementsRegardingActy4720Grp>
+      <OfficerDirTrstKeyEmplInfoGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>Christine Cross</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>17853 Santiago Blvd 107-277</AddressLine1Txt>
+            <CityNm>Villa Park</CityNm>
+            <StateAbbreviationCd>CA</StateAbbreviationCd>
+            <ZIPCd>92861</ZIPCd>
+          </USAddress>
+          <TitleTxt>President &amp; CEO</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>0.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>0</CompensationAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>Lon Cross</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>17853 Santiago Blvd 107-277</AddressLine1Txt>
+            <CityNm>Villa Park</CityNm>
+            <StateAbbreviationCd>CA</StateAbbreviationCd>
+            <ZIPCd>92861</ZIPCd>
+          </USAddress>
+          <TitleTxt>Secretary</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>0.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>0</CompensationAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <CompOfHghstPdEmplOrNONETxt>NONE</CompOfHghstPdEmplOrNONETxt>
+        <CompOfHghstPdCntrctOrNONETxt>NONE</CompOfHghstPdCntrctOrNONETxt>
+      </OfficerDirTrstKeyEmplInfoGrp>
+      <MinimumInvestmentReturnGrp>
+        <AverageMonthlyFMVOfSecAmt>0</AverageMonthlyFMVOfSecAmt>
+        <AverageMonthlyCashBalancesAmt>0</AverageMonthlyCashBalancesAmt>
+        <FMVAllOtherNoncharitableAstAmt>0</FMVAllOtherNoncharitableAstAmt>
+        <TotalFMVOfUnusedAssetsAmt>0</TotalFMVOfUnusedAssetsAmt>
+        <ReductionClaimedAmt>0</ReductionClaimedAmt>
+        <AdjustedTotalFMVOfUnusedAstAmt>0</AdjustedTotalFMVOfUnusedAstAmt>
+        <CashDeemedCharitableAmt>0</CashDeemedCharitableAmt>
+        <NetVlNoncharitableAssetsAmt>0</NetVlNoncharitableAssetsAmt>
+        <MinimumInvestmentReturnAmt>0</MinimumInvestmentReturnAmt>
+      </MinimumInvestmentReturnGrp>
+      <DistributableAmountGrp>
+        <TaxBasedOnInvestmentIncomeAmt>932</TaxBasedOnInvestmentIncomeAmt>
+        <TotalTaxAmt>932</TotalTaxAmt>
+        <DistributableBeforeAdjAmt>932</DistributableBeforeAdjAmt>
+        <DistributableBeforeDedAmt>932</DistributableBeforeDedAmt>
+        <DistributableAsAdjustedAmt>0</DistributableAsAdjustedAmt>
+      </DistributableAmountGrp>
+      <QualifyingDistriPartXIIGrp>
+        <ExpensesAndContributionsAmt>170847</ExpensesAndContributionsAmt>
+        <QualifyingDistributionsAmt>170847</QualifyingDistributionsAmt>
+        <AdjustedQualifyingDistriAmt>170847</AdjustedQualifyingDistriAmt>
+      </QualifyingDistriPartXIIGrp>
+      <UndistributedIncomeGrp>
+        <DistributableAsAdjustedAmt>0</DistributableAsAdjustedAmt>
+        <QualifyingDistributionsAmt>170847</QualifyingDistributionsAmt>
+        <TreatedAsDistriFromCorpusAmt>0</TreatedAsDistriFromCorpusAmt>
+        <RemainingDistriFromCorpusAmt>170847</RemainingDistriFromCorpusAmt>
+        <TotalCorpusAmt>170847</TotalCorpusAmt>
+        <UndistributedIncomeCYAmt>0</UndistributedIncomeCYAmt>
+        <ExcessDistriCyovToNextYrAmt>170847</ExcessDistriCyovToNextYrAmt>
+        <ExcessFromCurrentYearAmt>170847</ExcessFromCurrentYearAmt>
+      </UndistributedIncomeGrp>
+      <SupplementaryInformationGrp>
+        <OnlyContriToPreselectedInd>X</OnlyContriToPreselectedInd>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientPersonNm>Assistance League of Huntington Bea</RecipientPersonNm>
+          <RecipientUSAddress>
+            <AddressLine1Txt>8071 Slater Ave 145</AddressLine1Txt>
+            <CityNm>Huntington Beach</CityNm>
+            <StateAbbreviationCd>CA</StateAbbreviationCd>
+            <ZIPCd>92647</ZIPCd>
+          </RecipientUSAddress>
+          <GrantOrContributionPurposeTxt>General Charitable Purpose.</GrantOrContributionPurposeTxt>
+          <Amt>10000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientPersonNm>Chapman University</RecipientPersonNm>
+          <RecipientUSAddress>
+            <AddressLine1Txt>1 University Drive</AddressLine1Txt>
+            <CityNm>Orange</CityNm>
+            <StateAbbreviationCd>CA</StateAbbreviationCd>
+            <ZIPCd>92866</ZIPCd>
+          </RecipientUSAddress>
+          <GrantOrContributionPurposeTxt>For Education &amp; Scholarships.</GrantOrContributionPurposeTxt>
+          <Amt>160847</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <TotalGrantOrContriPdDurYrAmt>170847</TotalGrantOrContriPdDurYrAmt>
+      </SupplementaryInformationGrp>
+      <TrnsfrTransRlnNonchrtblEOGrp>
+        <TrnsfrOfCashToNonchrtblEOInd>false</TrnsfrOfCashToNonchrtblEOInd>
+        <TrnsfrOtherAssetNonchrtblEOInd>false</TrnsfrOtherAssetNonchrtblEOInd>
+        <SalesOrExchangesOfAssetsInd>false</SalesOrExchangesOfAssetsInd>
+        <PurchaseOfAssetsNonchrtblEOInd>false</PurchaseOfAssetsNonchrtblEOInd>
+        <RentalOfFacilitiesOthAssetsInd>false</RentalOfFacilitiesOthAssetsInd>
+        <ReimbursementArrangementsInd>false</ReimbursementArrangementsInd>
+        <LoansOrLoanGuaranteesInd>false</LoansOrLoanGuaranteesInd>
+        <PerformanceOfServicesEtcInd>false</PerformanceOfServicesEtcInd>
+        <SharingOfFacilitiesEtcInd>false</SharingOfFacilitiesEtcInd>
+        <RelationshipsNonchrtblEOInd>false</RelationshipsNonchrtblEOInd>
+      </TrnsfrTransRlnNonchrtblEOGrp>
+    </IRS990PF>
+    <InvestmentsCorpStockSchedule documentId="InvestmentsCorpStockSchedule" softwareId="18007218" softwareVersionNum="2018v3.1">
+      <InvestmentsCorporateStockGrp>
+        <StockNm>Sage Point Financial</StockNm>
+        <EOYBookValueAmt>2422581</EOYBookValueAmt>
+        <EOYFMVAmt>2422581</EOYFMVAmt>
+      </InvestmentsCorporateStockGrp>
+    </InvestmentsCorpStockSchedule>
+    <InvestmentsOtherSchedule2 documentId="InvestmentsOtherSchedule2" softwareId="18007218" softwareVersionNum="2018v3.1">
+      <InvestmentsOtherGrp>
+        <CategoryOrItemTxt>Carter Validus</CategoryOrItemTxt>
+        <ListedAtCostOrFMVCd>FMV</ListedAtCostOrFMVCd>
+        <BookValueAmt>92500</BookValueAmt>
+        <EOYFMVAmt>92500</EOYFMVAmt>
+      </InvestmentsOtherGrp>
+      <InvestmentsOtherGrp>
+        <CategoryOrItemTxt>TriLinc Global</CategoryOrItemTxt>
+        <ListedAtCostOrFMVCd>FMV</ListedAtCostOrFMVCd>
+        <BookValueAmt>58166</BookValueAmt>
+        <EOYFMVAmt>58166</EOYFMVAmt>
+      </InvestmentsOtherGrp>
+      <InvestmentsOtherGrp>
+        <CategoryOrItemTxt>Healthcare Trust, Inc</CategoryOrItemTxt>
+        <ListedAtCostOrFMVCd>FMV</ListedAtCostOrFMVCd>
+        <BookValueAmt>108000</BookValueAmt>
+        <EOYFMVAmt>108000</EOYFMVAmt>
+      </InvestmentsOtherGrp>
+      <InvestmentsOtherGrp>
+        <CategoryOrItemTxt>American Finance Trust Class A</CategoryOrItemTxt>
+        <ListedAtCostOrFMVCd>FMV</ListedAtCostOrFMVCd>
+        <BookValueAmt>33460</BookValueAmt>
+        <EOYFMVAmt>33460</EOYFMVAmt>
+      </InvestmentsOtherGrp>
+      <InvestmentsOtherGrp>
+        <CategoryOrItemTxt>American Finance Trust In B2</CategoryOrItemTxt>
+        <ListedAtCostOrFMVCd>FMV</ListedAtCostOrFMVCd>
+        <BookValueAmt>33469</BookValueAmt>
+        <EOYFMVAmt>33469</EOYFMVAmt>
+      </InvestmentsOtherGrp>
+    </InvestmentsOtherSchedule2>
+    <LegalFeesSchedule documentId="LegalFeesSchedule" softwareId="18007218" softwareVersionNum="2018v3.1">
+      <LegalFeesGrp>
+        <CategoryTxt>Legal &amp; Professional Fees</CategoryTxt>
+        <LegalFeesAmt>2205</LegalFeesAmt>
+        <NetInvestmentIncomeAmt>0</NetInvestmentIncomeAmt>
+        <AdjustedNetIncomeAmt>2205</AdjustedNetIncomeAmt>
+        <DisbursementsCharitablePrpsAmt>0</DisbursementsCharitablePrpsAmt>
+      </LegalFeesGrp>
+    </LegalFeesSchedule>
+    <OtherExpensesSchedule documentId="OtherExpensesSchedule" softwareId="18007218" softwareVersionNum="2018v3.1">
+      <OtherExpensesScheduleGrp>
+        <Desc>Attorney General Registration</Desc>
+        <RevenueAndExpensesPerBooksAmt>150</RevenueAndExpensesPerBooksAmt>
+        <AdjustedNetIncomeAmt>150</AdjustedNetIncomeAmt>
+      </OtherExpensesScheduleGrp>
+      <OtherExpensesScheduleGrp>
+        <Desc>Bank Fees</Desc>
+        <RevenueAndExpensesPerBooksAmt>18</RevenueAndExpensesPerBooksAmt>
+        <NetInvestmentIncomeAmt>18</NetInvestmentIncomeAmt>
+      </OtherExpensesScheduleGrp>
+      <OtherExpensesScheduleGrp>
+        <Desc>Postal Rental Box</Desc>
+        <RevenueAndExpensesPerBooksAmt>432</RevenueAndExpensesPerBooksAmt>
+        <AdjustedNetIncomeAmt>432</AdjustedNetIncomeAmt>
+      </OtherExpensesScheduleGrp>
+      <OtherExpensesScheduleGrp>
+        <Desc>Stipend</Desc>
+        <RevenueAndExpensesPerBooksAmt>340</RevenueAndExpensesPerBooksAmt>
+        <AdjustedNetIncomeAmt>340</AdjustedNetIncomeAmt>
+      </OtherExpensesScheduleGrp>
+      <OtherExpensesScheduleGrp>
+        <Desc>Supplies</Desc>
+        <RevenueAndExpensesPerBooksAmt>71</RevenueAndExpensesPerBooksAmt>
+        <AdjustedNetIncomeAmt>71</AdjustedNetIncomeAmt>
+      </OtherExpensesScheduleGrp>
+    </OtherExpensesSchedule>
+    <OtherProfessionalFeesSchedule documentId="OtherProfessionalFeesSchedule" softwareId="18007218" softwareVersionNum="2018v3.1">
+      <OtherProfessionalFeesDetail>
+        <CategoryTxt>Advisory Fees</CategoryTxt>
+        <Amt>34965</Amt>
+        <NetInvestmentIncomeAmt>34965</NetInvestmentIncomeAmt>
+        <AdjustedNetIncomeAmt>0</AdjustedNetIncomeAmt>
+        <DisbursementsCharitablePrpsAmt>0</DisbursementsCharitablePrpsAmt>
+      </OtherProfessionalFeesDetail>
+    </OtherProfessionalFeesSchedule>
+  </ReturnData>
+</Return>

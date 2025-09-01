@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" returnVersion="2022v5.0" xsi:schemaLocation="http://www.irs.gov/efile">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2024-05-15T15:16:07-07:00</ReturnTs>
+    <TaxPeriodEndDt>2023-06-30</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmEIN>941678995</PreparerFirmEIN>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>Clark &amp; Nelson</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>521 Market Street</AddressLine1Txt>
+        <CityNm>Colusa</CityNm>
+        <StateAbbreviationCd>CA</StateAbbreviationCd>
+        <ZIPCd>95932</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990EZ</ReturnTypeCd>
+    <TaxPeriodBeginDt>2022-07-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>680005486</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>COLUSA REDHAWKS ATHLETIC FOUNDATION</BusinessNameLine1Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>COLU</BusinessNameControlTxt>
+      <PhoneNum>5307135304</PhoneNum>
+      <USAddress>
+        <AddressLine1Txt>PO BOX 1027</AddressLine1Txt>
+        <CityNm>COLUSA</CityNm>
+        <StateAbbreviationCd>CA</StateAbbreviationCd>
+        <ZIPCd>95932</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>LEEANN PRICE</PersonNm>
+      <PersonTitleTxt>Treasurer</PersonTitleTxt>
+      <SignatureDt>2024-05-15</SignatureDt>
+      <DiscussWithPaidPreparerInd>true</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <SigningOfficerGrp>
+      <PersonFullName>
+        <PersonFirstNm>LEEANN</PersonFirstNm>
+        <PersonLastNm>PRICE</PersonLastNm>
+      </PersonFullName>
+      <SSN>999009999</SSN>
+    </SigningOfficerGrp>
+    <IRSResponsiblePrtyInfoCurrInd>true</IRSResponsiblePrtyInfoCurrInd>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>DAVID R NELSON</PreparerPersonNm>
+      <PTIN>P01397473</PTIN>
+      <PhoneNum>5304585157</PhoneNum>
+      <SelfEmployedInd>X</SelfEmployedInd>
+    </PreparerPersonGrp>
+    <AdditionalFilerInformation>
+      <TrustedCustomerGrp>
+        <TrustedCustomerCd>2</TrustedCustomerCd>
+        <AuthenticationAssuranceLevelCd>AAL1</AuthenticationAssuranceLevelCd>
+        <IdentityAssuranceLevelCd>IAL1</IdentityAssuranceLevelCd>
+        <FederatedAssuranceLevelCd>FAL1</FederatedAssuranceLevelCd>
+      </TrustedCustomerGrp>
+    </AdditionalFilerInformation>
+    <TaxYr>2022</TaxYr>
+    <BuildTS>2023-04-26 12:10:37Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="3">
+    <IRS990EZ documentId="IRS990EZ" referenceDocumentId="IRS990ScheduleO TransfersPersonalBenefitsContr" softwareId="22015553" softwareVersionNum="2022v5.0">
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <ScheduleBNotRequiredInd>X</ScheduleBNotRequiredInd>
+      <WebsiteAddressTxt>N/A</WebsiteAddressTxt>
+      <Organization4947a1NotPFInd referenceDocumentId="IRS990ScheduleA">X</Organization4947a1NotPFInd>
+      <TypeOfOrganizationTrustInd>X</TypeOfOrganizationTrustInd>
+      <GrossReceiptsAmt>92363</GrossReceiptsAmt>
+      <InfoInScheduleOPartIInd>X</InfoInScheduleOPartIInd>
+      <CostOrOtherBasisExpenseSaleAmt>0</CostOrOtherBasisExpenseSaleAmt>
+      <FundraisingGrossIncomeAmt>0</FundraisingGrossIncomeAmt>
+      <SpecialEventsDirectExpensesAmt>0</SpecialEventsDirectExpensesAmt>
+      <CostOfGoodsSoldAmt>0</CostOfGoodsSoldAmt>
+      <OtherRevenueTotalAmt>92363</OtherRevenueTotalAmt>
+      <TotalRevenueAmt>92363</TotalRevenueAmt>
+      <FeesAndOtherPymtToIndCntrctAmt>50</FeesAndOtherPymtToIndCntrctAmt>
+      <PrintingPublicationsPostageAmt>181</PrintingPublicationsPostageAmt>
+      <OtherExpensesTotalAmt>93749</OtherExpensesTotalAmt>
+      <TotalExpensesAmt>93980</TotalExpensesAmt>
+      <ExcessOrDeficitForYearAmt>-1617</ExcessOrDeficitForYearAmt>
+      <NetAssetsOrFundBalancesBOYAmt>26432</NetAssetsOrFundBalancesBOYAmt>
+      <NetAssetsOrFundBalancesEOYAmt>24815</NetAssetsOrFundBalancesEOYAmt>
+      <CashSavingsAndInvestmentsGrp>
+        <BOYAmt>26432</BOYAmt>
+        <EOYAmt>24815</EOYAmt>
+      </CashSavingsAndInvestmentsGrp>
+      <Form990TotalAssetsGrp>
+        <BOYAmt>26432</BOYAmt>
+        <EOYAmt>24815</EOYAmt>
+      </Form990TotalAssetsGrp>
+      <NetAssetsOrFundBalancesGrp>
+        <BOYAmt>26432</BOYAmt>
+        <EOYAmt>24815</EOYAmt>
+      </NetAssetsOrFundBalancesGrp>
+      <PrimaryExemptPurposeTxt>ENCOURAGE COMMUNITY SUPPORT IN FINANCING ATHLETIC PROGRAMS IN THE COLUSA UNIFIED SCHOOL DISTRICT AND TO STIMULATE A SPIRIT WITHIN THE COMMUNITY TO RALLY IN SUPPORT OF THE SCHOOL'S ATHLETICS FOR THE BENEFIT OF ITS STUDENTS.</PrimaryExemptPurposeTxt>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>TOURNAMENTS, EVENTS, ENTRY FEES, ETC</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>10296</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>SIGNAGE, SCORE BOARDS, SCORING BOOTHS, ETC</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>1025</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>TRAINING, SUPPLIES, DUES, SECURITY</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>8700</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>UNIFORMS, EQUIPMENT, ETC.</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>35372</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>ALUMNI DONATIONS DISTRIBUTED TO COLUSA UNIFIED SCHOOL DISTRICT</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>17133</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>DISTRIBUTION TO SCHOOL</DescriptionProgramSrvcAccomTxt>
+      </ProgramSrvcAccomplishmentGrp>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>FUNDRAISING EXPENSES</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>18004</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <TotalProgramServiceExpensesAmt>90530</TotalProgramServiceExpensesAmt>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>LEEANN PRICE</PersonNm>
+        <TitleTxt>Treasurer</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>0</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>KIM NALL</PersonNm>
+        <TitleTxt>Secretary</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>0</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>LESLIE PINGREY</PersonNm>
+        <TitleTxt>President</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>0</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+      <ChgMadeToOrgnzngDocNotRptInd>false</ChgMadeToOrgnzngDocNotRptInd>
+      <OrganizationHadUBIInd>false</OrganizationHadUBIInd>
+      <SubjectToProxyTaxInd>false</SubjectToProxyTaxInd>
+      <OrganizationDissolvedEtcInd>false</OrganizationDissolvedEtcInd>
+      <Form1120PolFiledInd>false</Form1120PolFiledInd>
+      <MadeLoansToFromOfficersInd>false</MadeLoansToFromOfficersInd>
+      <TaxImposedUnderIRC4911Amt>0</TaxImposedUnderIRC4911Amt>
+      <TaxImposedUnderIRC4912Amt>0</TaxImposedUnderIRC4912Amt>
+      <TaxImposedUnderIRC4955Amt>0</TaxImposedUnderIRC4955Amt>
+      <TaxImposedOnOrganizationMgrAmt>0</TaxImposedOnOrganizationMgrAmt>
+      <TaxReimbursedByOrganizationAmt>0</TaxReimbursedByOrganizationAmt>
+      <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+      <BooksInCareOfDetail>
+        <PersonNm>LEEANN PRICE</PersonNm>
+        <USAddress>
+          <AddressLine1Txt>513 FLORIMOND DRIVE</AddressLine1Txt>
+          <CityNm>COLUSA</CityNm>
+          <StateAbbreviationCd>CA</StateAbbreviationCd>
+          <ZIPCd>95932</ZIPCd>
+        </USAddress>
+        <PhoneNum>5307017789</PhoneNum>
+      </BooksInCareOfDetail>
+      <ForeignFinancialAccountInd>false</ForeignFinancialAccountInd>
+      <ForeignOfficeInd>false</ForeignOfficeInd>
+      <NECTFilingForm990Ind interestAmt="0">X</NECTFilingForm990Ind>
+      <DonorAdvisedFndsInd>false</DonorAdvisedFndsInd>
+      <OperateHospitalInd>false</OperateHospitalInd>
+      <TanningServicesProvidedInd>false</TanningServicesProvidedInd>
+      <RelatedOrganizationCtrlEntInd>false</RelatedOrganizationCtrlEntInd>
+      <TransactionWithControlEntInd>false</TransactionWithControlEntInd>
+      <PoliticalCampaignActyInd>false</PoliticalCampaignActyInd>
+      <LobbyingActivitiesInd>false</LobbyingActivitiesInd>
+      <SchoolOperatingInd>false</SchoolOperatingInd>
+      <TrnsfrExmptNonChrtblRltdOrgInd>false</TrnsfrExmptNonChrtblRltdOrgInd>
+      <PartVIOfCompOfHghstPdEmplTxt>NONE</PartVIOfCompOfHghstPdEmplTxt>
+      <PartVIHghstPdCntrctProfSrvcTxt>NONE</PartVIHghstPdCntrctProfSrvcTxt>
+      <FiledScheduleAInd>true</FiledScheduleAInd>
+    </IRS990EZ>
+    <IRS990ScheduleA documentId="IRS990ScheduleA" softwareId="22015553" softwareVersionNum="2022v5.0">
+      <CommunityTrustInd>X</CommunityTrustInd>
+      <GiftsGrantsContriRcvd170Grp>
+        <TotalAmt>0</TotalAmt>
+      </GiftsGrantsContriRcvd170Grp>
+      <TaxRevLeviedOrgnztnlBnft170Grp>
+        <TotalAmt>0</TotalAmt>
+      </TaxRevLeviedOrgnztnlBnft170Grp>
+      <GovtFurnSrvcFcltsVl170Grp>
+        <TotalAmt>0</TotalAmt>
+      </GovtFurnSrvcFcltsVl170Grp>
+      <SubstantialContributorsTotAmt>0</SubstantialContributorsTotAmt>
+      <PublicSupportTotal170Amt>0</PublicSupportTotal170Amt>
+      <GrossInvestmentIncome170Grp>
+        <TotalAmt>0</TotalAmt>
+      </GrossInvestmentIncome170Grp>
+      <UnrelatedBusinessNetIncm170Grp>
+        <TotalAmt>0</TotalAmt>
+      </UnrelatedBusinessNetIncm170Grp>
+      <OtherIncome170Grp>
+        <TotalAmt>0</TotalAmt>
+      </OtherIncome170Grp>
+      <TotalSupportAmt>0</TotalSupportAmt>
+      <First5Years170Ind>X</First5Years170Ind>
+      <PublicSupportCY170Pct>0.00000</PublicSupportCY170Pct>
+    </IRS990ScheduleA>
+    <IRS990ScheduleO documentId="IRS990ScheduleO" softwareId="22015553" softwareVersionNum="2022v5.0">
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Revenue.1</FormAndLineReferenceDesc>
+        <ExplanationTxt>CONCESSIONS, STORE, TOURN $32890</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Revenue.2</FormAndLineReferenceDesc>
+        <ExplanationTxt>ALUMNI DONATION INCOME $23188</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Revenue.3</FormAndLineReferenceDesc>
+        <ExplanationTxt>CORPORATE SPONSORS $22000</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Revenue.4</FormAndLineReferenceDesc>
+        <ExplanationTxt>SPONSOR INCOME $10440</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Revenue.5</FormAndLineReferenceDesc>
+        <ExplanationTxt>FUNDRAISING/RAFFLES $2100</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Revenue.6</FormAndLineReferenceDesc>
+        <ExplanationTxt>MEMORIALS, DONATIONS, GATE $1745</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.1</FormAndLineReferenceDesc>
+        <ExplanationTxt>UNIFORMS $35372</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.2</FormAndLineReferenceDesc>
+        <ExplanationTxt>FUNDRAISING EXPENSES $18004</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.3</FormAndLineReferenceDesc>
+        <ExplanationTxt>ALUMNI DISBURSEMENT TO SCHOOL $17133</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.4</FormAndLineReferenceDesc>
+        <ExplanationTxt>TOURNAMENT EXPENSES $10296</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.5</FormAndLineReferenceDesc>
+        <ExplanationTxt>TRAINING SUPPLIES,DUES,SECURIT $8700</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.6</FormAndLineReferenceDesc>
+        <ExplanationTxt>ALUMNI EXPENSES $3219</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Other Expenses.7</FormAndLineReferenceDesc>
+        <ExplanationTxt>SIGNAGE, SCORE BOARDS, SCORING $1025</ExplanationTxt>
+      </SupplementalInformationDetail>
+    </IRS990ScheduleO>
+  </ReturnData>
+</Return>

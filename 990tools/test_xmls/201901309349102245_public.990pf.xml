@@ -1,0 +1,586 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" returnVersion="2018v3.1">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2019-05-10T13:49:07-05:00</ReturnTs>
+    <TaxPeriodEndDt>2018-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmEIN>043602740</PreparerFirmEIN>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>BERKMANJORGENSENMASTERS &amp; STAFMAN LLC</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>1620 NILES CORTLAND RD NE STE B</AddressLine1Txt>
+        <CityNm>WARREN</CityNm>
+        <StateAbbreviationCd>OH</StateAbbreviationCd>
+        <ZIPCd>444841017</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990PF</ReturnTypeCd>
+    <TaxPeriodBeginDt>2018-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>346557110</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>WILLIAM J BRUDER TRUST</BusinessNameLine1Txt>
+        <BusinessNameLine2Txt>HUNTINGTON NATIONAL BANK</BusinessNameLine2Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>WILL</BusinessNameControlTxt>
+      <PhoneNum>3308410968</PhoneNum>
+      <USAddress>
+        <AddressLine1Txt>PO BOX 1558-EA5W86</AddressLine1Txt>
+        <CityNm>COLUMBUS</CityNm>
+        <StateAbbreviationCd>OH</StateAbbreviationCd>
+        <ZIPCd>432191558</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>HUNTINGTON NATIONAL BANK</PersonNm>
+      <PersonTitleTxt>TRUSTEE</PersonTitleTxt>
+      <SignatureDt>2019-05-01</SignatureDt>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>MICHAEL A JORGENSEN</PreparerPersonNm>
+      <PTIN>P00188771</PTIN>
+      <PhoneNum>3303992727</PhoneNum>
+      <PreparationDt>2019-05-01</PreparationDt>
+    </PreparerPersonGrp>
+    <TaxYr>2018</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="7">
+    <IRS990PF documentId="RetDoc7">
+      <Organization4947a1TrtdPFInd>X</Organization4947a1TrtdPFInd>
+      <FMVAssetsEOYAmt>984833</FMVAssetsEOYAmt>
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <AnalysisOfRevenueAndExpenses>
+        <ScheduleBNotRequiredInd>X</ScheduleBNotRequiredInd>
+        <DividendsRevAndExpnssAmt>21405</DividendsRevAndExpnssAmt>
+        <DividendsNetInvstIncmAmt>21405</DividendsNetInvstIncmAmt>
+        <NetGainSaleAstRevAndExpnssAmt>47338</NetGainSaleAstRevAndExpnssAmt>
+        <GrossSalesPriceAmt>331603</GrossSalesPriceAmt>
+        <CapGainNetIncmNetInvstIncmAmt>47338</CapGainNetIncmNetInvstIncmAmt>
+        <TotalRevAndExpnssAmt>68743</TotalRevAndExpnssAmt>
+        <TotalNetInvstIncmAmt>68743</TotalNetInvstIncmAmt>
+        <CompOfcrDirTrstRevAndExpnssAmt>17264</CompOfcrDirTrstRevAndExpnssAmt>
+        <CompOfcrDirTrstNetInvstIncmAmt>15776</CompOfcrDirTrstNetInvstIncmAmt>
+        <CompOfcrDirTrstDsbrsChrtblAmt>1488</CompOfcrDirTrstDsbrsChrtblAmt>
+        <LegalFeesRevAndExpnssAmt referenceDocumentId="RetDoc3">2000</LegalFeesRevAndExpnssAmt>
+        <LegalFeesDsbrsChrtblAmt>2000</LegalFeesDsbrsChrtblAmt>
+        <AccountingFeesRevAndExpnssAmt referenceDocumentId="RetDoc1">975</AccountingFeesRevAndExpnssAmt>
+        <AccountingFeesNetInvstIncmAmt>975</AccountingFeesNetInvstIncmAmt>
+        <OtherProfFeesRevAndExpnssAmt referenceDocumentId="RetDoc5">86</OtherProfFeesRevAndExpnssAmt>
+        <OtherProfFeesDsbrsChrtblAmt>86</OtherProfFeesDsbrsChrtblAmt>
+        <TaxesRevAndExpnssAmt referenceDocumentId="RetDoc6">433</TaxesRevAndExpnssAmt>
+        <TaxesNetInvstIncmAmt>32</TaxesNetInvstIncmAmt>
+        <OtherExpensesRevAndExpnssAmt referenceDocumentId="RetDoc4">230</OtherExpensesRevAndExpnssAmt>
+        <OtherExpensesNetInvstIncmAmt>30</OtherExpensesNetInvstIncmAmt>
+        <OtherExpensesDsbrsChrtblAmt>200</OtherExpensesDsbrsChrtblAmt>
+        <TotOprExpensesRevAndExpnssAmt>20988</TotOprExpensesRevAndExpnssAmt>
+        <TotOprExpensesNetInvstIncmAmt>16813</TotOprExpensesNetInvstIncmAmt>
+        <TotOprExpensesDsbrsChrtblAmt>3774</TotOprExpensesDsbrsChrtblAmt>
+        <ContriPaidRevAndExpnssAmt>58000</ContriPaidRevAndExpnssAmt>
+        <ContriPaidDsbrsChrtblAmt>58000</ContriPaidDsbrsChrtblAmt>
+        <TotalExpensesRevAndExpnssAmt>78988</TotalExpensesRevAndExpnssAmt>
+        <TotalExpensesNetInvstIncmAmt>16813</TotalExpensesNetInvstIncmAmt>
+        <TotalExpensesDsbrsChrtblAmt>61774</TotalExpensesDsbrsChrtblAmt>
+        <ExcessRevenueOverExpensesAmt>-10245</ExcessRevenueOverExpensesAmt>
+        <NetInvestmentIncomeAmt>51930</NetInvestmentIncomeAmt>
+      </AnalysisOfRevenueAndExpenses>
+      <Form990PFBalanceSheetsGrp>
+        <CashBOYAmt>26614</CashBOYAmt>
+        <CashEOYAmt>409</CashEOYAmt>
+        <CashEOYFMVAmt>409</CashEOYFMVAmt>
+        <SavAndTempCashInvstBOYAmt>25080</SavAndTempCashInvstBOYAmt>
+        <SavAndTempCashInvstEOYAmt>13197</SavAndTempCashInvstEOYAmt>
+        <SavAndTempCashInvstEOYFMVAmt>13197</SavAndTempCashInvstEOYFMVAmt>
+        <CorporateStockBOYAmt>727138</CorporateStockBOYAmt>
+        <CorporateStockEOYAmt referenceDocumentId="RetDoc2">754981</CorporateStockEOYAmt>
+        <CorporateStockEOYFMVAmt>971227</CorporateStockEOYFMVAmt>
+        <TotalAssetsBOYAmt>778832</TotalAssetsBOYAmt>
+        <TotalAssetsEOYAmt>768587</TotalAssetsEOYAmt>
+        <TotalAssetsEOYFMVAmt>984833</TotalAssetsEOYFMVAmt>
+        <TotalLiabilitiesEOYAmt>0</TotalLiabilitiesEOYAmt>
+        <OrgDoesNotFollowSFAS117Ind>X</OrgDoesNotFollowSFAS117Ind>
+        <CapitalStockBOYAmt>778832</CapitalStockBOYAmt>
+        <CapitalStockEOYAmt>768587</CapitalStockEOYAmt>
+        <TotNetAstOrFundBalancesBOYAmt>778832</TotNetAstOrFundBalancesBOYAmt>
+        <TotNetAstOrFundBalancesEOYAmt>768587</TotNetAstOrFundBalancesEOYAmt>
+        <TotalLiabilitiesNetAstBOYAmt>778832</TotalLiabilitiesNetAstBOYAmt>
+        <TotalLiabilitiesNetAstEOYAmt>768587</TotalLiabilitiesNetAstEOYAmt>
+      </Form990PFBalanceSheetsGrp>
+      <ChgInNetAssetsFundBalancesGrp>
+        <TotNetAstOrFundBalancesBOYAmt>778832</TotNetAstOrFundBalancesBOYAmt>
+        <ExcessRevenueOverExpensesAmt>-10245</ExcessRevenueOverExpensesAmt>
+        <SubtotalAmt>768587</SubtotalAmt>
+        <TotNetAstOrFundBalancesEOYAmt>768587</TotNetAstOrFundBalancesEOYAmt>
+      </ChgInNetAssetsFundBalancesGrp>
+      <CapGainsLossTxInvstIncmDetail>
+        <CapGainsLossTxInvstIncmGrp>
+          <PropertyDesc>PUBLICLY TRADED SECURITIES</PropertyDesc>
+          <HowAcquiredCd>P</HowAcquiredCd>
+          <GrossSalesPriceAmt>330711</GrossSalesPriceAmt>
+          <CostOrOtherBasisAmt>284265</CostOrOtherBasisAmt>
+          <GainOrLossAmt>46446</GainOrLossAmt>
+          <GainsMinusExcessOrLossesAmt>46446</GainsMinusExcessOrLossesAmt>
+        </CapGainsLossTxInvstIncmGrp>
+        <CapitalGainNetIncomeAmt>47338</CapitalGainNetIncomeAmt>
+      </CapGainsLossTxInvstIncmDetail>
+      <QlfyUndSect4940eReducedTaxGrp>
+        <LiableSection4942TaxInd>false</LiableSection4942TaxInd>
+        <AdjustedQlfyDistriYr1Amt>68261</AdjustedQlfyDistriYr1Amt>
+        <NetVlNoncharitableAssetsYr1Amt>1064772</NetVlNoncharitableAssetsYr1Amt>
+        <DistributionYr1Rt>0.064109</DistributionYr1Rt>
+        <AdjustedQlfyDistriYr2Amt>64365</AdjustedQlfyDistriYr2Amt>
+        <NetVlNoncharitableAssetsYr2Amt>1000911</NetVlNoncharitableAssetsYr2Amt>
+        <DistributionYr2Rt>0.064306</DistributionYr2Rt>
+        <AdjustedQlfyDistriYr3Amt>63028</AdjustedQlfyDistriYr3Amt>
+        <NetVlNoncharitableAssetsYr3Amt>1053691</NetVlNoncharitableAssetsYr3Amt>
+        <DistributionYr3Rt>0.059816</DistributionYr3Rt>
+        <AdjustedQlfyDistriYr4Amt>65497</AdjustedQlfyDistriYr4Amt>
+        <NetVlNoncharitableAssetsYr4Amt>1063163</NetVlNoncharitableAssetsYr4Amt>
+        <DistributionYr4Rt>0.061606</DistributionYr4Rt>
+        <AdjustedQlfyDistriYr5Amt>66244</AdjustedQlfyDistriYr5Amt>
+        <NetVlNoncharitableAssetsYr5Amt>1012765</NetVlNoncharitableAssetsYr5Amt>
+        <DistributionYr5Rt>0.065409</DistributionYr5Rt>
+        <TotalDistributionRt>0.315246</TotalDistributionRt>
+        <AverageDistributionRt>0.063049</AverageDistributionRt>
+        <NetVlNoncharitableAssetsAmt>1108380</NetVlNoncharitableAssetsAmt>
+        <AdjNetVlNoncharitableAssetsAmt>69882</AdjNetVlNoncharitableAssetsAmt>
+        <NetInvestmentIncomePctAmt>519</NetInvestmentIncomePctAmt>
+        <AdjNonchrtblNetInvstIncmPctAmt>70401</AdjNonchrtblNetInvstIncmPctAmt>
+        <QualifyingDistributionsAmt>61774</QualifyingDistributionsAmt>
+      </QlfyUndSect4940eReducedTaxGrp>
+      <ExciseTaxBasedOnInvstIncmGrp>
+        <InvestmentIncomeExciseTaxAmt>1039</InvestmentIncomeExciseTaxAmt>
+        <SubtotalAmt>1039</SubtotalAmt>
+        <TaxBasedOnInvestmentIncomeAmt>1039</TaxBasedOnInvestmentIncomeAmt>
+        <EstimatedPlusOvpmtIncmTxAmt>880</EstimatedPlusOvpmtIncmTxAmt>
+        <TotalPaymentsAndCreditsAmt>880</TotalPaymentsAndCreditsAmt>
+        <TaxDueAmt>159</TaxDueAmt>
+      </ExciseTaxBasedOnInvstIncmGrp>
+      <StatementsRegardingActyGrp>
+        <LegislativePoliticalActyInd>false</LegislativePoliticalActyInd>
+        <MoreThan100SpentInd>false</MoreThan100SpentInd>
+        <Form1120POLFiledInd>false</Form1120POLFiledInd>
+        <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+        <ChangesToArticlesOrBylawsInd>false</ChangesToArticlesOrBylawsInd>
+        <UnrelatedBusIncmOverLimitInd>false</UnrelatedBusIncmOverLimitInd>
+        <OrganizationDissolvedEtcInd>false</OrganizationDissolvedEtcInd>
+        <Section508eRqrSatisfiedInd>true</Section508eRqrSatisfiedInd>
+        <AtLeast5000InAssetsInd>true</AtLeast5000InAssetsInd>
+        <OrgReportOrRegisterStateCd>OH</OrgReportOrRegisterStateCd>
+        <Form990PFFiledWithAttyGenInd>true</Form990PFFiledWithAttyGenInd>
+        <PrivateOperatingFoundationInd>false</PrivateOperatingFoundationInd>
+        <NewSubstantialContributorsInd>false</NewSubstantialContributorsInd>
+        <OwnControlledEntityInd>false</OwnControlledEntityInd>
+        <DonorAdvisedFundInd>false</DonorAdvisedFundInd>
+        <ComplyWithPublicInspRqrInd>true</ComplyWithPublicInspRqrInd>
+        <WebsiteAddressTxt>N/A</WebsiteAddressTxt>
+        <IndividualWithBooksNm>HUNTINGTON NATIONAL BANK</IndividualWithBooksNm>
+        <PhoneNum>3308410968</PhoneNum>
+        <LocationOfBooksUSAddress>
+          <AddressLine1Txt>108 MAIN AVENUE SW</AddressLine1Txt>
+          <AddressLine2Txt>C/O DAVID KONIK</AddressLine2Txt>
+          <CityNm>WARREN</CityNm>
+          <StateAbbreviationCd>OH</StateAbbreviationCd>
+          <ZIPCd>44482</ZIPCd>
+        </LocationOfBooksUSAddress>
+        <ForeignAccountsQuestionInd>false</ForeignAccountsQuestionInd>
+      </StatementsRegardingActyGrp>
+      <StatementsRegardingActy4720Grp>
+        <SaleOrExchDisqualifiedPrsnInd>false</SaleOrExchDisqualifiedPrsnInd>
+        <BrrwOrLendDisqualifiedPrsnInd>false</BrrwOrLendDisqualifiedPrsnInd>
+        <FurnGoodsDisqualifiedPrsnInd>false</FurnGoodsDisqualifiedPrsnInd>
+        <PayCompDisqualifiedPrsnInd>false</PayCompDisqualifiedPrsnInd>
+        <TransferAstDisqualifiedPrsnInd>false</TransferAstDisqualifiedPrsnInd>
+        <PaymentToGovernmentOfficialInd>false</PaymentToGovernmentOfficialInd>
+        <UndistributedIncomePYInd>false</UndistributedIncomePYInd>
+        <BusinessHoldingsInd>false</BusinessHoldingsInd>
+        <JeopardyInvestmentsInd>false</JeopardyInvestmentsInd>
+        <UncorrectedPYJeopardyInvstInd>false</UncorrectedPYJeopardyInvstInd>
+        <InfluenceLegislationInd>false</InfluenceLegislationInd>
+        <InfluenceElectionInd>false</InfluenceElectionInd>
+        <GrantsToIndividualsInd>false</GrantsToIndividualsInd>
+        <GrantsToOrganizationsInd>false</GrantsToOrganizationsInd>
+        <NoncharitablePurposeInd>false</NoncharitablePurposeInd>
+        <RcvFndsToPayPrsnlBnftCntrctInd>false</RcvFndsToPayPrsnlBnftCntrctInd>
+        <PayPremiumsPrsnlBnftCntrctInd>false</PayPremiumsPrsnlBnftCntrctInd>
+        <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+        <SubjToTaxRmnrtnExPrchtPymtInd>false</SubjToTaxRmnrtnExPrchtPymtInd>
+      </StatementsRegardingActy4720Grp>
+      <OfficerDirTrstKeyEmplInfoGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>THOMAS H HALL CO WACHOVIA SECURITES</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>265 W MAIN ST SUITE 201</AddressLine1Txt>
+            <CityNm>KENT</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44240</ZIPCd>
+          </USAddress>
+          <TitleTxt>TRUSTEE</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>1.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>2250</CompensationAmt>
+          <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+          <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>ANTHONY G ROSSI</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>2500 HIDDEN LAKES NE</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44484</ZIPCd>
+          </USAddress>
+          <TitleTxt>TRUSTEE</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>1.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>2000</CompensationAmt>
+          <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+          <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>HUNTINGTON NATIONAL BANK</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>108 MAIN AVENUE SW</AddressLine1Txt>
+            <AddressLine2Txt>C/O DAVID KONIK</AddressLine2Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44482</ZIPCd>
+          </USAddress>
+          <TitleTxt>TRUSTEE</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>5.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>13014</CompensationAmt>
+          <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+          <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <CompOfHghstPdEmplOrNONETxt>NONE</CompOfHghstPdEmplOrNONETxt>
+        <CompOfHghstPdCntrctOrNONETxt>NONE</CompOfHghstPdCntrctOrNONETxt>
+      </OfficerDirTrstKeyEmplInfoGrp>
+      <SumOfProgramRelatedInvstGrp>
+        <Description1Txt>N/A</Description1Txt>
+      </SumOfProgramRelatedInvstGrp>
+      <MinimumInvestmentReturnGrp>
+        <AverageMonthlyFMVOfSecAmt>1075880</AverageMonthlyFMVOfSecAmt>
+        <AverageMonthlyCashBalancesAmt>49379</AverageMonthlyCashBalancesAmt>
+        <FMVAllOtherNoncharitableAstAmt>0</FMVAllOtherNoncharitableAstAmt>
+        <TotalFMVOfUnusedAssetsAmt>1125259</TotalFMVOfUnusedAssetsAmt>
+        <AdjustedTotalFMVOfUnusedAstAmt>1125259</AdjustedTotalFMVOfUnusedAstAmt>
+        <CashDeemedCharitableAmt>16879</CashDeemedCharitableAmt>
+        <NetVlNoncharitableAssetsAmt>1108380</NetVlNoncharitableAssetsAmt>
+        <MinimumInvestmentReturnAmt>55419</MinimumInvestmentReturnAmt>
+      </MinimumInvestmentReturnGrp>
+      <DistributableAmountGrp>
+        <MinimumInvestmentReturnAmt>55419</MinimumInvestmentReturnAmt>
+        <TaxBasedOnInvestmentIncomeAmt>1039</TaxBasedOnInvestmentIncomeAmt>
+        <TotalTaxAmt>1039</TotalTaxAmt>
+        <DistributableBeforeAdjAmt>54380</DistributableBeforeAdjAmt>
+        <DistributableBeforeDedAmt>54380</DistributableBeforeDedAmt>
+        <DistributableAsAdjustedAmt>54380</DistributableAsAdjustedAmt>
+      </DistributableAmountGrp>
+      <QualifyingDistriPartXIIGrp>
+        <ExpensesAndContributionsAmt>61774</ExpensesAndContributionsAmt>
+        <QualifyingDistributionsAmt>61774</QualifyingDistributionsAmt>
+        <AdjustedQualifyingDistriAmt>61774</AdjustedQualifyingDistriAmt>
+      </QualifyingDistriPartXIIGrp>
+      <UndistributedIncomeGrp>
+        <DistributableAsAdjustedAmt>54380</DistributableAsAdjustedAmt>
+        <ExcessDistributionCyovYr5Amt>16104</ExcessDistributionCyovYr5Amt>
+        <ExcessDistributionCyovYr4Amt>14345</ExcessDistributionCyovYr4Amt>
+        <ExcessDistributionCyovYr3Amt>13997</ExcessDistributionCyovYr3Amt>
+        <ExcessDistributionCyovYr2Amt>15299</ExcessDistributionCyovYr2Amt>
+        <ExcessDistributionCyovYr1Amt>16764</ExcessDistributionCyovYr1Amt>
+        <TotalExcessDistributionCyovAmt>76509</TotalExcessDistributionCyovAmt>
+        <QualifyingDistributionsAmt>61774</QualifyingDistributionsAmt>
+        <AppliedToCurrentYearAmt>54380</AppliedToCurrentYearAmt>
+        <RemainingDistriFromCorpusAmt>7394</RemainingDistriFromCorpusAmt>
+        <TotalCorpusAmt>83903</TotalCorpusAmt>
+        <UndistributedIncomeCYAmt>0</UndistributedIncomeCYAmt>
+        <ExcessDistriCyovFromYr5Amt>16104</ExcessDistriCyovFromYr5Amt>
+        <ExcessDistriCyovToNextYrAmt>67799</ExcessDistriCyovToNextYrAmt>
+        <ExcessFromYear4Amt>14345</ExcessFromYear4Amt>
+        <ExcessFromYear3Amt>13997</ExcessFromYear3Amt>
+        <ExcessFromYear2Amt>15299</ExcessFromYear2Amt>
+        <ExcessFromYear1Amt>16764</ExcessFromYear1Amt>
+        <ExcessFromCurrentYearAmt>7394</ExcessFromCurrentYearAmt>
+      </UndistributedIncomeGrp>
+      <SupplementaryInformationGrp>
+        <OnlyContriToPreselectedInd>X</OnlyContriToPreselectedInd>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>BELLA WOMEN'S CENTER</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>1192 NORTH ROAD NORTHEAST</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44483</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>4000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>CHILDRENS REHAB CENTER</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>885 HOWLAND WILSON RD NE</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44484</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>3000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>LIONS CLUB SIGHT SAVINGS PROGRAM</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>PO BOX 251</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44482</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>4000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>GREATER WARREN RESERVE COUNCIL</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>4930 ENTERPRISE BLVD NW</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44481</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIE</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>1000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>WARREN FAMILY MISSION</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>361 ELM RD NE</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44483</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>12000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>THE SALVATION ARMY</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>PO BOX 49</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44482</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>5000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>YWCA OF WARREN</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>375 NORTH PARK AVENUE</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44481</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>5000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>SAVE OUR SUMMER</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>2285 BRITTANY OAKS TRAIL</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44484</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>4000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>TRUMBULL FAMILY FITNESS</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>210 HIGH ST NW</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44481</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>7500</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>YOUNGSTOWN HEARING AND SPEECH CTR</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>6614 SOUTHERN BLVD</AddressLine1Txt>
+            <CityNm>YOUNGSTOWN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44512</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>3000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>JUNIOR ACHIEVEMENT OF MAHONING COUN</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>1601 MOTOR INN DR</AddressLine1Txt>
+            <AddressLine2Txt>STE 305</AddressLine2Txt>
+            <CityNm>GIRARD</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44420</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>2500</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>UNITED WAY OF TRUMBULL COUNTY</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>3601 YOUNGSTOWN RD SE</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44484</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>2000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>SISTER STELLA SHELTER FOR DOMESTIC</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>1540 TOD AVE NW</AddressLine1Txt>
+            <CityNm>WARREN</CityNm>
+            <StateAbbreviationCd>OH</StateAbbreviationCd>
+            <ZIPCd>44485</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientRelationshipTxt>NONE</RecipientRelationshipTxt>
+          <RecipientFoundationStatusTxt>OTHER PUBLIC</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>CHARITABLE</GrantOrContributionPurposeTxt>
+          <Amt>5000</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <TotalGrantOrContriPdDurYrAmt>58000</TotalGrantOrContriPdDurYrAmt>
+      </SupplementaryInformationGrp>
+      <AnalysisIncomeProducingActyGrp>
+        <DivAndIntFromSecPartVIIGrp>
+          <ExclusionCd>14</ExclusionCd>
+          <ExclusionAmt>21405</ExclusionAmt>
+        </DivAndIntFromSecPartVIIGrp>
+        <GainSalesAstOthThanInvntryGrp>
+          <ExclusionCd>18</ExclusionCd>
+          <ExclusionAmt>47338</ExclusionAmt>
+        </GainSalesAstOthThanInvntryGrp>
+        <SubtotalsIncmProducingActyGrp>
+          <ExclusionAmt>68743</ExclusionAmt>
+        </SubtotalsIncmProducingActyGrp>
+        <TotalIncomeProducingActyAmt>68743</TotalIncomeProducingActyAmt>
+      </AnalysisIncomeProducingActyGrp>
+      <TrnsfrTransRlnNonchrtblEOGrp>
+        <TrnsfrOfCashToNonchrtblEOInd>false</TrnsfrOfCashToNonchrtblEOInd>
+        <TrnsfrOtherAssetNonchrtblEOInd>false</TrnsfrOtherAssetNonchrtblEOInd>
+        <SalesOrExchangesOfAssetsInd>false</SalesOrExchangesOfAssetsInd>
+        <PurchaseOfAssetsNonchrtblEOInd>false</PurchaseOfAssetsNonchrtblEOInd>
+        <RentalOfFacilitiesOthAssetsInd>false</RentalOfFacilitiesOthAssetsInd>
+        <ReimbursementArrangementsInd>false</ReimbursementArrangementsInd>
+        <LoansOrLoanGuaranteesInd>false</LoansOrLoanGuaranteesInd>
+        <PerformanceOfServicesEtcInd>false</PerformanceOfServicesEtcInd>
+        <SharingOfFacilitiesEtcInd>false</SharingOfFacilitiesEtcInd>
+        <RelationshipsNonchrtblEOInd>false</RelationshipsNonchrtblEOInd>
+      </TrnsfrTransRlnNonchrtblEOGrp>
+    </IRS990PF>
+    <AccountingFeesSchedule documentId="RetDoc1">
+      <AccountingFeesDetail>
+        <CategoryTxt>ACCOUNTING FEES</CategoryTxt>
+        <Amt>975</Amt>
+        <NetInvestmentIncomeAmt>975</NetInvestmentIncomeAmt>
+      </AccountingFeesDetail>
+    </AccountingFeesSchedule>
+    <InvestmentsCorpStockSchedule documentId="RetDoc2">
+      <InvestmentsCorporateStockGrp>
+        <StockNm>MARKETABLE EQUITY SECURITIES (VARIOU</StockNm>
+        <EOYBookValueAmt>754981</EOYBookValueAmt>
+        <EOYFMVAmt>971227</EOYFMVAmt>
+      </InvestmentsCorporateStockGrp>
+    </InvestmentsCorpStockSchedule>
+    <LegalFeesSchedule documentId="RetDoc3">
+      <LegalFeesGrp>
+        <CategoryTxt>LEGAL FEES</CategoryTxt>
+        <LegalFeesAmt>2000</LegalFeesAmt>
+        <DisbursementsCharitablePrpsAmt>2000</DisbursementsCharitablePrpsAmt>
+      </LegalFeesGrp>
+    </LegalFeesSchedule>
+    <OtherExpensesSchedule documentId="RetDoc4">
+      <OtherExpensesScheduleGrp>
+        <Desc>EXPENSES</Desc>
+      </OtherExpensesScheduleGrp>
+      <OtherExpensesScheduleGrp>
+        <Desc>OHIO FILING FEES</Desc>
+        <RevenueAndExpensesPerBooksAmt>200</RevenueAndExpensesPerBooksAmt>
+        <DisbursementsCharitablePrpsAmt>200</DisbursementsCharitablePrpsAmt>
+      </OtherExpensesScheduleGrp>
+      <OtherExpensesScheduleGrp>
+        <Desc>INVESTMENT FEES</Desc>
+        <RevenueAndExpensesPerBooksAmt>30</RevenueAndExpensesPerBooksAmt>
+        <NetInvestmentIncomeAmt>30</NetInvestmentIncomeAmt>
+      </OtherExpensesScheduleGrp>
+    </OtherExpensesSchedule>
+    <OtherProfessionalFeesSchedule documentId="RetDoc5">
+      <OtherProfessionalFeesDetail>
+        <CategoryTxt>COURT COST</CategoryTxt>
+        <Amt>86</Amt>
+        <DisbursementsCharitablePrpsAmt>86</DisbursementsCharitablePrpsAmt>
+      </OtherProfessionalFeesDetail>
+    </OtherProfessionalFeesSchedule>
+    <TaxesSchedule documentId="RetDoc6">
+      <TaxesDetail>
+        <CategoryTxt>FOREIGN TAXES</CategoryTxt>
+        <Amt>32</Amt>
+        <NetInvestmentIncomeAmt>32</NetInvestmentIncomeAmt>
+      </TaxesDetail>
+      <TaxesDetail>
+        <CategoryTxt>FEDERAL TAXES</CategoryTxt>
+        <Amt>401</Amt>
+      </TaxesDetail>
+    </TaxesSchedule>
+  </ReturnData>
+</Return>

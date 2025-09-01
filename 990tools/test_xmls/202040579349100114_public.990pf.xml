@@ -1,0 +1,302 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.irs.gov/efile" returnVersion="2019v5.0">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2020-02-26T06:02:47-00:00</ReturnTs>
+    <TaxPeriodEndDt>2019-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>Cronin Hanley &amp; VanZile LLC</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>17 Kiel Ave</AddressLine1Txt>
+        <CityNm>Kinnelon</CityNm>
+        <StateAbbreviationCd>NJ</StateAbbreviationCd>
+        <ZIPCd>07405</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990PF</ReturnTypeCd>
+    <TaxPeriodBeginDt>2019-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>464284638</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>SUPPORTING GOOD DEEDS INC</BusinessNameLine1Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>SUPP</BusinessNameControlTxt>
+      <PhoneNum>5618323300</PhoneNum>
+      <USAddress>
+        <AddressLine1Txt>c/oCronin Hanley VanZile 17 Kiel Av</AddressLine1Txt>
+        <CityNm>Kinnelon</CityNm>
+        <StateAbbreviationCd>NJ</StateAbbreviationCd>
+        <ZIPCd>07405</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>Mary D Fisher</PersonNm>
+      <PersonTitleTxt>DIRECTOR</PersonTitleTxt>
+      <SignatureDt>2020-02-26</SignatureDt>
+      <DiscussWithPaidPreparerInd>false</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>Maryann Hanley</PreparerPersonNm>
+      <PhoneNum>9734923069</PhoneNum>
+      <PreparationDt>2020-02-26</PreparationDt>
+    </PreparerPersonGrp>
+    <TaxYr>2019</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="3">
+    <IRS990PF documentId="990PF" softwareId="19009610" softwareVersionNum="19.2.1.0">
+      <FinalReturnInd>X</FinalReturnInd>
+      <Organization501c3ExemptPFInd>X</Organization501c3ExemptPFInd>
+      <FMVAssetsEOYAmt>0</FMVAssetsEOYAmt>
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <AnalysisOfRevenueAndExpenses>
+        <CapGainNetIncmNetInvstIncmAmt>0</CapGainNetIncmNetInvstIncmAmt>
+        <TotalRevAndExpnssAmt>0</TotalRevAndExpnssAmt>
+        <TotalNetInvstIncmAmt>0</TotalNetInvstIncmAmt>
+        <TotOprExpensesRevAndExpnssAmt>0</TotOprExpensesRevAndExpnssAmt>
+        <TotOprExpensesNetInvstIncmAmt>0</TotOprExpensesNetInvstIncmAmt>
+        <TotOprExpensesDsbrsChrtblAmt>0</TotOprExpensesDsbrsChrtblAmt>
+        <ContriPaidRevAndExpnssAmt>1707</ContriPaidRevAndExpnssAmt>
+        <ContriPaidDsbrsChrtblAmt>1707</ContriPaidDsbrsChrtblAmt>
+        <TotalExpensesRevAndExpnssAmt>1707</TotalExpensesRevAndExpnssAmt>
+        <TotalExpensesNetInvstIncmAmt>0</TotalExpensesNetInvstIncmAmt>
+        <TotalExpensesDsbrsChrtblAmt>1707</TotalExpensesDsbrsChrtblAmt>
+        <ExcessRevenueOverExpensesAmt>-1707</ExcessRevenueOverExpensesAmt>
+        <NetInvestmentIncomeAmt>0</NetInvestmentIncomeAmt>
+      </AnalysisOfRevenueAndExpenses>
+      <Form990PFBalanceSheetsGrp>
+        <CashBOYAmt>1707</CashBOYAmt>
+        <TotalAssetsBOYAmt>1707</TotalAssetsBOYAmt>
+        <TotalAssetsEOYAmt>0</TotalAssetsEOYAmt>
+        <TotalAssetsEOYFMVAmt>0</TotalAssetsEOYFMVAmt>
+        <TotalLiabilitiesEOYAmt>0</TotalLiabilitiesEOYAmt>
+        <OrganizationFollowsFASB117Ind>X</OrganizationFollowsFASB117Ind>
+        <NoDonorRstrNetAssestsBOYAmt>1707</NoDonorRstrNetAssestsBOYAmt>
+        <TotNetAstOrFundBalancesBOYAmt>1707</TotNetAstOrFundBalancesBOYAmt>
+        <TotNetAstOrFundBalancesEOYAmt>0</TotNetAstOrFundBalancesEOYAmt>
+        <TotalLiabilitiesNetAstBOYAmt>1707</TotalLiabilitiesNetAstBOYAmt>
+        <TotalLiabilitiesNetAstEOYAmt>0</TotalLiabilitiesNetAstEOYAmt>
+      </Form990PFBalanceSheetsGrp>
+      <ChgInNetAssetsFundBalancesGrp>
+        <TotNetAstOrFundBalancesBOYAmt>1707</TotNetAstOrFundBalancesBOYAmt>
+        <ExcessRevenueOverExpensesAmt>-1707</ExcessRevenueOverExpensesAmt>
+      </ChgInNetAssetsFundBalancesGrp>
+      <QlfyUndSect4940eReducedTaxGrp>
+        <NetVlNoncharitableAssetsYr1Amt>1681</NetVlNoncharitableAssetsYr1Amt>
+        <NetVlNoncharitableAssetsYr2Amt>1681</NetVlNoncharitableAssetsYr2Amt>
+        <NetVlNoncharitableAssetsYr3Amt>1681</NetVlNoncharitableAssetsYr3Amt>
+        <AdjustedQlfyDistriYr4Amt>65000</AdjustedQlfyDistriYr4Amt>
+        <NetVlNoncharitableAssetsYr4Amt>33283</NetVlNoncharitableAssetsYr4Amt>
+        <DistributionYr4Rt>000001.952949</DistributionYr4Rt>
+        <TotalDistributionRt>000001.952949</TotalDistributionRt>
+        <AverageDistributionRt>000000.390590</AverageDistributionRt>
+      </QlfyUndSect4940eReducedTaxGrp>
+      <ExciseTaxBasedOnInvstIncmGrp>
+        <InvestmentIncomeExciseTaxAmt>0</InvestmentIncomeExciseTaxAmt>
+        <AppliedToESTaxAmt>0</AppliedToESTaxAmt>
+      </ExciseTaxBasedOnInvstIncmGrp>
+      <StatementsRegardingActyGrp>
+        <LegislativePoliticalActyInd>false</LegislativePoliticalActyInd>
+        <MoreThan100SpentInd>false</MoreThan100SpentInd>
+        <Form1120POLFiledInd>false</Form1120POLFiledInd>
+        <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+        <ChangesToArticlesOrBylawsInd>false</ChangesToArticlesOrBylawsInd>
+        <UnrelatedBusIncmOverLimitInd>false</UnrelatedBusIncmOverLimitInd>
+        <OrganizationDissolvedEtcInd referenceDocumentId="990PF:147">true</OrganizationDissolvedEtcInd>
+        <Section508eRqrSatisfiedInd>true</Section508eRqrSatisfiedInd>
+        <AtLeast5000InAssetsInd>false</AtLeast5000InAssetsInd>
+        <OrgReportOrRegisterStateCd>FL</OrgReportOrRegisterStateCd>
+        <PrivateOperatingFoundationInd>true</PrivateOperatingFoundationInd>
+        <NewSubstantialContributorsInd>false</NewSubstantialContributorsInd>
+        <OwnControlledEntityInd>false</OwnControlledEntityInd>
+        <DonorAdvisedFundInd>false</DonorAdvisedFundInd>
+        <ComplyWithPublicInspRqrInd>false</ComplyWithPublicInspRqrInd>
+        <WebsiteAddressTxt>www.100gooddeeds.org</WebsiteAddressTxt>
+        <PersonsWithBooksName>
+          <BusinessNameLine1Txt>CRONIN HANLEY &amp; VANZILE LLC</BusinessNameLine1Txt>
+        </PersonsWithBooksName>
+        <PhoneNum>9734923069</PhoneNum>
+        <LocationOfBooksUSAddress>
+          <AddressLine1Txt>17 KIEL AVENUE SUITE 1</AddressLine1Txt>
+          <CityNm>KINNELON</CityNm>
+          <StateAbbreviationCd>NJ</StateAbbreviationCd>
+          <ZIPCd>07405</ZIPCd>
+        </LocationOfBooksUSAddress>
+        <ForeignAccountsQuestionInd>false</ForeignAccountsQuestionInd>
+      </StatementsRegardingActyGrp>
+      <StatementsRegardingActy4720Grp>
+        <SaleOrExchDisqualifiedPrsnInd>false</SaleOrExchDisqualifiedPrsnInd>
+        <BrrwOrLendDisqualifiedPrsnInd>false</BrrwOrLendDisqualifiedPrsnInd>
+        <FurnGoodsDisqualifiedPrsnInd>false</FurnGoodsDisqualifiedPrsnInd>
+        <PayCompDisqualifiedPrsnInd>false</PayCompDisqualifiedPrsnInd>
+        <TransferAstDisqualifiedPrsnInd>false</TransferAstDisqualifiedPrsnInd>
+        <PaymentToGovernmentOfficialInd>false</PaymentToGovernmentOfficialInd>
+        <UncorrectedPriorActsInd>false</UncorrectedPriorActsInd>
+        <UndistributedIncomePYInd>false</UndistributedIncomePYInd>
+        <BusinessHoldingsInd>false</BusinessHoldingsInd>
+        <JeopardyInvestmentsInd>false</JeopardyInvestmentsInd>
+        <UncorrectedPYJeopardyInvstInd>false</UncorrectedPYJeopardyInvstInd>
+        <InfluenceLegislationInd>false</InfluenceLegislationInd>
+        <InfluenceElectionInd>false</InfluenceElectionInd>
+        <GrantsToIndividualsInd>false</GrantsToIndividualsInd>
+        <GrantsToOrganizationsInd>false</GrantsToOrganizationsInd>
+        <NoncharitablePurposeInd>false</NoncharitablePurposeInd>
+        <RcvFndsToPayPrsnlBnftCntrctInd>false</RcvFndsToPayPrsnlBnftCntrctInd>
+        <PayPremiumsPrsnlBnftCntrctInd>false</PayPremiumsPrsnlBnftCntrctInd>
+        <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+        <SubjToTaxRmnrtnExPrchtPymtInd>false</SubjToTaxRmnrtnExPrchtPymtInd>
+      </StatementsRegardingActy4720Grp>
+      <OfficerDirTrstKeyEmplInfoGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>Mary D Fisher</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>35 Garnet Hill Drive</AddressLine1Txt>
+            <CityNm>Sedona</CityNm>
+            <StateAbbreviationCd>AZ</StateAbbreviationCd>
+            <ZIPCd>86336</ZIPCd>
+          </USAddress>
+          <TitleTxt>Director</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>000.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>0</CompensationAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>A James Heynen co RTM Limited LLC</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>1776 Broadway Suite 1400</AddressLine1Txt>
+            <CityNm>New York</CityNm>
+            <StateAbbreviationCd>NY</StateAbbreviationCd>
+            <ZIPCd>10019</ZIPCd>
+          </USAddress>
+          <TitleTxt>Director</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>000.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>0</CompensationAmt>
+        </OfficerDirTrstKeyEmplGrp>
+        <OfficerDirTrstKeyEmplGrp>
+          <PersonNm>Jacqueline S Miller co Broad and Ca</PersonNm>
+          <USAddress>
+            <AddressLine1Txt>1 N Clematis St Suite 500</AddressLine1Txt>
+            <CityNm>West Palm Beach</CityNm>
+            <StateAbbreviationCd>FL</StateAbbreviationCd>
+            <ZIPCd>33401</ZIPCd>
+          </USAddress>
+          <TitleTxt>Director</TitleTxt>
+          <AverageHrsPerWkDevotedToPosRt>000.00</AverageHrsPerWkDevotedToPosRt>
+          <CompensationAmt>0</CompensationAmt>
+        </OfficerDirTrstKeyEmplGrp>
+      </OfficerDirTrstKeyEmplInfoGrp>
+      <SummaryOfDirectChrtblActyGrp>
+        <Description1Txt>N/A</Description1Txt>
+        <Expenses1Amt>0</Expenses1Amt>
+      </SummaryOfDirectChrtblActyGrp>
+      <SumOfProgramRelatedInvstGrp>
+        <Description1Txt>N/A</Description1Txt>
+      </SumOfProgramRelatedInvstGrp>
+      <MinimumInvestmentReturnGrp>
+        <AverageMonthlyFMVOfSecAmt>711</AverageMonthlyFMVOfSecAmt>
+        <AverageMonthlyCashBalancesAmt>0</AverageMonthlyCashBalancesAmt>
+        <FMVAllOtherNoncharitableAstAmt>0</FMVAllOtherNoncharitableAstAmt>
+        <TotalFMVOfUnusedAssetsAmt>711</TotalFMVOfUnusedAssetsAmt>
+        <AdjustedTotalFMVOfUnusedAstAmt>711</AdjustedTotalFMVOfUnusedAstAmt>
+        <CashDeemedCharitableAmt referenceDocumentId="990PF:150">11</CashDeemedCharitableAmt>
+        <NetVlNoncharitableAssetsAmt>700</NetVlNoncharitableAssetsAmt>
+        <MinimumInvestmentReturnAmt>35</MinimumInvestmentReturnAmt>
+      </MinimumInvestmentReturnGrp>
+      <DistributableAmountGrp>
+        <MinimumInvestmentReturnAmt>35</MinimumInvestmentReturnAmt>
+        <DistributableBeforeAdjAmt>35</DistributableBeforeAdjAmt>
+        <DistributableBeforeDedAmt>35</DistributableBeforeDedAmt>
+        <DistributableAsAdjustedAmt>35</DistributableAsAdjustedAmt>
+      </DistributableAmountGrp>
+      <QualifyingDistriPartXIIGrp>
+        <ExpensesAndContributionsAmt referenceDocumentId="990PF:151">1707</ExpensesAndContributionsAmt>
+        <QualifyingDistributionsAmt>1707</QualifyingDistributionsAmt>
+        <AdjustedQualifyingDistriAmt>1707</AdjustedQualifyingDistriAmt>
+      </QualifyingDistriPartXIIGrp>
+      <UndistributedIncomeGrp>
+        <DistributableAsAdjustedAmt>35</DistributableAsAdjustedAmt>
+        <ExcessDistributionCyovYr4Amt>63084</ExcessDistributionCyovYr4Amt>
+        <TotalExcessDistributionCyovAmt>63084</TotalExcessDistributionCyovAmt>
+        <QualifyingDistributionsAmt>1707</QualifyingDistributionsAmt>
+        <AppliedToCurrentYearAmt>35</AppliedToCurrentYearAmt>
+        <RemainingDistriFromCorpusAmt>1672</RemainingDistriFromCorpusAmt>
+        <TotalCorpusAmt>64756</TotalCorpusAmt>
+        <UndistributedIncomeCYAmt>0</UndistributedIncomeCYAmt>
+        <ExcessDistriCyovToNextYrAmt>64756</ExcessDistriCyovToNextYrAmt>
+        <ExcessFromYear4Amt>63084</ExcessFromYear4Amt>
+        <ExcessFromCurrentYearAmt>1672</ExcessFromCurrentYearAmt>
+      </UndistributedIncomeGrp>
+      <PrivateOperatingFoundationsGrp>
+        <PrivateOperatingFndtnRulingDt>2014-07-02</PrivateOperatingFndtnRulingDt>
+        <Section4942j3Ind>X</Section4942j3Ind>
+        <LessorAdjNetIncmMinInvstRetGrp>
+          <CurrentYearAmt>0</CurrentYearAmt>
+          <TotalAmt>0</TotalAmt>
+        </LessorAdjNetIncmMinInvstRetGrp>
+        <QualifyingDistributionsGrp>
+          <CurrentYearAmt>1707</CurrentYearAmt>
+          <TotalAmt>1707</TotalAmt>
+        </QualifyingDistributionsGrp>
+        <QualifyingDistriMadeDrtGrp>
+          <CurrentYearAmt>1707</CurrentYearAmt>
+          <TotalAmt>1707</TotalAmt>
+        </QualifyingDistriMadeDrtGrp>
+        <TwoThirdsMinimumInvstRetGrp>
+          <CurrentYearAmt>23</CurrentYearAmt>
+          <Year1Amt>56</Year1Amt>
+          <Year2Amt>56</Year2Amt>
+          <Year3Amt>56</Year3Amt>
+          <TotalAmt>191</TotalAmt>
+        </TwoThirdsMinimumInvstRetGrp>
+      </PrivateOperatingFoundationsGrp>
+      <SupplementaryInformationGrp>
+        <OnlyContriToPreselectedInd>X</OnlyContriToPreselectedInd>
+        <GrantOrContributionPdDurYrGrp>
+          <RecipientBusinessName>
+            <BusinessNameLine1Txt>Abataka Foundation Inc</BusinessNameLine1Txt>
+          </RecipientBusinessName>
+          <RecipientUSAddress>
+            <AddressLine1Txt>17 Kiel Avenue</AddressLine1Txt>
+            <CityNm>Kinnelon</CityNm>
+            <StateAbbreviationCd>NJ</StateAbbreviationCd>
+            <ZIPCd>07405</ZIPCd>
+          </RecipientUSAddress>
+          <RecipientFoundationStatusTxt>POF</RecipientFoundationStatusTxt>
+          <GrantOrContributionPurposeTxt>Support for mission</GrantOrContributionPurposeTxt>
+          <Amt>1707</Amt>
+        </GrantOrContributionPdDurYrGrp>
+        <TotalGrantOrContriPdDurYrAmt>1707</TotalGrantOrContriPdDurYrAmt>
+      </SupplementaryInformationGrp>
+      <TrnsfrTransRlnNonchrtblEOGrp>
+        <TrnsfrOfCashToNonchrtblEOInd>false</TrnsfrOfCashToNonchrtblEOInd>
+        <TrnsfrOtherAssetNonchrtblEOInd>false</TrnsfrOtherAssetNonchrtblEOInd>
+        <SalesOrExchangesOfAssetsInd>false</SalesOrExchangesOfAssetsInd>
+        <PurchaseOfAssetsNonchrtblEOInd>false</PurchaseOfAssetsNonchrtblEOInd>
+        <RentalOfFacilitiesOthAssetsInd>false</RentalOfFacilitiesOthAssetsInd>
+        <ReimbursementArrangementsInd>false</ReimbursementArrangementsInd>
+        <LoansOrLoanGuaranteesInd>false</LoansOrLoanGuaranteesInd>
+        <PerformanceOfServicesEtcInd>false</PerformanceOfServicesEtcInd>
+        <SharingOfFacilitiesEtcInd>false</SharingOfFacilitiesEtcInd>
+        <RelationshipsNonchrtblEOInd>false</RelationshipsNonchrtblEOInd>
+      </TrnsfrTransRlnNonchrtblEOGrp>
+    </IRS990PF>
+    <DissolutionStmt documentId="990PF:147" softwareId="19009610" softwareVersionNum="19.2.1.0">
+      <DissolutionInformationGrp>
+        <BusinessName>
+          <BusinessNameLine1Txt>Abataka Foundation Inc</BusinessNameLine1Txt>
+        </BusinessName>
+        <USAddress>
+          <AddressLine1Txt>c/o CHV 17 Kiel Ave</AddressLine1Txt>
+          <CityNm>Kinnelon</CityNm>
+          <StateAbbreviationCd>NJ</StateAbbreviationCd>
+          <ZIPCd>07405</ZIPCd>
+        </USAddress>
+        <ShortExplanationTxt>Cash Balance transferred</ShortExplanationTxt>
+        <DissolutionAmt>1707</DissolutionAmt>
+      </DissolutionInformationGrp>
+    </DissolutionStmt>
+    <LiquidationExplanationStmt documentId="990PF:148" softwareId="19009610" softwareVersionNum="19.2.1.0">
+      <ExplanationTxt>Final distibution of cash balance from general donations to Abataka Foundation Inc in June 2019 as Abatakas mission complies with the Supporting Good Deeds mission.</ExplanationTxt>
+    </LiquidationExplanationStmt>
+  </ReturnData>
+</Return>

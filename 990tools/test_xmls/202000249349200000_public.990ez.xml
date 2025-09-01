@@ -1,0 +1,216 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Return xmlns="http://www.irs.gov/efile" returnVersion="2019v5.0">
+  <ReturnHeader binaryAttachmentCnt="0">
+    <ReturnTs>2020-01-24T06:37:51-05:00</ReturnTs>
+    <TaxPeriodEndDt>2019-12-31</TaxPeriodEndDt>
+    <PreparerFirmGrp>
+      <PreparerFirmEIN>341789234</PreparerFirmEIN>
+      <PreparerFirmName>
+        <BusinessNameLine1Txt>Grob&amp;Associates CPAs Ltd</BusinessNameLine1Txt>
+      </PreparerFirmName>
+      <PreparerUSAddress>
+        <AddressLine1Txt>114 Barrington Square Ste 117</AddressLine1Txt>
+        <CityNm>Aurora</CityNm>
+        <StateAbbreviationCd>OH</StateAbbreviationCd>
+        <ZIPCd>44202</ZIPCd>
+      </PreparerUSAddress>
+    </PreparerFirmGrp>
+    <ReturnTypeCd>990EZ</ReturnTypeCd>
+    <TaxPeriodBeginDt>2019-01-01</TaxPeriodBeginDt>
+    <Filer>
+      <EIN>200814693</EIN>
+      <BusinessName>
+        <BusinessNameLine1Txt>American Board of Vascular Medicine Inc</BusinessNameLine1Txt>
+      </BusinessName>
+      <BusinessNameControlTxt>AMER</BusinessNameControlTxt>
+      <USAddress>
+        <AddressLine1Txt>446 North Street</AddressLine1Txt>
+        <CityNm>Chagrin Falls</CityNm>
+        <StateAbbreviationCd>OH</StateAbbreviationCd>
+        <ZIPCd>44022</ZIPCd>
+      </USAddress>
+    </Filer>
+    <BusinessOfficerGrp>
+      <PersonNm>Micheline Watt</PersonNm>
+      <PersonTitleTxt>Administrative</PersonTitleTxt>
+      <SignatureDt>2020-01-13</SignatureDt>
+      <DiscussWithPaidPreparerInd>false</DiscussWithPaidPreparerInd>
+    </BusinessOfficerGrp>
+    <PreparerPersonGrp>
+      <PreparerPersonNm>David R Grob</PreparerPersonNm>
+      <PTIN>P00914745</PTIN>
+      <PhoneNum>3306565709</PhoneNum>
+      <PreparationDt>2020-01-24</PreparationDt>
+    </PreparerPersonGrp>
+    <TaxYr>2019</TaxYr>
+    <BuildTS>2022-09-23 18:48:47Z</BuildTS>
+  </ReturnHeader>
+  <ReturnData documentCnt="2">
+    <IRS990EZ documentId="IRS990EZ">
+      <MethodOfAccountingCashInd>X</MethodOfAccountingCashInd>
+      <Organization501cInd organization501cTypeTxt="6">X</Organization501cInd>
+      <TypeOfOrganizationCorpInd>X</TypeOfOrganizationCorpInd>
+      <GrossReceiptsAmt>68943</GrossReceiptsAmt>
+      <InfoInScheduleOPartIInd>X</InfoInScheduleOPartIInd>
+      <ProgramServiceRevenueAmt>68920</ProgramServiceRevenueAmt>
+      <InvestmentIncomeAmt>23</InvestmentIncomeAmt>
+      <TotalRevenueAmt>68943</TotalRevenueAmt>
+      <SalariesOtherCompEmplBnftAmt>64896</SalariesOtherCompEmplBnftAmt>
+      <FeesAndOtherPymtToIndCntrctAmt>7324</FeesAndOtherPymtToIndCntrctAmt>
+      <PrintingPublicationsPostageAmt>7409</PrintingPublicationsPostageAmt>
+      <OtherExpensesTotalAmt>74368</OtherExpensesTotalAmt>
+      <TotalExpensesAmt>153997</TotalExpensesAmt>
+      <ExcessOrDeficitForYearAmt>-85054</ExcessOrDeficitForYearAmt>
+      <NetAssetsOrFundBalancesBOYAmt>135766</NetAssetsOrFundBalancesBOYAmt>
+      <NetAssetsOrFundBalancesEOYAmt>50712</NetAssetsOrFundBalancesEOYAmt>
+      <InfoInScheduleOPartIIInd>X</InfoInScheduleOPartIIInd>
+      <CashSavingsAndInvestmentsGrp>
+        <BOYAmt>136278</BOYAmt>
+        <EOYAmt>51224</EOYAmt>
+      </CashSavingsAndInvestmentsGrp>
+      <LandAndBuildingsGrp>
+        <BOYAmt>0</BOYAmt>
+        <EOYAmt>0</EOYAmt>
+      </LandAndBuildingsGrp>
+      <OtherAssetsTotalDetail>
+        <BOYAmt>0</BOYAmt>
+        <EOYAmt>0</EOYAmt>
+      </OtherAssetsTotalDetail>
+      <Form990TotalAssetsGrp>
+        <BOYAmt>136278</BOYAmt>
+        <EOYAmt>51224</EOYAmt>
+      </Form990TotalAssetsGrp>
+      <SumOfTotalLiabilitiesGrp>
+        <BOYAmt>512</BOYAmt>
+        <EOYAmt>512</EOYAmt>
+      </SumOfTotalLiabilitiesGrp>
+      <NetAssetsOrFundBalancesGrp>
+        <BOYAmt>135766</BOYAmt>
+        <EOYAmt>50712</EOYAmt>
+      </NetAssetsOrFundBalancesGrp>
+      <PrimaryExemptPurposeTxt>Medical Certification Tests</PrimaryExemptPurposeTxt>
+      <ProgramSrvcAccomplishmentGrp>
+        <DescriptionProgramSrvcAccomTxt>Conducts medical certification tests in the field of Vascular medicine forPhysicians</DescriptionProgramSrvcAccomTxt>
+        <ProgramServiceExpensesAmt>153997</ProgramServiceExpensesAmt>
+      </ProgramSrvcAccomplishmentGrp>
+      <TotalProgramServiceExpensesAmt>153997</TotalProgramServiceExpensesAmt>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>J Michael Bacharach MD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Mark Bates MD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Teresa Carman MD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Robert Eberhardt MD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Bruce Gray DO</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Michael Jaff DO</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Scott Kinlay MBBS PhD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Sahil Parikh MD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>David Slovut MD PhD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <OfficerDirectorTrusteeEmplGrp>
+        <PersonNm>Gregory Von Mering MD</PersonNm>
+        <TitleTxt>Trustee</TitleTxt>
+        <AverageHrsPerWkDevotedToPosRt>2.00</AverageHrsPerWkDevotedToPosRt>
+        <CompensationAmt>0</CompensationAmt>
+        <EmployeeBenefitProgramAmt>0</EmployeeBenefitProgramAmt>
+        <ExpenseAccountOtherAllwncAmt>0</ExpenseAccountOtherAllwncAmt>
+      </OfficerDirectorTrusteeEmplGrp>
+      <ActivitiesNotPreviouslyRptInd>false</ActivitiesNotPreviouslyRptInd>
+      <ChgMadeToOrgnzngDocNotRptInd>false</ChgMadeToOrgnzngDocNotRptInd>
+      <OrganizationHadUBIInd>false</OrganizationHadUBIInd>
+      <SubjectToProxyTaxInd>false</SubjectToProxyTaxInd>
+      <OrganizationDissolvedEtcInd>false</OrganizationDissolvedEtcInd>
+      <Form1120PolFiledInd>false</Form1120PolFiledInd>
+      <MadeLoansToFromOfficersInd>false</MadeLoansToFromOfficersInd>
+      <ProhibitedTaxShelterTransInd>false</ProhibitedTaxShelterTransInd>
+      <BooksInCareOfDetail>
+        <PersonNm>Micheline Watt</PersonNm>
+        <USAddress>
+          <AddressLine1Txt>446 North Street</AddressLine1Txt>
+          <CityNm>Chagrin Falls</CityNm>
+          <StateAbbreviationCd>OH</StateAbbreviationCd>
+          <ZIPCd>44022</ZIPCd>
+        </USAddress>
+        <PhoneNum>4402474015</PhoneNum>
+      </BooksInCareOfDetail>
+      <ForeignFinancialAccountInd>false</ForeignFinancialAccountInd>
+      <ForeignOfficeInd>false</ForeignOfficeInd>
+      <DonorAdvisedFndsInd>false</DonorAdvisedFndsInd>
+      <OperateHospitalInd>false</OperateHospitalInd>
+      <TanningServicesProvidedInd>false</TanningServicesProvidedInd>
+      <RelatedOrganizationCtrlEntInd>false</RelatedOrganizationCtrlEntInd>
+      <TransactionWithControlEntInd>false</TransactionWithControlEntInd>
+      <PoliticalCampaignActyInd>false</PoliticalCampaignActyInd>
+      <FiledScheduleAInd>false</FiledScheduleAInd>
+    </IRS990EZ>
+    <IRS990ScheduleO documentId="990O">
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Description of other expenses Part I line 16</FormAndLineReferenceDesc>
+        <ExplanationTxt>Description AmountBoard exam Costs 60,572Insurance 1,961Payroll Taxes 5,036Telephone 3,599Travel 3,200</ExplanationTxt>
+      </SupplementalInformationDetail>
+      <SupplementalInformationDetail>
+        <FormAndLineReferenceDesc>Description of total liabilities Part II line 26</FormAndLineReferenceDesc>
+        <ExplanationTxt>Category Beginning of Year End of YearWithheld Taxes 512 512</ExplanationTxt>
+      </SupplementalInformationDetail>
+    </IRS990ScheduleO>
+  </ReturnData>
+</Return>
