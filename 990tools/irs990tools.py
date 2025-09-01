@@ -50,7 +50,7 @@ Examples:
     )
     download_parser.add_argument('start_year', type=int, help='Start year for downloads')
     download_parser.add_argument('end_year', type=int, help='End year for downloads')
-    download_parser.add_argument('--dest', type=str, default='./irs_zips', help='Destination directory')
+    download_parser.add_argument('--dest', type=str, default='/Volumes/Data/irs_zips', help='Destination directory')
 
     # Recompress command
     recompress_parser = subparsers.add_parser(
@@ -58,7 +58,7 @@ Examples:
         parents=[common_parser],
         help='Recompress problematic IRS ZIP files'
     )
-    recompress_parser.add_argument('--zips-dir', type=str, default='./irs_zips', help='Directory containing ZIP files')
+    recompress_parser.add_argument('--zips-dir', type=str, default='/Volumes/Data/irs_zips', help='Directory containing ZIP files')
 
     # Extract charities command
     extract_parser = subparsers.add_parser(
@@ -68,8 +68,8 @@ Examples:
     )
     extract_parser.add_argument('start_year', type=int, help='Start year for processing')
     extract_parser.add_argument('end_year', type=int, help='End year for processing')
-    extract_parser.add_argument('--input-dir', type=str, default='./irs_zips', help='Directory containing ZIP files')
-    extract_parser.add_argument('--output-dir', type=str, default='./tsvs', help='Directory for output TSV files')
+    extract_parser.add_argument('--input-dir', type=str, default='/Volumes/Data/irs_zips', help='Directory containing ZIP files')
+    extract_parser.add_argument('--output-dir', type=str, default='/Volumes/Data/tsvs', help='Directory for output TSV files')
     extract_parser.add_argument('--worker-threads', type=int, default=16, help='Number of worker threads')
     extract_parser.add_argument('--batch-size', type=int, default=500, help='Batch size for processing')
     extract_parser.add_argument('--write-buffer-size', type=int, default=10000, help='TSV write buffer size')
@@ -83,8 +83,8 @@ Examples:
     )
     analyze_parser.add_argument('--start-year', type=int, default=2016, help='Start year for analysis')
     analyze_parser.add_argument('--stop-year', type=int, default=2024, help='End year for analysis')
-    analyze_parser.add_argument('--input-dir', type=str, default='./tsvs', help='Directory containing input TSV files')
-    analyze_parser.add_argument('--output-dir', type=str, default='./analyzed', help='Directory for output files')
+    analyze_parser.add_argument('--input-dir', type=str, default='/Volumes/Data/tsvs', help='Directory containing input TSV files')
+    analyze_parser.add_argument('--output-dir', type=str, default='/Volumes/Data/atsvs', help='Directory for output files')
 
     # Get latest command
     latest_parser = subparsers.add_parser(
@@ -94,9 +94,9 @@ Examples:
     )
     latest_parser.add_argument('start_year', type=int, help='Start year for processing')
     latest_parser.add_argument('end_year', type=int, help='End year for processing')
-    latest_parser.add_argument('--source-dir', type=str, default='./analyzed', help='Directory containing analyzed TSV files')
-    latest_parser.add_argument('--zip-dir', type=str, default='./irs_zips', help='Directory containing ZIP files')
-    latest_parser.add_argument('--output-dir', type=str, default='./final', help='Directory for output files')
+    latest_parser.add_argument('--source-dir', type=str, default='/Volumes/Data/atsvs', help='Directory containing analyzed TSV files')
+    latest_parser.add_argument('--zip-dir', type=str, default='/Volumes/Data/irs_zips', help='Directory containing ZIP files')
+    latest_parser.add_argument('--output-dir', type=str, default='/Volumes/Data/final', help='Directory for output files')
     latest_parser.add_argument('--minimum-d', type=float, default=10_000_000, help='Minimum denominator value')
     latest_parser.add_argument('--org-types', type=str, default='all', help='Comma-separated list of org types')
     latest_parser.add_argument('--not-types', type=str, default='', help='Comma-separated list of org types to exclude')
@@ -110,9 +110,9 @@ Examples:
     )
     addresses_parser.add_argument('start_year', type=int, help='Start year for processing')
     addresses_parser.add_argument('end_year', type=int, help='End year for processing')
-    addresses_parser.add_argument('--zip-dir', type=str, default='./irs_zips', help='Directory containing ZIP files')
-    addresses_parser.add_argument('--cache-dir', type=str, help='Cache directory for address data')
-    addresses_parser.add_argument('--output-dir', type=str, default='./final', help='Directory for output files')
+    addresses_parser.add_argument('--zip-dir', type=str, default='/Volumes/Data/irs_zips', help='Directory containing ZIP files')
+    addresses_parser.add_argument('--cache-dir', type=str, default='/Volumes/Data/atsvs/_cache', help='Cache directory for address data')
+    addresses_parser.add_argument('--output-dir', type=str, default='/Volumes/Data/final', help='Directory for output files')
     addresses_parser.add_argument('--sample-xml', type=str, help='Directory for sample XML files')
     addresses_parser.add_argument('--backfill-source', type=str, help='Path to backfill TSV file')
     addresses_parser.add_argument('--force-reprocess', action='store_true', help='Force reprocessing of cached data')
@@ -125,7 +125,7 @@ Examples:
     )
     backfill_parser.add_argument('--charity-tsv', type=str, help='Path to charity TSV file')
     backfill_parser.add_argument('--backfill-tsv', type=str, help='Path to backfill TSV file')
-    backfill_parser.add_argument('--output-dir', type=str, default='./final', help='Directory for output files')
+    backfill_parser.add_argument('--output-dir', type=str, default='/Volumes/Data/final', help='Directory for output files')
 
     # Extract grants command
     grants_parser = subparsers.add_parser(
@@ -135,9 +135,9 @@ Examples:
     )
     grants_parser.add_argument('start_year', type=int, help='Start year for processing')
     grants_parser.add_argument('end_year', type=int, help='End year for processing')
-    grants_parser.add_argument('--zip-dir', type=str, default='./irs_zips', help='Directory containing ZIP files')
-    grants_parser.add_argument('--cache-dir', type=str, help='Cache directory')
-    grants_parser.add_argument('--output-dir', type=str, default='./final', help='Directory for output files')
+    grants_parser.add_argument('--zip-dir', type=str, default='/Volumes/Data/irs_zips', help='Directory containing ZIP files')
+    grants_parser.add_argument('--cache-dir', type=str, default='/Volumes/Data/atsvs/_cache', help='Cache directory')
+    grants_parser.add_argument('--output-dir', type=str, default='/Volumes/Data/final', help='Directory for output files')
     grants_parser.add_argument('--charity-source', type=str, required=True, help='Path to charity source file')
 
     # Filter charities command
@@ -193,11 +193,11 @@ Examples:
                               default=get_config_value(config, 'directories', 'final'),
                               help='Directory for final output')
     runall_parser.add_argument('--browse-dir', type=str,
-                              default=get_config_value(config, 'directories', 'browse'),
-                              help='Directory for browse files')
+                               default='../browse',
+                               help='Directory for browse files')
     runall_parser.add_argument('--cache-dir', type=str,
-                              default=get_config_value(config, 'directories', 'cache'),
-                              help='Cache directory')
+                               default='/Volumes/Data/atsvs/_cache',
+                               help='Cache directory')
     runall_parser.add_argument('--minimum-d', type=float,
                               default=get_config_value(config, 'processing', 'minimum_d'),
                               help='Minimum denominator value')

@@ -11,12 +11,12 @@ from pathlib import Path
 # Default configuration
 DEFAULT_CONFIG = {
     "directories": {
-        "zips": "./irs_zips",
-        "tsvs": "./tsvs",
-        "analyzed": "./analyzed",
-        "final": "./final",
-        "browse": "./browse",
-        "cache": "./cache"
+        "zips": "/Volumes/Data/irs_zips",
+        "tsvs": "/Volumes/Data/tsvs",
+        "analyzed": "/Volumes/Data/atsvs",
+        "final": "/Volumes/Data/final",
+        "browse": "../browse",
+        "cache": "/Volumes/Data/atsvs/_cache"
     },
     "processing": {
         "start_year": 2017,

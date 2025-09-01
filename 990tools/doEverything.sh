@@ -61,12 +61,12 @@ echo "=== Post-processing ==="
 ./combine_grants.sh $FINAL_DIR/inferred_grants.tsv  $FINAL_DIR/grants_pf_combined.tsv
 
 #there are EINs that have gotten money that don't file 990s, (state/local govt i.e. state unis, churches, etc)
-python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file filter_501.md
-python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_pf_combined.tsv --output-file $FINAL_DIR/grants_pf.tsv --report-file filter_pf.md
+python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/filter_501.md
+python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_pf_combined.tsv --output-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/filter_pf.md
 
 
-./grant_report.py --input-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/final_report.md 
-./grant_report.py --input-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/pf_report.md
+python grant_report.py --input-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/final_report.md
+python grant_report.py --input-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/pf_report.md
 
 # so all that work to filtered out the charities by size? guess what? We over filtered have to copy some charities back so the grants have a destination to go to! Need to do that for both sets of grants, thanks for playing!
 
@@ -84,6 +84,8 @@ mv $FINAL_DIR/charity_latest_with_backfill.tsv $FINAL_DIR/charity_latest.tsv
 cp $FINAL_DIR/grants_final.tsv $BROWSE
 cp $FINAL_DIR/grants_pf.tsv $BROWSE/grants.pf.tsv
 cp $FINAL_DIR/charity_latest.tsv $BROWSE/charities.tsv
+cp $FINAL_DIR/contractors.tsv $BROWSE 2>/dev/null || echo "contractors.tsv not found, skipping..."
+cp $FINAL_DIR/political_contributions.tsv $BROWSE 2>/dev/null || echo "political_contributions.tsv not found, skipping..."
 
 
 pushd $BROWSE
