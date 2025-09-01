@@ -429,6 +429,7 @@ def contractors_writer_thread(writer_id):
     contractors_data = []
 
     while True:
+        item = None
         try:
             item = contractors_queue.get(timeout=0.1)
             if item is None:
@@ -472,6 +473,7 @@ def political_contributions_writer_thread(writer_id):
     political_data = []
 
     while True:
+        item = None
         try:
             item = political_queue.get(timeout=0.1)
             if item is None:

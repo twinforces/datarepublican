@@ -38,8 +38,8 @@ python irs990tools.py --help
 python irs990tools.py run-all \
   --start-year 2017 \
   --end-year 2025 \
-  --zips-dir ./irs_zips \
-  --final-dir ./final \
+  --zips-dir /Volumes/Data/irs_zips \
+  --final-dir /Volumes/Data/final \
   --worker-threads 16
 ```
 
@@ -50,7 +50,7 @@ python irs990tools.py run-all \
 python irs990tools.py download \
   --start-year 2017 \
   --end-year 2025 \
-  --dest ./irs_zips
+  --dest /Volumes/Data/irs_zips
 ```
 
 #### Extract charity data
@@ -58,8 +58,8 @@ python irs990tools.py download \
 python irs990tools.py extract-charities \
   --start-year 2017 \
   --end-year 2025 \
-  --input-dir ./irs_zips \
-  --output-dir ./tsvs \
+  --input-dir /Volumes/Data/irs_zips \
+  --output-dir /Volumes/Data/tsvs \
   --worker-threads 16
 ```
 
@@ -68,8 +68,8 @@ python irs990tools.py extract-charities \
 python irs990tools.py analyze-charities \
   --start-year 2017 \
   --stop-year 2025 \
-  --input-dir ./tsvs \
-  --output-dir ./analyzed
+  --input-dir /Volumes/Data/tsvs \
+  --output-dir /Volumes/Data/atsvs
 ```
 
 #### Get latest filings
@@ -77,17 +77,17 @@ python irs990tools.py analyze-charities \
 python irs990tools.py get-latest \
   --start-year 2017 \
   --end-year 2025 \
-  --source-dir ./analyzed \
-  --zip-dir ./irs_zips \
-  --output-dir ./final \
-  --minimum-d 10000000
+  --source-dir /Volumes/Data/atsvs \
+  --zip-dir /Volumes/Data/irs_zips \
+  --output-dir /Volumes/Data/final \
+  --minimum-d 0
 ```
 
 #### Filter charities
 ```bash
 python irs990tools.py filter-charities \
-  --input-file ./final/charity_latest.tsv \
-  --output-file ./final/charities_1M.tsv \
+  --input-file /Volumes/Data/final/charity_latest.tsv \
+  --output-file /Volumes/Data/final/charities_1M.tsv \
   --filter-column denominator \
   --filter-value 1000000
 ```
@@ -95,10 +95,10 @@ python irs990tools.py filter-charities \
 #### Check grants
 ```bash
 python irs990tools.py check-grants \
-  --index-file ./final/charity_latest.tsv \
-  --input-file ./final/grants.tsv \
-  --output-file ./final/grants_final.tsv \
-  --report-file ./final/filter_report.md
+  --index-file /Volumes/Data/final/charity_latest.tsv \
+  --input-file /Volumes/Data/final/grants.tsv \
+  --output-file /Volumes/Data/final/grants_final.tsv \
+  --report-file /Volumes/Data/final/filter_report.md
 ```
 
 ## Configuration
@@ -118,17 +118,17 @@ python irs990tools.py --config my_config.json run-all
 ```json
 {
   "directories": {
-    "zips": "./irs_zips",
-    "tsvs": "./tsvs",
-    "analyzed": "./analyzed",
-    "final": "./final",
-    "browse": "./browse",
-    "cache": "./cache"
+    "zips": "/Volumes/Data/irs_zips",
+    "tsvs": "/Volumes/Data/tsvs",
+    "analyzed": "/Volumes/Data/atsvs",
+    "final": "/Volumes/Data/final",
+    "browse": "/Volumes/Data/browse",
+    "cache": "/Volumes/Data/cache"
   },
   "processing": {
     "start_year": 2017,
     "end_year": 2025,
-    "minimum_d": 10000000,
+    "minimum_d": 0,
     "worker_threads": 16,
     "batch_size": 500,
     "write_buffer_size": 10000,
@@ -250,6 +250,11 @@ All extracted data includes:
 ### Before (Old Approach)
 ```bash
 # Run 15+ separate commands
+export ZIPS_DIR="/Volumes/Data/irs_zips"
+export OUT_DIR="/Volumes/Data/tsvs"
+export ANAL_DIR="/Volumes/Data/atsvs"
+export FINAL_DIR="/Volumes/Data/final"
+
 python download_IRS_990_zips.py 2017 2025 --dest $ZIPS_DIR
 python extract_charities.py 2017 2025 --input-dir $ZIPS_DIR --output-dir $OUT_DIR
 python analyze_charities.py --start-year 2017 --stop-year 2025 --input-dir $OUT_DIR --output-dir $ANAL_DIR
@@ -258,8 +263,13 @@ python analyze_charities.py --start-year 2017 --stop-year 2025 --input-dir $OUT_
 
 ### After (New Approach)
 ```bash
-# Single command
-python irs990tools.py run-all --start-year 2017 --end-year 2025 --zips-dir $ZIPS_DIR --final-dir $FINAL_DIR
+# Single command with all enhancements
+python irs990tools.py run-all \
+  --start-year 2017 \
+  --end-year 2025 \
+  --zips-dir /Volumes/Data/irs_zips \
+  --final-dir /Volumes/Data/final \
+  --worker-threads 16
 ```
 
 ## Development

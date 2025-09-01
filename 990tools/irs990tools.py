@@ -23,13 +23,13 @@ def create_parser():
         epilog="""
 Examples:
   # Run the complete pipeline
-  python irs990tools.py run-all --start-year 2017 --end-year 2025 --zips-dir ./zips --final-dir ./final
+  python irs990tools.py run-all --start-year 2017 --end-year 2025 --zips-dir /Volumes/Data/irs_zips --final-dir /Volumes/Data/final
 
   # Download IRS ZIP files
-  python irs990tools.py download --start-year 2017 --end-year 2025 --dest ./zips
+  python irs990tools.py download --start-year 2017 --end-year 2025 --dest /Volumes/Data/irs_zips
 
   # Extract charity data
-  python irs990tools.py extract-charities --start-year 2017 --end-year 2025 --input-dir ./zips --output-dir ./tsvs
+  python irs990tools.py extract-charities --start-year 2017 --end-year 2025 --input-dir /Volumes/Data/irs_zips --output-dir /Volumes/Data/tsvs
         """
     )
 
