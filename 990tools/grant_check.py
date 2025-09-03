@@ -146,6 +146,8 @@ if __name__ == '__main__':
     parser.add_argument('--output-file', help='Output filtered TSV file', required=True)
     parser.add_argument('--report-file', help='Output Markdown file for report of filtered-out rows', default=None)
     parser.add_argument('--report-depth', help="Top N", default=1000, type=int)
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--quiet', action='store_true', help='Suppress non-error output')
 
     args = parser.parse_args()
-    main(args.index_file, args.input_file, args.output_file, args.report_file, args.report_depth)
+    main(args.index_file, args.input_file, args.output_file, args.report_file, args.report_depth, args.verbose, args.quiet)

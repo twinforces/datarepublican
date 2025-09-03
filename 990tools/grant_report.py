@@ -135,6 +135,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate report from TSV file')
     parser.add_argument('--input-file', help='Input TSV file', required=True)
     parser.add_argument('--report-file', help='Output Markdown file for report', default='report.md')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--quiet', action='store_true', help='Suppress non-error output')
 
     args = parser.parse_args()
-    main(args.input_file, args.report_file)
+    main(args.input_file, args.report_file, args.verbose, args.quiet)

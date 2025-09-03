@@ -101,6 +101,32 @@ python irs990tools.py check-grants \
   --report-file /Volumes/Data/final/filter_report.md
 ```
 
+#### Run pipeline from specific step
+```bash
+python irs990tools.py run-from extract \
+  --start-year 2020 \
+  --end-year 2023 \
+  --zips-dir /Volumes/Data/irs_zips \
+  --final-dir /Volumes/Data/final
+```
+
+#### Extract XML files for specific EIN
+```bash
+python irs990tools.py extract-ein 271414646 \
+  --zips-dir /Volumes/Data/irs_zips \
+  --output-dir ./ein_extracted \
+  --index-file ./xml_index.json
+```
+
+#### Build XML to ZIP index
+```bash
+python irs990tools.py build-index \
+  --zips-dir /Volumes/Data/irs_zips \
+  --index-file ./xml_zip_index.json \
+  --start-year 2017 \
+  --end-year 2025
+```
+
 ## Configuration
 
 ### Default Configuration
@@ -157,6 +183,12 @@ python irs990tools.py --config my_config.json run-all
 10. **check-grants** - Validate and filter grant data
 11. **run-all** - Execute complete pipeline with dependency management
 
+### New Development Commands
+
+12. **run-from** - Start pipeline from any specific step (accelerates development/testing)
+13. **extract-ein** - Extract all XML files for a specific EIN across all ZIP files
+14. **build-index** - Build XML→ZIP index for fast EIN-based lookups
+
 ## Command Line Options
 
 ### Global Options
@@ -211,6 +243,50 @@ All extracted data includes:
 - **Name/Address**: For fuzzy matching when EIN is unavailable
 - **Tax Year**: For temporal analysis
 - **Filer EIN**: Links back to the charity organization
+
+## Development and Debugging Features
+
+### Run Pipeline from Specific Step
+The `run-from` command allows you to start the processing pipeline from any step, which is perfect for:
+- **Accelerated Development**: Skip already completed steps
+- **Targeted Testing**: Test specific pipeline stages
+- **Error Recovery**: Resume from failed step without redoing everything
+
+```bash
+# Start from extraction (skip download/recompress)
+python irs990tools.py run-from extract --start-year 2022 --end-year 2023
+
+# Start from analysis (skip earlier steps)
+python irs990tools.py run-from analyze --start-year 2022 --end-year 2023
+```
+
+### Extract EIN Files
+The `extract-ein` command extracts all XML files for a specific EIN across all ZIP files:
+- **Targeted Analysis**: Focus on specific organizations
+- **Debugging**: Examine filings for particular charities
+- **Performance**: Uses optional XML→ZIP index for fast lookups
+
+```bash
+# Extract all CHAI filings
+python irs990tools.py extract-ein 271414646 --output-dir ./chai_filings
+
+# Use existing index for faster extraction
+python irs990tools.py extract-ein 271414646 --index-file ./xml_index.json
+```
+
+### Build XML Index
+The `build-index` command creates a mapping of XML files to their containing ZIP files:
+- **Performance Optimization**: Eliminates full ZIP scanning
+- **Fast Lookups**: Enables quick EIN-based file location
+- **Reusable**: Save index for multiple extractions
+
+```bash
+# Build comprehensive index
+python irs990tools.py build-index --index-file ./xml_zip_index.json
+
+# Build index for specific year range
+python irs990tools.py build-index --start-year 2020 --end-year 2023 --index-file ./recent_index.json
+```
 
 ## Dependencies
 

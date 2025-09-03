@@ -256,6 +256,7 @@ def parse_contractors_990(root, field, namespaces, xml_filename, context, xpath_
             contractor_address = ""
             contractor_zip = ""
             contractor_po_box = ""
+            is_foreign_contractor = False
 
             # Look for address elements in the contractor record
             address_elem = elem.find(".//{http://www.irs.gov/efile}USAddress")
@@ -263,50 +264,69 @@ def parse_contractors_990(root, field, namespaces, xml_filename, context, xpath_
                 address_elem = elem.find(".//USAddress")
             if address_elem is None:
                 address_elem = elem.find(".//{http://www.irs.gov/efile}ForeignAddress")
+                is_foreign_contractor = True
             if address_elem is None:
                 address_elem = elem.find(".//ForeignAddress")
+                is_foreign_contractor = True
 
             if address_elem is not None:
-                # Extract address components
-                addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
-                if addr_line_1 is None:
-                    addr_line_1 = address_elem.find(".//AddressLine1Txt")
+                if is_foreign_contractor:
+                    # Handle foreign contractor addresses
+                    country_elem = address_elem.find(".//{http://www.irs.gov/efile}CountryCd")
+                    if country_elem is None:
+                        country_elem = address_elem.find(".//CountryCd")
 
-                addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
-                if addr_line_2 is None:
-                    addr_line_2 = address_elem.find(".//AddressLine2Txt")
+                    if country_elem is not None and country_elem.text:
+                        country_code = country_elem.text.strip()
+                        from countryCodes import lookupCC
+                        country = lookupCC(country_code) if country_code else None
+                        if country:
+                            contractor_ein = country["number"]
+                            contractor_name = country["name"]
+                        else:
+                            contractor_ein = "999"
+                            contractor_name = f"Foreign Contractor - {country_code or 'Unknown'}"
+                else:
+                    # Handle US contractor addresses
+                    addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
+                    if addr_line_1 is None:
+                        addr_line_1 = address_elem.find(".//AddressLine1Txt")
 
-                city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
-                if city is None:
-                    city = address_elem.find(".//City")
+                    addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
+                    if addr_line_2 is None:
+                        addr_line_2 = address_elem.find(".//AddressLine2Txt")
 
-                state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
-                if state is None:
-                    state = address_elem.find(".//State")
+                    city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
+                    if city is None:
+                        city = address_elem.find(".//City")
 
-                zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
-                if zip_code is None:
-                    zip_code = address_elem.find(".//ZIPCode")
+                    state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
+                    if state is None:
+                        state = address_elem.find(".//State")
 
-                # Build address string
-                address_parts = []
-                if addr_line_1 is not None and addr_line_1.text:
-                    address_parts.append(addr_line_1.text.strip())
-                if addr_line_2 is not None and addr_line_2.text:
-                    address_parts.append(addr_line_2.text.strip())
-                if city is not None and city.text:
-                    if state is not None and state.text:
-                        address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
-                    else:
-                        address_parts.append(city.text.strip())
-                if zip_code is not None and zip_code.text:
-                    contractor_zip = zip_code.text.strip()
+                    zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
+                    if zip_code is None:
+                        zip_code = address_elem.find(".//ZIPCode")
 
-                contractor_address = " ".join(address_parts)
+                    # Build address string
+                    address_parts = []
+                    if addr_line_1 is not None and addr_line_1.text:
+                        address_parts.append(addr_line_1.text.strip())
+                    if addr_line_2 is not None and addr_line_2.text:
+                        address_parts.append(addr_line_2.text.strip())
+                    if city is not None and city.text:
+                        if state is not None and state.text:
+                            address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
+                        else:
+                            address_parts.append(city.text.strip())
+                    if zip_code is not None and zip_code.text:
+                        contractor_zip = zip_code.text.strip()
 
-                # Check for PO Box
-                if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
-                    contractor_po_box = addr_line_1.text.strip()
+                    contractor_address = " ".join(address_parts)
+
+                    # Check for PO Box
+                    if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
+                        contractor_po_box = addr_line_1.text.strip()
 
             if contractor_name or contractor_amount:
                 contractors.append({
@@ -345,53 +365,77 @@ def parse_political_contributions_990(root, field, namespaces, xml_filename, con
                 recipient_address = ""
                 recipient_zip = ""
                 recipient_po_box = ""
+                is_foreign_recipient = False
 
                 # Look for address elements in the contribution
                 address_elem = elem.find(".//{http://www.irs.gov/efile}USAddress")
                 if address_elem is None:
                     address_elem = elem.find(".//USAddress")
+                if address_elem is None:
+                    address_elem = elem.find(".//{http://www.irs.gov/efile}ForeignAddress")
+                    is_foreign_recipient = True
+                if address_elem is None:
+                    address_elem = elem.find(".//ForeignAddress")
+                    is_foreign_recipient = True
 
                 if address_elem is not None:
-                    # Extract address components
-                    addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
-                    if addr_line_1 is None:
-                        addr_line_1 = address_elem.find(".//AddressLine1Txt")
+                    if is_foreign_recipient:
+                        # Handle foreign recipient addresses
+                        country_elem = address_elem.find(".//{http://www.irs.gov/efile}CountryCd")
+                        if country_elem is None:
+                            country_elem = address_elem.find(".//CountryCd")
 
-                    addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
-                    if addr_line_2 is None:
-                        addr_line_2 = address_elem.find(".//AddressLine2Txt")
+                        if country_elem is not None and country_elem.text:
+                            country_code = country_elem.text.strip()
+                            from countryCodes import lookupCC
+                            country = lookupCC(country_code) if country_code else None
+                            if country:
+                                recipient_ein = country["number"]
+                                recipient = country["name"]
+                            else:
+                                recipient_ein = "999"
+                                recipient = f"Foreign Recipient - {country_code or 'Unknown'}"
+                    else:
+                        # Handle US recipient addresses
+                        addr_line_1 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine1Txt")
+                        if addr_line_1 is None:
+                            addr_line_1 = address_elem.find(".//AddressLine1Txt")
 
-                    city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
-                    if city is None:
-                        city = address_elem.find(".//City")
+                        addr_line_2 = address_elem.find(".//{http://www.irs.gov/efile}AddressLine2Txt")
+                        if addr_line_2 is None:
+                            addr_line_2 = address_elem.find(".//AddressLine2Txt")
 
-                    state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
-                    if state is None:
-                        state = address_elem.find(".//State")
+                        city = address_elem.find(".//{http://www.irs.gov/efile}CityNm")
+                        if city is None:
+                            city = address_elem.find(".//City")
 
-                    zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
-                    if zip_code is None:
-                        zip_code = address_elem.find(".//ZIPCode")
+                        state = address_elem.find(".//{http://www.irs.gov/efile}StateAbbreviationCd")
+                        if state is None:
+                            state = address_elem.find(".//State")
 
-                    # Build address string
-                    address_parts = []
-                    if addr_line_1 is not None and addr_line_1.text:
-                        address_parts.append(addr_line_1.text.strip())
-                    if addr_line_2 is not None and addr_line_2.text:
-                        address_parts.append(addr_line_2.text.strip())
-                    if city is not None and city.text:
-                        if state is not None and state.text:
-                            address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
-                        else:
-                            address_parts.append(city.text.strip())
-                    if zip_code is not None and zip_code.text:
-                        recipient_zip = zip_code.text.strip()
+                        zip_code = address_elem.find(".//{http://www.irs.gov/efile}ZIPCd")
+                        if zip_code is None:
+                            zip_code = address_elem.find(".//ZIPCode")
 
-                    recipient_address = " ".join(address_parts)
+                        # Build address string
+                        address_parts = []
+                        if addr_line_1 is not None and addr_line_1.text:
+                            address_parts.append(addr_line_1.text.strip())
+                        if addr_line_2 is not None and addr_line_2.text:
+                            address_parts.append(addr_line_2.text.strip())
+                        if city is not None and city.text:
+                            if state is not None and state.text:
+                                address_parts.append(f"{city.text.strip()}, {state.text.strip()}")
+                            else:
+                                address_parts.append(city.text.strip())
+                        if zip_code is not None and zip_code.text:
+                            recipient_zip = zip_code.text.strip()
 
-                    # Check for PO Box
-                    if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
-                        recipient_po_box = addr_line_1.text.strip()
+                        recipient_address = " ".join(address_parts)
+
+                        # Check for PO Box
+                        if addr_line_1 is not None and addr_line_1.text and "PO BOX" in addr_line_1.text.upper():
+                            recipient_po_box = addr_line_1.text.strip()
 
                 if recipient or amount:
                     contributions.append({

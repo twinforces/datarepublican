@@ -472,7 +472,7 @@ def process_grants_and_contributions(row_data, worker_threads, zip_index, start_
                 zip_cache[zip_path] = zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                grant_list = parse_grants(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'], known_eins, row['form_type'])
+                grant_list = parse_grants(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'], known_eins, row['form_type'], backfill_entries, seen_backfill_keys)
                 contrib_list = parse_contributions(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'], row['form_type'])
                 return grant_list, contrib_list
         except Exception as e:

@@ -335,7 +335,17 @@ def main():
     parser.add_argument('--output-dir', default='analyzed', help='Directory for output TSV files and reports')
     parser.add_argument('--start-year', type=int, default=2016, help='Start year for processing')
     parser.add_argument('--stop-year', type=int, default=2024, help='Stop year for processing')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--quiet', action='store_true', help='Suppress non-error output')
     args = parser.parse_args()
+
+    # Configure logging based on arguments
+    if args.quiet:
+        logging.getLogger().setLevel(logging.ERROR)
+    elif args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.INFO)
 
     os.makedirs(args.output_dir, exist_ok=True)
     histograms = {}

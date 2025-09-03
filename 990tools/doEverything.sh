@@ -28,6 +28,13 @@ echo ""
 # Change to tools directory
 cd "$TOOLS" || exit 1
 
+# Clean up old TSV files to ensure they get recreated with correct headers
+echo "Cleaning up old TSV files..."
+rm -f "$OUT_DIR"/*.tsv
+rm -f "$ANAL_DIR"/*.tsv
+rm -f "$FINAL_DIR"/*.tsv
+rm -f "$BROWSE"/*.tsv
+
 # Run the complete pipeline using the new unified tool
 echo "Running complete IRS 990 processing pipeline..."
 python irs990tools.py run-all \

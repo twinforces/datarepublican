@@ -99,15 +99,12 @@ def read_tsv_file(tsv_file, minimum_d):
     total_rows = 0
     with open(tsv_file, 'r', encoding='utf-8') as f:
         header = f.readline().strip().split('\t')
-        header_map = {col: idx for idx, col in enumerate(header) if col in TSV_COLUMNS}
-        if not header_map:
-            log_error("No valid columns found in TSV header for {}", tsv_file)
-            return [], 0
+        header_map = {col: idx for idx, col in enumerate(header)}
         sample_paths = []
         for line in f:
             total_rows += 1
             fields = line.strip().split('\t')
-            if len(fields) < len(header_map):
+            if len(fields) != len(header):
                 continue
             row = {col: fields[idx] for col, idx in header_map.items()}
             rows.append(row)

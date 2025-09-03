@@ -74,6 +74,9 @@ total_entries = 0  # Global counter for total entries processed
 tsv_write_counts = defaultdict(int)
 done_queuing = False  # Flag to signal when main thread is done queuing tasks
 
+# EIN to XML index
+ein_xml_index = defaultdict(list)
+
 # Queue for TSV writes with increased size
 tsv_write_queue = queue.Queue(maxsize=20000)
 officer_queue = queue.Queue(maxsize=QUEUE_SIZE)
@@ -561,6 +564,15 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
             log_error("Missing Filer EIN in {}", xml_filename)
             file_counter_local.skipped += 1
             return [], None, xml_filename, [], [], []
+
+        # Add to EIN index
+        global ein_xml_index
+        ein_xml_index[filer_ein].append({
+            'xml_file': xml_filename,
+            'zip_path': zip_path,
+            'tax_year': tax_year,
+            'form_type': form_type
+        })
         if form_type == "990":
             row, officer_entries, contractors, political_contributions = parse_990.parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats)
         elif form_type == "990EZ":
@@ -863,6 +875,15 @@ def main(start_year=None, end_year=None, input_dir=".", output_dir=".", eins=Non
         cleanup_empty_tsv_files()
         save_xpath_stats()
         reorder_xpaths()
+
+        # Save EIN index
+        global ein_xml_index
+        if ein_xml_index:
+            ein_index_path = os.path.join(args.output_dir, "ein_xml_index.json")
+            with open(ein_index_path, 'w', encoding='utf-8') as f:
+                json.dump(dict(ein_xml_index), f, indent=2)
+            log_error("Saved EIN->XML index with {} EINs to {}", len(ein_xml_index), ein_index_path)
+
         listener.stop()
 
     if not quiet:
