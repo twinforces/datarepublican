@@ -2,6 +2,9 @@
 Utility commands for IRS 990 processing
 """
 
+import os
+import json
+
 def extract_ein_files(ein, zips_dir, output_dir='./extracted_ein', tsvs_dir=None,
                     index_file=None, start_year=2017, end_year=2025, verbose=False, quiet=False):
     """Extract all XML files for a specific EIN from ZIP files."""
@@ -10,6 +13,9 @@ def extract_ein_files(ein, zips_dir, output_dir='./extracted_ein', tsvs_dir=None
     import json
     from pathlib import Path
     from lxml import etree
+
+    # Make os available to the function
+    import os as os_module
 
     if not quiet:
         print(f"Extracting XML files for EIN: {ein}")
@@ -23,18 +29,18 @@ def extract_ein_files(ein, zips_dir, output_dir='./extracted_ein', tsvs_dir=None
     xml_index = {}
     ein_index = {}
 
-    # First try to load indexes from the TSVs directory (created by extract-charities)
-    if tsvs_dir:
+    # First try to load indexes from the zips directory (new default location)
+    if not index_file:
+        xml_index_file = os.path.join(zips_dir, 'xml_zip_index.json')
+        ein_index_file = os.path.join(zips_dir, 'ein_xml_index.json')
+    else:
+        xml_index_file = index_file
+        ein_index_file = index_file.replace('.json', '_ein.json')
+
+    # Fallback to TSVs directory if specified
+    if tsvs_dir and not os.path.exists(xml_index_file):
         ein_index_file = os.path.join(tsvs_dir, 'ein_xml_index.json')
         xml_index_file = os.path.join(tsvs_dir, 'xml_zip_index.json')
-    # Then try the output directory
-    elif output_dir != './extracted_ein':
-        ein_index_file = os.path.join(output_dir, 'ein_xml_index.json')
-        xml_index_file = os.path.join(output_dir, 'xml_zip_index.json')
-    else:
-        # Fall back to current directory or specified index file
-        xml_index_file = index_file or './xml_zip_index.json'
-        ein_index_file = index_file.replace('.json', '_ein.json') if index_file else './xml_zip_index_ein.json'
 
     # Try to load EIN index first (faster) - this is created during extract-charities
     if os.path.exists(ein_index_file):
@@ -127,7 +133,7 @@ def extract_ein_files(ein, zips_dir, output_dir='./extracted_ein', tsvs_dir=None
                         print(f"Error reading content of {xml_file}: {e}")
 
             # Progress update
-            if searched_files % 1000 == 0 and not getattr(args, 'quiet', False):
+            if searched_files % 1000 == 0 and not quiet:
                 print(f"Searched {searched_files} files, found {len(ein_files)} matches so far...")
 
         if not quiet:
@@ -178,10 +184,16 @@ def extract_ein_files(ein, zips_dir, output_dir='./extracted_ein', tsvs_dir=None
     if not quiet:
         print(f"Saved EIN index to: {ein_index_file}")
 
-def build_xml_index(zips_dir, index_file='./xml_zip_index.json', ein_index_file=None,
+def build_xml_index(zips_dir, index_file=None, ein_index_file=None,
                    start_year=2017, end_year=2025, verbose=False, quiet=False):
     """Build XML to ZIP file index and optionally EIN to XML index for faster lookups."""
-    xml_index, ein_index = build_xml_index_internal(zips_dir, start_year, end_year, verbose, quiet, build_ein_index=bool(ein_index_file))
+    # Use default paths in zips_dir if not specified
+    if index_file is None:
+        index_file = os.path.join(zips_dir, 'xml_zip_index.json')
+    if ein_index_file is None:
+        ein_index_file = os.path.join(zips_dir, 'ein_xml_index.json')
+
+    xml_index, ein_index = build_xml_index_internal(zips_dir, start_year, end_year, verbose, quiet, build_ein_index=True)
 
     # Save XML->ZIP index
     with open(index_file, 'w') as f:
@@ -191,8 +203,8 @@ def build_xml_index(zips_dir, index_file='./xml_zip_index.json', ein_index_file=
         print(f"XML->ZIP index saved to: {index_file}")
         print(f"Total XML files indexed: {len(xml_index)}")
 
-    # Save EIN->XML index if requested
-    if ein_index_file and ein_index:
+    # Save EIN->XML index
+    if ein_index:
         with open(ein_index_file, 'w') as f:
             json.dump(ein_index, f, indent=2)
         if not quiet:
@@ -202,7 +214,6 @@ def build_xml_index(zips_dir, index_file='./xml_zip_index.json', ein_index_file=
 def build_xml_index_internal(zips_dir, start_year, end_year, verbose=False, quiet=False, build_ein_index=False):
     """Internal function to build XML and optionally EIN index."""
     import zipfile
-    import os
     import glob
     import re
     from lxml import etree

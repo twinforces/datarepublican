@@ -9,20 +9,43 @@ def run_all_pipeline(args):
     print(f"Directories: zips={args.zips_dir}, tsvs={args.tsvs_dir}, analyzed={args.analyzed_dir}, final={args.final_dir}")
 
     try:
-        # Step 1: Download IRS ZIP files
-        print("\n=== Step 1: Downloading IRS ZIP files ===")
-        from download_irs_990_zips import main as download_main
-        download_main(args.start_year, args.end_year, args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+        # Import optimization functions
+        from irs990tools import should_skip_download, should_skip_recompress, check_index_status
 
-        # Step 2: Recompress ZIP files
+        # Step 1: Download IRS ZIP files (always check website for new files)
+        print("\n=== Step 1: Downloading IRS ZIP files ===")
+        from commands.download import download_irs_zips
+        download_irs_zips(args.start_year, args.end_year, args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+
+        # Step 2: Recompress ZIP files (skip if not needed)
         print("\n=== Step 2: Recompressing ZIP files ===")
-        from recompress_irs_zips import main as recompress_main
-        recompress_main(zips_dir=args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+        skip_recompress = should_skip_recompress(args.zips_dir, args.start_year, args.end_year,
+                                                force=getattr(args, 'force', False),
+                                                verbose=args.verbose, quiet=args.quiet)
+
+        if not skip_recompress:
+            from commands.download import recompress_zips
+            recompress_zips(zips_dir=args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+        else:
+            print("Skipping recompress step - no recompression needed")
+
+        # Step 2.5: Check and build indexes if needed
+        print("\n=== Step 2.5: Checking indexes ===")
+        indexes_up_to_date, xml_exists, ein_exists = check_index_status(args.zips_dir, args.start_year, args.end_year,
+                                                                       verbose=args.verbose, quiet=args.quiet)
+
+        if not indexes_up_to_date or not xml_exists:
+            print("Building/updating XML and EIN indexes...")
+            from commands.utilities import build_xml_index
+            build_xml_index(args.zips_dir, start_year=args.start_year, end_year=args.end_year,
+                          verbose=args.verbose, quiet=args.quiet)
+        else:
+            print("Indexes are up-to-date, skipping rebuild")
 
         # Step 3: Extract charity data
         print("\n=== Step 3: Extracting charity data ===")
-        from extract_charities import main as extract_main
-        extract_main(
+        from commands.extract import extract_charities
+        extract_charities(
             start_year=args.start_year,
             end_year=args.end_year,
             input_dir=args.zips_dir,
@@ -34,52 +57,23 @@ def run_all_pipeline(args):
 
         # Step 4: Analyze charities
         print("\n=== Step 4: Analyzing charity data ===")
-        from analyze_charities import main as analyze_main
-        import sys
-        # Set up arguments for analyze_charities
-        sys.argv = ['analyze_charities.py',
-                   '--input-dir', args.tsvs_dir,
-                   '--output-dir', args.analyzed_dir,
-                   '--start-year', str(args.start_year),
-                   '--stop-year', str(args.end_year)]
-        analyze_main()
+        from commands.analyze import analyze_charities
+        analyze_charities(args)
 
         # Step 5: Get latest filings
         print("\n=== Step 5: Getting latest filings ===")
-        from get_latest import main as latest_main
-        # Set up arguments for get_latest
-        sys.argv = ['get_latest.py', str(args.start_year), str(args.end_year),
-                   '--source-dir', args.analyzed_dir,
-                   '--zip-dir', args.zips_dir,
-                   '--output-dir', args.final_dir,
-                   '--minimumD', str(args.minimum_d),
-                   '--orgTypes', 'all',
-                   '--NOTTypes', '',
-                   '--worker-threads', str(args.worker_threads)]
-        if args.verbose:
-            sys.argv.append('--verbose')
-        if args.quiet:
-            sys.argv.append('--quiet')
-        latest_main()
+        from commands.analyze import get_latest_filings
+        get_latest_filings(args)
 
         # Step 6: Extract addresses
         print("\n=== Step 6: Extracting addresses ===")
-        from extract_addresses import main as addresses_main
-        # Set up arguments for extract_addresses
-        sys.argv = ['extract_addresses.py', str(args.start_year), str(args.end_year),
-                   '--zip-dir', args.zips_dir,
-                   '--cache-dir', args.cache_dir,
-                   '--output-dir', args.final_dir]
-        if args.verbose:
-            sys.argv.append('--verbose')
-        if args.quiet:
-            sys.argv.append('--quiet')
-        addresses_main()
+        from commands.extract import extract_addresses
+        extract_addresses(args)
 
         # Step 7: Add backfill
         print("\n=== Step 7: Adding backfill data ===")
-        from add_backfill import main as backfill_main
-        backfill_main(
+        from commands.extract import add_backfill
+        add_backfill(
             charity_tsv=f"{args.final_dir}/charity_latest.tsv",
             backfill_tsv=f"{args.final_dir}/backfill.tsv",
             output_dir=args.final_dir,
@@ -89,26 +83,13 @@ def run_all_pipeline(args):
 
         # Step 8: Extract grants
         print("\n=== Step 8: Extracting grants ===")
-        from extract_grants import main as grants_main
-        # Set up arguments for extract_grants
-        sys.argv = ['extract_grants.py', str(args.start_year), str(args.end_year),
-                   '--source-dir', args.analyzed_dir,
-                   '--zip-dir', args.zips_dir,
-                   '--output-dir', args.final_dir,
-                   '--minimumD', str(args.minimum_d),
-                   '--orgTypes', 'all',
-                   '--NOTTypes', '',
-                   '--worker-threads', str(args.worker_threads)]
-        if args.verbose:
-            sys.argv.append('--verbose')
-        if args.quiet:
-            sys.argv.append('--quiet')
-        grants_main()
+        from commands.extract import extract_grants
+        extract_grants(args)
 
         # Step 9: Check grants
         print("\n=== Step 9: Checking grants ===")
-        from grant_check import main as check_main
-        check_main(
+        from commands.analyze import check_grants
+        check_grants(
             index_file=f"{args.final_dir}/charity_latest_with_backfill.tsv",
             input_file=f"{args.final_dir}/grants_latest.tsv",
             output_file=f"{args.final_dir}/grants_final.tsv",
@@ -141,8 +122,8 @@ def run_all_pipeline(args):
 
         # Step 11: Generate reports
         print("\n=== Step 11: Generating reports ===")
-        from grant_report import main as report_main
-        report_main(
+        from commands.analyze import generate_grant_report
+        generate_grant_report(
             input_file=f"{args.final_dir}/grants_final.tsv",
             report_file=f"{args.final_dir}/final_report.md",
             verbose=args.verbose,
@@ -182,23 +163,47 @@ def run_from_step(args):
     start_step_num = steps.get(args.start_step, 1)
 
     try:
-        # Step 1: Download IRS ZIP files (if starting from here)
+        # Import optimization functions
+        from irs990tools import should_skip_download, should_skip_recompress, check_index_status
+
+        # Step 1: Download IRS ZIP files (if starting from here, always check website)
         if start_step_num <= 1:
             print("\n=== Step 1: Downloading IRS ZIP files ===")
-            from download_irs_990_zips import main as download_main
-            download_main(args.start_year, args.end_year, args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+            from commands.download import download_irs_zips
+            download_irs_zips(args.start_year, args.end_year, args.zips_dir, verbose=args.verbose, quiet=args.quiet)
 
         # Step 2: Recompress ZIP files (if starting from here)
         if start_step_num <= 2:
             print("\n=== Step 2: Recompressing ZIP files ===")
-            from recompress_irs_zips import main as recompress_main
-            recompress_main(zips_dir=args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+            skip_recompress = should_skip_recompress(args.zips_dir, args.start_year, args.end_year,
+                                                    force=getattr(args, 'force', False),
+                                                    verbose=args.verbose, quiet=args.quiet)
+
+            if not skip_recompress:
+                from commands.download import recompress_zips
+                recompress_zips(zips_dir=args.zips_dir, verbose=args.verbose, quiet=args.quiet)
+            else:
+                print("Skipping recompress step - no recompression needed")
+
+        # Step 2.5: Check and build indexes if needed (if starting from extract or earlier)
+        if start_step_num <= 3:
+            print("\n=== Step 2.5: Checking indexes ===")
+            indexes_up_to_date, xml_exists, ein_exists = check_index_status(args.zips_dir, args.start_year, args.end_year,
+                                                                           verbose=args.verbose, quiet=args.quiet)
+
+            if not indexes_up_to_date or not xml_exists:
+                print("Building/updating XML and EIN indexes...")
+                from commands.utilities import build_xml_index
+                build_xml_index(args.zips_dir, start_year=args.start_year, end_year=args.end_year,
+                              verbose=args.verbose, quiet=args.quiet)
+            else:
+                print("Indexes are up-to-date, skipping rebuild")
 
         # Step 3: Extract charity data (if starting from here)
         if start_step_num <= 3:
             print("\n=== Step 3: Extracting charity data ===")
-            from extract_charities import main as extract_main
-            extract_main(
+            from commands.extract import extract_charities
+            extract_charities(
                 start_year=args.start_year,
                 end_year=args.end_year,
                 input_dir=args.zips_dir,
@@ -212,18 +217,8 @@ def run_from_step(args):
         if start_step_num <= 4:
             print("\n=== Step 4: Analyzing charity data ===")
             try:
-                from analyze_charities import main as analyze_main
-                import sys
-                sys.argv = ['analyze_charities.py',
-                           '--input-dir', args.tsvs_dir,
-                           '--output-dir', args.analyzed_dir,
-                           '--start-year', str(args.start_year),
-                           '--stop-year', str(args.end_year)]
-                if args.verbose:
-                    sys.argv.append('--verbose')
-                if args.quiet:
-                    sys.argv.append('--quiet')
-                analyze_main()
+                from commands.analyze import analyze_charities
+                analyze_charities(args)
             except Exception as e:
                 print(f"Error in analyze step: {e}")
                 if args.verbose:
@@ -234,21 +229,8 @@ def run_from_step(args):
         if start_step_num <= 5:
             print("\n=== Step 5: Getting latest filings ===")
             try:
-                from get_latest import main as latest_main
-                import sys
-                sys.argv = ['get_latest.py', str(args.start_year), str(args.end_year),
-                           '--source-dir', args.analyzed_dir,
-                           '--zip-dir', args.zips_dir,
-                           '--output-dir', args.final_dir,
-                           '--minimumD', str(args.minimum_d),
-                           '--orgTypes', 'all',
-                           '--NOTTypes', '',
-                           '--worker-threads', str(args.worker_threads)]
-                if args.verbose:
-                    sys.argv.append('--verbose')
-                if args.quiet:
-                    sys.argv.append('--quiet')
-                latest_main()
+                from commands.analyze import get_latest_filings
+                get_latest_filings(args)
             except Exception as e:
                 print(f"Error in get-latest step: {e}")
                 if args.verbose:
@@ -259,17 +241,8 @@ def run_from_step(args):
         if start_step_num <= 6:
             print("\n=== Step 6: Extracting addresses ===")
             try:
-                from extract_addresses import main as addresses_main
-                import sys
-                sys.argv = ['extract_addresses.py', str(args.start_year), str(args.end_year),
-                           '--zip-dir', args.zips_dir,
-                           '--cache-dir', args.cache_dir,
-                           '--output-dir', args.final_dir]
-                if args.verbose:
-                    sys.argv.append('--verbose')
-                if args.quiet:
-                    sys.argv.append('--quiet')
-                addresses_main()
+                from commands.extract import extract_addresses
+                extract_addresses(args)
             except Exception as e:
                 print(f"Error in extract-addresses step: {e}")
                 if args.verbose:
@@ -280,8 +253,8 @@ def run_from_step(args):
         if start_step_num <= 7:
             print("\n=== Step 7: Adding backfill data ===")
             try:
-                from add_backfill import main as backfill_main
-                backfill_main(
+                from commands.extract import add_backfill
+                add_backfill(
                     charity_tsv=f"{args.final_dir}/charity_latest.tsv",
                     backfill_tsv=f"{args.final_dir}/backfill.tsv",
                     output_dir=args.final_dir,
@@ -298,21 +271,8 @@ def run_from_step(args):
         if start_step_num <= 8:
             print("\n=== Step 8: Extracting grants ===")
             try:
-                from extract_grants import main as grants_main
-                import sys
-                sys.argv = ['extract_grants.py', str(args.start_year), str(args.end_year),
-                           '--source-dir', args.analyzed_dir,
-                           '--zip-dir', args.zips_dir,
-                           '--output-dir', args.final_dir,
-                           '--minimumD', str(args.minimum_d),
-                           '--orgTypes', 'all',
-                           '--NOTTypes', '',
-                           '--worker-threads', str(args.worker_threads)]
-                if args.verbose:
-                    sys.argv.append('--verbose')
-                if args.quiet:
-                    sys.argv.append('--quiet')
-                grants_main()
+                from commands.extract import extract_grants
+                extract_grants(args)
             except Exception as e:
                 print(f"Error in extract-grants step: {e}")
                 if args.verbose:
@@ -322,8 +282,8 @@ def run_from_step(args):
         # Step 9: Check grants (if starting from here)
         if start_step_num <= 9:
             print("\n=== Step 9: Checking grants ===")
-            from grant_check import main as check_main
-            check_main(
+            from commands.analyze import check_grants
+            check_grants(
                 index_file=f"{args.final_dir}/charity_latest_with_backfill.tsv",
                 input_file=f"{args.final_dir}/grants_latest.tsv",
                 output_file=f"{args.final_dir}/grants_final.tsv",
@@ -358,8 +318,8 @@ def run_from_step(args):
         # Step 11: Generate reports (if starting from here)
         if start_step_num <= 11:
             print("\n=== Step 11: Generating reports ===")
-            from grant_report import main as report_main
-            report_main(
+            from commands.analyze import generate_grant_report
+            generate_grant_report(
                 input_file=f"{args.final_dir}/grants_final.tsv",
                 report_file=f"{args.final_dir}/final_report.md",
                 verbose=args.verbose,

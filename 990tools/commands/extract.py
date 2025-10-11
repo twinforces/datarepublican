@@ -19,12 +19,23 @@ def extract_charities(start_year, end_year, input_dir, output_dir, verbose=False
         writer_threads=writer_threads
     )
 
-def extract_addresses(start_year, end_year, zip_dir, cache_dir, output_dir,
-                     sample_xml=None, backfill_source=None, force_reprocess=False,
-                     verbose=False, quiet=False):
+def extract_addresses(args):
     """Extract address data for charity matching."""
     import extract_addresses
-    extract_addresses.extract_addresses_main(
+
+    # Extract arguments from args object
+    start_year = args.start_year
+    end_year = args.end_year
+    zip_dir = getattr(args, 'zip_dir', args.zips_dir)
+    cache_dir = getattr(args, 'cache_dir', args.cache_dir)
+    output_dir = getattr(args, 'output_dir', args.final_dir)
+    sample_xml = getattr(args, 'sample_xml', None)
+    backfill_source = getattr(args, 'backfill_source', None)
+    force_reprocess = getattr(args, 'force_reprocess', False)
+    verbose = args.verbose
+    quiet = args.quiet
+
+    extract_addresses.main(
         start_year=start_year,
         end_year=end_year,
         zip_dir=zip_dir,
@@ -37,12 +48,25 @@ def extract_addresses(start_year, end_year, zip_dir, cache_dir, output_dir,
         quiet=quiet
     )
 
-def extract_grants(start_year, end_year, zip_dir, cache_dir, output_dir,
-                  charity_source, minimum_d=10_000_000, org_types='all', not_types='',
-                  worker_threads=16, verbose=False, quiet=False):
+def extract_grants(args):
     """Extract grant data from IRS filings."""
     import extract_grants
-    extract_grants.extract_grants_main(
+
+    # Extract arguments from args object
+    start_year = args.start_year
+    end_year = args.end_year
+    zip_dir = getattr(args, 'zip_dir', args.zips_dir)
+    cache_dir = getattr(args, 'cache_dir', args.cache_dir)
+    output_dir = getattr(args, 'output_dir', args.final_dir)
+    charity_source = f"{args.final_dir}/charity_latest_with_backfill.tsv"
+    minimum_d = getattr(args, 'minimum_d', 0)
+    org_types = 'all'
+    not_types = ''
+    worker_threads = getattr(args, 'worker_threads', 16)
+    verbose = args.verbose
+    quiet = args.quiet
+
+    extract_grants.main(
         start_year=start_year,
         end_year=end_year,
         zip_dir=zip_dir,
