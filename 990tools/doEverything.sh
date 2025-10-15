@@ -35,9 +35,19 @@ rm -f "$ANAL_DIR"/*.tsv
 rm -f "$FINAL_DIR"/*.tsv
 rm -f "$BROWSE"/*.tsv
 
-# Run the complete pipeline using the new unified tool
-echo "Running complete IRS 990 processing pipeline..."
-python irs990tools.py run-all \
+# Run the complete pipeline using the new unified tool with performance timing
+echo "Running complete IRS 990 processing pipeline with performance monitoring..."
+LOG_FILE="$FINAL_DIR/pipeline_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging to: $LOG_FILE"
+
+# Start overall timing
+OVERALL_START=$(date +%s)
+echo "=== Pipeline Performance Test Started: $(date) ===" >> "$LOG_FILE"
+echo "Processing years: $START_YEAR-$END_YEAR (full dataset for bottleneck analysis)" >> "$LOG_FILE"
+echo "Worker threads: $WORKER_THREADS" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+python irs990tools.py --command run-all \
   --start-year $START_YEAR \
   --end-year $END_YEAR \
   --zips-dir "$ZIPS_DIR" \
@@ -48,7 +58,15 @@ python irs990tools.py run-all \
   --cache-dir "$ANAL_DIR/_cache" \
   --minimum-d $MINIMUM_D \
   --worker-threads $WORKER_THREADS \
-  --verbose
+  --verbose 2>&1 | tee -a "$LOG_FILE"
+
+# Calculate overall duration
+OVERALL_END=$(date +%s)
+OVERALL_DURATION=$((OVERALL_END - OVERALL_START))
+echo "" >> "$LOG_FILE"
+echo "=== Pipeline Performance Summary ===" >> "$LOG_FILE"
+echo "Total execution time: $OVERALL_DURATION seconds" >> "$LOG_FILE"
+echo "Pipeline completed at: $(date)" >> "$LOG_FILE"
 
 # Check if pipeline completed successfully
 if [ $? -ne 0 ]; then
@@ -64,16 +82,18 @@ echo "=== Post-processing ==="
 
 
 # this will aggregate grants by the same filer to the same grantee in the same tax year, which usually cuts the file by a half to a third.
-./combine_grants.sh $FINAL_DIR/grants_latest.tsv $FINAL_DIR/grants_combined.tsv
-./combine_grants.sh $FINAL_DIR/inferred_grants.tsv  $FINAL_DIR/grants_pf_combined.tsv
+echo "Combining grants..."
+./combine_grants.sh $FINAL_DIR/grants_latest.tsv $FINAL_DIR/grants_combined.tsv 2>&1 | tee -a "$LOG_FILE"
+./combine_grants.sh $FINAL_DIR/inferred_grants.tsv  $FINAL_DIR/grants_pf_combined.tsv 2>&1 | tee -a "$LOG_FILE"
 
 #there are EINs that have gotten money that don't file 990s, (state/local govt i.e. state unis, churches, etc)
-python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/filter_501.md
-python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_pf_combined.tsv --output-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/filter_pf.md
+echo "Checking grants..."
+python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_combined.tsv --output-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/filter_501.md 2>&1 | tee -a "$LOG_FILE"
+python grant_check.py --index-file $FINAL_DIR/charity_latest_with_backfill.tsv --input-file  $FINAL_DIR/grants_pf_combined.tsv --output-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/filter_pf.md 2>&1 | tee -a "$LOG_FILE"
 
-
-python grant_report.py --input-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/final_report.md
-python grant_report.py --input-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/pf_report.md
+echo "Generating reports..."
+python grant_report.py --input-file $FINAL_DIR/grants_final.tsv --report-file $FINAL_DIR/final_report.md 2>&1 | tee -a "$LOG_FILE"
+python grant_report.py --input-file $FINAL_DIR/grants_pf.tsv --report-file $FINAL_DIR/pf_report.md 2>&1 | tee -a "$LOG_FILE"
 
 # so all that work to filtered out the charities by size? guess what? We over filtered have to copy some charities back so the grants have a destination to go to! Need to do that for both sets of grants, thanks for playing!
 
@@ -86,19 +106,22 @@ python grant_report.py --input-file $FINAL_DIR/grants_pf.tsv --report-file $FINA
 wc -l $FINAL_DIR/*.tsv 
 
 # zip everything and move it into place
-mv $FINAL_DIR/charity_latest.tsv $FINAL_DIR/charity_latest_without_backfill.tsv
-mv $FINAL_DIR/charity_latest_with_backfill.tsv $FINAL_DIR/charity_latest.tsv
-cp $FINAL_DIR/grants_final.tsv $BROWSE
-cp $FINAL_DIR/grants_pf.tsv $BROWSE/grants.pf.tsv
-cp $FINAL_DIR/charity_latest.tsv $BROWSE/charities.tsv
-cp $FINAL_DIR/contractors.tsv $BROWSE 2>/dev/null || echo "contractors.tsv not found, skipping..."
-cp $FINAL_DIR/political_contributions.tsv $BROWSE 2>/dev/null || echo "political_contributions.tsv not found, skipping..."
+echo "Finalizing files..."
+mv $FINAL_DIR/charity_latest.tsv $FINAL_DIR/charity_latest_without_backfill.tsv 2>&1 | tee -a "$LOG_FILE"
+mv $FINAL_DIR/charity_latest_with_backfill.tsv $FINAL_DIR/charity_latest.tsv 2>&1 | tee -a "$LOG_FILE"
+cp $FINAL_DIR/grants_final.tsv $BROWSE 2>&1 | tee -a "$LOG_FILE"
+cp $FINAL_DIR/grants_pf.tsv $BROWSE/grants.pf.tsv 2>&1 | tee -a "$LOG_FILE"
+cp $FINAL_DIR/charity_latest.tsv $BROWSE/charities.tsv 2>&1 | tee -a "$LOG_FILE"
+cp $FINAL_DIR/contractors.tsv $BROWSE 2>/dev/null || echo "contractors.tsv not found, skipping..." 2>&1 | tee -a "$LOG_FILE"
+cp $FINAL_DIR/political_contributions.tsv $BROWSE 2>/dev/null || echo "political_contributions.tsv not found, skipping..." 2>&1 | tee -a "$LOG_FILE"
 
-
+echo "Splitting TSVs for web interface..."
 pushd $BROWSE
-rm -rf $BROWSE/tsv_chunks
-$TOOLS/split_tsvs.sh
+rm -rf $BROWSE/tsv_chunks 2>&1 | tee -a "$LOG_FILE"
+$TOOLS/split_tsvs.sh 2>&1 | tee -a "$LOG_FILE"
 popd
+
+echo "Pipeline complete! Log saved to: $LOG_FILE"
 
 
 

@@ -13,35 +13,15 @@ import argparse
 import sys
 import os
 import json
-import logging
-import zipfile
-import glob
-import threading
-import queue
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-from collections import defaultdict
-import re
-from lxml import etree
-from io import BytesIO
-import csv
-import time
-import psutil
-from countryCodes import lookupCC
 
 # Import configuration
-from config import get_config, get_config_value
-
-# Import utility modules
-import extract_utils as cu
-from parse_utils import parse_grants, parse_contributions
+from config import get_config
 
 # Import our modular command functions
-from utils.args import add_common_args, add_year_args, add_directory_args, add_processing_args, add_pipeline_dirs
+from utils.args import add_common_args, add_year_args, add_directory_args, add_processing_args, add_pipeline_dirs, resolve_directory_args
 from commands.download import download_irs_zips, recompress_zips
 from commands.extract import extract_charities, extract_addresses, extract_grants, add_backfill
-from commands.analyze import analyze_charities, get_latest_filings, filter_charities, check_grants, generate_grant_report
+from commands.analyze import analyze_charities, get_latest_filings, filter_charities, check_grants
 from commands.pipeline import run_all_pipeline, run_from_step
 from commands.utilities import extract_ein_files, build_xml_index
 
@@ -67,6 +47,182 @@ def setup_module_logging(output_dir, log_filename, verbose, quiet):
 def log_error(msg_format, *args, ein=None, exc_info=False):
     """Log an error message."""
     cu.log_error(msg_format, *args, ein=ein, exc_info=exc_info)
+def check_zips_directory_status(zips_dir, start_year, end_year, verbose=False, quiet=False):
+    """Check if ZIP files are present and up-to-date for the given year range."""
+    import os
+    import glob
+
+    if not os.path.exists(zips_dir):
+        if not quiet:
+            print(f"ZIP directory {zips_dir} does not exist")
+        return False, 0
+
+    # Count ZIP files in the year range
+    zip_pattern = os.path.join(zips_dir, "*.zip")
+    zip_files = glob.glob(zip_pattern)
+    year_range_files = []
+
+    for zip_path in zip_files:
+        zip_filename = os.path.basename(zip_path)
+        if zip_filename[:4].isdigit():
+            zip_year = int(zip_filename[:4])
+            if start_year <= zip_year <= end_year:
+                year_range_files.append(zip_path)
+
+    file_count = len(year_range_files)
+
+    if not quiet:
+        print(f"Found {file_count} ZIP files in {zips_dir} for years {start_year}-{end_year}")
+
+    return file_count > 0, file_count
+
+def should_skip_download(zips_dir, start_year, end_year, force=False, verbose=False, quiet=False):
+    """Determine if download step should be skipped."""
+    if force:
+        if not quiet:
+            print("Force download requested, proceeding...")
+        return False
+
+    has_files, file_count = check_zips_directory_status(zips_dir, start_year, end_year, verbose, quiet)
+
+    if has_files:
+        if not quiet:
+            print(f"ZIP files already present ({file_count} files), skipping download step")
+        return True
+
+    if not quiet:
+        print("No ZIP files found, download required")
+    return False
+
+def should_skip_recompress(zips_dir, start_year, end_year, force=False, verbose=False, quiet=False):
+    """Determine if recompress step should be skipped."""
+    if force:
+        if not quiet:
+            print("Force recompress requested, proceeding...")
+        return False
+
+    has_files, file_count = check_zips_directory_status(zips_dir, start_year, end_year, verbose, quiet)
+
+    if not has_files:
+        if not quiet:
+            print("No ZIP files to recompress, skipping recompress step")
+        return True
+
+    # Check if any files need recompression (this is a simple check)
+    # In a real implementation, you might check file sizes or corruption
+    if not quiet:
+        print(f"ZIP files present ({file_count} files), checking if recompression needed...")
+
+    # For now, assume recompression is needed if files exist
+    # Could be enhanced to check file integrity
+    return False
+
+def get_index_paths(zips_dir):
+    """Get the standard index file paths within the zips directory."""
+    xml_index_file = os.path.join(zips_dir, 'xml_zip_index.json')
+    ein_index_file = os.path.join(zips_dir, 'ein_xml_index.json')
+    return xml_index_file, ein_index_file
+
+def check_index_status(zips_dir, start_year, end_year, verbose=False, quiet=False):
+    """Check if indexes exist and are up-to-date."""
+    xml_index_file, ein_index_file = get_index_paths(zips_dir)
+
+    xml_index_exists = os.path.exists(xml_index_file) and os.path.getsize(xml_index_file) > 0
+    ein_index_exists = os.path.exists(ein_index_file) and os.path.getsize(ein_index_file) > 0
+
+    if not quiet:
+        if xml_index_exists:
+            print(f"XML index found: {xml_index_file}")
+        else:
+            print(f"XML index not found or empty: {xml_index_file}")
+
+        if ein_index_exists:
+            print(f"EIN index found: {ein_index_file}")
+        else:
+            print(f"EIN index not found or empty: {ein_index_file}")
+
+    # Get list of ZIP files in the directory
+    import glob
+    zip_pattern = os.path.join(zips_dir, "*.zip")
+    zip_files = glob.glob(zip_pattern)
+
+    if not zip_files:
+        if not quiet:
+            print("No ZIP files found in directory")
+        return True, xml_index_exists, ein_index_exists
+
+    # Check if indexes are newer than ZIP files
+    if xml_index_exists:
+        # Get the newest ZIP file modification time (only consider ZIPs in year range)
+        year_range_zips = []
+        for zip_path in zip_files:
+            zip_filename = os.path.basename(zip_path)
+            if zip_filename[:4].isdigit():
+                zip_year = int(zip_filename[:4])
+                if start_year <= zip_year <= end_year:
+                    year_range_zips.append(zip_path)
+
+        if year_range_zips:
+            newest_zip_time = max(os.path.getmtime(zip_file) for zip_file in year_range_zips)
+            index_time = os.path.getmtime(xml_index_file)
+
+            if verbose and not quiet:
+                print(f"DEBUG: Index timestamp: {index_time} ({os.path.getctime(xml_index_file)})")
+                print(f"DEBUG: Newest ZIP timestamp in range: {newest_zip_time}")
+                print(f"DEBUG: Year range ZIPs: {[os.path.basename(z) for z in year_range_zips]}")
+
+            if index_time < newest_zip_time:
+                if not quiet:
+                    print("Index is older than some ZIP files in year range, rebuild recommended")
+                    if verbose:
+                        print(f"  Index time: {index_time}")
+                        print(f"  Newest ZIP time: {newest_zip_time}")
+                        newest_zip = max(year_range_zips, key=os.path.getmtime)
+                        print(f"  Newest ZIP: {os.path.basename(newest_zip)}")
+                return False, xml_index_exists, ein_index_exists
+        else:
+            if verbose and not quiet:
+                print(f"DEBUG: No ZIP files found in year range {start_year}-{end_year}")
+
+        # Validate that index contains entries for all current ZIP files
+        try:
+            with open(xml_index_file, 'r') as f:
+                xml_index = json.load(f)
+
+            # Get list of ZIP files that should be in the index (within year range)
+            expected_zips = set()
+            for zip_path in zip_files:
+                zip_filename = os.path.basename(zip_path)
+                if zip_filename[:4].isdigit():
+                    zip_year = int(zip_filename[:4])
+                    if start_year <= zip_year <= end_year:
+                        expected_zips.add(zip_path)
+
+            # Check if all expected ZIPs are in the index
+            indexed_zips = set(xml_index.values())
+            missing_zips = expected_zips - indexed_zips
+
+            if verbose and not quiet:
+                print(f"DEBUG: Expected ZIPs in range: {len(expected_zips)}")
+                print(f"DEBUG: Indexed ZIPs total: {len(indexed_zips)}")
+                print(f"DEBUG: Missing ZIPs: {len(missing_zips)}")
+                if missing_zips:
+                    print(f"DEBUG: Missing: {[os.path.basename(z) for z in missing_zips]}")
+
+            if missing_zips:
+                if not quiet:
+                    print(f"Index is missing {len(missing_zips)} ZIP files, rebuild recommended")
+                    if verbose:
+                        for missing in missing_zips:
+                            print(f"  Missing: {os.path.basename(missing)}")
+                return False, xml_index_exists, ein_index_exists
+
+        except (json.JSONDecodeError, KeyError) as e:
+            if not quiet:
+                print(f"Index file is corrupted or invalid: {e}, rebuild recommended")
+            return False, xml_index_exists, ein_index_exists
+
+    return True, xml_index_exists, ein_index_exists
 
 
 
@@ -110,6 +266,9 @@ Examples:
     add_directory_args(parser)
     add_processing_args(parser)
     add_pipeline_dirs(parser)
+
+    # Force option for overriding optimizations
+    parser.add_argument('--force', action='store_true', help='Force execution of all steps, ignoring optimizations')
 
     # Add command-specific arguments
     config = get_config()
@@ -182,6 +341,9 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
+    # Resolve directory arguments based on data-root
+    args = resolve_directory_args(args)
+
     # Handle positional arguments for backward compatibility
     if args.command == 'extract-ein':
         if args.positional_ein and not args.ein:
@@ -194,6 +356,14 @@ def main():
         elif not args.start_step and not args.positional_start_step:
             parser.error("--start-step is required for run-from command")
 
+    # For commands that need years, ensure they're provided
+    year_required_commands = ['download', 'extract-charities', 'get-latest', 'extract-addresses', 'extract-grants', 'run-all']
+    if args.command in year_required_commands:
+        if not hasattr(args, 'start_year') or args.start_year is None:
+            parser.error(f"--start-year is required for {args.command} command")
+        if not hasattr(args, 'end_year') or args.end_year is None:
+            parser.error(f"--end-year is required for {args.command} command")
+
     # Load configuration
     config_file = getattr(args, 'config', None)
     config = get_config(config_file)
@@ -205,14 +375,11 @@ def main():
     # Dispatch to appropriate command handler
     try:
         if args.command == 'download':
-            from download_irs_990_zips import main as download_main
-            download_main(args.start_year, args.end_year, args.dest, verbose=verbose, quiet=quiet)
+            download_irs_zips(args.start_year, args.end_year, args.dest, verbose=verbose, quiet=quiet)
         elif args.command == 'recompress':
-            from recompress_irs_zips import main as recompress_main
-            recompress_main(zips_dir=args.zips_dir, verbose=verbose, quiet=quiet)
+            recompress_zips(zips_dir=args.zips_dir, verbose=verbose, quiet=quiet)
         elif args.command == 'extract-charities':
-            from extract_charities import main as extract_main
-            extract_main(
+            extract_charities(
                 start_year=args.start_year,
                 end_year=args.end_year,
                 input_dir=args.input_dir,
@@ -225,69 +392,68 @@ def main():
                 writer_threads=args.writer_threads
             )
         elif args.command == 'analyze-charities':
-            from analyze_charities import main as analyze_main
-            # analyze_charities.main() handles its own argument parsing
-            sys.argv = ['analyze_charities.py',
-                       '--input-dir', args.input_dir,
-                       '--output-dir', args.output_dir,
-                       '--start-year', str(args.start_year),
-                       '--stop-year', str(args.end_year)]
-            analyze_main()
+            # Call analyze_charities with required arguments
+            analyze_charities(
+                input_dir=args.input_dir,
+                output_dir=args.output_dir,
+                start_year=args.start_year,
+                stop_year=args.end_year,
+                verbose=verbose,
+                quiet=quiet
+            )
         elif args.command == 'get-latest':
-            from get_latest import main as latest_main
-            # get_latest.main() handles its own argument parsing
-            sys.argv = ['get_latest.py', str(args.start_year), str(args.end_year),
-                       '--source-dir', args.source_dir,
-                       '--zip-dir', args.zip_dir,
-                       '--output-dir', args.output_dir,
-                       '--minimumD', str(args.minimum_d),
-                       '--orgTypes', args.org_types,
-                       '--NOTTypes', args.not_types,
-                       '--worker-threads', str(args.worker_threads)]
-            if verbose:
-                sys.argv.append('--verbose')
-            if quiet:
-                sys.argv.append('--quiet')
-            latest_main()
+            # Call get_latest_filings with required arguments
+            get_latest_filings(
+                start_year=args.start_year,
+                end_year=args.end_year,
+                source_dir=args.source_dir,
+                zip_dir=args.zip_dir,
+                output_dir=args.output_dir,
+                minimum_d=getattr(args, 'minimum_d', 0),
+                org_types=getattr(args, 'org_types', 'all'),
+                not_types=getattr(args, 'not_types', ''),
+                worker_threads=getattr(args, 'worker_threads', 16),
+                verbose=verbose,
+                quiet=quiet
+            )
         elif args.command == 'extract-addresses':
-            from extract_addresses import main as addresses_main
-            # extract_addresses.main() handles its own argument parsing
-            sys.argv = ['extract_addresses.py', str(args.start_year), str(args.end_year),
-                       '--zip-dir', args.zip_dir,
-                       '--cache-dir', args.cache_dir,
-                       '--output-dir', args.output_dir]
-            if verbose:
-                sys.argv.append('--verbose')
-            if quiet:
-                sys.argv.append('--quiet')
-            addresses_main()
+            # Call extract_addresses with required arguments
+            extract_addresses(
+                start_year=args.start_year,
+                end_year=args.end_year,
+                zip_dir=args.zip_dir,
+                cache_dir=args.cache_dir,
+                output_dir=args.output_dir,
+                sample_xml=getattr(args, 'sample_xml', None),
+                backfill_source=getattr(args, 'backfill_source', None),
+                force_reprocess=getattr(args, 'force_reprocess', False),
+                verbose=verbose,
+                quiet=quiet
+            )
         elif args.command == 'add-backfill':
-            from add_backfill import main as backfill_main
-            backfill_main(args.charity_tsv, args.backfill_tsv, args.output_dir, verbose=verbose, quiet=quiet)
+            add_backfill(args.charity_tsv, args.backfill_tsv, args.output_dir, verbose=verbose, quiet=quiet)
         elif args.command == 'extract-grants':
-            from extract_grants import main as grants_main
-            # extract_grants.main() handles its own argument parsing
-            sys.argv = ['extract_grants.py', str(args.start_year), str(args.end_year),
-                       '--source-dir', args.source_dir,
-                       '--zip-dir', args.zip_dir,
-                       '--output-dir', args.output_dir,
-                       '--minimumD', str(args.minimum_d),
-                       '--orgTypes', args.org_types,
-                       '--NOTTypes', args.not_types,
-                       '--worker-threads', str(args.worker_threads)]
-            if verbose:
-                sys.argv.append('--verbose')
-            if quiet:
-                sys.argv.append('--quiet')
-            grants_main()
+            # Call extract_grants with required arguments
+            extract_grants(
+                start_year=args.start_year,
+                end_year=args.end_year,
+                zip_dir=args.zip_dir,
+                cache_dir=args.cache_dir,
+                output_dir=args.output_dir,
+                charity_source=args.charity_source,
+                minimum_d=getattr(args, 'minimum_d', 0),
+                org_types=getattr(args, 'org_types', 'all'),
+                not_types=getattr(args, 'not_types', ''),
+                worker_threads=getattr(args, 'worker_threads', 16),
+                verbose=verbose,
+                quiet=quiet
+            )
         elif args.command == 'filter-charities':
-            from charity_filter import main as filter_main
-            filter_main(args.input_file, args.output_file, args.filter_column,
-                       args.filter_value, getattr(args, 'columns', None), getattr(args, 'analysis_md', 'analysis.md'),
-                       verbose=verbose, quiet=quiet)
+            filter_charities(args.input_file, args.output_file, args.filter_column,
+                           args.filter_value, getattr(args, 'columns', None), getattr(args, 'analysis_md', 'analysis.md'),
+                           verbose=verbose, quiet=quiet)
         elif args.command == 'check-grants':
-            from grant_check import main as check_main
-            check_main()
+            check_grants()
         elif args.command == 'run-all':
             run_all_pipeline(args)
         elif args.command == 'run-from':

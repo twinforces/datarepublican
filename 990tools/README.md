@@ -29,13 +29,17 @@ pip install -e .
 ```bash
 cd 990tools
 python irs990tools.py --help
+# Or run commands directly:
+python irs990tools.py --command run-all --start-year 2017 --end-year 2025
 ```
 
 ## Quick Start
 
+**Note**: All commands now require the `--command` flag followed by the specific command name.
+
 ### Run Complete Pipeline
 ```bash
-python irs990tools.py run-all \
+python irs990tools.py --command run-all \
   --start-year 2017 \
   --end-year 2025 \
   --zips-dir /Volumes/Data/irs_zips \
@@ -47,7 +51,7 @@ python irs990tools.py run-all \
 
 #### Download IRS ZIP files
 ```bash
-python irs990tools.py download \
+python irs990tools.py --command download \
   --start-year 2017 \
   --end-year 2025 \
   --dest /Volumes/Data/irs_zips
@@ -55,7 +59,7 @@ python irs990tools.py download \
 
 #### Extract charity data
 ```bash
-python irs990tools.py extract-charities \
+python irs990tools.py --command extract-charities \
   --start-year 2017 \
   --end-year 2025 \
   --input-dir /Volumes/Data/irs_zips \
@@ -65,7 +69,7 @@ python irs990tools.py extract-charities \
 
 #### Analyze charities
 ```bash
-python irs990tools.py analyze-charities \
+python irs990tools.py --command analyze-charities \
   --start-year 2017 \
   --stop-year 2025 \
   --input-dir /Volumes/Data/tsvs \
@@ -74,7 +78,7 @@ python irs990tools.py analyze-charities \
 
 #### Get latest filings
 ```bash
-python irs990tools.py get-latest \
+python irs990tools.py --command get-latest \
   --start-year 2017 \
   --end-year 2025 \
   --source-dir /Volumes/Data/atsvs \
@@ -85,7 +89,7 @@ python irs990tools.py get-latest \
 
 #### Filter charities
 ```bash
-python irs990tools.py filter-charities \
+python irs990tools.py --command filter-charities \
   --input-file /Volumes/Data/final/charity_latest.tsv \
   --output-file /Volumes/Data/final/charities_1M.tsv \
   --filter-column denominator \
@@ -94,7 +98,7 @@ python irs990tools.py filter-charities \
 
 #### Check grants
 ```bash
-python irs990tools.py check-grants \
+python irs990tools.py --command check-grants \
   --index-file /Volumes/Data/final/charity_latest.tsv \
   --input-file /Volumes/Data/final/grants.tsv \
   --output-file /Volumes/Data/final/grants_final.tsv \
@@ -103,7 +107,8 @@ python irs990tools.py check-grants \
 
 #### Run pipeline from specific step
 ```bash
-python irs990tools.py run-from extract \
+python irs990tools.py --command run-from \
+  --start-step extract \
   --start-year 2020 \
   --end-year 2023 \
   --zips-dir /Volumes/Data/irs_zips \
@@ -112,7 +117,8 @@ python irs990tools.py run-from extract \
 
 #### Extract XML files for specific EIN
 ```bash
-python irs990tools.py extract-ein 271414646 \
+python irs990tools.py --command extract-ein \
+  --ein 271414646 \
   --zips-dir /Volumes/Data/irs_zips \
   --output-dir ./ein_extracted \
   --index-file ./xml_index.json
@@ -120,7 +126,7 @@ python irs990tools.py extract-ein 271414646 \
 
 #### Build XML to ZIP index
 ```bash
-python irs990tools.py build-index \
+python irs990tools.py --command build-index \
   --zips-dir /Volumes/Data/irs_zips \
   --index-file ./xml_zip_index.json \
   --start-year 2017 \
@@ -137,7 +143,7 @@ The module includes sensible defaults, but you can customize behavior with a con
 python -c "from config import save_default_config; save_default_config()"
 
 # Use custom config
-python irs990tools.py --config my_config.json run-all
+python irs990tools.py --config my_config.json --command run-all
 ```
 
 ### Configuration File Format
@@ -254,10 +260,10 @@ The `run-from` command allows you to start the processing pipeline from any step
 
 ```bash
 # Start from extraction (skip download/recompress)
-python irs990tools.py run-from extract --start-year 2022 --end-year 2023
+python irs990tools.py --command run-from --start-step extract --start-year 2022 --end-year 2023
 
 # Start from analysis (skip earlier steps)
-python irs990tools.py run-from analyze --start-year 2022 --end-year 2023
+python irs990tools.py --command run-from --start-step analyze --start-year 2022 --end-year 2023
 ```
 
 ### Extract EIN Files
@@ -268,10 +274,10 @@ The `extract-ein` command extracts all XML files for a specific EIN across all Z
 
 ```bash
 # Extract all CHAI filings
-python irs990tools.py extract-ein 271414646 --output-dir ./chai_filings
+python irs990tools.py --command extract-ein --ein 271414646 --output-dir ./chai_filings
 
 # Use existing index for faster extraction
-python irs990tools.py extract-ein 271414646 --index-file ./xml_index.json
+python irs990tools.py --command extract-ein --ein 271414646 --index-file ./xml_index.json
 ```
 
 ### Build XML Index
@@ -282,10 +288,10 @@ The `build-index` command creates a mapping of XML files to their containing ZIP
 
 ```bash
 # Build comprehensive index
-python irs990tools.py build-index --index-file ./xml_zip_index.json
+python irs990tools.py --command build-index --index-file ./xml_zip_index.json
 
 # Build index for specific year range
-python irs990tools.py build-index --start-year 2020 --end-year 2023 --index-file ./recent_index.json
+python irs990tools.py --command build-index --start-year 2020 --end-year 2023 --index-file ./recent_index.json
 ```
 
 ## Dependencies
@@ -340,7 +346,7 @@ python analyze_charities.py --start-year 2017 --stop-year 2025 --input-dir $OUT_
 ### After (New Approach)
 ```bash
 # Single command with all enhancements
-python irs990tools.py run-all \
+python irs990tools.py --command run-all \
   --start-year 2017 \
   --end-year 2025 \
   --zips-dir /Volumes/Data/irs_zips \
@@ -359,11 +365,11 @@ python irs990tools.py run-all \
 ### Testing
 ```bash
 # Test individual commands
-python irs990tools.py download --help
-python irs990tools.py extract-charities --start-year 2020 --end-year 2020 --input-dir ./test_zips --output-dir ./test_output
+python irs990tools.py --command download --help
+python irs990tools.py --command extract-charities --start-year 2020 --end-year 2020 --input-dir ./test_zips --output-dir ./test_output
 
 # Test pipeline
-python irs990tools.py run-all --start-year 2020 --end-year 2020 [other options]
+python irs990tools.py --command run-all --start-year 2020 --end-year 2020 [other options]
 ```
 
 ## Troubleshooting
@@ -377,7 +383,7 @@ python irs990tools.py run-all --start-year 2020 --end-year 2020 [other options]
 
 ### Debug Mode
 ```bash
-python irs990tools.py --verbose run-all [options]
+python irs990tools.py --command run-all --verbose [options]
 ```
 
 ## Contributing

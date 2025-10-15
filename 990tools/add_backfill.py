@@ -6,10 +6,11 @@ import subprocess
 import tempfile
 import shutil
 import extract_utils as cu
+from extract_utils import perform_batch_geocoding, get_colocator_for_address
 
 # Constants
 BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
-CSV_QUOTE_FIELDS = ['filer_name', 'org_type', 'form_type', 'xml_name', 'foreign_office', 'domestic_misrep_flag']
+CSV_QUOTE_FIELDS = ['filer_name', 'org_type', 'form_type', 'xml_name', 'foreign_office', 'domestic_misrep_flag', 'colocator']
 
 # Logging setup
 logger = None
@@ -72,6 +73,18 @@ def process_backfill_rows(sorted_backfill_file, charity_header):
                 new_row['filer_name'] = name
                 new_row['form_type'] = 'backfill'
                 new_row['xml_name'] = 'backfill'
+
+                # Generate colocator using geocoding for backfill entries
+                canonical_address = row.get('canonical_address', '')
+                po_box = row.get('po_box', '')
+                zip_code = row.get('zip_code', '')
+                if canonical_address or po_box or zip_code:
+                    address_dict = {'canonical': canonical_address, 'po_box': po_box, 'zip_code': zip_code}
+                    colocator = get_colocator_for_address(address_dict)
+                    new_row['colocator'] = colocator
+                else:
+                    new_row['colocator'] = ''
+
                 unique_rows.append(new_row)
                 if args.verbose:
                     log_error("Selected backfill row for EIN={}, Name={}", ein, name)
@@ -106,6 +119,9 @@ def main(charity_tsv=None, backfill_tsv=None, output_dir=".", verbose=False, qui
 
     if not quiet:
         print("Adding backfill data to charity records...")
+
+    # Perform batch geocoding before processing backfill
+    perform_batch_geocoding()
 
     try:
         # Read charity_latest.tsv header

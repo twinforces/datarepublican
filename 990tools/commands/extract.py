@@ -3,7 +3,7 @@ Data extraction related commands
 """
 
 def extract_charities(start_year, end_year, input_dir, output_dir, verbose=False, quiet=False,
-                     worker_threads=16, batch_size=500, write_buffer_size=10000, writer_threads=1):
+                      worker_threads=16, batch_size=500, write_buffer_size=10000, writer_threads=1):
     """Extract charity data from IRS XML files."""
     from extract_charities import main as extract_main
     return extract_main(

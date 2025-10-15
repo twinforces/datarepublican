@@ -19,7 +19,7 @@ TSV_COLUMNS = [
     "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
     "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
     "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag", "xml_name",
-    "eating_seed_corn", "canonical_address"
+    "eating_seed_corn", "canonical_address", "mailing_zip", "colocator"
 ]
 
 PERCENTILE_COLS = {
@@ -67,11 +67,14 @@ def parse_float(value):
 
 def compute_percentiles(values, metric, exclude_zeros=False):
     """Compute percentiles and generate both standard histogram (20 bins) and percentile table (5% increments)."""
+    logger.debug(f"compute_percentiles called for {metric}, exclude_zeros={exclude_zeros}, len(values)={len(values)}")
     if exclude_zeros:
         valid_values = [v for v in values if v > 0]
     else:
         valid_values = [v for v in values if v != 0]
-    
+
+    logger.debug(f"valid_values length: {len(valid_values)}")
+
     if len(valid_values) == 0:
         logger.warning(f"No valid values for {metric} computation")
         return np.array([np.nan] * len(values), dtype=np.float64), [], []
@@ -91,8 +94,13 @@ def compute_percentiles(values, metric, exclude_zeros=False):
     over_max_count = sum(1 for v in values if v > max_value)
     valid_values = np.array([v for v in valid_values if 0 <= v <= max_value], dtype=np.float64)
 
+    logger.debug(f"After filtering 0-101, valid_values length: {len(valid_values)}")
+
     # Generate standard histogram (20 equal-width bins)
     bin_table = []
+    cumulative_count = 0
+    total_valid = len(valid_values)
+    logger.debug(f"total_valid: {total_valid}")
     if len(valid_values) > 0:
         bin_edges = np.linspace(0, max_value, 21)  # 20 bins from 0 to max_value
         counts, _ = np.histogram(valid_values, bins=bin_edges)
@@ -103,16 +111,16 @@ def compute_percentiles(values, metric, exclude_zeros=False):
             cumulative_count += count
             bin_values = valid_values[(valid_values >= bin_edges[i]) & (valid_values < bin_edges[i + 1])]
             if bin_values.size > 0:
-                bin_table.append((f"{bin_edges[i]:.0f}-{bin_edges[i + 1]:.0f}", 
-                                  (count, float(bin_values.min()), float(bin_values.max()), 
-                                   cumulative_count / total_valid * 100)))
+                bin_table.append((f"{bin_edges[i]:.0f}-{bin_edges[i + 1]:.0f}",
+                                  (count, float(bin_values.min()), float(bin_values.max()),
+                                   cumulative_count / total_valid * 100 if total_valid > 0 else 0.0)))
             else:
-                bin_table.append((f"{bin_edges[i]:.0f}-{bin_edges[i + 1]:.0f}", 
-                                  (0, None, None, cumulative_count / total_valid * 100)))
-    
+                bin_table.append((f"{bin_edges[i]:.0f}-{bin_edges[i + 1]:.0f}",
+                                  (0, None, None, cumulative_count / total_valid * 100 if total_valid > 0 else 0.0)))
+
     # Add -0 and +max entries to bin table
     bin_table.insert(0, ('-0', (negative_count, None, None, 0.0)))
-    bin_table.append((f'+{max_value:.0f}', (over_max_count, None, None, 100.0 if over_max_count > 0 else cumulative_count / total_valid * 100)))
+    bin_table.append((f'+{max_value:.0f}', (over_max_count, None, None, 100.0 if over_max_count > 0 else cumulative_count / total_valid * 100 if total_valid > 0 else 0.0)))
 
     # Collapse zero-count bins
     collapsed_bin_table = []
@@ -126,7 +134,7 @@ def compute_percentiles(values, metric, exclude_zeros=False):
             if j < len(bin_table):
                 next_range, (next_count, next_min, next_max, next_cum_pct) = bin_table[j]
                 if next_count > 0:
-                    collapsed_bin_table.append((f"{range_str}-{next_range}", 
+                    collapsed_bin_table.append((f"{range_str}-{next_range}",
                                                (next_count, next_min, next_max, next_cum_pct)))
                     i = j + 1
                     continue
@@ -186,13 +194,48 @@ def process_file(file_path, output_dir, histograms, top_bottom, lock):
         logger.error(f"Error reading {file_path}: {e}")
         return
 
-    org_type = df['org_type'].iloc[0]
+    org_type = str(df['org_type'].iloc[0])
     tax_year = df['tax_year'].iloc[0]
     output_filename = f"charities_{org_type.replace('(', '').replace(')', '').replace(' ', '').lower()}_{tax_year}_analyzed.tsv"
     output_path = os.path.join(output_dir, output_filename)
 
     # Log available columns for debugging
     logger.debug(f"Columns in {file_path}: {list(df.columns)}")
+
+    # Add colocator analysis
+    colocator_counts = defaultdict(int)
+    if 'colocator' in df.columns:
+        for colocator in df['colocator'].dropna():
+            if colocator and colocator != '':
+                colocator_counts[colocator] += 1
+
+    # Get top 100 colocators by count
+    top_colocators = sorted(colocator_counts.items(), key=lambda x: x[1], reverse=True)[:100]
+
+    # Log top colocator groups
+    if top_colocators:
+        logger.info(f"Top 10 colocator groups for {file_path}:")
+        for i, (colocator, count) in enumerate(top_colocators[:10]):
+            logger.info(f"  {i+1}. {colocator}: {count} charities")
+
+        # Get top 10 groups with their charities
+        colocator_groups = defaultdict(list)
+        for _, row in df.iterrows():
+            colocator = row.get('colocator', '')
+            if colocator and colocator != '':
+                colocator_groups[colocator].append({
+                    'ein': row.get('filer_ein', ''),
+                    'name': row.get('filer_name', ''),
+                    'zip': row.get('mailing_zip', ''),
+                    'total_exp': row.get('total_exp', 0)
+                })
+
+        # Log details for top groups
+        for colocator, count in top_colocators[:10]:
+            charities = colocator_groups[colocator][:5]  # Show first 5 charities
+            logger.info(f"Colocator {colocator} ({count} charities):")
+            for charity in charities:
+                logger.info(f"  - {charity['ein']}: {charity['name']} (${charity['total_exp']:,.0f})")
 
     # Recompute percentages from raw amounts
     df['receipt_amt'] = df['receipt_amt'].apply(parse_float)
@@ -329,39 +372,48 @@ def generate_grift_report(top_bottom, output_dir):
             ))
         logger.info(f"Generated grift report: {output_path}")
 
-def main():
-    parser = argparse.ArgumentParser(description="Analyze charity TSV files, compute percentiles, and generate reports.")
-    parser.add_argument('--input-dir', default='.', help='Directory containing input TSV files')
-    parser.add_argument('--output-dir', default='analyzed', help='Directory for output TSV files and reports')
-    parser.add_argument('--start-year', type=int, default=2016, help='Start year for processing')
-    parser.add_argument('--stop-year', type=int, default=2024, help='Stop year for processing')
-    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
-    parser.add_argument('--quiet', action='store_true', help='Suppress non-error output')
-    args = parser.parse_args()
+def main(input_dir='.', output_dir='analyzed', start_year=2016, stop_year=2024, verbose=False, quiet=False):
+    """Main function that can be called with arguments or use argparse for backward compatibility."""
+    if isinstance(input_dir, str) and input_dir.startswith('--'):
+        # Called from command line, use argparse
+        parser = argparse.ArgumentParser(description="Analyze charity TSV files, compute percentiles, and generate reports.")
+        parser.add_argument('--input-dir', default='.', help='Directory containing input TSV files')
+        parser.add_argument('--output-dir', default='analyzed', help='Directory for output TSV files and reports')
+        parser.add_argument('--start-year', type=int, default=2016, help='Start year for processing')
+        parser.add_argument('--stop-year', type=int, default=2024, help='Stop year for processing')
+        parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
+        parser.add_argument('--quiet', action='store_true', help='Suppress non-error output')
+        args = parser.parse_args()
+        input_dir = args.input_dir
+        output_dir = args.output_dir
+        start_year = args.start_year
+        stop_year = args.stop_year
+        verbose = args.verbose
+        quiet = args.quiet
 
     # Configure logging based on arguments
-    if args.quiet:
+    if quiet:
         logging.getLogger().setLevel(logging.ERROR)
-    elif args.verbose:
+    elif verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     else:
         logging.getLogger().setLevel(logging.INFO)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     histograms = {}
     top_bottom = {}
     lock = threading.Lock()
     threads = []
 
     tsv_files = []
-    for year in range(args.start_year, args.stop_year + 1):
-        tsv_files.extend(glob.glob(os.path.join(args.input_dir, f"charities_*_{year}.tsv")))
-    logger.info(f"Found {len(tsv_files)} TSV files for years {args.start_year} to {args.stop_year}")
+    for year in range(start_year, stop_year + 1):
+        tsv_files.extend(glob.glob(os.path.join(input_dir, f"charities_*_{year}.tsv")))
+    logger.info(f"Found {len(tsv_files)} TSV files for years {start_year} to {stop_year}")
 
     for file_path in tsv_files:
         thread = threading.Thread(
             target=process_file,
-            args=(file_path, args.output_dir, histograms, top_bottom, lock)
+            args=(file_path, output_dir, histograms, top_bottom, lock)
         )
         threads.append(thread)
         thread.start()
@@ -369,8 +421,8 @@ def main():
     for thread in tqdm(threads, desc="Waiting for threads"):
         thread.join()
 
-    generate_histogram_report(histograms, args.output_dir)
-    generate_grift_report(top_bottom, args.output_dir)
+    generate_histogram_report(histograms, output_dir)
+    generate_grift_report(top_bottom, output_dir)
 
     logger.info("Analysis and report generation complete.")
 

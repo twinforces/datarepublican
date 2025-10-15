@@ -21,16 +21,24 @@ def download_990_zips(start_year, end_year, dest_folder):
         os.makedirs(dest_folder)
 
     base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
+    print(f"Fetching {base_url}")
     response = requests.get(base_url)
+    print(f"Response status: {response.status_code}")
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
+    all_links = soup.find_all('a', href=True)
+    print(f"Found {len(all_links)} links on the page")
+    # Print sample links for debugging
+    for i, a in enumerate(all_links[:10]):
+        print(f"Link {i}: {a.get('href')} - {a.get_text().strip()[:50]}")
 
     for year in range(start_year, end_year + 1):
         year_str = str(year)
         # Find links containing the year and ending in .zip
-        zip_links = [a['href'] for a in soup.find_all('a', href=True) 
+        zip_links = [a['href'] for a in all_links
                      if year_str in a['href'] and a['href'].endswith('.zip') and 'TEOS_XML' in a['href']]
-        
+        print(f"For year {year}, found zip_links: {zip_links}")
+
         if not zip_links:
             print(f"No ZIP files found for {year}")
             continue

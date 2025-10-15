@@ -56,6 +56,13 @@ def index_and_filter(index_file, input_file, output_file, report_file=None, repo
                 grant_amt_idx = columns.index('grant_amt')
             except ValueError:
                 raise ValueError("grant_ein or grant_amt column not found in input file")
+    
+            # Check if colocator column exists and get its index
+            colocator_idx = None
+            try:
+                colocator_idx = columns.index('colocator')
+            except ValueError:
+                pass  # colocator column is optional
 
             # Write header to output
             out.write(header + '\n')
@@ -122,11 +129,36 @@ def index_and_filter(index_file, input_file, output_file, report_file=None, repo
 
 def main(index_file, input_file, output_file, report_file=None, report_depth=1000, verbose=False, quiet=False):
     """Main function for checking and filtering grant data."""
-    # Validate input files exist
-    if not Path(index_file).is_file():
-        raise FileNotFoundError(f"Index file '{index_file}' not found")
-    if not Path(input_file).is_file():
-        raise FileNotFoundError(f"Input file '{input_file}' not found")
+    from utils.args import find_file_path
+    import os
+
+    # Try to find files in multiple possible locations
+    data_root = '/Volumes/Data'
+    possible_dirs = [
+        os.path.join(data_root, 'final'),
+        os.path.join(data_root, 'tsvs'),
+        os.path.join(data_root, 'atsvs'),
+        data_root,
+        '.'
+    ]
+
+    # Find actual file paths
+    actual_index_file = find_file_path(possible_dirs, os.path.basename(index_file), "index file")
+    actual_input_file = find_file_path(possible_dirs, os.path.basename(input_file), "input file")
+
+    print(f"Looking for index_file: {index_file}")
+    print(f"Found index_file: {actual_index_file}, exists: {Path(actual_index_file).is_file()}")
+    print(f"Looking for input_file: {input_file}")
+    print(f"Found input_file: {actual_input_file}, exists: {Path(actual_input_file).is_file()}")
+
+    if not Path(actual_index_file).is_file():
+        raise FileNotFoundError(f"Index file '{actual_index_file}' not found")
+    if not Path(actual_input_file).is_file():
+        raise FileNotFoundError(f"Input file '{actual_input_file}' not found")
+
+    # Use the found files
+    index_file = actual_index_file
+    input_file = actual_input_file
 
     if not quiet:
         print(f"Checking and filtering grants from {input_file}")

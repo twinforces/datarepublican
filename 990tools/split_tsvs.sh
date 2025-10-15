@@ -7,7 +7,7 @@ set -e
 # Input TSV files and required columns
 TSV_FILES=("charities.tsv" "grants_final.tsv" "grants.pf.tsv" "contractors.tsv" "political_contributions.tsv")
 CHARITY_COLUMNS="filer_ein,filer_name,xml_name,receipt_amt,govt_amt,contrib_amt,tax_year,org_type,total_assets,form_type,denominator,canonical_address"
-GRANT_COLUMNS="filer_ein,grant_ein,grant_amt"
+GRANT_COLUMNS="filer_ein,grant_ein,grant_amt,filer_colocator,grantee_colocator"
 CONTRACTOR_COLUMNS="filer_ein,name,amount,ein,address,zip_code,po_box,tax_year"
 POLITICAL_COLUMNS="filer_ein,recipient,amount,recipient_address,recipient_zip,recipient_po_box,tax_year"
 CHARITY_CHUNK_SIZE=10000
@@ -84,7 +84,7 @@ for TSV_FILE in "${TSV_FILES[@]}"; do
     GRANT_TYPE=""
   else
     COLUMNS="$GRANT_COLUMNS"
-    HEADER="filer_ein\tgrant_ein\tgrant_amt"
+    HEADER="filer_ein\tgrant_ein\tgrant_amt\tfiler_colocator\tgrantee_colocator"
     CHUNK_SIZE="$GRANT_CHUNK_SIZE"
     TYPE="grants"
     GRANT_TYPE=$( [[ "$TSV_FILE" == "grants_final.tsv" ]] && echo "regular" || echo "private" )

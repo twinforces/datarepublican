@@ -7,7 +7,7 @@ import logging
 from xpaths import NAMESPACES, XPATHS_990EZ, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
 from xpath_utils import find_element
-from extract_utils import canonicalize_address
+from extract_utils import canonicalize_address, get_colocator_for_address, perform_batch_geocoding, parse_recipient_address
 MONEY_PATTERN = re.compile(r'\$([\d,]+(?:\.\d{2})?)')
 ORG_TYPE_PATTERN = re.compile(r'501\(c\)\((\d+)\)')
 
@@ -59,56 +59,111 @@ def clean_name(name):
     return re.sub(r'[^a-zA-Z0-9\s]', '', name).strip().upper()
 
 def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins, form_type, backfill_entries=None, seen_backfill_keys=None):
+    # Perform batch geocoding before processing grants
+    from extract_utils import perform_batch_geocoding
+    perform_batch_geocoding()
     grants = []
+
+    # Define grant element tags for streaming parsing
+    grant_tags = {
+        "990": ["GrantsToOrgOutsideUSGrp", "GrantsToOrganizationsOutsideUS", "GrantsToOrgsOutsideUS", "ForeignIndividualsGrantsGrp", "RecipientTable", "GrantsOtherAsstToIndivInUSGrp"],
+        "990EZ": ["GrantsToOrgOutsideUSGrp", "GrantsToOrganizationsOutsideUS", "GrantsToOrgsOutsideUS", "ForeignIndividualsGrantsGrp", "RecipientTable", "GrantsOtherAsstToIndivInUSGrp"],
+        "990PF": ["GrantOrContributionPdDurYrGrp"]
+    }
+
     try:
-        parser = etree.XMLParser(recover=True)
-        tree = etree.parse(BytesIO(xml_content), parser)
-        root = tree.getroot()
-        grant_xpaths = GRANT_XPATHS.get(form_type, [])
-        for xpath in grant_xpaths:
-            elements = xpath(root)
-            for elem in elements:
+        # Use streaming parser to avoid loading entire XML into memory
+        context = etree.iterparse(BytesIO(xml_content), events=('end',), tag=grant_tags.get(form_type, []), recover=True)
+
+        for event, elem in context:
+            try:
                 # Try to find EIN using all available XPaths
                 grant_ein = "Unknown"
                 for ein_xpath in GRANT_EIN_XPATHS:
-                    ein_elem = elem.xpath(ein_xpath.path, namespaces=NAMESPACES)
-                    if ein_elem:
-                        grant_ein = ein_elem[0].text.strip()
-                        break
-    
+                    try:
+                        ein_elem = elem.xpath(ein_xpath.path, namespaces=NAMESPACES)
+                        if ein_elem:
+                            grant_ein = ein_elem[0].text.strip()
+                            break
+                    except Exception as xpath_error:
+                        if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                            logging.warning(f"Memory allocation error during EIN XPath evaluation in {xml_filename}: {xpath_error}. Skipping this XPath.")
+                            continue
+                        else:
+                            raise
+
                 # Try to find name using all available XPaths
                 grantee_name = "Unknown"
                 for name_xpath in GRANT_NAME_XPATHS:
-                    name_elem = elem.xpath(name_xpath.path, namespaces=NAMESPACES)
-                    if name_elem:
-                        grantee_name = name_elem[0].text.strip()
-                        break
-    
+                    try:
+                        name_elem = elem.xpath(name_xpath.path, namespaces=NAMESPACES)
+                        if name_elem:
+                            grantee_name = name_elem[0].text.strip()
+                            break
+                    except Exception as xpath_error:
+                        if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                            logging.warning(f"Memory allocation error during name XPath evaluation in {xml_filename}: {xpath_error}. Skipping this XPath.")
+                            continue
+                        else:
+                            raise
+
                 # Try to find amount using all available XPaths
                 grant_amt = 0
                 for amount_xpath in GRANT_AMOUNT_XPATHS:
-                    amount_elem = elem.xpath(amount_xpath.path, namespaces=NAMESPACES)
-                    if amount_elem and amount_elem[0].text:
-                        try:
-                            grant_amt = int(float(amount_elem[0].text.strip()))
-                            break
-                        except (ValueError, TypeError):
+                    try:
+                        amount_elem = elem.xpath(amount_xpath.path, namespaces=NAMESPACES)
+                        if amount_elem and amount_elem[0].text:
+                            try:
+                                grant_amt = int(float(amount_elem[0].text.strip()))
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                    except Exception as xpath_error:
+                        if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                            logging.warning(f"Memory allocation error during amount XPath evaluation in {xml_filename}: {xpath_error}. Skipping this XPath.")
                             continue
-    
-                is_foreign = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                if is_foreign:
-                    country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
-                    country_code = country_elem[0].text.strip() if country_elem else None
-                    from countryCodes import lookupCC
-                    country = lookupCC(country_code) if country_code else None
-                    if country:
-                        grant_ein = country["number"]
-                        grantee_name = country["name"]
+                        else:
+                            raise
+
+                # Extract colocator information
+                colocator = ""
+                try:
+                    is_foreign = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
+                    if is_foreign:
+                        try:
+                            country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
+                            country_code = country_elem[0].text.strip() if country_elem else None
+                            from countryCodes import lookupCC
+                            country = lookupCC(country_code) if country_code else None
+                            if country:
+                                grant_ein = country["number"]
+                                grantee_name = country["name"]
+                                colocator = f"FOREIGN:{country_code or 'UNKNOWN'}"
+                            else:
+                                grant_ein = "999"
+                                grantee_name = "Foreign_" + (country_code or "Unknown")
+                                colocator = f"FOREIGN:{country_code or 'UNKNOWN'}"
+                        except Exception as xpath_error:
+                            if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                                logging.warning(f"Memory allocation error during foreign address XPath evaluation in {xml_filename}: {xpath_error}. Treating as domestic.")
+                                is_foreign = False
+                            else:
+                                raise
                     else:
-                        grant_ein = "999"
-                        grantee_name = "Foreign_" + (country_code or "Unknown")
-    
+                        # Extract US address for colocator using geocoding
+                        canonical_address, po_box, zip_code = parse_recipient_address(elem, xml_filename, grant_ein, grantee_name, None)
+                        # Use geocoded colocator if available, otherwise fallback to zip-based
+                        address_dict = {'canonical': canonical_address, 'po_box': po_box, 'zip_code': zip_code}
+                        colocator = get_colocator_for_address(address_dict)
+                except Exception as xpath_error:
+                    if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                        logging.warning(f"Memory allocation error during address XPath evaluation in {xml_filename}: {xpath_error}. Skipping colocator.")
+                        colocator = ""
+                    else:
+                        raise
+
                 if grant_ein == "Unknown" and not is_foreign:
+                    elem.clear()  # Free memory
                     continue
                 if grant_amt > 0:
                     grants.append({
@@ -116,82 +171,135 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                         'filer_name': filer_name,
                         'grant_ein': grant_ein,
                         'grant_amt': grant_amt,
-                        'tax_year': tax_year
+                        'tax_year': tax_year,
+                        'filer_colocator': '',  # Will be filled from charity data
+                        'grantee_colocator': colocator
                     })
                     # Only add backfill entries if the parameters are provided
                     if backfill_entries is not None and seen_backfill_keys is not None:
                         if grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999" and not is_foreign:
                             is_valid, reason = validate_ein(grant_ein)
                             if is_valid:
-                                address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                                canonical_address, po_box, zip_code, _ = canonicalize_address([comp for comp in address_components if comp.text], None)
-                                if canonical_address or po_box or zip_code:
-                                    backfill_key = (grant_ein, grantee_name, zip_code)
+                                # Use the same address parsing as for colocator generation
+                                backfill_canonical_address, backfill_po_box, backfill_zip_code = parse_recipient_address(elem, xml_filename, grant_ein, grantee_name, None)
+                                if backfill_canonical_address or backfill_po_box or backfill_zip_code:
+                                    backfill_key = (grant_ein, grantee_name, backfill_zip_code)
                                     if backfill_key not in seen_backfill_keys:
                                         seen_backfill_keys.add(backfill_key)
                                         backfill_entries.append({
                                             'grant_ein': grant_ein,
                                             'name': grantee_name,
-                                            'canonical_address': canonical_address,
-                                            'po_box': po_box,
-                                            'zip_code': zip_code
+                                            'canonical_address': backfill_canonical_address,
+                                            'po_box': backfill_po_box,
+                                            'zip_code': backfill_zip_code
                                         })
+
+                # Clear the element to free memory
+                elem.clear()
+                while elem.getprevious() is not None:
+                    del elem.getparent()[0]
+            except Exception as elem_error:
+                if "growing nodeset hit limit" in str(elem_error) or "Memory allocation failed" in str(elem_error):
+                    logging.warning(f"Memory allocation error processing grant element in {xml_filename}: {elem_error}. Skipping this element.")
+                    elem.clear()
+                    continue
+                else:
+                    raise
+
     except Exception as e:
         logging.error(f"Error parsing grants from {xml_filename}: {e}")
     return grants
 
 def parse_contributions(xml_content, xml_filename, filer_ein, filer_name, tax_year, form_type):
     contributions = []
+
+    # Define contribution element tags for streaming parsing
+    contribution_tags = ["PoliticalCampaignActyGrp", "PoliticalCampaignActivitiesGrp"]
+
     try:
-        parser = etree.XMLParser(recover=True)
-        tree = etree.parse(BytesIO(xml_content), parser)
-        root = tree.getroot()
-        schedule_c_xpaths = SCHEDULE_C_XPATHS.get(form_type, [])
-        for xpath in schedule_c_xpaths:
-            elements = xpath(root)
-            for elem in elements:
+        # Use streaming parser to avoid loading entire XML into memory
+        context = etree.iterparse(BytesIO(xml_content), events=('end',), tag=contribution_tags, recover=True)
+
+        for event, elem in context:
+            try:
                 # Try to find amount using all available XPaths
                 amount = 0
                 for amount_xpath in SCHEDULE_C_AMOUNT_XPATHS:
-                    amount_elem = elem.xpath(amount_xpath.path, namespaces=NAMESPACES)
-                    if amount_elem and amount_elem[0].text:
-                        try:
-                            amount = int(float(amount_elem[0].text.strip()))
-                            break
-                        except (ValueError, TypeError):
+                    try:
+                        amount_elem = elem.xpath(amount_xpath.path, namespaces=NAMESPACES)
+                        if amount_elem and amount_elem[0].text:
+                            try:
+                                amount = int(float(amount_elem[0].text.strip()))
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                    except Exception as xpath_error:
+                        if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                            logging.warning(f"Memory allocation error during contribution amount XPath evaluation in {xml_filename}: {xpath_error}. Skipping this XPath.")
                             continue
+                        else:
+                            raise
 
                 # Try to find recipient name using all available XPaths
                 recipient_name = "Unknown"
                 for recipient_xpath in SCHEDULE_C_RECIPIENT_XPATHS:
-                    recipient_elem = elem.xpath(recipient_xpath.path, namespaces=NAMESPACES)
-                    if recipient_elem:
-                        recipient_name = recipient_elem[0].text.strip()
-                        break
+                    try:
+                        recipient_elem = elem.xpath(recipient_xpath.path, namespaces=NAMESPACES)
+                        if recipient_elem:
+                            recipient_name = recipient_elem[0].text.strip()
+                            break
+                    except Exception as xpath_error:
+                        if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                            logging.warning(f"Memory allocation error during recipient name XPath evaluation in {xml_filename}: {xpath_error}. Skipping this XPath.")
+                            continue
+                        else:
+                            raise
 
                 # Try to find recipient EIN using all available XPaths
                 recipient_ein = "Unknown"
                 for ein_xpath in SCHEDULE_C_EIN_XPATHS:
-                    ein_elem = elem.xpath(ein_xpath.path, namespaces=NAMESPACES)
-                    if ein_elem:
-                        recipient_ein = ein_elem[0].text.strip()
-                        break
+                    try:
+                        ein_elem = elem.xpath(ein_xpath.path, namespaces=NAMESPACES)
+                        if ein_elem:
+                            recipient_ein = ein_elem[0].text.strip()
+                            break
+                    except Exception as xpath_error:
+                        if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                            logging.warning(f"Memory allocation error during recipient EIN XPath evaluation in {xml_filename}: {xpath_error}. Skipping this XPath.")
+                            continue
+                        else:
+                            raise
 
                 # Check for foreign address
-                is_foreign = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                if is_foreign:
-                    country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
-                    country_code = country_elem[0].text.strip() if country_elem else None
-                    from countryCodes import lookupCC
-                    country = lookupCC(country_code) if country_code else None
-                    if country:
-                        recipient_ein = country["number"]
-                        recipient_name = country["name"]
+                try:
+                    is_foreign = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
+                    if is_foreign:
+                        try:
+                            country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
+                            country_code = country_elem[0].text.strip() if country_elem else None
+                            from countryCodes import lookupCC
+                            country = lookupCC(country_code) if country_code else None
+                            if country:
+                                recipient_ein = country["number"]
+                                recipient_name = country["name"]
+                            else:
+                                recipient_ein = "999"
+                                recipient_name = "Foreign_" + (country_code or "Unknown")
+                        except Exception as xpath_error:
+                            if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                                logging.warning(f"Memory allocation error during foreign address XPath evaluation in {xml_filename}: {xpath_error}. Treating as domestic.")
+                                is_foreign = False
+                            else:
+                                raise
+                except Exception as xpath_error:
+                    if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                        logging.warning(f"Memory allocation error during address XPath evaluation in {xml_filename}: {xpath_error}. Treating as domestic.")
+                        is_foreign = False
                     else:
-                        recipient_ein = "999"
-                        recipient_name = "Foreign_" + (country_code or "Unknown")
+                        raise
 
                 if recipient_ein == "Unknown" and not is_foreign:
+                    elem.clear()  # Free memory
                     continue
                 if amount > 0:
                     contributions.append({
@@ -201,6 +309,19 @@ def parse_contributions(xml_content, xml_filename, filer_ein, filer_name, tax_ye
                         'amount': amount,
                         'tax_year': tax_year
                     })
+
+                # Clear the element to free memory
+                elem.clear()
+                while elem.getprevious() is not None:
+                    del elem.getparent()[0]
+            except Exception as elem_error:
+                if "growing nodeset hit limit" in str(elem_error) or "Memory allocation failed" in str(elem_error):
+                    logging.warning(f"Memory allocation error processing contribution element in {xml_filename}: {elem_error}. Skipping this element.")
+                    elem.clear()
+                    continue
+                else:
+                    raise
+
     except Exception as e:
         logging.error(f"Error parsing contributions from {xml_filename}: {e}")
     return contributions

@@ -74,10 +74,10 @@ def get_tsv_files(start_year, end_year, org_types, not_types, source_dir):
     all_files = glob.glob(os.path.join(source_dir, "charities_*_analyzed.tsv"))
     filtered_files = []
     for tsv_file in all_files:
-        match = re.match(r'charities_(.+)_(\d{4})_analyzed\.tsv', os.path.basename(tsv_file))
+        match = re.match(r'charities_(\d{4})_(.+)_analyzed\.tsv', os.path.basename(tsv_file))
         if not match:
             continue
-        org_type, year = match.groups()
+        year, org_type = match.groups()
         year = int(year)
         if start_year <= year <= end_year:
             org_type_formatted = org_type
@@ -435,22 +435,29 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
             elements = xpath(root)
             total_elements += len(elements)
             for elem in elements:
-                ein_elem = elem.xpath("irs:EIN | irs:RecipientEIN | irs:RecipientBusinessName/irs:EIN", namespaces=NAMESPACES)
-                name_elem = elem.xpath(
-                    "irs:RecipientNameBusiness | irs:RecipientBusinessName/irs:BusinessNameLine1Txt | irs:BusinessName/irs:BusinessNameLine1Txt",
-                    namespaces=NAMESPACES
-                )
-                amount_elem = elem.xpath(
-                    "irs:CashGrantAmt | irs:TotalGrantOrContriPdDurYrAmt | irs:GrantOrContributionAmt | irs:Amount",
-                    namespaces=NAMESPACES
-                )
-                grantee_name = name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown"
-                
-                # Check for foreign address
-                is_foreign = elem.xpath("irs:RecipientForeignAddress", namespaces=NAMESPACES)
-                if is_foreign:
-                    country_elem = elem.xpath("irs:RecipientForeignAddress/irs:CountryCd", namespaces=NAMESPACES)
-                    country_code = country_elem[0].text.strip() if country_elem and country_elem[0].text else None
+                try:
+                    ein_elem = elem.xpath("irs:EIN | irs:RecipientEIN | irs:RecipientBusinessName/irs:EIN", namespaces=NAMESPACES)
+                    name_elem = elem.xpath(
+                        "irs:RecipientNameBusiness | irs:RecipientBusinessName/irs:BusinessNameLine1Txt | irs:BusinessName/irs:BusinessNameLine1Txt",
+                        namespaces=NAMESPACES
+                    )
+                    amount_elem = elem.xpath(
+                        "irs:CashGrantAmt | irs:TotalGrantOrContriPdDurYrAmt | irs:GrantOrContributionAmt | irs:Amount",
+                        namespaces=NAMESPACES
+                    )
+                    grantee_name = name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown"
+
+                    # Check for foreign address
+                    is_foreign = elem.xpath("irs:RecipientForeignAddress", namespaces=NAMESPACES)
+                    if is_foreign:
+                        country_elem = elem.xpath("irs:RecipientForeignAddress/irs:CountryCd", namespaces=NAMESPACES)
+                        country_code = country_elem[0].text.strip() if country_elem and country_elem[0].text else None
+                except Exception as xpath_error:
+                    if "growing nodeset hit limit" in str(xpath_error) or "Memory allocation failed" in str(xpath_error):
+                        logging.warning(f"Memory allocation error during XPath evaluation in grant processing: {xpath_error}. Skipping this element.")
+                        continue
+                    else:
+                        raise
                     if country_code and lookupCC(country_code):
                         country = lookupCC(country_code)
                         grant_ein = country["number"]
@@ -641,8 +648,8 @@ def main():
     parser.add_argument(
         "--minimumD",
         type=float,
-        default=10_000_000,
-        help="Minimum denominator value (default: 10M)"
+        default=0,
+        help="Minimum denominator value (default: 0 for all organizations)"
     )
     parser.add_argument(
         "--source-dir",
@@ -711,6 +718,17 @@ def main():
         tsv_files = get_tsv_files(start_year, end_year, org_types, not_types, source_dir)
         if not tsv_files:
             print("No TSV files found matching the criteria")
+            print(f"Looked in directory: {source_dir}")
+            print(f"Pattern: charities_*_analyzed.tsv")
+            # List what files are actually there
+            try:
+                import glob
+                all_files = glob.glob(os.path.join(source_dir, "*"))
+                print(f"Files found in {source_dir}: {all_files[:10]}")  # Show first 10
+                if len(all_files) > 10:
+                    print(f"... and {len(all_files) - 10} more files")
+            except Exception as e:
+                print(f"Error listing files: {e}")
             return
         year_range = (start_year, end_year + 1)
         latest_rows, summary, total_mismatches, total_missing_xmls, total_potential_mismatches = collect_latest_rows(tsv_files, minimum_d, worker_threads, zip_index, year_range)

@@ -19,6 +19,7 @@ from tqdm import tqdm
 from collections import defaultdict
 import hashlib
 from io import BytesIO
+from geocoding import geocode_batch
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 ADDRESS_XPATHS = [
@@ -54,8 +55,7 @@ GRANTEE_ADDRESS_XPATHS = [
     etree.XPath(".//*[local-name()='RecipientForeignAddress']/* | .//*[local-name()='CountryCd']", namespaces={}),
 ]
 ZIP_REGEX = re.compile(r'^\d{5}$')
-PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
-PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
+PO_BOX_REGEX = re.compile(r'\bP\.?\s*O\.?\s*BOX\s+(\d+|[A-Z\d]+)', re.IGNORECASE)
 STOP_WORDS = {'AND', 'THE', 'OF', 'FOR', 'IN', 'TO', 'A', 'AN'}
 USPS_FIXES = {
     'Saint': 'Street', 'St': 'Street', 'Ave': 'Avenue', 'Av': 'Avenue',
@@ -71,7 +71,7 @@ DEBUG_GRANT_COLUMNS = ['filer_ein', 'grant_ein', 'filer_name', 'grantee_name', '
 INVALID_EIN_COLUMNS = ['tsv_ein', 'xml_ein', 'filer_name', 'xml_filename', 'reason']
 PO_BOX_COLUMNS = ['po_box', 'zip_code', 'ein', 'org_name']
 CSV_QUOTE_FIELDS = {
-    'addresses': ['filer_name', 'canonical_address'],
+    'addresses': ['filer_name', 'canonical_address', 'zip_code'],
     'grants': ['filer_name', 'grant_ein'],
     'debug_address': ['filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'reason'],
     'debug_grant': ['filer_name', 'xml_filename', 'grantee_name', 'grant_ein', 'grant_address', 'reason'],
@@ -91,6 +91,11 @@ VALID_EIN_PREFIXES = {
 logger = None
 quiet = False
 thread_local = threading.local()
+
+# Global variables for geocoding
+addresses_to_geocode = set()
+address_to_colocator = {}
+geocoding_done = False
 
 def validate_ein(ein):
     """
@@ -241,16 +246,51 @@ def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
     log_error("Read {} rows from {}", len(rows), tsv_file)
     return rows
 
-def canonicalize_address(address_components, output_dir):
-    if not address_components:
-        return "", None, None, ""
-    address_line = ""
-    address_line2 = ""
-    address_line3 = ""
-    city = ""
-    state = ""
-    zip_code = None
-    po_box = None
+def canonicalize_address(address_input, output_dir):
+    global addresses_to_geocode
+    if isinstance(address_input, dict):
+        address_dict = address_input
+    else:
+        # Fallback for old address_components
+        address_dict = {}
+        if not address_input:
+            return "", None, None, ""
+        for elem in address_input:
+            if elem.tag.endswith('AddressLine1Txt') and elem.text:
+                parts = [p.strip() for p in elem.text.split(',') if p.strip()]
+                address_dict['address_line1'] = parts[0] if parts else ""
+                if len(parts) > 1:
+                    address_dict['address_line2'] = parts[1]
+                if len(parts) > 2:
+                    address_dict['address_line3'] = parts[2]
+                match = PO_BOX_REGEX.search(address_dict['address_line1'])
+                if match:
+                    address_dict['po_box'] = match.group(1)
+            elif elem.tag.endswith('AddressLine2Txt') and elem.text:
+                address_dict['address_line2'] = elem.text.strip()
+            elif elem.tag.endswith('AddressLine3Txt') and elem.text:
+                address_dict['address_line3'] = elem.text.strip()
+            elif elem.tag.endswith('CityNm') and elem.text:
+                address_dict['city'] = elem.text.strip()
+            elif elem.tag.endswith('StateAbbreviationCd') and elem.text:
+                address_dict['state'] = elem.text.strip()
+            elif elem.tag.endswith('ZIPCd') and elem.text:
+                address_dict['zip_code'] = elem.text.strip()
+
+    if 'canonical' in address_dict:
+        canonical = address_dict['canonical']
+        po_box = address_dict.get('po_box')
+        zip_code = address_dict.get('zip_code')
+        return canonical, po_box, zip_code, ""
+
+    address_line = address_dict.get('address_line1', '')
+    address_line2 = address_dict.get('address_line2', '')
+    address_line3 = address_dict.get('address_line3', '')
+    city = address_dict.get('city', '')
+    state = address_dict.get('state', '')
+    zip_code = address_dict.get('zip_code', '')
+    po_box = address_dict.get('po_box')
+
     STREET_FIXES = {
         'St': 'Street', 'Saint': 'Street', 'Ave': 'Avenue', 'Av': 'Avenue',
         'Blvd': 'Boulevard', 'Dr': 'Drive', 'Ln': 'Lane', 'Rd': 'Road',
@@ -264,32 +304,7 @@ def canonicalize_address(address_components, output_dir):
         'Fl': 'Floor', 'Rm': 'Room', 'Dept': 'Department', 'Ofc': 'Office',
         'SPC': 'Space', 'LOT': 'Lot', 'TRLR': 'Trailer', 'BSMT': 'Basement'
     }
-    for elem in address_components:
-        if elem.tag.endswith('AddressLine1Txt') and elem.text:
-            parts = [p.strip() for p in elem.text.split(',') if p.strip()]
-            address_line = parts[0] if parts else ""
-            if len(parts) > 1:
-                address_line2 = parts[1]
-            if len(parts) > 2:
-                address_line3 = parts[2]
-            match = PO_BOX_REGEX.search(address_line)
-            if match:
-                po_box_str = match.group(1)
-                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                if number_match:
-                    po_box = number_match.group(0)
-                else:
-                    log_error("Failed to extract PO box number from: {} in address: {}", po_box_str, address_line)
-        elif elem.tag.endswith('AddressLine2Txt') and elem.text:
-            address_line2 = elem.text.strip()
-        elif elem.tag.endswith('AddressLine3Txt') and elem.text:
-            address_line3 = elem.text.strip()
-        elif elem.tag.endswith('CityNm') and elem.text:
-            city = elem.text.strip()
-        elif elem.tag.endswith('StateAbbreviationCd') and elem.text:
-            state = elem.text.strip()
-        elif elem.tag.endswith('ZIPCd') and elem.text:
-            zip_code = elem.text.strip()
+
     def expand_street(line):
         if not line:
             return line
@@ -299,6 +314,7 @@ def canonicalize_address(address_components, output_dir):
         if words[-1] in STREET_FIXES:
             words[-1] = STREET_FIXES[words[-1]]
         return " ".join(words)
+
     def expand_unit(line):
         if not line:
             return line
@@ -308,14 +324,46 @@ def canonicalize_address(address_components, output_dir):
         if words[-2] in UNIT_FIXES:
             words[-2] = UNIT_FIXES[words[-2]]
         return " ".join(words)
+
     address_line = expand_street(address_line)
     address_line2 = expand_unit(address_line2)
     address_line3 = expand_unit(address_line3)
-    address_parts = [comp for comp in [address_line, address_line2, address_line3, city, state, zip_code] if comp]
-    if not address_parts:
-        log_error("No valid address components: {}", address_components)
+
+    # Build canonical address with proper comma separation
+    canonical_parts = []
+    if address_line:
+        canonical_parts.append(address_line)
+    if address_line2:
+        canonical_parts.append(address_line2)
+    if address_line3:
+        canonical_parts.append(address_line3)
+
+    # Create the street part
+    street_part = ", ".join(canonical_parts) if canonical_parts else ""
+
+    # Add city, state, zip with proper formatting
+    location_parts = []
+    if city:
+        location_parts.append(city)
+    if state:
+        location_parts.append(state)
+    if zip_code:
+        location_parts.append(zip_code)
+
+    location_part = ", ".join(location_parts) if location_parts else ""
+
+    # Combine street and location with comma
+    if street_part and location_part:
+        canonical = f"{street_part}, {location_part}"
+    elif street_part:
+        canonical = street_part
+    elif location_part:
+        canonical = location_part
+    else:
+        log_error("No valid address components: {}", address_dict)
         return "", None, None, ""
-    canonical = " ".join(address_parts).title()
+
+    canonical = canonical.title()
     if state and state.upper() not in VALID_STATES:
         log_error("Invalid state '{}' in address: {}; resetting state", state, canonical)
         state = None
@@ -326,6 +374,12 @@ def canonicalize_address(address_components, output_dir):
             zip_code = zip_code_digits[:5]
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
+    # Collect address for geocoding if not PO Box and has valid components
+    try:
+        if not po_box and canonical and city and state and zip_code and ZIP_REGEX.match(zip_code):
+            addresses_to_geocode.add(canonical)
+    except Exception as e:
+        log_error("Error adding address to geocoding queue: {}", str(e))
     return canonical, po_box, zip_code, ""
 
 def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
@@ -380,7 +434,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 'status': 'skipped',
                 'reason': f"No or invalid EIN: {xml_ein or 'None'}"
             })
-            return False, None
+            return False, None, None, None, None, None
         if not filer_name:
             filer_name = 'Unknown'
             result['debug_address_entries'].append({
@@ -394,7 +448,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 'status': 'skipped',
                 'reason': 'No filer name in XML'
             })
-            return False, None
+            return False, None, None, None, None
         address_components = []
         xpaths = ADDRESS_XPATHS
         for xpath in xpaths:
@@ -402,7 +456,29 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             for elem in elements:
                 if elem.text:
                     address_components.append(elem)
-        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        address_dict = {}
+        for elem in address_components:
+            if elem.tag.endswith('AddressLine1Txt') and elem.text:
+                parts = [p.strip() for p in elem.text.split(',') if p.strip()]
+                address_dict['address_line1'] = parts[0] if parts else ""
+                if len(parts) > 1:
+                    address_dict['address_line2'] = parts[1]
+                if len(parts) > 2:
+                    address_dict['address_line3'] = parts[2]
+                match = PO_BOX_REGEX.search(address_dict['address_line1'])
+                if match:
+                    address_dict['po_box'] = match.group(1)
+            elif elem.tag.endswith('AddressLine2Txt') and elem.text:
+                address_dict['address_line2'] = elem.text.strip()
+            elif elem.tag.endswith('AddressLine3Txt') and elem.text:
+                address_dict['address_line3'] = elem.text.strip()
+            elif elem.tag.endswith('CityNm') and elem.text:
+                address_dict['city'] = elem.text.strip()
+            elif elem.tag.endswith('StateAbbreviationCd') and elem.text:
+                address_dict['state'] = elem.text.strip()
+            elif elem.tag.endswith('ZIPCd') and elem.text:
+                address_dict['zip_code'] = elem.text.strip()
+        canonical_address, po_box, zip_code, _ = canonicalize_address(address_dict, output_dir)
         raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
@@ -449,10 +525,10 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 with open(os.path.join(sample_xml, xml_filename), 'wb') as f:
                     f.write(xml_content)
             if not skip_address_errors:
-                return False, None
+                return False, None, None, None, None
             with threading.Lock():
                 result['filer_eins'][xml_filename] = (xml_ein, row, canonical_address)
-        return True, xml_ein
+        return True, xml_ein, address_dict, canonical_address, po_box, zip_code
     except Exception as e:
         log_error("Error parsing XML {}: {}", xml_filename, str(e), exc_info=True)
         result['total_address_errors'] += 1
@@ -467,9 +543,10 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             'status': 'error',
             'reason': str(e)
         })
-        return False, None
+        return False, None, None, None, None
 
 def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipient_name, output_dir):
+    global addresses_to_geocode
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
             'address_entries': [],
@@ -488,7 +565,29 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
             for elem in elements:
                 if elem.text:
                     address_components.append(elem)
-        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        address_dict = {}
+        for elem in address_components:
+            if elem.tag.endswith('AddressLine1Txt') and elem.text:
+                parts = [p.strip() for p in elem.text.split(',') if p.strip()]
+                address_dict['address_line1'] = parts[0] if parts else ""
+                if len(parts) > 1:
+                    address_dict['address_line2'] = parts[1]
+                if len(parts) > 2:
+                    address_dict['address_line3'] = parts[2]
+                match = PO_BOX_REGEX.search(address_dict['address_line1'])
+                if match:
+                    address_dict['po_box'] = match.group(1)
+            elif elem.tag.endswith('AddressLine2Txt') and elem.text:
+                address_dict['address_line2'] = elem.text.strip()
+            elif elem.tag.endswith('AddressLine3Txt') and elem.text:
+                address_dict['address_line3'] = elem.text.strip()
+            elif elem.tag.endswith('CityNm') and elem.text:
+                address_dict['city'] = elem.text.strip()
+            elif elem.tag.endswith('StateAbbreviationCd') and elem.text:
+                address_dict['state'] = elem.text.strip()
+            elif elem.tag.endswith('ZIPCd') and elem.text:
+                address_dict['zip_code'] = elem.text.strip()
+        canonical_address, po_box, zip_code, _ = canonicalize_address(address_dict, output_dir)
         raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
         address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]
         if not canonical_address:
@@ -505,6 +604,12 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
                 'reason': f"Invalid recipient address; components={address_components}; snippet={address_snippet}"
             })
             return "", None, None
+        # Collect address for geocoding if not PO Box and has valid components
+        try:
+            if not po_box and canonical_address and zip_code and ZIP_REGEX.match(zip_code):
+                addresses_to_geocode.add(canonical_address)
+        except Exception as e:
+            log_error("Error adding grant address to geocoding queue: {}", str(e))
         return canonical_address, po_box, zip_code
     except Exception as e:
         log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
@@ -583,3 +688,96 @@ def normalize_file_path(arg_value, default_filename, base_dir=None):
     if os.path.isdir(arg_value):
         return os.path.join(arg_value, default_filename)
     return arg_value
+
+def perform_batch_geocoding():
+    """Perform batch geocoding on collected addresses and build colocator mapping."""
+    global addresses_to_geocode, address_to_colocator, geocoding_done
+    if geocoding_done or not addresses_to_geocode:
+        return
+
+    log_error("Starting batch geocoding for {} addresses", len(addresses_to_geocode))
+
+    # Try to use database-backed geocoding if available
+    try:
+        from geocoding_db import process_database_geocoding_threaded
+        log_error("Using database-backed geocoding process")
+        stats = process_database_geocoding_threaded(num_threads=4, batch_size=5000)
+        log_error("Database geocoding completed: {}", stats)
+
+        # Now build the colocator mapping from database results
+        from geocoding_db import GeocodingManager, AddressManager
+        geocoding_manager = GeocodingManager()
+        address_manager = AddressManager()
+
+        # Get all addresses with geocoding
+        addresses = address_manager.get_addresses_by_ein(None)  # This might need adjustment
+        # Actually, we need to get all addresses and their geocoding
+        # For now, fall back to the old method but this should be updated
+
+        # For backward compatibility, still populate the global mapping
+        for address in addresses_to_geocode:
+            # Try to find geocoding for this address
+            normalized = geocode.normalize_address(address)
+            address_hash = hashlib.sha256(normalized.encode()).hexdigest()
+            geocoding_result = geocoding_manager.get_geocoding_by_hash(address_hash)
+            if geocoding_result and geocoding_result.is_successful:
+                colocator = f"{geocoding_result.latitude},{geocoding_result.longitude}"
+                address_to_colocator[address] = colocator
+
+    except ImportError:
+        # Fall back to original geocoding method
+        log_error("Database geocoding not available, using legacy method")
+        try:
+            address_list = list(addresses_to_geocode)
+            geocoded_results = geocode_batch(address_list)
+            success_count = 0
+            for result in geocoded_results:
+                address = result['address']
+                lat = result.get('lat')
+                lon = result.get('lon')
+                if lat is not None and lon is not None:
+                    colocator = f"{lat},{lon}"
+                    address_to_colocator[address] = colocator
+                    success_count += 1
+                else:
+                    log_error("Geocoding failed for address: {}", address)
+            log_error("Completed batch geocoding, {}/{} addresses geocoded successfully", success_count, len(addresses_to_geocode))
+        except Exception as e:
+            log_error("Error during batch geocoding: {}", str(e), exc_info=True)
+            # Don't set geocoding_done = True on failure, allow retry
+            return
+    finally:
+        geocoding_done = True
+
+def get_colocator_for_address(address_dict):
+    """Get colocator for an address, handling PO Box and geocoded cases."""
+    try:
+        canonical_address = canonicalize_address(address_dict, None)[0]
+        po_box = address_dict.get('po_box')
+        zip_code = address_dict.get('zip_code')
+
+        if po_box:
+            return f"PO:{po_box}:{zip_code}" if zip_code else ""
+        elif canonical_address in address_to_colocator:
+            return address_to_colocator[canonical_address]
+        else:
+            # Try to get from database if available
+            try:
+                from geocoding_db import GeocodingManager
+                geocoding_manager = GeocodingManager()
+                normalized = geocode.normalize_address(canonical_address)
+                address_hash = hashlib.sha256(normalized.encode()).hexdigest()
+                geocoding_result = geocoding_manager.get_geocoding_by_hash(address_hash)
+                if geocoding_result and geocoding_result.is_successful:
+                    return f"{geocoding_result.latitude},{geocoding_result.longitude}"
+            except ImportError:
+                pass  # Database not available, continue with fallback
+
+            # Fallback to zip-based colocator for backward compatibility
+            return f"{zip_code}:{canonical_address.split(',')[0] if canonical_address else 'UNKNOWN'}" if zip_code else ""
+    except Exception as e:
+        log_error("Error getting colocator for address: {}", str(e))
+        # Return fallback even on error
+        canonical_address = canonicalize_address(address_dict, None)[0]
+        zip_code = address_dict.get('zip_code')
+        return f"{zip_code}:{canonical_address.split(',')[0] if canonical_address else 'UNKNOWN'}" if zip_code else ""

@@ -59,7 +59,7 @@ def resolve_directory_args(args):
     if not hasattr(args, 'cache_dir') or args.cache_dir is None:
         args.cache_dir = os.path.join(data_root, 'atsvs', '_cache')
     if not hasattr(args, 'browse_dir') or args.browse_dir is None:
-        args.browse_dir = os.path.join(data_root, '..', 'browse')
+        args.browse_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'browse')
 
     # Also resolve other directory args for backward compatibility
     if not hasattr(args, 'output_dir') or args.output_dir is None:
@@ -68,3 +68,15 @@ def resolve_directory_args(args):
         args.source_dir = args.analyzed_dir
 
     return args
+
+def find_file_path(base_dirs, filename, description="file"):
+    """Find a file in multiple possible directories, returning the first match."""
+    import os
+
+    for base_dir in base_dirs:
+        file_path = os.path.join(base_dir, filename)
+        if os.path.isfile(file_path):
+            return file_path
+
+    # If not found, return the most likely path for error messages
+    return os.path.join(base_dirs[0], filename) if base_dirs else filename

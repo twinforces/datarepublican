@@ -16,7 +16,7 @@ def precompile_xpaths(xpaths, namespaces):
 def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_type=None, log_error=None, xpath_match_stats=None):
     """
     Find an element using a list of XPaths, with caching to avoid redundant evaluations.
-    
+
     Args:
         root: The root element to evaluate XPaths against.
         xpaths: List of XPaths (either strings or precompiled etree.XPath objects).
@@ -26,7 +26,7 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
         form_type: Form type (e.g., "990", "990EZ", "990PF") for stats tracking (optional).
         log_error: Logging function to use for error messages (optional).
         xpath_match_stats: Dictionary to track XPath match statistics (optional).
-    
+
     Returns:
         The first matching element, or None if no match is found.
     """
@@ -82,6 +82,16 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
                     return elem[0]
             except etree.XPathEvalError as e:
                 log_error("Non-namespaced XPath error for {}: {}. XML snippet: {}", non_ns_xpath, e, xml_snippet)
+        except Exception as e:
+            # Catch memory allocation errors and other XPath evaluation issues
+            if "growing nodeset hit limit" in str(e) or "Memory allocation failed" in str(e):
+                log_error("Memory allocation error during XPath evaluation for field {}: {}. Skipping this XPath.", field, e)
+                # Cache the None result to avoid re-evaluating this problematic XPath
+                xpath_cache[cache_key] = None
+                continue
+            else:
+                # Re-raise other exceptions
+                raise
 
         # Cache the None result to avoid re-evaluating
         xpath_cache[cache_key] = None

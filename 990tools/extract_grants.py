@@ -15,9 +15,11 @@ import psutil
 from io import BytesIO
 import csv
 import re
+import sys
 from countryCodes import lookupCC
 import extract_utils as cu
 from parse_utils import parse_grants, parse_contributions
+from extract_utils import perform_batch_geocoding
 
 # Constants
 TSV_COLUMNS = [
@@ -28,7 +30,7 @@ TSV_COLUMNS = [
     "denominator", "foreign_office", "foreign_expenses", "grants_to_others", "domestic_misrep_flag",
     "xml_name", "grift"
 ]
-GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year"]
+GRANT_COLUMNS = ["filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year", "filer_colocator", "grantee_colocator"]
 CONTRIB_COLUMNS = ["filer_ein", "filer_name", "recipient_ein", "amount", "tax_year"]
 BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
@@ -194,6 +196,9 @@ def collect_latest_rows(tsv_files, minimum_d, worker_threads, zip_index, year_ra
                                 "Comparison: TSV ZIP={} vs. Index ZIP={} for xml_filename={} in TSV {}",
                                 tsv_zip, index_zip, xml_filename, tsv_file, ein=ein
                             )
+                            # Normalize index_zip by removing .zip suffix if present
+                            if index_zip.endswith('.zip'):
+                                index_zip = index_zip[:-4]
                             if tsv_zip != index_zip:
                                 local_mismatches += 1
                                 mismatch_details.append((ein, xml_path, tsv_zip, index_zip))
@@ -373,7 +378,9 @@ def write_grants_latest(grants, output_tsv, output_csv):
     with open(output_tsv, 'w', encoding='utf-8') as f:
         f.write('\t'.join(GRANT_COLUMNS) + '\n')
         for grant in grants:
-            f.write('\t'.join(str(grant[col]) for col in GRANT_COLUMNS) + '\n')
+            # Handle missing colocator columns for backward compatibility
+            grant_data = [str(grant.get(col, '')) for col in GRANT_COLUMNS]
+            f.write('\t'.join(grant_data) + '\n')
     log_error("Wrote {} grant rows to {}", len(grants), output_tsv)
 
     with open(output_csv, 'w', encoding='utf-8', newline='') as f:
@@ -382,7 +389,7 @@ def write_grants_latest(grants, output_tsv, output_csv):
         for grant in grants:
             csv_row = []
             for col in GRANT_COLUMNS:
-                value = str(grant[col])
+                value = str(grant.get(col, ''))
                 if col in CSV_QUOTE_FIELDS['grants']:
                     csv_row.append(value)
                 else:
@@ -437,6 +444,17 @@ def process_grants_and_contributions(row_data, worker_threads, zip_index, start_
     zip_cache = {}
     known_eins = {row['filer_ein'] for row, _, _ in row_data}
 
+    # Perform batch geocoding before processing grants
+    perform_batch_geocoding()
+
+    # Build EIN to colocator mapping from charity data
+    ein_to_colocator = {}
+    for row, _, _ in row_data:
+        ein = row['filer_ein']
+        colocator = row.get('colocator', '')
+        if colocator:
+            ein_to_colocator[ein] = colocator
+
     def process_row(row, org_type, year):
         xml_path = row['xml_name']
         try:
@@ -490,6 +508,10 @@ def process_grants_and_contributions(row_data, worker_threads, zip_index, start_
                 try:
                     grant_list, contrib_list = future.result()
                     if grant_list is not None:
+                        # Add filer_colocator to each grant
+                        for grant in grant_list:
+                            filer_ein = grant['filer_ein']
+                            grant['filer_colocator'] = ein_to_colocator.get(filer_ein, '')
                         grants.extend(grant_list)
                     if contrib_list is not None:
                         contributions.extend(contrib_list)
@@ -502,78 +524,154 @@ def process_grants_and_contributions(row_data, worker_threads, zip_index, start_
     
     return grants, contributions
 
-def main():
-    global verbose, quiet, done_queuing, total_entries
-    parser = argparse.ArgumentParser(
-        description=(
-            "Integrate IRS 990 data to produce latest charity, grant, and contribution data.\n"
-            "Note: Use --minimumD (not --miniumD) to set the minimum denominator value.\n"
-            "Note: ZIP files are indexed for start_year to end_year + 1 to account for 990 filing lag.\n"
-            "Output: Produces charity_latest.tsv/csv, grants_latest.tsv/csv, contributions_latest.tsv/csv, and backfill.tsv/csv.\n"
-            "Processing: Selects latest qualifying filing per EIN and backfills grantee data for unknown domestic EINs."
-        )
-    )
-    parser.add_argument("start_year", type=int, help="Start year for processing")
-    parser.add_argument("end_year", type=int, help="End year for processing")
-    parser.add_argument(
-        "--orgTypes",
-        type=str,
-        default="all",
-        help="Comma-separated list of org types to include (or 'all')"
-    )
-    parser.add_argument(
-        "--NOTTypes",
-        type=str,
-        default="",
-        help="Comma-separated list of org types to exclude"
-    )
-    parser.add_argument(
-        "--minimumD",
-        type=float,
-        default=10_000_000,
-        help="Minimum denominator value (default: 10M)"
-    )
-    parser.add_argument(
-        "--source-dir",
-        type=str,
-        default=".",
-        help="Directory containing analyzed TSV files"
-    )
-    parser.add_argument(
-        "--zip-dir",
-        type=str,
-        default="..",
-        help="Directory containing ZIP files"
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default=".",
-        help="Directory for output TSV and CSV files"
-    )
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--quiet", action="store_true", help="Disable all logging")
-    parser.add_argument(
-        "--worker-threads",
-        type=int,
-        default=16,
-        help="Number of worker threads for processing"
-    )
-    args = parser.parse_args()
+def main(start_year=None, end_year=None, org_types=None, not_types=None, minimum_d=None,
+         source_dir=None, zip_dir=None, output_dir=None, cache_dir=None, charity_source=None, verbose=None, quiet=None, worker_threads=None):
+    global done_queuing, total_entries
 
-    verbose = args.verbose
-    quiet = args.quiet
-    start_year = args.start_year
-    end_year = args.end_year
-    minimum_d = args.minimumD
-    worker_threads = args.worker_threads
-    source_dir = args.source_dir
-    zip_dir = args.zip_dir
-    output_dir = args.output_dir
-    org_types = args.orgTypes.split(',') if args.orgTypes else ['all']
-    not_types = args.NOTTypes.split(',') if args.NOTTypes else []
+    # Check if called with arguments or from command line
+    if start_year is None and len(sys.argv) > 1 and not sys.argv[1].startswith('--'):
+        # Called from command line with positional args
+        parser = argparse.ArgumentParser(
+            description=(
+                "Integrate IRS 990 data to produce latest charity, grant, and contribution data.\n"
+                "Note: Use --minimumD (not --miniumD) to set the minimum denominator value.\n"
+                "Note: ZIP files are indexed for start_year to end_year + 1 to account for 990 filing lag.\n"
+                "Output: Produces charity_latest.tsv/csv, grants_latest.tsv/csv, contributions_latest.tsv/csv, and backfill.tsv/csv.\n"
+                "Processing: Selects latest qualifying filing per EIN and backfills grantee data for unknown domestic EINs."
+            )
+        )
+        parser.add_argument("start_year", type=int, help="Start year for processing")
+        parser.add_argument("end_year", type=int, help="End year for processing")
+        parser.add_argument(
+            "--orgTypes",
+            type=str,
+            default="all",
+            help="Comma-separated list of org types to include (or 'all')"
+        )
+        parser.add_argument(
+            "--NOTTypes",
+            type=str,
+            default="",
+            help="Comma-separated list of org types to exclude"
+        )
+        parser.add_argument(
+            "--minimumD",
+            type=float,
+            default=0,
+            help="Minimum denominator value (default: 0 for all organizations)"
+        )
+        parser.add_argument(
+            "--source-dir",
+            type=str,
+            default=".",
+            help="Directory containing analyzed TSV files"
+        )
+        parser.add_argument(
+            "--zip-dir",
+            type=str,
+            default="..",
+            help="Directory containing ZIP files"
+        )
+        parser.add_argument(
+            "--output-dir",
+            type=str,
+            default=".",
+            help="Directory for output TSV and CSV files"
+        )
+        parser.add_argument(
+            "--cache-dir",
+            type=str,
+            default=None,
+            help="Cache directory for work files (default: {data_dir}/_cache)"
+        )
+        parser.add_argument(
+            "--charity-source",
+            type=str,
+            default=None,
+            help="Path to charity source file"
+        )
+        parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+        parser.add_argument("--quiet", action="store_true", help="Disable all logging")
+        parser.add_argument(
+            "--worker-threads",
+            type=int,
+            default=16,
+            help="Number of worker threads for processing"
+        )
+        args = parser.parse_args()
+        start_year = args.start_year
+        end_year = args.end_year
+        org_types = args.orgTypes.split(',') if args.orgTypes else ['all']
+        not_types = args.NOTTypes.split(',') if args.NOTTypes else []
+        minimum_d = args.minimumD
+        source_dir = args.source_dir
+        zip_dir = args.zip_dir
+        output_dir = args.output_dir
+        cache_dir = args.cache_dir
+        charity_source = args.charity_source
+        verbose = args.verbose
+        quiet = args.quiet
+        worker_threads = args.worker_threads
+    else:
+        # Called with keyword arguments - set defaults
+        if start_year is None:
+            raise ValueError("start_year is required")
+        if end_year is None:
+            raise ValueError("end_year is required")
+        if org_types is None:
+            org_types = ['all']
+        if not_types is None:
+            not_types = []
+        if minimum_d is None:
+            minimum_d = 0
+        if source_dir is None:
+            source_dir = "."
+        if zip_dir is None:
+            zip_dir = ".."
+        if output_dir is None:
+            output_dir = "."
+        if cache_dir is None:
+            cache_dir = None  # Will be set later based on data_root
+        if charity_source is None:
+            charity_source = None
+        if verbose is None:
+            verbose = False
+        if quiet is None:
+            quiet = False
+        if worker_threads is None:
+            worker_threads = 16
+
+        # Create args object for compatibility
+        class Args:
+            pass
+        args = Args()
+        args.start_year = start_year
+        args.end_year = end_year
+        args.orgTypes = ','.join(org_types) if isinstance(org_types, list) else org_types
+        args.NOTTypes = ','.join(not_types) if isinstance(not_types, list) else not_types
+        args.minimumD = minimum_d
+        args.source_dir = source_dir
+        args.zip_dir = zip_dir
+        args.output_dir = output_dir
+        args.cache_dir = cache_dir
+        args.charity_source = charity_source
+        args.verbose = verbose
+        args.quiet = quiet
+        args.worker_threads = worker_threads
+
+    # Variables are already set above
+
+    # Set default cache_dir if not provided
+    if cache_dir is None:
+        # Try to infer from data_root or use a reasonable default
+        if hasattr(args, 'data_root') and args.data_root:
+            cache_dir = os.path.join(args.data_root, '_cache')
+        else:
+            cache_dir = os.path.join(output_dir, '_cache')
+    log_error("cache_dir set to: {}", cache_dir)
 
     # Validate arguments
+    log_error("Validating arguments: source_dir={}, zip_dir={}, output_dir={}, cache_dir={}", source_dir, zip_dir, output_dir, cache_dir)
     if worker_threads < 1:
         raise ValueError("Number of worker threads must be at least 1")
     if minimum_d < 0:
@@ -586,6 +684,8 @@ def main():
         raise ValueError(f"ZIP directory {zip_dir} does not exist")
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
+    if not os.path.isdir(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
 
     listener = setup_logging(output_dir, verbose, quiet)
 

@@ -31,6 +31,13 @@ def generate_report(input_file, report_file):
             except ValueError as e:
                 raise ValueError("Required columns (filer_ein, grant_ein, grant_amt) not found in TSV")
 
+            # Check if colocator column exists
+            colocator_idx = None
+            try:
+                colocator_idx = columns.index('colocator')
+            except ValueError:
+                pass  # colocator column is optional
+
         # Process lines
         print("Reading TSV for report generation...")
         with open(input_file, 'r') as f:
@@ -117,9 +124,30 @@ def generate_report(input_file, report_file):
 
 def main(input_file, report_file='report.md', verbose=False, quiet=False):
     """Main function for generating grant reports."""
-    # Validate input file exists
-    if not Path(input_file).is_file():
-        raise FileNotFoundError(f"Input file '{input_file}' not found")
+    from utils.args import find_file_path
+    import os
+
+    # Try to find file in multiple possible locations
+    data_root = '/Volumes/Data'
+    possible_dirs = [
+        os.path.join(data_root, 'final'),
+        os.path.join(data_root, 'tsvs'),
+        os.path.join(data_root, 'atsvs'),
+        data_root,
+        '.'
+    ]
+
+    # Find actual file path
+    actual_input_file = find_file_path(possible_dirs, os.path.basename(input_file), "input file")
+
+    print(f"Looking for input_file: {input_file}")
+    print(f"Found input_file: {actual_input_file}, exists: {Path(actual_input_file).is_file()}")
+
+    if not Path(actual_input_file).is_file():
+        raise FileNotFoundError(f"Input file '{actual_input_file}' not found")
+
+    # Use the found file
+    input_file = actual_input_file
 
     if not quiet:
         print(f"Generating grant report from {input_file}")

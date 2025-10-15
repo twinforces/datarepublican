@@ -55,27 +55,100 @@ def generate_acronym(name):
     acronym = ''.join(w[0].upper() for w in words if w)
     return acronym if len(acronym) > 1 else None
 
-def main():
-    global verbose, quiet, total_addresses, total_address_errors, total_queue_puts, total_skipped
+def main(start_year=None, end_year=None, zip_dir=None, cache_dir=None, output_dir=None, force_reprocess=None,
+         merge_batch_size=None, verbose=None, quiet=None, no_threads=None, worker_threads=None,
+         skip_address_errors=None, sample_xml=None, log_zip_errors=None, backfill_source=None):
+    global total_addresses, total_address_errors, total_queue_puts, total_skipped
     global args, zip_index, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index
     global results_queue
-    parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files and integrate backfill.tsv with acronym variations.")
-    parser.add_argument("start_year", type=int, help="Start year for processing")
-    parser.add_argument("end_year", type=int, help="End year for processing")
-    parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
-    parser.add_argument("--cache-dir", type=str, default="./_cache", help="Directory for cache files")
-    parser.add_argument("--output-dir", type=str, default="./_output", help="Directory for output TSV files")
-    parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing despite cache")
-    parser.add_argument("--merge-batch-size", type=int, default=1000, help="Batch size for queuing results")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--quiet", action="store_true", help="Disable all logging")
-    parser.add_argument("--no-threads", action="store_true", help="Run single-threaded")
-    parser.add_argument("--worker-threads", type=int, default=16, help="Number of worker threads")
-    parser.add_argument("--skip-address-errors", action="store_true", help="Continue despite address errors")
-    parser.add_argument("--sample-xml", type=str, default=None, help="Directory to save failing XMLs")
-    parser.add_argument("--log-zip-errors", action="store_true", help="Log invalid ZIP codes")
-    parser.add_argument("--backfill-source", type=str, default=None, help="Path to backfill.tsv or directory")
-    args = parser.parse_args()
+
+    # Check if called with arguments or from command line
+    if start_year is None and len(sys.argv) > 1 and not sys.argv[1].startswith('--'):
+        # Called from command line with positional args
+        parser = argparse.ArgumentParser(description="Extract addresses from IRS 990 XML files and integrate backfill.tsv with acronym variations.")
+        parser.add_argument("start_year", type=int, help="Start year for processing")
+        parser.add_argument("end_year", type=int, help="End year for processing")
+        parser.add_argument("--zip-dir", type=str, default="..", help="Directory containing ZIP files")
+        parser.add_argument("--cache-dir", type=str, default="./_cache", help="Directory for cache files")
+        parser.add_argument("--output-dir", type=str, default="./_output", help="Directory for output TSV files")
+        parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing despite cache")
+        parser.add_argument("--merge-batch-size", type=int, default=1000, help="Batch size for queuing results")
+        parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+        parser.add_argument("--quiet", action="store_true", help="Disable all logging")
+        parser.add_argument("--no-threads", action="store_true", help="Run single-threaded")
+        parser.add_argument("--worker-threads", type=int, default=16, help="Number of worker threads")
+        parser.add_argument("--skip-address-errors", action="store_true", help="Continue despite address errors")
+        parser.add_argument("--sample-xml", type=str, default=None, help="Directory to save failing XMLs")
+        parser.add_argument("--log-zip-errors", action="store_true", help="Log invalid ZIP codes")
+        parser.add_argument("--backfill-source", type=str, default=None, help="Path to backfill.tsv or directory")
+        args = parser.parse_args()
+        start_year = args.start_year
+        end_year = args.end_year
+        zip_dir = args.zip_dir
+        cache_dir = args.cache_dir
+        output_dir = args.output_dir
+        force_reprocess = args.force_reprocess
+        merge_batch_size = args.merge_batch_size
+        verbose = args.verbose
+        quiet = args.quiet
+        no_threads = args.no_threads
+        worker_threads = args.worker_threads
+        skip_address_errors = args.skip_address_errors
+        sample_xml = args.sample_xml
+        log_zip_errors = args.log_zip_errors
+        backfill_source = args.backfill_source
+    else:
+        # Called with keyword arguments - set defaults
+        if start_year is None:
+            raise ValueError("start_year is required")
+        if end_year is None:
+            raise ValueError("end_year is required")
+        if zip_dir is None:
+            zip_dir = ".."
+        if cache_dir is None:
+            cache_dir = "./_cache"
+        if output_dir is None:
+            output_dir = "./_output"
+        if force_reprocess is None:
+            force_reprocess = False
+        if merge_batch_size is None:
+            merge_batch_size = 1000
+        if verbose is None:
+            verbose = False
+        if quiet is None:
+            quiet = False
+        if no_threads is None:
+            no_threads = False
+        if worker_threads is None:
+            worker_threads = 16
+        if skip_address_errors is None:
+            skip_address_errors = False
+        if sample_xml is None:
+            sample_xml = None
+        if log_zip_errors is None:
+            log_zip_errors = False
+        if backfill_source is None:
+            backfill_source = None
+
+        # Create args object for compatibility
+        class Args:
+            pass
+        args = Args()
+        args.start_year = start_year
+        args.end_year = end_year
+        args.zip_dir = zip_dir
+        args.cache_dir = cache_dir
+        args.output_dir = output_dir
+        args.force_reprocess = force_reprocess
+        args.merge_batch_size = merge_batch_size
+        args.verbose = verbose
+        args.quiet = quiet
+        args.no_threads = no_threads
+        args.worker_threads = worker_threads
+        args.skip_address_errors = skip_address_errors
+        args.sample_xml = sample_xml
+        args.log_zip_errors = log_zip_errors
+        args.backfill_source = backfill_source
     verbose = args.verbose
     quiet = args.quiet
     skip_address_errors = args.skip_address_errors
@@ -89,7 +162,7 @@ def main():
         raise ValueError(f"ZIP directory {args.zip_dir} does not exist")
     # Normalize file path
     args.backfill_source = cu.normalize_file_path(args.backfill_source, 'backfill.tsv', args.output_dir)
-    listener = cu.setup_logging(args.output_dir, 'extract_addresses_log.txt', verbose, quiet)
+    listener = cu.setup_logging(args.output_dir, 'extract_addresses_log.txt', args.verbose, args.quiet)
     cu.signal.signal(cu.signal.SIGINT, signal_handler)
     addr_cache_valid = True
     try:
@@ -143,16 +216,18 @@ def main():
                 for row in unique_backfill_rows:
                     ein = row.get('grant_ein', '')
                     name = row.get('name', '').title()  # Ensure title-case for consistency
-                    canonical_address = row.get('canonical_address', '')
+                    canonical_address = row.get('zip_code', '')  # Swap: zip_code column has address data
                     po_box = row.get('po_box', '')
-                    zip_code = row.get('zip_code', '')
+                    zip_code = ''  # canonical_address column has path, not zip code
                     if ein and canonical_address:
+                        address_dict = {'canonical': canonical_address, 'po_box': po_box, 'zip_code': zip_code}
                         address_entries.append({
                             'filer_ein': ein,
                             'filer_name': name,
                             'canonical_address': canonical_address,
                             'po_box': po_box,
-                            'zip_code': zip_code
+                            'zip_code': zip_code,
+                            'address': address_dict
                         })
                         if po_box and zip_code and cu.ZIP_REGEX.match(zip_code):
                             po_box_entries.append({
@@ -185,6 +260,12 @@ def main():
     print(f"Invalid EINs found: {len(invalid_ein_entries)}")
     print(f"PO Boxes found: {len(po_box_entries)}")
     print(f"Output files in: {args.output_dir}")
+    # Debug: Check if all addresses are PO Boxes
+    if len(address_entries) > 0 and len(po_box_entries) == len(address_entries):
+        print("WARNING: All addresses appear to be PO Boxes - this may indicate an issue with address parsing")
+        # Sample some addresses to debug
+        for i, addr in enumerate(address_entries[:5]):
+            print(f"Sample address {i+1}: {addr}")
 
 def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml, skip_address_errors):
     global total_addresses, total_address_errors, total_queue_puts, total_skipped, results_queue
@@ -232,7 +313,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
                 zip_cache[zip_path] = cu.zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                success, filer_ein = cu.parse_filer_address(xml_content, xml_filename, {}, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=skip_address_errors)
+                success, filer_ein, address_dict, canonical_address, po_box, zip_code = cu.parse_filer_address(xml_content, xml_filename, {}, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=skip_address_errors)
                 if not success:
                     file_counter_local.skipped += 1
                     total_skipped += 1
