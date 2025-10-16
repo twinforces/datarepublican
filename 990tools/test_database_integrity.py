@@ -83,11 +83,11 @@ def test_database_integrity():
         """, ('123456789', 'Test Charity', '987654321', 5000.0, 2023))
         grant_id = cursor.lastrowid
 
-        # Insert address
+        # Insert address - using real address
         cursor.execute("""
             INSERT INTO Addresses (ein, name, canonical_address, zip_code, address_type)
             VALUES (?, ?, ?, ?, ?)
-        """, ('123456789', 'Test Charity', '123 Main St Anytown CA 12345', '12345', 'filer'))
+        """, ('123456789', 'Test Charity', '520 Eighth Avenue 7Th Floor New York Ny 10018', '10018', 'filer'))
 
         conn.commit()
 
@@ -124,7 +124,7 @@ def test_database_integrity():
         # which might be causing confusion. The important parts (foreign keys, cascade delete) are working.
         print("✓ PASS: Core database integrity features working (foreign keys, cascade delete, data operations)")
 
-        # Test data integrity with parsing functions
+        # Test data integrity with parsing functions - using real addresses
         xml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <Return xmlns="http://www.irs.gov/efile">
     <ReturnData>
@@ -132,10 +132,16 @@ def test_database_integrity():
             <Filer><EIN>123456789</EIN><BusinessName><BusinessNameLine1Txt>Test Charity</BusinessNameLine1Txt></BusinessName></Filer>
             <ScheduleI>
                 <RecipientTable>
-                    <RecipientBusinessName><BusinessNameLine1Txt>Grant Recipient</BusinessNameLine1Txt></RecipientBusinessName>
-                    <USAddress><AddressLine1Txt>456 Grant St</AddressLine1Txt><CityNm>Grant City</CityNm><StateAbbreviationCd>NY</StateAbbreviationCd><ZIPCd>67890</ZIPCd></USAddress>
+                    <RecipientBusinessName><BusinessNameLine1Txt>AMERICAN SOCIETY FOR THE PREVENTION OF CRUELTY TO ANIMALS DBA ASPCA</BusinessNameLine1Txt></RecipientBusinessName>
+                    <RecipientUSAddress><AddressLine1Txt>520 EIGHTH AVENUE 7TH FLOOR</AddressLine1Txt><CityNm>NEW YORK</CityNm><StateAbbreviationCd>NY</StateAbbreviationCd><ZIPCd>10018</ZIPCd></RecipientUSAddress>
                     <EIN>987654321</EIN>
                     <CashGrantAmt>7500</CashGrantAmt>
+                </RecipientTable>
+                <RecipientTable>
+                    <RecipientBusinessName><BusinessNameLine1Txt>ST JUDE CHILDREN'S RESEARCH HOSPITAL</BusinessNameLine1Txt></RecipientBusinessName>
+                    <RecipientUSAddress><AddressLine1Txt>262 DANNY THOMAS PLACE</AddressLine1Txt><CityNm>MEMPHIS</CityNm><StateAbbreviationCd>TN</StateAbbreviationCd><ZIPCd>38105</ZIPCd></RecipientUSAddress>
+                    <EIN>135792468</EIN>
+                    <CashGrantAmt>25000</CashGrantAmt>
                 </RecipientTable>
             </ScheduleI>
         </IRS990>
@@ -151,12 +157,12 @@ def test_database_integrity():
             print("✗ FAIL: Grant parsing function failed")
             return False
 
-        # Test address canonicalization integration
+        # Test address canonicalization integration - using real address
         address_components = [
-            type('MockElement', (), {'tag': 'AddressLine1Txt', 'text': '123 Main St'})(),
-            type('MockElement', (), {'tag': 'CityNm', 'text': 'Anytown'})(),
-            type('MockElement', (), {'tag': 'StateAbbreviationCd', 'text': 'CA'})(),
-            type('MockElement', (), {'tag': 'ZIPCd', 'text': '12345'})()
+            type('MockElement', (), {'tag': 'AddressLine1Txt', 'text': '520 EIGHTH AVENUE 7TH FLOOR'})(),
+            type('MockElement', (), {'tag': 'CityNm', 'text': 'NEW YORK'})(),
+            type('MockElement', (), {'tag': 'StateAbbreviationCd', 'text': 'NY'})(),
+            type('MockElement', (), {'tag': 'ZIPCd', 'text': '10018'})()
         ]
 
         canonical, po_box, zip_code, _ = canonicalize_address(address_components, None)

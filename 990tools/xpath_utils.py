@@ -16,7 +16,7 @@ def precompile_xpaths(xpaths, namespaces):
 def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_type=None, log_error=None, xpath_match_stats=None):
     """
     Find an element using a list of XPaths, with caching to avoid redundant evaluations.
-    
+
     Args:
         root: The root element to evaluate XPaths against.
         xpaths: List of XPaths (either strings or precompiled etree.XPath objects).
@@ -26,7 +26,7 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
         form_type: Form type (e.g., "990", "990EZ", "990PF") for stats tracking (optional).
         log_error: Logging function to use for error messages (optional).
         xpath_match_stats: Dictionary to track XPath match statistics (optional).
-    
+
     Returns:
         The first matching element, or None if no match is found.
     """
@@ -37,7 +37,7 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
     # Use a dummy log_error if not provided
     if log_error is None:
         def log_error(msg, *args, **kwargs):
-            print(msg.format(*args))
+            pass  # Silent dummy logger
 
     # Create a unique key for the cache based on root, xpath, and namespaces
     root_id = id(root)
@@ -51,7 +51,6 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
         if cache_key in xpath_cache:
             elem = xpath_cache[cache_key]
             if elem is not None:
-                log_error("Cache hit for field {} with XPath {}", field, str(xpath))
                 return elem
             continue
 
@@ -60,28 +59,27 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
             elem = xpath(root)
             if elem:
                 xpath_cache[cache_key] = elem[0]
-                log_error("XPath match for field {} with XPath {}", field, str(xpath))
+                # Only update stats, don't log individual matches
                 if field and form_type and xpath_match_stats is not None:
                     stats_key = f"{form_type}:{field}:{xpath}"
                     xpath_match_stats[stats_key] += 1
-                    log_error("Incremented xpath_match_stats for {}: {}", stats_key, xpath_match_stats[stats_key])
                 return elem[0]
         except etree.XPathEvalError as e:
             xml_snippet = etree.tostring(root, encoding='unicode', method='xml')[:2000]
-            log_error("XPath error for {}: {}. XML snippet: {}", xpath, e, xml_snippet)
+            if log_error:
+                log_error("XPath error for %s: %s. XML snippet: %s", xpath, e, xml_snippet)
             non_ns_xpath = xpath.replace('irs:', '').replace('{http://www.irs.gov/efile}', '')
             try:
                 elem = root.xpath(non_ns_xpath, namespaces=None)
                 if elem:
                     xpath_cache[cache_key] = elem[0]
-                    log_error("XPath match (non-namespaced) for field {} with XPath {}", field, non_ns_xpath)
                     if field and form_type and xpath_match_stats is not None:
                         stats_key = f"{form_type}:{field}:{xpath}"
                         xpath_match_stats[stats_key] += 1
-                        log_error("Incremented xpath_match_stats for {}: {}", stats_key, xpath_match_stats[stats_key])
                     return elem[0]
             except etree.XPathEvalError as e:
-                log_error("Non-namespaced XPath error for {}: {}. XML snippet: {}", non_ns_xpath, e, xml_snippet)
+                if log_error:
+                    log_error("Non-namespaced XPath error for %s: %s. XML snippet: %s", non_ns_xpath, e, xml_snippet)
 
         # Cache the None result to avoid re-evaluating
         xpath_cache[cache_key] = None

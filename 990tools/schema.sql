@@ -199,6 +199,8 @@ CREATE TABLE XmlFiles (
     -- Form type (990, 990EZ, 990PF)
     processed BOOLEAN DEFAULT FALSE,
     -- Whether XML has been processed
+    processing_version INTEGER DEFAULT 0,
+    -- Version of processing pipeline used (for incremental updates)
     error_message TEXT,
     -- Error message if processing failed
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

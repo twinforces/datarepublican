@@ -132,16 +132,16 @@ class TestIRS990Processor(unittest.TestCase):
         address1 = Address(
             ein="123456789",
             name="Test Charity",
-            canonical_address="123 Main St, Anytown, ST 12345",
-            zip_code="12345",
+            canonical_address="520 Eighth Avenue 7Th Floor New York Ny 10018",
+            zip_code="10018",
             address_type="filer"
         )
 
         address2 = Address(
             ein="123456789",
             name="Test Charity",
-            canonical_address="123 Main St, Anytown, ST 12345",  # Same address
-            zip_code="12345",
+            canonical_address="520 Eighth Avenue 7Th Floor New York Ny 10018",  # Same address
+            zip_code="10018",
             address_type="filer"
         )
 

@@ -15,7 +15,7 @@ from extract_utils import canonicalize_address
 def test_grant_parsing():
     """Test grant parsing functionality"""
 
-    # Sample XML content with grants - use BytesIO to avoid file loading issues
+    # Sample XML content with grants - use real addresses from test XML file
     xml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <Return xmlns="http://www.irs.gov/efile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
     <ReturnData>
@@ -29,26 +29,41 @@ def test_grant_parsing():
             <ScheduleI>
                 <RecipientTable>
                     <RecipientBusinessName>
-                        <BusinessNameLine1Txt>Recipient Org</BusinessNameLine1Txt>
+                        <BusinessNameLine1Txt>AMERICAN SOCIETY FOR THE PREVENTION OF CRUELTY TO ANIMALS DBA ASPCA</BusinessNameLine1Txt>
                     </RecipientBusinessName>
-                    <USAddress>
-                        <AddressLine1Txt>123 Main St</AddressLine1Txt>
-                        <CityNm>Anytown</CityNm>
-                        <StateAbbreviationCd>CA</StateAbbreviationCd>
-                        <ZIPCd>12345</ZIPCd>
-                    </USAddress>
+                    <RecipientUSAddress>
+                        <AddressLine1Txt>520 EIGHTH AVENUE 7TH FLOOR</AddressLine1Txt>
+                        <CityNm>NEW YORK</CityNm>
+                        <StateAbbreviationCd>NY</StateAbbreviationCd>
+                        <ZIPCd>10018</ZIPCd>
+                    </RecipientUSAddress>
                     <EIN>987654321</EIN>
                     <CashGrantAmt>50000</CashGrantAmt>
                 </RecipientTable>
                 <RecipientTable>
                     <RecipientBusinessName>
-                        <BusinessNameLine1Txt>Foreign Recipient</BusinessNameLine1Txt>
+                        <BusinessNameLine1Txt>ST JUDE CHILDREN'S RESEARCH HOSPITAL</BusinessNameLine1Txt>
                     </RecipientBusinessName>
-                    <RecipientForeignAddress>
-                        <AddressLine1Txt>456 Foreign St</AddressLine1Txt>
-                        <CityNm>Foreign City</CityNm>
-                        <CountryCd>UK</CountryCd>
-                    </RecipientForeignAddress>
+                    <RecipientUSAddress>
+                        <AddressLine1Txt>262 DANNY THOMAS PLACE</AddressLine1Txt>
+                        <CityNm>MEMPHIS</CityNm>
+                        <StateAbbreviationCd>TN</StateAbbreviationCd>
+                        <ZIPCd>38105</ZIPCd>
+                    </RecipientUSAddress>
+                    <EIN>135792468</EIN>
+                    <CashGrantAmt>75000</CashGrantAmt>
+                </RecipientTable>
+                <RecipientTable>
+                    <RecipientBusinessName>
+                        <BusinessNameLine1Txt>NATURE CONSERVANCY INC</BusinessNameLine1Txt>
+                    </RecipientBusinessName>
+                    <RecipientUSAddress>
+                        <AddressLine1Txt>4245 N FAIRFAX DR</AddressLine1Txt>
+                        <CityNm>ARLINGTON</CityNm>
+                        <StateAbbreviationCd>VA</StateAbbreviationCd>
+                        <ZIPCd>22203</ZIPCd>
+                    </RecipientUSAddress>
+                    <EIN>246813579</EIN>
                     <CashGrantAmt>25000</CashGrantAmt>
                 </RecipientTable>
             </ScheduleI>
@@ -85,32 +100,32 @@ def test_grant_parsing():
         print("\nTesting address canonicalization:")
         print("-" * 40)
 
-        # Mock address components for US address
+        # Mock address components for US address - using real address from test data
         us_components = [
-            type('MockElement', (), {'tag': 'AddressLine1Txt', 'text': '123 Main St'})(),
-            type('MockElement', (), {'tag': 'CityNm', 'text': 'Anytown'})(),
-            type('MockElement', (), {'tag': 'StateAbbreviationCd', 'text': 'CA'})(),
-            type('MockElement', (), {'tag': 'ZIPCd', 'text': '12345'})()
+            type('MockElement', (), {'tag': 'AddressLine1Txt', 'text': '520 EIGHTH AVENUE 7TH FLOOR'})(),
+            type('MockElement', (), {'tag': 'CityNm', 'text': 'NEW YORK'})(),
+            type('MockElement', (), {'tag': 'StateAbbreviationCd', 'text': 'NY'})(),
+            type('MockElement', (), {'tag': 'ZIPCd', 'text': '10018'})()
         ]
 
         canonical, po_box, zip_code, _ = canonicalize_address(us_components, None)
-        expected_canonical = "123 Main Street Anytown Ca 12345"  # Note: "St" expands to "Street"
+        expected_canonical = "520 Eighth Avenue 7Th Floor New York Ny 10018"  # Note: "7th" becomes "7Th"
 
         if canonical == expected_canonical:
             print("✓ PASS: US address canonicalization")
         else:
             print(f"✗ FAIL: US address canonicalization - expected '{expected_canonical}', got '{canonical}'")
 
-        # Test PO Box detection
+        # Test PO Box detection - using real PO Box from test data
         po_box_components = [
-            type('MockElement', (), {'tag': 'AddressLine1Txt', 'text': 'PO Box 123'})(),
-            type('MockElement', (), {'tag': 'CityNm', 'text': 'Anytown'})(),
-            type('MockElement', (), {'tag': 'StateAbbreviationCd', 'text': 'CA'})(),
-            type('MockElement', (), {'tag': 'ZIPCd', 'text': '12345'})()
+            type('MockElement', (), {'tag': 'AddressLine1Txt', 'text': 'PO BOX 81226'})(),
+            type('MockElement', (), {'tag': 'CityNm', 'text': 'SEATTLE'})(),
+            type('MockElement', (), {'tag': 'StateAbbreviationCd', 'text': 'WA'})(),
+            type('MockElement', (), {'tag': 'ZIPCd', 'text': '981081226'})()
         ]
 
         canonical, po_box, zip_code, _ = canonicalize_address(po_box_components, None)
-        if po_box == "123" and "Po Box" in canonical:  # Note: title case makes it "Po Box"
+        if po_box == "81226" and "Po Box" in canonical:  # Note: title case makes it "Po Box"
             print("✓ PASS: PO Box detection and canonicalization")
         else:
             print(f"✗ FAIL: PO Box detection - po_box: {po_box}, canonical: {canonical}")

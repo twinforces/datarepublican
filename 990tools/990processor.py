@@ -74,6 +74,9 @@ DEFAULT_OUT_DIR = "/Volumes/Data/tsvs"
 DEFAULT_ANAL_DIR = "/Volumes/Data/atsvs"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 
+# Processing version constants
+CURRENT_PROCESSING_VERSION = 1  # Increment when processing logic changes
+
 # Threading constants
 MAX_WORKERS = 16
 BATCH_SIZE = 5000
@@ -104,6 +107,7 @@ class XMLFile:
     tax_year: Optional[int] = None
     form_type: Optional[str] = None
     processed: bool = False
+    processing_version: int = 0
     error_message: Optional[str] = None
 
 @dataclass
@@ -333,11 +337,11 @@ class IRS990Processor:
 
         self.db_cursor.execute("""
             INSERT INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year,
-                                form_type, processed, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                form_type, processed, processing_version, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (xml_file.zip_id, xml_file.filename, xml_file.internal_path,
               xml_file.ein, xml_file.tax_year, xml_file.form_type,
-              xml_file.processed, xml_file.error_message))
+              xml_file.processed, xml_file.processing_version, xml_file.error_message))
         xml_file.xml_id = self.db_cursor.lastrowid or 0
         self.db_conn.commit()
         return xml_file.xml_id
@@ -506,11 +510,11 @@ class IRS990Processor:
 
         # Bulk insert XML files
         if xml_file_objects:
-            xml_data = [(xf.zip_id, xf.filename, xf.internal_path, xf.ein, xf.tax_year, xf.form_type, xf.processed, xf.error_message)
-                       for xf in xml_file_objects]
+            xml_data = [(xf.zip_id, xf.filename, xf.internal_path, xf.ein, xf.tax_year, xf.form_type, xf.processed, xf.processing_version, xf.error_message)
+                        for xf in xml_file_objects]
             self.db_cursor.executemany("""
-                INSERT OR IGNORE INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year, form_type, processed, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year, form_type, processed, processing_version, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, xml_data)
             self.db_conn.commit()
             self.log_info(f"Bulk inserted {len(xml_file_objects)} XML files for ZIP {zip_filename}")
@@ -528,13 +532,13 @@ class IRS990Processor:
         """Parse XML files and extract data to dataclasses (step 5)"""
         self.log_info("Processing XML files and extracting data")
 
-        # Get unprocessed XML files
+        # Get unprocessed XML files or files with outdated processing version
         self.db_cursor.execute("""
             SELECT xml_id, zip_id, filename, internal_path
             FROM XmlFiles
-            WHERE processed = FALSE
+            WHERE processed = FALSE OR processing_version < ?
             ORDER BY zip_id, filename
-        """)
+        """, (CURRENT_PROCESSING_VERSION,))
 
         xml_files = self.db_cursor.fetchall()
         self.log_info(f"Found {len(xml_files)} unprocessed XML files")
@@ -665,9 +669,9 @@ class IRS990Processor:
                     # Mark XML as processed with error
                     xml_id = item[1]
                     cursor.execute("""
-                        UPDATE XmlFiles SET processed = TRUE, error_message = ?
+                        UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
                         WHERE xml_id = ?
-                    """, ("Processing error", xml_id))
+                    """, (CURRENT_PROCESSING_VERSION, "Processing error", xml_id))
                     conn.commit()
                     continue
 
@@ -964,17 +968,17 @@ class IRS990Processor:
     def _mark_xml_error(self, xml_id: int, error_msg: str):
         """Mark XML file as having an error"""
         self.db_cursor.execute("""
-            UPDATE XmlFiles SET processed = TRUE, error_message = ?
+            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
             WHERE xml_id = ?
-        """, (error_msg, xml_id))
+        """, (CURRENT_PROCESSING_VERSION, error_msg, xml_id))
         self.db_conn.commit()
 
     def _mark_xml_processed(self, xml_id: int):
         """Mark XML file as processed"""
         self.db_cursor.execute("""
-            UPDATE XmlFiles SET processed = TRUE
+            UPDATE XmlFiles SET processed = TRUE, processing_version = ?
             WHERE xml_id = ?
-        """, (xml_id,))
+        """, (CURRENT_PROCESSING_VERSION, xml_id))
         self.db_conn.commit()
 
     def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:

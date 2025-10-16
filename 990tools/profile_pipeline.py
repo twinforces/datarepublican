@@ -55,7 +55,7 @@ def profile_pipeline():
         processor.db_cursor.execute("""
             SELECT xml_id, zip_id, filename, internal_path
             FROM XmlFiles
-            WHERE processed = FALSE
+            WHERE processed = FALSE OR processing_version < 1
             ORDER BY zip_id, filename
         """)
 
@@ -86,7 +86,7 @@ def profile_pipeline():
                     processed_files += 1
                     # Mark as processed
                     processor.db_cursor.execute("""
-                        UPDATE XmlFiles SET processed = TRUE
+                        UPDATE XmlFiles SET processed = TRUE, processing_version = 1
                         WHERE xml_id = ?
                     """, (xml_id,))
                     processor.db_conn.commit()
