@@ -2,27 +2,16 @@
 
 A comprehensive Python module for processing IRS Form 990, 990EZ, and 990PF filings to extract charity data, grants, and financial information for nonprofit transparency analysis.
 
-## Quick Start
-
-The easiest way to run the complete pipeline:
-
-```bash
-cd /path/to/990tools
-./doEverything.sh
-```
-
-This will process all IRS 990 data from 2017-2025 using the new unified processor.
-
 ## Overview
 
-This system replaces the previous collection of separate scripts with a unified, database-driven processing pipeline. It processes IRS 990 tax filings to extract:
+This module replaces the previous collection of separate scripts with a unified, database-driven processing pipeline. It processes IRS 990 tax filings to extract:
 
-- Charity organization data with financial metrics
-- Grant and contribution flows between organizations
+- Charity organization data
+- Grant and contribution flows
 - Officer compensation data
 - Contractor payments
 - Political contributions
-- Address geocoding for fraud detection (coordinates rounded to ~10m precision)
+- Address geocoding for fraud detection
 
 ## Performance & Reliability
 
@@ -48,7 +37,7 @@ This system replaces the previous collection of separate scripts with a unified,
 
 The system uses:
 - **SQLite database** for data storage and relationships
-- **Dataclass-based data models** for type safety and clarity
+- **Dataclasses** for type-safe data models
 - **Threaded processing** for performance
 - **Census geocoding API** for address location data
 - **Comprehensive logging** for debugging and monitoring
@@ -66,7 +55,7 @@ The system uses:
 ### Processing Pipeline
 1. **ZIP File Processing**: Register and index ZIP files containing XML filings
 2. **XML Parsing**: Extract data from Form 990/990EZ/990PF XML files
-3. **Address Geocoding**: Convert addresses to lat/long coordinates (10m precision)
+3. **Address Geocoding**: Convert addresses to lat/long coordinates
 4. **Grant Matching**: Match grants to recipient organizations by EIN or address
 5. **Percentile Analysis**: Calculate financial ratios and percentiles by organization type
 6. **Data Export**: Generate final TSV files for analysis
@@ -143,40 +132,6 @@ The processor uses several directory paths (can be overridden):
 
 Set these as environment variables or pass to constructor.
 
-## Output Files
-
-The processor generates several TSV files in the final directory:
-
-- `charities_latest.tsv`: Latest charity data with percentiles
-- `grants_latest.tsv`: Grant payment data
-- `contractors_latest.tsv`: Contractor payment data
-- `political_contributions_latest.tsv`: Political contribution data
-
-## Key Features
-
-### Address Geocoding
-- Uses Census Bureau geocoding API
-- Handles PO boxes and foreign addresses
-- Stores lat/long coordinates rounded to 4 decimal places (~10m precision)
-- Enables building-level fraud detection
-- Batches requests for efficiency
-
-### Grant Matching
-- Matches grants by EIN when available
-- Falls back to address/name matching for foreign grants
-- Creates "stub" charities for unmatched recipients
-- Uses geocoding data for proximity matching
-
-### Percentile Analysis
-- Calculates compensation, travel, and expense percentiles
-- Groups by organization type and tax year
-- Enables comparative analysis across charities
-
-### Threaded Processing
-- Multi-threaded XML parsing and geocoding
-- Batched database operations
-- Progress monitoring with tqdm
-
 ## Database Schema
 
 The system uses SQLite with the following main tables:
@@ -192,16 +147,38 @@ The system uses SQLite with the following main tables:
 
 See `schema.sql` for complete schema definition.
 
-## Migration from Old Scripts
+## Output Files
 
-The new processor replaces these scripts:
-- `extract_charities.py`
-- `extract_grants.py`
-- `extract_addresses.py`
-- `analyze_charities.py`
-- `get_latest.py`
+The processor generates several TSV files in the final directory:
 
-Data flows are now stored in SQLite instead of intermediate TSV files, enabling more complex queries and relationships.
+- `charities_latest.tsv`: Latest charity data with percentiles
+- `grants_latest.tsv`: Grant payment data
+- `contractors_latest.tsv`: Contractor payment data
+- `political_contributions_latest.tsv`: Political contribution data
+
+## Key Features
+
+### Address Geocoding
+- Uses Census Bureau geocoding API
+- Handles PO boxes and foreign addresses
+- Stores lat/long coordinates for fraud detection
+- Batches requests for efficiency
+
+### Grant Matching
+- Matches grants by EIN when available
+- Falls back to address/name matching for foreign grants
+- Creates "stub" charities for unmatched recipients
+- Uses geocoding data for proximity matching
+
+### Percentile Analysis
+- Calculates compensation, travel, and expense percentiles
+- Groups by organization type and tax year
+- Enables comparative analysis across charities
+
+### Threaded Processing
+- Multi-threaded XML parsing
+- Batched database operations
+- Progress monitoring with tqdm
 
 ## Testing
 
@@ -272,6 +249,17 @@ The processor includes comprehensive error handling:
 - **Schedule O**: Optimized parsing with ~25% performance improvement
 - **Import Logic**: Removed problematic backfill code causing pipeline failures
 
+## Migration from Old Scripts
+
+The new processor replaces these scripts:
+- `extract_charities.py`
+- `extract_grants.py`
+- `extract_addresses.py`
+- `analyze_charities.py`
+- `get_latest.py`
+
+Data flows are now stored in SQLite instead of intermediate TSV files, enabling more complex queries and relationships.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed change history and performance improvements.
@@ -287,6 +275,3 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed change history and performance imp
 ## License
 
 See repository license file.
-
-
- 

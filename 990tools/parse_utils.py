@@ -7,18 +7,25 @@ import logging
 from xpaths import NAMESPACES, XPATHS_990EZ, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
 from xpath_utils import find_element
+from extract_utils import canonicalize_address
 MONEY_PATTERN = re.compile(r'\$([\d,]+(?:\.\d{2})?)')
+FLOAT_PATTERN = re.compile(r'-?[\d,]+\.?\d*')
 
 def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False):
     elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)
     if elem is not None:
+        text = elem.text.strip() if elem.text else ""
+        if text.upper() == "RESTRICTED":
+            # Skip RESTRICTED values silently
+            return 0
         try:
-            value = int(elem.text.strip())
+            value = int(text)
             if verbose:
                 log_error("Parsed int field {}: {} for EIN {} in {}", field, value, context.get('filer_ein'), xml_filename)
             return value
         except (ValueError, AttributeError):
-            log_error("Invalid int value for field {}: {} in {}", field, elem.text, xml_filename)
+            if log_error:
+                log_error("Invalid int value for field %s: %s in %s", field, text, xml_filename)
     return 0
 
 def parse_string_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False, default=None, return_element=False):
@@ -45,7 +52,7 @@ def parse_schedule(root, xpaths_dict, elements_key, sub_elements_key, value_key,
             value_elem = find_element(sub_elem, xpaths_dict[value_key], namespaces, xpath_cache=xpath_cache, field=value_key, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)
             if value_elem is not None:
                 try:
-                    amount = int(value_elem.text.strip())
+                    amount = int(parse_float_field(value_elem.text.strip()))
                     total += amount
                     if verbose:
                         log_error("Parsed schedule amount ${} for field in {}", amount, xml_filename)
@@ -56,11 +63,28 @@ def parse_schedule(root, xpaths_dict, elements_key, sub_elements_key, value_key,
 def clean_name(name):
     return re.sub(r'[^a-zA-Z0-9\s]', '', name).strip().upper()
 
+def parse_float_field(text):
+    """Parse a float from text, handling commas, dollar signs, and other formatting"""
+    if not text:
+        return 0.0
+
+    # Use regex to find the first valid number pattern
+    match = FLOAT_PATTERN.search(str(text))
+    if match:
+        # Remove commas and dollar signs
+        cleaned = match.group().replace(',', '').replace('$', '')
+        try:
+            return float(cleaned)
+        except ValueError:
+            pass
+
+    return 0.0
+
 def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins, form_type):
     grants = []
     try:
         parser = etree.XMLParser(recover=True)
-        tree = etree.parse(BytesIO(xml_content), parser)
+        tree = etree.parse(xml_content, parser)
         root = tree.getroot()
         grant_xpaths = GRANT_XPATHS.get(form_type, [])
         for xpath in grant_xpaths:
@@ -88,7 +112,7 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                     continue
                 if amount_elem and amount_elem[0].text:
                     try:
-                        grant_amt = int(float(amount_elem[0].text.strip()))
+                        grant_amt = int(parse_float_field(amount_elem[0].text.strip()))
                         if grant_amt > 0:
                             grants.append({
                                 'filer_ein': filer_ein,
@@ -97,22 +121,23 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 'grant_amt': grant_amt,
                                 'tax_year': tax_year
                             })
-                            if grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999" and not is_foreign:
-                                is_valid, reason = validate_ein(grant_ein)
-                                if is_valid:
-                                    address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                                    canonical_address, po_box, zip_code, _ = canonicalize_address([comp for comp in address_components if comp.text], None)
-                                    if canonical_address or po_box or zip_code:
-                                        backfill_key = (grant_ein, grantee_name, zip_code)
-                                        if backfill_key not in seen_backfill_keys:
-                                            seen_backfill_keys.add(backfill_key)
-                                            backfill_entries.append({
-                                                'grant_ein': grant_ein,
-                                                'name': grantee_name,
-                                                'canonical_address': canonical_address,
-                                                'po_box': po_box,
-                                                'zip_code': zip_code
-                                            })
+                            # Skip backfill logic for now - causing import issues
+                            # if grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999" and not is_foreign:
+                            #     is_valid, reason = validate_ein(grant_ein)
+                            #     if is_valid:
+                            #         address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
+                            #         canonical_address, po_box, zip_code, _ = canonicalize_address([comp for comp in address_components if comp.text], None)
+                            #         if canonical_address or po_box or zip_code:
+                            #             backfill_key = (grant_ein, grantee_name, zip_code)
+                            #             if backfill_key not in seen_backfill_keys:
+                            #                 seen_backfill_keys.add(backfill_key)
+                            #                 backfill_entries.append({
+                            #                     'grant_ein': grant_ein,
+                            #                     'name': grantee_name,
+                            #                     'canonical_address': canonical_address,
+                            #                     'po_box': po_box,
+                            #                     'zip_code': zip_code
+                            #                 })
                     except (ValueError, TypeError):
                         pass
     except Exception as e:
@@ -138,7 +163,7 @@ def parse_contributions(xml_content, xml_filename, filer_ein, filer_name, tax_ye
                     continue
                 if amount_elem and amount_elem[0].text:
                     try:
-                        amount = int(float(amount_elem[0].text.strip()))
+                        amount = int(parse_float_field(amount_elem[0].text.strip()))
                         if amount > 0:
                             contributions.append({
                                 'filer_ein': filer_ein,

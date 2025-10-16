@@ -4,7 +4,7 @@ from lxml import etree
 from io import BytesIO
 import logging
 from nameparser import HumanName
-from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN
+from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field
 from xpaths import XPATHS_990PF, NAMESPACES
 
 logger = None
@@ -128,9 +128,8 @@ def parse_grants_to_others_990pf(root, field, namespaces, xml_filename, context,
     
     debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
     if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
-        log_error("Non-zero grants_to_others ${} for EIN {}, Name {}, TaxYear {}, XML {}", 
-                  total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename, 
-                  ein=context.get('filer_ein', 'Unknown'))
+        log_error("Non-zero grants_to_others $%s for EIN %s, Name %s, TaxYear %s, XML %s",
+                  total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename)
     elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
         return_data = parse_string_field(root, XPATHS_990PF, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
@@ -252,16 +251,12 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["travel_ptile"] = "n/y"
     data["conferences_ptile"] = "n/y"
     data["grants_ptile"] = "n/y"
+    data["foreign_expenses_ptile"] = "n/y"
     data["foreign_expenses_pct"] = "n/a"
     data["foreign_expenses"] = "n/a"
     data["foreign_office"] = "n/a"
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
-    data["denominator"] = data["total_assets"] + data["receipt"]
-    data["comp_ptile"] = "n/y"
-    data["travel_ptile"] = "n/y"
-    data["conferences_ptile"] = "n/y"
-    data["grants_ptile"] = "n/y"
     data["govt_grants"] = "n/a"
     data["contributions"] = "n/a"
     data["domestic_misrep_flag"] = False

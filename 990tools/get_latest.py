@@ -483,7 +483,7 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                     continue
                 if amount_elem and amount_elem[0].text:
                     try:
-                        grant_amt = int(float(amount_elem[0].text.strip()))
+                        grant_amt = int(parse_float_field(amount_elem[0].text.strip()))
                         if grant_amt > 0:
                             grants.append({
                                 'filer_ein': filer_ein,

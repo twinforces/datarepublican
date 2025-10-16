@@ -484,9 +484,9 @@ FIPS_TO_ISO = {
 }
 
 def lookupCC(code):
-    if (code in iso3166_alpha2):
-        return iso3166_alpha2
+    if code in iso3166_alpha2:
+        return iso3166_alpha2[code]
     else:
-        if (code in FIPS_TO_ISO):
+        if code in FIPS_TO_ISO:
             return iso3166_alpha2[FIPS_TO_ISO[code]]
     return None
