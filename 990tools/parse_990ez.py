@@ -272,6 +272,8 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
         return None, []
 
     context["filer_name"] = parse_filer_name_990ez(root, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+    context["business_name_line1"] = parse_string_field(root, XPATHS_990EZ, "business_name_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+    context["business_name_line2"] = parse_string_field(root, XPATHS_990EZ, "business_name_line2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
 
     fields = [
         ("receipt", parse_receipt_990ez),
@@ -320,7 +322,7 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["domestic_misrep_flag"] = False
 
     row = [
-        context["tax_year"], context["filer_ein"], context["filer_name"], data["receipt"], data["govt_grants"],
+        context["tax_year"], context["filer_ein"], context["filer_name"], context["business_name_line1"], context["business_name_line2"], data["receipt"], data["govt_grants"],
         data["contributions"], data["org_type"], data["total_exp"], data["prog_exp"], data["travel"],
         data["conferences"], data["officer_comp"], data["comp_pct"], data["comp_ptile"], data["travel_pct"],
         data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],

@@ -5,12 +5,16 @@ PRAGMA foreign_keys = ON;
 -- Charities table - Core charity data from IRS 990 filings
 CREATE TABLE Charities (
     charity_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ein TEXT NOT NULL UNIQUE,
+    ein TEXT NOT NULL,
     -- Employer Identification Number (9 digits)
     tax_year INTEGER NOT NULL,
     -- Tax year of filing
     filer_name TEXT NOT NULL,
     -- Organization name
+    business_name_line1 TEXT,
+    -- First line of business name
+    business_name_line2 TEXT,
+    -- Second line of business name
     receipt_amt REAL,
     -- Total receipts
     govt_amt REAL,
@@ -75,13 +79,12 @@ CREATE TABLE Charities (
     -- Grants to other organizations
     domestic_misrep_flag TEXT,
     -- Domestic misrepresentation flag
-    xml_name TEXT,
+    xml_name TEXT UNIQUE,
     -- XML filename reference
     grift REAL,
     -- Grift amount
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(ein, tax_year) -- One filing per EIN per year
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 -- Grants table - Grant data from charity filings
 CREATE TABLE Grants (
@@ -126,12 +129,20 @@ CREATE TABLE Addresses (
     -- EIN this address belongs to
     name TEXT NOT NULL,
     -- Organization name
-    canonical_address TEXT,
-    -- Standardized address
-    po_box TEXT,
-    -- PO Box if applicable
+    address_line1 TEXT,
+    -- First line of street address
+    address_line2 TEXT,
+    -- Second line of street address
+    city TEXT,
+    -- City
+    state TEXT,
+    -- State
     zip_code TEXT,
     -- ZIP code
+    po_box TEXT,
+    -- PO Box if applicable
+    canonical_address TEXT,
+    -- Standardized address built from components
     address_type TEXT NOT NULL CHECK(address_type IN ('filer', 'grantee')),
     -- Address type
     geocoding_id INTEGER,
@@ -315,6 +326,8 @@ CREATE TABLE Contractors (
     -- PO Box if applicable
     tax_year INTEGER NOT NULL,
     -- Tax year
+    colocator TEXT,
+    -- Colocator data
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (filer_ein) REFERENCES Charities(ein) ON DELETE CASCADE
 );
@@ -335,6 +348,8 @@ CREATE TABLE PoliticalContributions (
     -- Recipient PO Box
     tax_year INTEGER NOT NULL,
     -- Tax year
+    colocator TEXT,
+    -- Colocator data
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (filer_ein) REFERENCES Charities(ein) ON DELETE CASCADE
 );

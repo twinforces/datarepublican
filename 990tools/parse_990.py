@@ -221,14 +221,19 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         'tax_year': tax_year,
         'form_type': form_type
     }
+    log_error("TRACE: parse_990() started with context: EIN='{}', tax_year={}, form_type={}, file={}",
+              context['filer_ein'], context['tax_year'], context['form_type'], xml_filename, ein=context['filer_ein'])
 
     if context["form_type"] != "990":
-        log_error("XML {} is not a Form 990 (form_type: {}), skipping", 
-                  xml_filename, context['form_type'], 
+        log_error("TRACE: XML {} is not a Form 990 (form_type: {}), skipping for EIN {}",
+                  xml_filename, context['form_type'], context['filer_ein'],
                   ein=context['filer_ein'])
         return None, []
 
     context["filer_name"] = parse_filer_name_990(root, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+    context["business_name_line1"] = parse_string_field(root, XPATHS_990, "business_name_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+    context["business_name_line2"] = parse_string_field(root, XPATHS_990, "business_name_line2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+    log_error("TRACE: After filer_name parsing, context EIN: '{}' in file {}", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
     fields = [
         ("receipt", parse_receipt_990),
@@ -276,7 +281,7 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
     data["domestic_misrep_flag"] = data["grift_ratio"] > 10 and data["foreign_expenses_pct"] < 0.1 * 100 if data["total_exp"] > 0 else False
 
     row = [
-        context["tax_year"], context["filer_ein"], context["filer_name"], data["receipt"], data["govt_grants"],
+        context["tax_year"], context["filer_ein"], context["filer_name"], context["business_name_line1"], context["business_name_line2"], data["receipt"], data["govt_grants"],
         data["contributions"], data["org_type"], data["total_exp"], data["prog_exp"], data["travel"],
         data["conferences"], data["officer_comp"], data["comp_pct"], data["comp_ptile"], data["travel_pct"],
         data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],
@@ -284,6 +289,7 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
         data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
         data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename
     ]
+    log_error("TRACE: parse_990() returning row with EIN: '{}' (position 1) for file {}", row[1], xml_filename, ein=row[1])
     return row, officer_entries
 
 def main():
@@ -343,14 +349,29 @@ def main():
     for xpath in filer_ein_paths:
         result = xpath(root)
         if result:
-            filer_ein = result[0].text.strip()
+            raw_ein = result[0].text.strip()
+            log_error("TRACE: Found raw EIN: '{}' using xpath: {} in file {}", raw_ein, xpath.path, xml_file, ein=raw_ein)
+            if raw_ein.isdigit():
+                filer_ein = f"{int(raw_ein):09d}"
+                log_error("TRACE: Formatted EIN: '{}' (valid 9-digit) in file {}", filer_ein, xml_file, ein=filer_ein)
+            else:
+                log_error("TRACE: Non-digit EIN found: '{}' in file {}, setting to 'Unknown'", raw_ein, xml_file, ein=raw_ein)
+                filer_ein = "Unknown"
             break
-    filer_ein = filer_ein if filer_ein is not None else "Unknown"
+    if filer_ein is None:
+        log_error("TRACE: No EIN found in XML file {}, setting to 'Unknown'", xml_file, ein="Unknown")
+        filer_ein = "Unknown"
 
+    log_error("TRACE: Final EIN before parse_990() call: '{}' in file {}", filer_ein, xml_file, ein=filer_ein)
+
+    log_error("TRACE: Calling parse_990() with EIN: '{}' for file {}", filer_ein, xml_file, ein=filer_ein)
     row, _ = parse_990(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
     if row:
+        log_error("TRACE: parse_990() returned row with EIN: '{}' for file {}", row[1], xml_file, ein=row[1])
         row_str = [str(x).replace('\t', ' ').replace('\n', ' ') for x in row]
         print('\t'.join(row_str))
+    else:
+        log_error("TRACE: parse_990() returned None for EIN: '{}' in file {}", filer_ein, xml_file, ein=filer_ein)
 
 if __name__ == "__main__":
     main()

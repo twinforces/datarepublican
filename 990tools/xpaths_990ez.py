@@ -19,6 +19,14 @@ XPATHS_990EZ = {
         etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
         etree.XPath(".//Filer/BusinessName/BusinessNameLine1Txt", namespaces=NAMESPACES),
     ],
+    "business_name_line1": [
+        etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/BusinessName/BusinessNameLine1Txt", namespaces=NAMESPACES),
+    ],
+    "business_name_line2": [
+        etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/BusinessName/BusinessNameLine2Txt", namespaces=NAMESPACES),
+    ],
     "receipt": [
         etree.XPath(".//irs:IRS990EZ/irs:GrossReceiptsAmt", namespaces=NAMESPACES),
         etree.XPath(".//irs:IRS990EZ/irs:TotalRevenueAmt", namespaces=NAMESPACES),

@@ -131,6 +131,9 @@ def main():
                             acronym_row = {
                                 'grant_ein': ein,
                                 'name': acronym,
+                                'street': None,
+                                'city': None,
+                                'state': None,
                                 'canonical_address': row.get('canonical_address', ''),
                                 'po_box': row.get('po_box', ''),
                                 'zip_code': zip_code
@@ -150,6 +153,9 @@ def main():
                         address_entries.append({
                             'filer_ein': ein,
                             'filer_name': name,
+                            'street': None,
+                            'city': None,
+                            'state': None,
                             'canonical_address': canonical_address,
                             'po_box': po_box,
                             'zip_code': zip_code

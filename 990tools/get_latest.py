@@ -208,7 +208,7 @@ def collect_latest_rows(tsv_files, minimum_d, worker_threads, zip_index, year_ra
                                 "Potential mismatch (missing XML): EIN={}, xml_name={}, TSV ZIP={}, no index entry for xml_filename {}",
                                 ein, xml_path, tsv_zip, xml_filename, ein=ein
                             )
-            # Select qualifying rows
+            # Select qualifying rows - handle duplicates by taking latest XML file
             for row in filtered_rows:
                 ein = row['filer_ein']
                 try:
@@ -217,8 +217,29 @@ def collect_latest_rows(tsv_files, minimum_d, worker_threads, zip_index, year_ra
                     continue
                 if denominator >= minimum_d:
                     with rows_lock:
-                        # Update only if no row exists or this row is newer
-                        if ein not in latest_rows or year > latest_rows[ein][2]:
+                        # For duplicates, compare XML filenames to determine which is "latest"
+                        # Use filename as tiebreaker when years are equal
+                        xml_name = row.get('xml_name', '')
+                        existing_xml = latest_rows.get(ein, (None, None, None))[0]
+                        existing_xml_name = existing_xml.get('xml_name', '') if existing_xml else ''
+                        existing_year = latest_rows.get(ein, (None, None, 0))[2]
+
+                        should_update = False
+                        if ein not in latest_rows:
+                            should_update = True
+                        elif year > existing_year:
+                            should_update = True
+                        elif year == existing_year:
+                            # Same year, compare XML filenames (simple string comparison)
+                            if xml_name > existing_xml_name:
+                                should_update = True
+                                if verbose:
+                                    log_error(
+                                        "Replacing duplicate EIN={} year {} with newer XML {} (was {})",
+                                        ein, year, xml_name, existing_xml_name, ein=ein
+                                    )
+
+                        if should_update:
                             local_rows.append((row, org_type, year))
                             latest_rows[ein] = (row, org_type, year)
                             selected_count += 1
@@ -229,8 +250,8 @@ def collect_latest_rows(tsv_files, minimum_d, worker_threads, zip_index, year_ra
                                 )
                         elif verbose:
                             log_error(
-                                "Keeping newer row for EIN={} from year {} in TSV {}, ignoring year {}",
-                                ein, latest_rows[ein][2], tsv_file, year, ein=ein
+                                "Keeping existing row for EIN={} from year {} in TSV {}, ignoring year {}",
+                                ein, existing_year, tsv_file, year, ein=ein
                             )
             return local_rows, total_rows, len(filtered_rows), selected_count, local_mismatches, local_missing_xmls, local_potential_mismatches
         except Exception as e:
@@ -412,7 +433,7 @@ def write_backfill(backfill_entries, output_tsv, output_csv):
             writer.writerow(csv_row)
     log_error("Wrote {} backfill rows to {}", len(backfill_entries), output_csv)
 
-def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins):
+def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins, backfill_entries=None, seen_backfill_keys=None):
     """Parse grant data from an XML file, handling foreign addresses as country-level grants and collecting backfill for domestic unknown EINs."""
     try:
         parser = etree.XMLParser(recover=True)
@@ -498,7 +519,7 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                     grant_ein, grant_amt, xml_filename, filer_ein, ein=filer_ein
                                 )
                             # Backfill for domestic grants with unknown EINs
-                            if not is_foreign and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999":
+                            if backfill_entries is not None and not is_foreign and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999":
                                 # Validate EIN
                                 is_valid, reason = cu.validate_ein(grant_ein)
                                 if not is_valid:
@@ -513,7 +534,7 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 us_address = elem.xpath("irs:USAddress/*", namespaces=NAMESPACES)
                                 address_components.extend([comp for comp in us_address if comp.text])
                                 # Canonicalize address
-                                canonical_address, po_box, zip_code, _ = cu.canonicalize_address(address_components, output_dir=None)
+                                canonical_address, street, city, state, po_box, zip_code, _ = cu.canonicalize_address(address_components, output_dir=None)
                                 if canonical_address or po_box or zip_code:
                                     backfill_key = (grant_ein, grantee_name, zip_code)
                                     with backfill_lock:
@@ -549,7 +570,7 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
         log_error("Error parsing grants from {}: {}", xml_filename, str(e), exc_info=True, ein=filer_ein)
         return []
 
-def process_grants(row_data, worker_threads, zip_index, start_year, end_year):
+def process_grants(row_data, worker_threads, zip_index, start_year, end_year, backfill_entries=None, seen_backfill_keys=None):
     """Process XML files to extract grant data using the ZIP index."""
     grants = []
     zip_cache = {}
@@ -590,7 +611,7 @@ def process_grants(row_data, worker_threads, zip_index, start_year, end_year):
                 zip_cache[zip_path] = zipfile.ZipFile(zip_path, 'r')
             with zip_cache[zip_path].open(internal_path) as xml_file:
                 xml_content = xml_file.read()
-                return parse_grants(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'], known_eins)
+                return parse_grants(xml_content, internal_path, row['filer_ein'], row['filer_name'], row['tax_year'], known_eins, backfill_entries, seen_backfill_keys)
         except Exception as e:
             log_error(
                 "Error accessing XML {} for EIN={}: {}", xml_path, row['filer_ein'], str(e),
@@ -723,7 +744,7 @@ def main():
         print_summary_table(summary, total_mismatches, total_missing_xmls, total_potential_mismatches)
 
         # Step 2: Extract grants and backfill
-        grants = process_grants(latest_rows, worker_threads, zip_index, start_year, end_year)
+        grants = process_grants(latest_rows, worker_threads, zip_index, start_year, end_year, backfill_entries, seen_backfill_keys)
         write_grants_latest(grants, os.path.join(output_dir, "grants_latest.tsv"), os.path.join(output_dir, "grants_latest.csv"))
         write_backfill(backfill_entries, os.path.join(output_dir, "backfill.tsv"), os.path.join(output_dir, "backfill.csv"))
         print(f"Total grant entries extracted: {len(grants)}")

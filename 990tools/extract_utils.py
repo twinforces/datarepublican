@@ -64,7 +64,7 @@ USPS_FIXES = {
     'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Sq': 'Square'
 }
 VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
-ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'canonical_address', 'zip_code', 'po_box']
+ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'address_line1', 'address_line2', 'city', 'state', 'canonical_address', 'zip_code', 'po_box']
 GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grantee_name', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
 DEBUG_ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'raw_zip', 'zip_code', 'status', 'reason']
 DEBUG_GRANT_COLUMNS = ['filer_ein', 'grant_ein', 'filer_name', 'grantee_name', 'xml_filename', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
@@ -94,18 +94,22 @@ thread_local = threading.local()
 
 def validate_ein(ein):
     """
-    Validate an EIN against IRS standards.
-    
+    Validate an EIN or IRS file sequence number.
+
     Args:
-        ein (str): The EIN to validate.
-    
+        ein (str): The EIN or file sequence number to validate.
+
     Returns:
         tuple: (bool, str) where bool indicates validity and str provides the reason if invalid.
     """
     if not ein:
         return False, "EIN is empty"
     if not EIN_REGEX.match(ein):
-        return False, f"EIN {ein} is not a 9-digit number"
+        if ein.isdigit() and len(ein) > 9:
+            # Assume it's a valid IRS file sequence number
+            log_error("Accepting IRS file sequence number: %s (length: %d)", ein, len(ein))
+            return True, ""
+        return False, f"EIN {ein} is not a digit string"
     if ein == "000000000":
         return False, "EIN is all zeros"
     if ein[:2] not in VALID_EIN_PREFIXES:
@@ -115,9 +119,15 @@ def validate_ein(ein):
 def log_error(msg_format, *args, ein=None, exc_info=False):
     if logger and not quiet:
         try:
-            logger.info(msg_format.format(*args), extra={'ein': ein} if ein else None, exc_info=exc_info)
+            if ein:
+                logger.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
+            else:
+                logger.info(msg_format, *args, exc_info=exc_info)
         except Exception as e:
             logger.info("Log formatting error: {}; args: {}", str(e), args)
+    elif ein is not None:
+        # If logger is not set up but ein is provided, this might be the issue
+        print(f"Logger not set up but ein parameter provided: {ein}")
 
 def setup_logging(output_dir, log_filename, verbose, quiet_global):
     global logger, quiet
@@ -243,7 +253,7 @@ def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
 
 def canonicalize_address(address_components, output_dir):
     if not address_components:
-        return "", None, None, ""
+        return "", None, None, None, None, None, "", ""
     address_line = ""
     address_line2 = ""
     address_line3 = ""
@@ -311,22 +321,27 @@ def canonicalize_address(address_components, output_dir):
     address_line = expand_street(address_line)
     address_line2 = expand_unit(address_line2)
     address_line3 = expand_unit(address_line3)
-    address_parts = [comp for comp in [address_line, address_line2, address_line3, city, state, zip_code] if comp]
+
+    # Build street address from lines
+    street_parts = [comp for comp in [address_line, address_line2, address_line3] if comp]
+    street = " ".join(street_parts) if street_parts else None
+
+    address_parts = [comp for comp in [street, city, state, zip_code] if comp]
     if not address_parts:
         log_error("No valid address components: {}", address_components)
-        return "", None, None, ""
+        return "", None, None, None, None, None, ""
     canonical = " ".join(address_parts).title()
     if state and state.upper() not in VALID_STATES:
         log_error("Invalid state '{}' in address: {}; resetting state", state, canonical)
         state = None
-        canonical = " ".join(comp for comp in [address_line, address_line2, address_line3, city, zip_code] if comp).title()
+        canonical = " ".join(comp for comp in [street, city, zip_code] if comp).title()
     if zip_code:
         zip_code_digits = re.sub(r'\D', '', zip_code)
         if len(zip_code_digits) > 5:
             zip_code = zip_code_digits[:5]
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
-    return canonical, po_box, zip_code, ""
+    return canonical, address_line, address_line2, city, state, po_box, zip_code, ""
 
 def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
     global thread_local
@@ -361,16 +376,17 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             if elem and elem[0].text:
                 filer_name = elem[0].text.strip()
                 break
-        if not xml_ein or not EIN_REGEX.match(xml_ein):            
+        if not xml_ein:
+            log_error("Skipping XML %s: No EIN in XML", xml_filename)
             result['invalid_ein_entries'].append({
                 'tsv_ein': '',
-                'xml_ein': xml_ein or '',
+                'xml_ein': '',
                 'filer_name': filer_name or 'Unknown',
                 'xml_filename': xml_filename,
-                'reason': 'No or invalid EIN in XML'
+                'reason': 'No EIN in XML'
             })
             result['debug_address_entries'].append({
-                'filer_ein': xml_ein or '',
+                'filer_ein': '',
                 'filer_name': filer_name or 'Unknown',
                 'xml_filename': xml_filename,
                 'raw_components': '',
@@ -378,9 +394,38 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 'raw_zip': '',
                 'zip_code': '',
                 'status': 'skipped',
-                'reason': f"No or invalid EIN: {xml_ein or 'None'}"
+                'reason': 'No EIN in XML'
             })
             return False, None
+        # Check if it's a valid 9-digit EIN
+        if EIN_REGEX.match(xml_ein):
+            # Validate the EIN format
+            valid, reason = validate_ein(xml_ein)
+            if not valid:
+                log_error("Skipping XML %s: Invalid EIN %s (%s)", xml_filename, xml_ein, reason)
+                result['invalid_ein_entries'].append({
+                    'tsv_ein': '',
+                    'xml_ein': xml_ein,
+                    'filer_name': filer_name or 'Unknown',
+                    'xml_filename': xml_filename,
+                    'reason': reason
+                })
+                result['debug_address_entries'].append({
+                    'filer_ein': xml_ein,
+                    'filer_name': filer_name or 'Unknown',
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': f"Invalid EIN: {reason}"
+                })
+                return False, None
+        else:
+            # Not a 9-digit number - could be a file sequence number or other identifier
+            # Log but don't skip - this might be acceptable for processing
+            log_error("XML %s has non-standard EIN format: %s (length: %d)", xml_filename, xml_ein, len(xml_ein))
         if not filer_name:
             filer_name = 'Unknown'
             result['debug_address_entries'].append({
@@ -402,7 +447,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             for elem in elements:
                 if elem.text:
                     address_components.append(elem)
-        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        canonical_address, address_line1, address_line2, city, state, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
         raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
@@ -410,6 +455,10 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             result['address_entries'].append({
                 'filer_ein': xml_ein,
                 'filer_name': filer_name,
+                'address_line1': address_line1,
+                'address_line2': address_line2,
+                'city': city,
+                'state': state,
                 'canonical_address': canonical_address,
                 'po_box': po_box,
                 'zip_code': zip_code
@@ -488,7 +537,7 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
             for elem in elements:
                 if elem.text:
                     address_components.append(elem)
-        canonical_address, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        canonical_address, address_line1, address_line2, city, state, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
         raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
         address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]
         if not canonical_address:
@@ -505,7 +554,7 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
                 'reason': f"Invalid recipient address; components={address_components}; snippet={address_snippet}"
             })
             return "", None, None
-        return canonical_address, po_box, zip_code
+        return canonical_address, address_line1, address_line2, city, state, po_box, zip_code
     except Exception as e:
         log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
         result['total_address_errors'] += 1

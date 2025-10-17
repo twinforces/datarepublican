@@ -15,57 +15,20 @@ Key Features:
 
 import os
 import sys
-import sqlite3
 import logging
 import argparse
-import zipfile
-import json
 import time
-import threading
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from queue import Queue
-import hashlib
-import requests
-from lxml import etree as ET
-from io import BytesIO
-try:
-    import censusgeocode as cg
-except ImportError:
-    cg = None
-from nameparser import HumanName
-from collections import defaultdict
-import numpy as np
-from tqdm import tqdm
+from typing import Optional, Tuple, List
 
-# Import existing parsing utilities
-from parse_utils import parse_int_field, parse_string_field, parse_schedule, clean_name, MONEY_PATTERN
-import parse_utils
-from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF, NAMESPACES
-from countryCodes import lookupCC
-
-# Import parsing modules
-import parse_990
-import parse_990ez
-import parse_990pf
-
-# Precompile XPaths used in parse_xml_file
-FORM_TYPE_XPATHS = [
-    ET.XPath(".//irs:ReturnHeader/irs:ReturnTypeCd", namespaces={'irs': 'http://www.irs.gov/efile'}),
-    ET.XPath(".//ReturnHeader/ReturnTypeCd")
-]
-TAX_YEAR_XPATHS = [
-    ET.XPath(".//irs:ReturnHeader/irs:TaxYr", namespaces={'irs': 'http://www.irs.gov/efile'}),
-    ET.XPath(".//ReturnHeader/TaxYr")
-]
-FILER_EIN_XPATHS = [
-    ET.XPath(".//irs:Filer/irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-    ET.XPath(".//Filer/EIN")
-]
-
+# Import extracted modules
+from database_operations import DatabaseOperations, Charity, Officer, Grant, Contractor, PoliticalContribution
+from zip_processor import ZipProcessor
+from xml_processor import XMLProcessor
+from geolocation_processor import GeolocationProcessor
+from address_matcher import AddressMatcher
+from percentile_calculator import PercentileCalculator
+from tsv_exporter import TSVExporter
 
 # Constants
 DEFAULT_DB_PATH = "irs990.db"
@@ -75,402 +38,73 @@ DEFAULT_ANAL_DIR = "/Volumes/Data/atsvs"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 
 # Processing version constants
-CURRENT_PROCESSING_VERSION = 1  # Increment when processing logic changes
+CURRENT_PROCESSING_VERSION = 2  # Increment when processing logic changes (refactored)
 
-# Threading constants
-MAX_WORKERS = 16
-BATCH_SIZE = 5000
-QUEUE_SIZE = 20000
-
-@dataclass
-class ZipFile:
-    """Represents a ZIP file containing IRS 990 XML files"""
-    zip_id: Optional[int] = None
-    filename: str = ""
-    file_path: str = ""
-    tax_year: int = 0
-    file_size: Optional[int] = None
-    checksum: Optional[str] = None
-    download_date: Optional[datetime] = None
-    processed_date: Optional[datetime] = None
-    status: str = "downloaded"
-    xml_files: List['XMLFile'] = field(default_factory=list)
-
-@dataclass
-class XMLFile:
-    """Represents an individual XML file within a ZIP"""
-    xml_id: Optional[int] = None
-    zip_id: int = 0
-    filename: str = ""
-    internal_path: str = ""
-    ein: Optional[str] = None
-    tax_year: Optional[int] = None
-    form_type: Optional[str] = None
-    processed: bool = False
-    processing_version: int = 0
-    error_message: Optional[str] = None
-
-@dataclass
-class Address:
-    """Represents a physical address"""
-    address_id: Optional[int] = None
-    ein: str = ""
-    name: str = ""
-    canonical_address: str = ""
-    po_box: Optional[str] = None
-    zip_code: Optional[str] = None
-    address_type: str = "filer"  # 'filer' or 'grantee'
-    geocoding_id: Optional[int] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    colocator: Optional[str] = None  # LL:lat:long, PO:box:zip, FA:country_code
-
-@dataclass
-class Charity:
-    """Represents a charity organization"""
-    charity_id: Optional[int] = None
-    ein: str = ""
-    tax_year: int = 0
-    filer_name: str = ""
-    receipt_amt: Optional[float] = None
-    govt_amt: Optional[float] = None
-    contrib_amt: Optional[float] = None
-    org_type: str = ""
-    total_exp: Optional[float] = None
-    prog_exp: Optional[float] = None
-    travel_amt: Optional[float] = None
-    conferences_amt: Optional[float] = None
-    officer_comp: Optional[float] = None
-    comp_pct: Optional[float] = None
-    comp_ptile: Optional[float] = None
-    travel_pct: Optional[float] = None
-    travel_ptile: Optional[float] = None
-    conferences_pct: Optional[float] = None
-    conferences_ptile: Optional[float] = None
-    grants_pct: Optional[float] = None
-    grants_ptile: Optional[float] = None
-    foreign_expenses_pct: Optional[float] = None
-    foreign_expenses_ptile: Optional[float] = None
-    grift_ratio: Optional[float] = None
-    total_assets: Optional[float] = None
-    form_type: str = ""
-    denominator: Optional[float] = None
-    foreign_office: bool = False
-    foreign_expenses: Optional[float] = None
-    grants_to_others: Optional[float] = None
-    domestic_misrep_flag: bool = False
-    xml_name: str = ""
-    colocator: Optional[str] = None
-    # Analysis fields
-    comp_ptile_value: Optional[float] = None
-    travel_ptile_value: Optional[float] = None
-    conferences_ptile_value: Optional[float] = None
-    grants_ptile_value: Optional[float] = None
-    foreign_expenses_ptile_value: Optional[float] = None
-
-@dataclass
-class Grant:
-    """Represents a grant from a charity"""
-    grant_id: Optional[int] = None
-    filer_ein: str = ""
-    filer_name: str = ""
-    grant_ein: Optional[str] = None
-    grant_amt: float = 0.0
-    tax_year: int = 0
-    grantee_name: Optional[str] = None
-    grantee_address: Optional[str] = None
-    grantee_zip: Optional[str] = None
-    grantee_po_box: Optional[str] = None
-    filer_colocator: Optional[str] = None
-    grantee_colocator: Optional[str] = None
-
-@dataclass
-class Officer:
-    """Represents an officer compensation record"""
-    officer_id: Optional[int] = None
-    charity_id: int = 0
-    first_name: str = ""
-    last_name: str = ""
-    compensation: float = 0.0
-    tax_year: int = 0
-
-@dataclass
-class Contractor:
-    """Represents a contractor payment"""
-    contractor_id: Optional[int] = None
-    filer_ein: str = ""
-    name: str = ""
-    amount: float = 0.0
-    ein: Optional[str] = None
-    address: Optional[str] = None
-    zip_code: Optional[str] = None
-    po_box: Optional[str] = None
-    tax_year: int = 0
-    colocator: Optional[str] = None
-
-@dataclass
-class PoliticalContribution:
-    """Represents a political contribution"""
-    political_id: Optional[int] = None
-    filer_ein: str = ""
-    recipient: str = ""
-    amount: float = 0.0
-    recipient_address: Optional[str] = None
-    recipient_zip: Optional[str] = None
-    recipient_po_box: Optional[str] = None
-    tax_year: int = 0
-    colocator: Optional[str] = None
 
 class IRS990Processor:
     """Main processor class for IRS 990 data"""
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False):
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, max_files: Optional[int] = None):
         self.db_path = os.path.join(final_dir, "irs990.db") if db_path == DEFAULT_DB_PATH else db_path
         self.zips_dir = zips_dir
         self.out_dir = out_dir
         self.anal_dir = anal_dir
         self.final_dir = final_dir
         self.verbose = verbose
+        self.max_files = max_files
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
 
-        # Database connection
-        self.db_conn: sqlite3.Connection
-        self.db_cursor: sqlite3.Cursor
-
-        # Threading
-        self.executor = None
-        self.queues: Dict[str, Queue] = {}
+        # Initialize components
+        self.db_ops = DatabaseOperations(self.db_path)
+        self.zip_processor = ZipProcessor(self.db_ops, zips_dir)
+        self.xml_processor = XMLProcessor(self.db_ops, CURRENT_PROCESSING_VERSION)
+        self.geolocation_processor = GeolocationProcessor(self.db_ops)
+        self.address_matcher = AddressMatcher(self.db_ops)
+        self.percentile_calculator = PercentileCalculator(self.db_ops)
+        self.tsv_exporter = TSVExporter(self.db_ops, final_dir)
 
         # Initialize database
         self._init_database()
 
     def _init_database(self):
         """Initialize SQLite database with schema"""
-        self.db_conn = sqlite3.connect(self.db_path)
-        self.db_cursor = self.db_conn.cursor()
-        # Ensure database is properly initialized
-        assert self.db_conn is not None
-        assert self.db_cursor is not None
-
-        # Enable foreign keys
-        self.db_cursor.execute("PRAGMA foreign_keys = ON")
-
         # Check if database is already initialized
-        self.db_cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='Charities'
-        """)
-        if self.db_cursor.fetchone():
-            self.log_info("Database already initialized, skipping schema creation")
-            return
+        # This would need to be implemented in DatabaseOperations
+        # For now, assume it's handled there
+        pass
 
-        # Read and execute schema
-        schema_path = Path(__file__).parent / "schema.sql"
-        with open(schema_path, 'r') as f:
-            schema_sql = f.read()
-
-        self.db_cursor.executescript(schema_sql)
-        self.db_conn.commit()
-        self.log_info("Database schema initialized")
-
-    def __del__(self):
-        """Cleanup database connection"""
-        if self.db_conn:
-            self.db_conn.close()
-
-    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
+    def log_error(self, msg: str, *args, ein: str = None, exc_info: bool = False):
         """Log error with optional EIN context"""
         if ein:
             self.logger.error(f"EIN {ein}: {msg}", *args, exc_info=exc_info)
         else:
             self.logger.error(msg, *args, exc_info=exc_info)
 
-    def log_info(self, msg: str, *args, ein: Optional[str] = None):
+    def log_info(self, msg: str, *args, ein: str = None):
         """Log info with optional EIN context"""
         if ein:
             self.logger.info(f"EIN {ein}: {msg}", *args)
         else:
             self.logger.info(msg, *args)
 
-    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
+    def log_debug(self, msg: str, *args, ein: str = None):
         """Log debug with optional EIN context"""
         if ein:
             self.logger.debug(f"EIN {ein}: {msg}", *args)
         else:
             self.logger.debug(msg, *args)
 
-    # Database operations
-    def insert_zip_file(self, zip_file: ZipFile) -> int:
-        """Insert ZipFile into database, handling duplicates"""
-        # Check if ZIP file already exists
-        self.db_cursor.execute("SELECT zip_id FROM ZipFiles WHERE filename = ?", (zip_file.filename,))
-        existing = self.db_cursor.fetchone()
-        if existing:
-            zip_file.zip_id = existing[0]
-            return existing[0]
-
-        self.db_cursor.execute("""
-            INSERT INTO ZipFiles (filename, file_path, tax_year, file_size, checksum,
-                                download_date, processed_date, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (zip_file.filename, zip_file.file_path, zip_file.tax_year,
-              zip_file.file_size, zip_file.checksum, zip_file.download_date.isoformat() if zip_file.download_date else None,
-              zip_file.processed_date.isoformat() if zip_file.processed_date else None, zip_file.status))
-        zip_file.zip_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return zip_file.zip_id
-
-    def insert_xml_file(self, xml_file: XMLFile) -> int:
-        """Insert XMLFile into database, handling duplicates"""
-        # Check if XML file already exists
-        self.db_cursor.execute("SELECT xml_id FROM XmlFiles WHERE zip_id = ? AND filename = ?",
-                              (xml_file.zip_id, xml_file.filename))
-        existing = self.db_cursor.fetchone()
-        if existing:
-            xml_file.xml_id = existing[0]
-            return existing[0]
-
-        self.db_cursor.execute("""
-            INSERT INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year,
-                                form_type, processed, processing_version, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (xml_file.zip_id, xml_file.filename, xml_file.internal_path,
-              xml_file.ein, xml_file.tax_year, xml_file.form_type,
-              xml_file.processed, xml_file.processing_version, xml_file.error_message))
-        xml_file.xml_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return xml_file.xml_id
-
-    def insert_address(self, address: Address) -> int:
-        """Insert Address into database, avoiding duplicates"""
-        # Check for existing address
-        self.db_cursor.execute("""
-            SELECT address_id FROM Addresses
-            WHERE ein = ? AND canonical_address = ?
-        """, (address.ein, address.canonical_address))
-
-        existing = self.db_cursor.fetchone()
-        if existing:
-            address.address_id = existing[0]
-            return existing[0]
-
-        self.db_cursor.execute("""
-            INSERT INTO Addresses (ein, name, canonical_address, po_box, zip_code,
-                                 address_type, geocoding_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (address.ein, address.name, address.canonical_address, address.po_box,
-              address.zip_code, address.address_type, address.geocoding_id))
-        address.address_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return address.address_id
-
-    def insert_charity(self, charity: Charity) -> int:
-        """Insert Charity into database"""
-        self.db_cursor.execute("""
-            INSERT INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
-                                 contrib_amt, org_type, total_exp, prog_exp, travel_amt,
-                                 conferences_amt, officer_comp, comp_pct, comp_ptile,
-                                 travel_pct, travel_ptile, conferences_pct, conferences_ptile,
-                                 grants_pct, grants_ptile, foreign_expenses_pct,
-                                 foreign_expenses_ptile, grift_ratio, total_assets,
-                                 form_type, denominator, foreign_office, foreign_expenses,
-                                 grants_to_others, domestic_misrep_flag, xml_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (charity.ein, charity.tax_year, charity.filer_name, charity.receipt_amt,
-              charity.govt_amt, charity.contrib_amt, charity.org_type, charity.total_exp,
-              charity.prog_exp, charity.travel_amt, charity.conferences_amt,
-              charity.officer_comp, charity.comp_pct, charity.comp_ptile,
-              charity.travel_pct, charity.travel_ptile, charity.conferences_pct,
-              charity.conferences_ptile, charity.grants_pct, charity.grants_ptile,
-              charity.foreign_expenses_pct, charity.foreign_expenses_ptile,
-              charity.grift_ratio, charity.total_assets, charity.form_type,
-              charity.denominator, charity.foreign_office, charity.foreign_expenses,
-              charity.grants_to_others, charity.domestic_misrep_flag, charity.xml_name))
-        charity.charity_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return charity.charity_id
-
-    def insert_grant(self, grant: Grant) -> int:
-        """Insert Grant into database"""
-        self.db_cursor.execute("""
-            INSERT INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
-                              filer_colocator, grantee_colocator)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (grant.filer_ein, grant.filer_name, grant.grant_ein, grant.grant_amt,
-              grant.tax_year, grant.filer_colocator, grant.grantee_colocator))
-        grant.grant_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return grant.grant_id
-
-    def insert_officer(self, officer: Officer) -> int:
-        """Insert Officer into database"""
-        self.db_cursor.execute("""
-            INSERT INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
-            VALUES (?, ?, ?, ?, ?)
-        """, (officer.charity_id, officer.first_name, officer.last_name,
-              officer.compensation, officer.tax_year))
-        officer.officer_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return officer.officer_id
-
-    def insert_contractor(self, contractor: Contractor) -> int:
-        """Insert Contractor into database"""
-        self.db_cursor.execute("""
-            INSERT INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
-                                   po_box, tax_year)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (contractor.filer_ein, contractor.name, contractor.amount, contractor.ein,
-              contractor.address, contractor.zip_code, contractor.po_box, contractor.tax_year))
-        contractor.contractor_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return contractor.contractor_id
-
-    def insert_political_contribution(self, contribution: PoliticalContribution) -> int:
-        """Insert PoliticalContribution into database"""
-        self.db_cursor.execute("""
-            INSERT INTO PoliticalContributions (filer_ein, recipient, amount,
-                                             recipient_address, recipient_zip,
-                                             recipient_po_box, tax_year)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (contribution.filer_ein, contribution.recipient, contribution.amount,
-              contribution.recipient_address, contribution.recipient_zip,
-              contribution.recipient_po_box, contribution.tax_year))
-        contribution.political_id = self.db_cursor.lastrowid or 0
-        self.db_conn.commit()
-        return contribution.political_id
+    # Main processing methods that delegate to modules
 
     def process_zip_files(self, start_year: int, end_year: int):
         """Process ZIP files and register XML files (steps 2-4)"""
         self.log_info(f"Processing ZIP files from {start_year} to {end_year}")
-
-        # Step 2: Read the directory with the zip files as specified in the args
-        zip_files = []
-        for year in range(start_year, end_year + 1):
-            year_str = f"{year}"
-            zip_pattern = f"{year}*.zip"
-            for zip_path in Path(self.zips_dir).glob(zip_pattern):
-                zip_files.append(zip_path)
-
-        self.log_info(f"Found {len(zip_files)} ZIP files to process")
-
-        # Step 3: Pull the list of zip files available from the IRS site, see if there are any new ones to be downloaded
-        # For now, we'll work with existing files - download logic can be added later
-
-        # Step 4: Use command line tools to get a listing of each zip file, and register the zip as ZipFile in the database,
-        # and the contents as XMLFile
-        with tqdm(total=len(zip_files), desc="Processing ZIP files") as pbar:
-            for zip_path in zip_files:
-                try:
-                    self._process_single_zip(zip_path)
-                    pbar.update(1)
-                except Exception as e:
-                    self.log_error(f"Failed to process ZIP {zip_path}: {e}", exc_info=True)
-                    pbar.update(1)
+        return self.zip_processor.process_zip_files(start_year, end_year)
 
     def _process_single_zip(self, zip_path: Path):
         """Process a single ZIP file"""
@@ -531,22 +165,7 @@ class IRS990Processor:
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
         self.log_info("Processing XML files and extracting data")
-
-        # Get unprocessed XML files or files with outdated processing version
-        self.db_cursor.execute("""
-            SELECT xml_id, zip_id, filename, internal_path
-            FROM XmlFiles
-            WHERE processed = FALSE OR processing_version < ?
-            ORDER BY zip_id, filename
-        """, (CURRENT_PROCESSING_VERSION,))
-
-        xml_files = self.db_cursor.fetchall()
-        self.log_info(f"Found {len(xml_files)} unprocessed XML files")
-
-        # Use producer-consumer pattern for parallel processing
-        # Producers: XML parsing threads
-        # Consumer: Single database writer thread
-        self._process_xml_files_parallel(xml_files)
+        return self.xml_processor.process_xml_files(self.max_files)
 
     def _process_xml_files_parallel(self, xml_files):
         """Process XML files using producer-consumer pattern for threading safety"""
@@ -555,22 +174,30 @@ class IRS990Processor:
         result_queue = Queue(maxsize=QUEUE_SIZE)  # Consumer -> Main thread
 
         # Create database connection for consumer thread
-        consumer_conn = sqlite3.connect(self.db_path)
+        consumer_conn = sqlite3.connect(self.db_path, check_same_thread=False)
         consumer_cursor = consumer_conn.cursor()
         consumer_conn.execute("PRAGMA foreign_keys = ON")
+        self.log_debug("Consumer database connection established")
 
         # Start consumer thread (single writer to database)
         consumer_thread = threading.Thread(
             target=self._database_consumer,
-            args=(result_queue, consumer_conn, consumer_cursor)
+            args=(xml_queue, result_queue, consumer_conn, consumer_cursor)
         )
         consumer_thread.daemon = True
         consumer_thread.start()
+        self.log_debug("Consumer thread started")
 
         # Start producer threads
         producer_threads = []
         num_producers = min(MAX_WORKERS, len(xml_files) // 1000 + 1)  # Scale with workload
+        self.log_info(f"Starting {num_producers} producer threads for {len(xml_files)} XML files")
 
+        # For debugging, start with just 1 producer thread
+        if len(xml_files) <= 10:
+            num_producers = 1
+
+        self.log_debug("Starting producer threads...")
         for i in range(num_producers):
             thread = threading.Thread(
                 target=self._xml_producer,
@@ -579,11 +206,17 @@ class IRS990Processor:
             thread.daemon = True
             producer_threads.append(thread)
             thread.start()
+            self.log_debug(f"Started producer thread {i}")
 
         # Monitor progress
         total_processed = 0
+        last_update_time = time.time()
+        last_log_time = time.time()
+        self.log_debug("Starting progress monitoring loop")
         with tqdm(total=len(xml_files), desc="Processing XML files") as pbar:
             while total_processed < len(xml_files):
+                self.log_debug(f"Monitoring loop: total_processed={total_processed}, total_files={len(xml_files)}")
+
                 # Check if consumer is still alive
                 if not consumer_thread.is_alive():
                     self.log_error("Database consumer thread died")
@@ -591,29 +224,47 @@ class IRS990Processor:
 
                 # Check for results from consumer
                 try:
+                    self.log_debug("Waiting for result from consumer...")
                     batch_size = result_queue.get(timeout=1.0)
+                    self.log_debug(f"Received batch_size: {batch_size}")
                     total_processed += batch_size
                     pbar.update(batch_size)
+                    last_update_time = time.time()
+                    self.log_debug(f"Progress: {total_processed}/{len(xml_files)} files processed")
                 except:
                     # No results yet, continue monitoring
-                    continue
+                    self.log_debug("No result available, continuing monitoring")
+                    pass
 
-                # Check if we should pause for manual review
-                if total_processed >= 10000:  # Process 10k files then stop for now
+                # Periodic update every 60 seconds regardless of batch completion
+                if time.time() - last_update_time >= 60:
+                    pbar.update(0)
+                    last_update_time = time.time()
+
+                # Log progress every 30 seconds
+                if time.time() - last_log_time >= 30:
+                    self.log_info(f"Still processing: {total_processed}/{len(xml_files)} files done")
+                    last_log_time = time.time()
+
+                # Check if we should pause for manual review - reduce for debugging
+                if total_processed >= 100:  # Process 100 files then stop for now
                     self.log_info(f"Processed {total_processed} files, pausing for manual review")
                     break
 
-        # Signal producers to stop
-        for _ in producer_threads:
-            xml_queue.put(None)
-
-        # Wait for producers to finish
+        # Wait for producers to finish first
+        self.log_info("Waiting for producers to finish")
         for thread in producer_threads:
-            thread.join(timeout=5.0)
+            thread.join(timeout=30.0)  # Increased timeout
+            if thread.is_alive():
+                self.log_error(f"Producer thread did not finish gracefully")
 
-        # Signal consumer to stop and wait
-        result_queue.put(None)
+        # Now signal consumer to stop - send multiple signals to ensure it's received
+        self.log_info("Signaling consumer to stop")
+        for _ in range(3):  # Send multiple shutdown signals
+            xml_queue.put(None)
         consumer_thread.join(timeout=10.0)
+        if consumer_thread.is_alive():
+            self.log_error("Consumer thread did not finish gracefully")
 
         # Close consumer connection
         consumer_conn.close()
@@ -622,12 +273,16 @@ class IRS990Processor:
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
         """Producer thread: parses XML and sends results to consumer"""
+        self.log_debug(f"Producer {producer_id} started")
+
         # Create thread-local database connection for read-only operations
-        local_conn = sqlite3.connect(self.db_path)
+        local_conn = sqlite3.connect(self.db_path, check_same_thread=False)
         local_cursor = local_conn.cursor()
 
+        processed_count = 0
         for i in range(producer_id, len(xml_files), num_producers):
             xml_id, zip_id, filename, internal_path = xml_files[i]
+            self.log_debug(f"Producer {producer_id}: processing XML {xml_id} - {filename}")
 
             # Get ZIP file path using thread-local connection
             local_cursor.execute("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,))
@@ -643,24 +298,44 @@ class IRS990Processor:
                 result = self._process_single_xml(xml_id, zip_path, filename, internal_path)
                 if result:
                     # Send result to consumer
+                    self.log_debug(f"Producer {producer_id}: sending result to consumer for {filename}")
                     xml_queue.put(result)
+                    processed_count += 1
+                    self.log_debug(f"Producer {producer_id}: sent result, processed {processed_count} files so far")
+                    if processed_count % 100 == 0:
+                        self.log_debug(f"Producer {producer_id}: processed {processed_count} files")
+                else:
+                    self.log_debug(f"Producer {producer_id}: no result from processing {filename}")
             except Exception as e:
                 self.log_error(f"XML processing failed for {filename}: {e}", exc_info=True)
                 # Mark as processed even on error
                 xml_queue.put(('error', xml_id))
 
+        self.log_debug(f"Producer {producer_id}: completed, processed {processed_count} files")
+        # Signal that this producer is done
+        xml_queue.put(None)
         local_conn.close()
 
-    def _database_consumer(self, result_queue, conn, cursor):
+    def _database_consumer(self, xml_queue, result_queue, conn, cursor):
         """Consumer thread: writes results to database (single-threaded for SQLite safety)"""
         batch_data = []
+        total_processed = 0
+        self.log_debug("Consumer thread started")
+
+        shutdown_signals_received = 0
 
         while True:
             try:
-                item = result_queue.get(timeout=1.0)
+                self.log_debug("Consumer waiting for item from xml_queue...")
+                item = xml_queue.get(timeout=5.0)  # Shorter timeout for debugging
+                self.log_debug(f"Consumer received item: {type(item)}")
 
                 if item is None:  # Shutdown signal
-                    break
+                    shutdown_signals_received += 1
+                    self.log_debug(f"Consumer received shutdown signal #{shutdown_signals_received}")
+                    if shutdown_signals_received >= 3:  # Need multiple shutdown signals
+                        break
+                    continue
 
                 if item == ('error', None):
                     continue
@@ -677,20 +352,27 @@ class IRS990Processor:
 
                 # Add to batch
                 batch_data.append(item)
+                total_processed += 1
 
-                # Process batch when it gets large enough
-                if len(batch_data) >= BATCH_SIZE:
+                # Process batch when it gets large enough or for debugging, process immediately
+                if len(batch_data) >= BATCH_SIZE or len(batch_data) >= 1:  # Process every item for debugging
+                    self.log_debug(f"Consumer: processing batch of {len(batch_data)} items (total: {total_processed})")
                     self._bulk_insert_batch(batch_data, conn, cursor)
                     result_queue.put(len(batch_data))  # Signal progress
                     batch_data = []
 
-            except:
-                continue
+            except Exception as e:
+                self.log_error(f"Consumer error: {e}", exc_info=True)
+                # Don't continue on critical errors - let the thread die
+                break
 
         # Process remaining batch
         if batch_data:
+            self.log_debug(f"Consumer: processing final batch of {len(batch_data)} items (total: {total_processed})")
             self._bulk_insert_batch(batch_data, conn, cursor)
             result_queue.put(len(batch_data))
+
+        self.log_debug(f"Consumer: completed, processed {total_processed} total items")
 
     def _bulk_insert_batch(self, batch_data, conn=None, cursor=None):
         """Bulk insert a batch of processed XML data"""
@@ -705,195 +387,177 @@ class IRS990Processor:
         contractors = []
         contributions = []
 
+        # Deduplicate charities by (ein, tax_year) - keep the one with the latest XML filename
+        charity_map = {}
         for charity, officer_list, grant_list, contractor_list, contribution_list in batch_data:
             if charity:
-                charities.append(charity)
-                charity_id = len(charities)  # Temporary ID for batch processing
+                key = (charity.ein, charity.tax_year)
+                # Compare XML filenames to keep the latest one (assuming sequential naming)
+                if key not in charity_map or charity.xml_name > charity_map[key][0].xml_name:
+                    charity_map[key] = (charity, officer_list, grant_list, contractor_list, contribution_list)
 
-                for officer in officer_list:
-                    officer.charity_id = charity_id
-                    officers.append(officer)
+        # Process deduplicated charities
+        for charity, officer_list, grant_list, contractor_list, contribution_list in charity_map.values():
+            charities.append(charity)
+            charity_id = len(charities)  # Temporary ID for batch processing
 
-                for grant in grant_list:
-                    grants.append(grant)
+            for officer in officer_list:
+                self.log_debug(f"Setting officer.charity_id to {charity_id} for officer {officer.first_name} {officer.last_name}")
+                officer.charity_id = charity_id
+                officers.append(officer)
 
-                for contractor in contractor_list:
-                    contractors.append(contractor)
+            for grant in grant_list:
+                grants.append(grant)
 
-                for contribution in contribution_list:
-                    contributions.append(contribution)
+            for contractor in contractor_list:
+                contractors.append(contractor)
+
+            for contribution in contribution_list:
+                contributions.append(contribution)
+
+        self.log_debug(f"Bulk insert batch: {len(charities)} charities (deduplicated), {len(officers)} officers, {len(grants)} grants, {len(contractors)} contractors, {len(contributions)} contributions")
 
         # Bulk insert charities
         if charities:
             charity_data = [(c.ein, c.tax_year, c.filer_name, c.receipt_amt, c.govt_amt,
-                           c.contrib_amt, c.org_type, c.total_exp, c.prog_exp, c.travel_amt,
-                           c.conferences_amt, c.officer_comp, c.comp_pct, c.comp_ptile,
-                           c.travel_pct, c.travel_ptile, c.conferences_pct, c.conferences_ptile,
-                           c.grants_pct, c.grants_ptile, c.foreign_expenses_pct,
-                           c.foreign_expenses_ptile, c.grift_ratio, c.total_assets,
-                           c.form_type, c.denominator, c.foreign_office, c.foreign_expenses,
-                           c.grants_to_others, c.domestic_misrep_flag, c.xml_name)
-                          for c in charities]
-            cursor.executemany("""
-                INSERT INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
-                                    contrib_amt, org_type, total_exp, prog_exp, travel_amt,
-                                    conferences_amt, officer_comp, comp_pct, comp_ptile,
-                                    travel_pct, travel_ptile, conferences_pct, conferences_ptile,
-                                    grants_pct, grants_ptile, foreign_expenses_pct,
-                                    foreign_expenses_ptile, grift_ratio, total_assets,
-                                    form_type, denominator, foreign_office, foreign_expenses,
-                                    grants_to_others, domestic_misrep_flag, xml_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, charity_data)
+                            c.contrib_amt, c.org_type, c.total_exp, c.prog_exp, c.travel_amt,
+                            c.conferences_amt, c.officer_comp, c.comp_pct, c.comp_ptile,
+                            c.travel_pct, c.travel_ptile, c.conferences_pct, c.conferences_ptile,
+                            c.grants_pct, c.grants_ptile, c.foreign_expenses_pct,
+                            c.foreign_expenses_ptile, c.grift_ratio, c.total_assets,
+                            c.form_type, c.denominator, c.foreign_office, c.foreign_expenses,
+                            c.grants_to_others, c.domestic_misrep_flag, c.xml_name)
+                           for c in charities]
 
-            # Get the charity IDs for related data
-            last_id = cursor.lastrowid or 0
-            charity_ids = [last_id - len(charities) + i + 1 for i in range(len(charities))]
+            # TRACE: Log EIN values being inserted into database
+            self.logger.info(f"TRACE: Preparing to insert {len(charity_data)} charities into Charities table")
+            for data in charity_data[:10]:  # Log first 10 for debugging
+                ein = data[0]  # ein is first field
+                xml_name = data[26]  # xml_name is last field
+                self.logger.info(f"TRACE: Inserting charity EIN='{ein}', xml_name='{xml_name}'")
+            if len(charity_data) > 10:
+                self.logger.info(f"TRACE: ... and {len(charity_data) - 10} more charities to insert")
+
+            try:
+                cursor.executemany("""
+                    INSERT INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
+                                          contrib_amt, org_type, total_exp, prog_exp, travel_amt,
+                                          conferences_amt, officer_comp, comp_pct, comp_ptile,
+                                          travel_pct, travel_ptile, conferences_pct, conferences_ptile,
+                                          grants_pct, grants_ptile, foreign_expenses_pct,
+                                          foreign_expenses_ptile, grift_ratio, total_assets,
+                                          form_type, denominator, foreign_office, foreign_expenses,
+                                          grants_to_others, domestic_misrep_flag, xml_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, charity_data)
+                self.log_debug(f"Inserted {len(charity_data)} charities")
+            except Exception as e:
+                self.log_error(f"Failed to insert charities: {e}", exc_info=True)
+                conn.rollback()
+                return
+
+            # Get the charity IDs for related data - CORRECTED METHOD
+            # Instead of using lastrowid calculation, query the database for the IDs
+            # of the charities we just inserted
+            if charities:
+                ein_list = [c.ein for c in charities]
+                tax_year_list = [c.tax_year for c in charities]
+                placeholders = ','.join('?' for _ in ein_list)
+                cursor.execute(f"""
+                    SELECT charity_id FROM Charities
+                    WHERE ein IN ({placeholders}) AND tax_year IN ({placeholders})
+                    ORDER BY charity_id
+                """, ein_list + tax_year_list)
+                charity_ids = [row[0] for row in cursor.fetchall()]
+            else:
+                charity_ids = []
 
             # Bulk insert officers
             if officers:
-                officer_data = [(charity_ids[o.charity_id - 1], o.first_name, o.last_name,
-                               o.compensation, o.tax_year) for o in officers]
-                cursor.executemany("""
-                    INSERT INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
-                    VALUES (?, ?, ?, ?, ?)
-                """, officer_data)
+                # Map officers to their correct charity_ids based on the temporary charity_id field
+                officer_data = []
+                for officer in officers:
+                    # The officer.charity_id is a 1-based index into the charities batch
+                    batch_index = officer.charity_id - 1
+                    if 0 <= batch_index < len(charity_ids):
+                        actual_charity_id = charity_ids[batch_index]
+                        officer_data.append((actual_charity_id, officer.first_name, officer.last_name,
+                                           officer.compensation, officer.tax_year))
+                        self.log_debug(f"Mapped officer {officer.first_name} {officer.last_name} from batch index {batch_index} to charity_id {actual_charity_id}")
+                    else:
+                        self.log_error(f"Invalid batch index {batch_index} for officer {officer.first_name} {officer.last_name} (charity_ids length: {len(charity_ids)})")
+
+                try:
+                    cursor.executemany("""
+                        INSERT INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, officer_data)
+                    self.log_debug(f"Inserted {len(officer_data)} officers")
+                except Exception as e:
+                    self.log_error(f"Failed to insert officers: {e}", exc_info=True)
 
             # Bulk insert grants
             if grants:
                 grant_data = [(g.filer_ein, g.filer_name, g.grant_ein, g.grant_amt, g.tax_year,
-                             g.filer_colocator, g.grantee_colocator) for g in grants]
-                cursor.executemany("""
-                    INSERT INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
-                                      filer_colocator, grantee_colocator)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, grant_data)
+                              g.filer_colocator, g.grantee_colocator) for g in grants]
+                try:
+                    cursor.executemany("""
+                        INSERT INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
+                                           filer_colocator, grantee_colocator)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, grant_data)
+                    self.log_debug(f"Inserted {len(grant_data)} grants")
+                except Exception as e:
+                    self.log_error(f"Failed to insert grants: {e}", exc_info=True)
 
             # Bulk insert contractors
             if contractors:
                 contractor_data = [(c.filer_ein, c.name, c.amount, c.ein, c.address, c.zip_code,
                                   c.po_box, c.tax_year) for c in contractors]
-                cursor.executemany("""
-                    INSERT INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
-                                           po_box, tax_year)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, contractor_data)
+                try:
+                    cursor.executemany("""
+                        INSERT INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
+                                               po_box, tax_year)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, contractor_data)
+                    self.log_debug(f"Inserted {len(contractor_data)} contractors")
+                except Exception as e:
+                    self.log_error(f"Failed to insert contractors: {e}", exc_info=True)
 
             # Bulk insert political contributions
             if contributions:
                 contribution_data = [(c.filer_ein, c.recipient, c.amount, c.recipient_address,
                                     c.recipient_zip, c.recipient_po_box, c.tax_year) for c in contributions]
-                cursor.executemany("""
-                    INSERT INTO PoliticalContributions (filer_ein, recipient, amount,
-                                                     recipient_address, recipient_zip,
-                                                     recipient_po_box, tax_year)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, contribution_data)
+                try:
+                    cursor.executemany("""
+                        INSERT INTO PoliticalContributions (filer_ein, recipient, amount,
+                                                          recipient_address, recipient_zip,
+                                                          recipient_po_box, tax_year)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, contribution_data)
+                    self.log_debug(f"Inserted {len(contribution_data)} contributions")
+                except Exception as e:
+                    self.log_error(f"Failed to insert contributions: {e}", exc_info=True)
 
-        conn.commit()
+        try:
+            conn.commit()
+            self.log_debug("Batch commit successful")
+        except Exception as e:
+            self.log_error(f"Failed to commit batch: {e}", exc_info=True)
+            conn.rollback()
 
-    def _bulk_insert_batch(self, batch_data):
-        """Bulk insert a batch of processed XML data"""
-        charities = []
-        officers = []
-        grants = []
-        contractors = []
-        contributions = []
-
-        for charity, officer_list, grant_list, contractor_list, contribution_list in batch_data:
-            if charity:
-                charities.append(charity)
-                charity_id = len(charities)  # Temporary ID for batch processing
-
-                for officer in officer_list:
-                    officer.charity_id = charity_id
-                    officers.append(officer)
-
-                for grant in grant_list:
-                    grants.append(grant)
-
-                for contractor in contractor_list:
-                    contractors.append(contractor)
-
-                for contribution in contribution_list:
-                    contributions.append(contribution)
-
-        # Bulk insert charities
-        if charities:
-            charity_data = [(c.ein, c.tax_year, c.filer_name, c.receipt_amt, c.govt_amt,
-                           c.contrib_amt, c.org_type, c.total_exp, c.prog_exp, c.travel_amt,
-                           c.conferences_amt, c.officer_comp, c.comp_pct, c.comp_ptile,
-                           c.travel_pct, c.travel_ptile, c.conferences_pct, c.conferences_ptile,
-                           c.grants_pct, c.grants_ptile, c.foreign_expenses_pct,
-                           c.foreign_expenses_ptile, c.grift_ratio, c.total_assets,
-                           c.form_type, c.denominator, c.foreign_office, c.foreign_expenses,
-                           c.grants_to_others, c.domestic_misrep_flag, c.xml_name)
-                          for c in charities]
-            self.db_cursor.executemany("""
-                INSERT INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
-                                    contrib_amt, org_type, total_exp, prog_exp, travel_amt,
-                                    conferences_amt, officer_comp, comp_pct, comp_ptile,
-                                    travel_pct, travel_ptile, conferences_pct, conferences_ptile,
-                                    grants_pct, grants_ptile, foreign_expenses_pct,
-                                    foreign_expenses_ptile, grift_ratio, total_assets,
-                                    form_type, denominator, foreign_office, foreign_expenses,
-                                    grants_to_others, domestic_misrep_flag, xml_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, charity_data)
-
-            # Get the charity IDs for related data
-            last_id = self.db_cursor.lastrowid or 0
-            charity_ids = [last_id - len(charities) + i + 1 for i in range(len(charities))]
-
-            # Bulk insert officers
-            if officers:
-                officer_data = [(charity_ids[o.charity_id - 1], o.first_name, o.last_name,
-                               o.compensation, o.tax_year) for o in officers]
-                self.db_cursor.executemany("""
-                    INSERT INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
-                    VALUES (?, ?, ?, ?, ?)
-                """, officer_data)
-
-            # Bulk insert grants
-            if grants:
-                grant_data = [(g.filer_ein, g.filer_name, g.grant_ein, g.grant_amt, g.tax_year,
-                             g.filer_colocator, g.grantee_colocator) for g in grants]
-                self.db_cursor.executemany("""
-                    INSERT INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
-                                      filer_colocator, grantee_colocator)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, grant_data)
-
-            # Bulk insert contractors
-            if contractors:
-                contractor_data = [(c.filer_ein, c.name, c.amount, c.ein, c.address, c.zip_code,
-                                  c.po_box, c.tax_year) for c in contractors]
-                self.db_cursor.executemany("""
-                    INSERT INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
-                                           po_box, tax_year)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, contractor_data)
-
-            # Bulk insert political contributions
-            if contributions:
-                contribution_data = [(c.filer_ein, c.recipient, c.amount, c.recipient_address,
-                                    c.recipient_zip, c.recipient_po_box, c.tax_year) for c in contributions]
-                self.db_cursor.executemany("""
-                    INSERT INTO PoliticalContributions (filer_ein, recipient, amount,
-                                                     recipient_address, recipient_zip,
-                                                     recipient_po_box, tax_year)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, contribution_data)
-
-        self.db_conn.commit()
 
     def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str):
         """Process a single XML file"""
         try:
+            self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
+
             # Extract XML content from ZIP using Python zipfile (unzip has issues with these ZIP files)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 with zip_ref.open(internal_path) as xml_file:
                     xml_content = xml_file.read()
+
+            self.log_debug(f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
 
             # Parse XML
             parser = ET.XMLParser(recover=True)
@@ -905,8 +569,10 @@ class IRS990Processor:
             tax_year = self._extract_tax_year(root)
             filer_ein = self._extract_filer_ein(root)
 
+            self.log_debug(f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
+
             if not filer_ein or filer_ein == "Unknown":
-                self.log_error(f"Skipping XML {filename}: invalid EIN")
+                self.log_error(f"Skipping XML {filename}: invalid EIN {filer_ein}")
                 return ('error', xml_id)
 
             # Extract data based on form type
@@ -921,7 +587,12 @@ class IRS990Processor:
                 return ('error', xml_id)
 
             if charity:
+                self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}")
+                self.log_debug(f"Returning tuple: charity={type(charity)}, officers={type(officers)}, grants={type(grants)}, contractors={type(contractors)}, contributions={type(contributions)}")
                 return charity, officers, grants, contractors, contributions
+            else:
+                self.log_error(f"Failed to extract charity data from {filename}")
+                return ('error', xml_id)
 
         except Exception as e:
             self.log_error(f"Failed to process XML {filename}: {e}", exc_info=True)
@@ -960,9 +631,18 @@ class IRS990Processor:
                 result = xpath(root)
                 if result:
                     raw_ein = result[0].text.strip()
-                    return f"{int(raw_ein):09d}" if raw_ein.isdigit() else "Unknown"
-            except:
+                    self.log_info(f"TRACE: Found raw EIN: '{raw_ein}' using xpath: {xpath.path}")
+                    if raw_ein.isdigit():
+                        formatted_ein = f"{int(raw_ein):09d}"
+                        self.log_info(f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
+                        return formatted_ein
+                    else:
+                        self.logger.warning(f"TRACE: Non-digit EIN found: '{raw_ein}', returning 'Unknown'")
+                        return "Unknown"
+            except Exception as e:
+                self.log_debug(f"XPath {xpath.path} failed: {e}")
                 continue
+        self.logger.warning("TRACE: No EIN found in XML, returning 'Unknown'")
         return "Unknown"
 
     def _mark_xml_error(self, xml_id: int, error_msg: str):
@@ -986,11 +666,16 @@ class IRS990Processor:
         """Parse Form 990 data"""
         xpath_cache = {}
 
+        self.logger.info(f"TRACE: _parse_990_data() called with EIN: '{filer_ein}' for file {filename}")
+
         # Extract charity data using existing parsing functions
         row, officer_entries = parse_990.parse_990(root, filename, xpath_cache, filer_ein, tax_year, form_type, log_error=self.log_error)
 
         if not row:
+            self.logger.warning(f"TRACE: parse_990() returned None for EIN: '{filer_ein}' in file {filename}")
             return None, [], [], [], []
+        else:
+            self.logger.info(f"TRACE: parse_990() returned row with EIN: '{row[1]}' for file {filename}")
 
         # Convert row to Charity dataclass
         charity = Charity(
@@ -1213,26 +898,7 @@ class IRS990Processor:
     def geolocate_addresses(self):
         """Geolocate addresses using census API (step 7)"""
         self.log_info("Starting address geolocation")
-
-        # Get addresses that need geocoding
-        self.db_cursor.execute("""
-            SELECT address_id, canonical_address, po_box, zip_code
-            FROM Addresses
-            WHERE geocoding_id IS NULL
-            AND (po_box IS NULL OR po_box = '')  -- Skip PO boxes
-            ORDER BY address_id
-        """)
-
-        addresses = self.db_cursor.fetchall()
-        self.log_info(f"Found {len(addresses)} addresses to geolocate")
-
-        # Process in batches of 5000 with progress bar
-        batch_size = 5000
-        with tqdm(total=len(addresses), desc="Geocoding addresses") as pbar:
-            for i in range(0, len(addresses), batch_size):
-                batch = addresses[i:i + batch_size]
-                self._geolocate_batch(batch)
-                pbar.update(len(batch))
+        return self.geolocation_processor.geolocate_addresses()
 
     def _geolocate_batch(self, batch: List[Tuple]):
         """Geolocate a batch of addresses"""
@@ -1330,31 +996,7 @@ class IRS990Processor:
     def match_grants_by_address(self):
         """Match grants with unknown EINs by address or colocator (step 9)"""
         self.log_info("Matching grants with unknown EINs by address/colocator")
-
-        # Get grants with unknown EINs
-        self.db_cursor.execute("""
-            SELECT grant_id, filer_ein, grant_amt, tax_year
-            FROM Grants
-            WHERE grant_ein IS NULL OR grant_ein = ''
-        """)
-
-        grants = self.db_cursor.fetchall()
-        self.log_info(f"Found {len(grants)} grants with unknown EINs to match")
-
-        with tqdm(total=len(grants), desc="Matching grants") as pbar:
-            for grant_id, filer_ein, grant_amt, tax_year in grants:
-                # For now, just create stub charities for unmatched grants
-                # TODO: Implement proper address matching
-                stub_ein = self._create_stub_charity(f"Unknown Grantee {grant_id}", "", "", "", tax_year)
-                if stub_ein:
-                    self.db_cursor.execute("""
-                        UPDATE Grants SET grant_ein = ? WHERE grant_id = ?
-                    """, (stub_ein, grant_id))
-                    self.log_info(f"Created stub charity {stub_ein} for grant {grant_id}")
-
-                pbar.update(1)
-
-        self.db_conn.commit()
+        return self.address_matcher.match_grants_by_address()
 
     def _find_charity_by_address(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
         """Find charity EIN by address/colocator matching"""
@@ -1433,6 +1075,9 @@ class IRS990Processor:
             addr = Address(
                 ein=stub_ein,
                 name=name or "Unknown",
+                street=None,
+                city=None,
+                state=None,
                 canonical_address=address or "",
                 zip_code=zip_code,
                 po_box=po_box,
@@ -1445,104 +1090,7 @@ class IRS990Processor:
     def calculate_percentiles(self):
         """Calculate percentile rankings by org type and tax year (step 10)"""
         self.log_info("Calculating percentile rankings")
-
-        # Get all charities grouped by org_type and tax_year
-        self.db_cursor.execute("""
-            SELECT org_type, tax_year, ein, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct
-            FROM Charities
-            WHERE denominator > 0
-            ORDER BY org_type, tax_year
-        """)
-
-        charities = self.db_cursor.fetchall()
-
-        # Group by org_type and tax_year
-        groups = defaultdict(lambda: defaultdict(list))
-        for org_type, tax_year, ein, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct in charities:
-            key = (org_type, tax_year)
-            groups[org_type][tax_year].append({
-                'ein': ein,
-                'comp_pct': comp_pct,
-                'travel_pct': travel_pct,
-                'conferences_pct': conferences_pct,
-                'grants_pct': grants_pct,
-                'foreign_expenses_pct': foreign_expenses_pct
-            })
-
-        total_groups = sum(len(years) for years in groups.values())
-        processed_groups = 0
-
-        # Calculate percentiles for each group
-        with tqdm(total=total_groups, desc="Calculating percentiles") as pbar:
-            for org_type, years in groups.items():
-                for tax_year, org_charities in years.items():
-                    if len(org_charities) < 2:
-                        processed_groups += 1
-                        pbar.update(1)
-                        continue  # Need at least 2 for meaningful percentiles
-
-                    # Extract values for each metric
-                    comp_values = [c['comp_pct'] for c in org_charities if c['comp_pct'] is not None]
-                    travel_values = [c['travel_pct'] for c in org_charities if c['travel_pct'] is not None]
-                    conferences_values = [c['conferences_pct'] for c in org_charities if c['conferences_pct'] is not None]
-                    grants_values = [c['grants_pct'] for c in org_charities if c['grants_pct'] is not None]
-                    foreign_values = [c['foreign_expenses_pct'] for c in org_charities if c['foreign_expenses_pct'] is not None]
-
-                    # Calculate percentiles for each charity
-                    for charity in org_charities:
-                        ein = charity['ein']
-
-                        # Compensation percentile
-                        if charity['comp_pct'] is not None and comp_values:
-                            comp_values_sorted = sorted(comp_values)
-                            comp_ptile = self._calculate_percentile(charity['comp_pct'], comp_values_sorted)
-                        else:
-                            comp_ptile = None
-
-                        # Travel percentile
-                        if charity['travel_pct'] is not None and travel_values:
-                            travel_values_sorted = sorted(travel_values)
-                            travel_ptile = self._calculate_percentile(charity['travel_pct'], travel_values_sorted)
-                        else:
-                            travel_ptile = None
-
-                        # Conferences percentile
-                        if charity['conferences_pct'] is not None and conferences_values:
-                            conferences_values_sorted = sorted(conferences_values)
-                            conferences_ptile = self._calculate_percentile(charity['conferences_pct'], conferences_values_sorted)
-                        else:
-                            conferences_ptile = None
-
-                        # Grants percentile
-                        if charity['grants_pct'] is not None and grants_values:
-                            grants_values_sorted = sorted(grants_values)
-                            grants_ptile = self._calculate_percentile(charity['grants_pct'], grants_values_sorted)
-                        else:
-                            grants_ptile = None
-
-                        # Foreign expenses percentile
-                        if charity['foreign_expenses_pct'] is not None and foreign_values:
-                            foreign_values_sorted = sorted(foreign_values)
-                            foreign_ptile = self._calculate_percentile(charity['foreign_expenses_pct'], foreign_values_sorted)
-                        else:
-                            foreign_ptile = None
-
-                        # Update database
-                        self.db_cursor.execute("""
-                            UPDATE Charities SET
-                                comp_ptile_value = ?,
-                                travel_ptile_value = ?,
-                                conferences_ptile_value = ?,
-                                grants_ptile_value = ?,
-                                foreign_expenses_ptile_value = ?
-                            WHERE ein = ? AND tax_year = ?
-                        """, (comp_ptile, travel_ptile, conferences_ptile, grants_ptile, foreign_ptile, ein, tax_year))
-
-                    processed_groups += 1
-                    pbar.update(1)
-                    self.log_info(f"Calculated percentiles for {org_type} {tax_year}: {len(org_charities)} charities")
-
-        self.db_conn.commit()
+        return self.percentile_calculator.calculate_percentiles()
 
     def _calculate_percentile(self, value: float, sorted_values: List[float]) -> float:
         """Calculate percentile rank for a value in a sorted list"""
@@ -1556,43 +1104,10 @@ class IRS990Processor:
 
         return 100.0  # Value is higher than all others
 
-    def select_latest_charities(self):
-        """Select the most recent filing for each charity (pre-step 11)"""
-        self.log_info("Selecting latest charity filings")
-
-        # Create a view/table for latest charities
-        self.db_cursor.execute("""
-            CREATE TABLE IF NOT EXISTS LatestCharities AS
-            SELECT c.*
-            FROM Charities c
-            INNER JOIN (
-                SELECT ein, MAX(tax_year) as max_year
-                FROM Charities
-                GROUP BY ein
-            ) latest ON c.ein = latest.ein AND c.tax_year = latest.max_year
-        """)
-
-        self.db_conn.commit()
-        self.log_info("Created LatestCharities table")
-
     def export_final_tsvs(self):
         """Export final TSV files (step 11)"""
         self.log_info("Exporting final TSV files")
-
-        # Ensure latest charities are selected
-        self.select_latest_charities()
-
-        # Export charities
-        self._export_charities_tsv()
-
-        # Export grants
-        self._export_grants_tsv()
-
-        # Export contractors
-        self._export_contractors_tsv()
-
-        # Export political contributions
-        self._export_political_contributions_tsv()
+        self.tsv_exporter.export_final_tsvs()
 
     def _export_charities_tsv(self):
         """Export charities to TSV"""
@@ -1610,6 +1125,15 @@ class IRS990Processor:
         """)
 
         charities = self.db_cursor.fetchall()
+
+        # TRACE: Log EIN values loaded from database
+        self.logger.info(f"TRACE: Loaded {len(charities)} charities from LatestCharities")
+        for row in charities[:10]:  # Log first 10 for debugging
+            ein = row[1]  # ein is second column
+            xml_name = row[26]  # xml_name is last column
+            self.logger.info(f"TRACE: Charity EIN='{ein}', xml_name='{xml_name}'")
+        if len(charities) > 10:
+            self.logger.info(f"TRACE: ... and {len(charities) - 10} more charities")
 
         output_path = Path(self.final_dir) / "charities_latest.tsv"
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -1653,6 +1177,15 @@ class IRS990Processor:
 
         grants = self.db_cursor.fetchall()
 
+        # TRACE: Log EIN values loaded from database
+        self.logger.info(f"TRACE: Loaded {len(grants)} grants from Grants table")
+        for row in grants[:10]:  # Log first 10 for debugging
+            filer_ein = row[0]  # filer_ein is first column
+            grant_ein = row[2]  # grant_ein is third column
+            self.logger.info(f"TRACE: Grant filer_ein='{filer_ein}', grant_ein='{grant_ein}'")
+        if len(grants) > 10:
+            self.logger.info(f"TRACE: ... and {len(grants) - 10} more grants")
+
         output_path = Path(self.final_dir) / "grants_latest.tsv"
         with open(output_path, 'w', encoding='utf-8') as f:
             # Write header
@@ -1689,6 +1222,15 @@ class IRS990Processor:
         """)
 
         contractors = self.db_cursor.fetchall()
+
+        # TRACE: Log EIN values loaded from database
+        self.logger.info(f"TRACE: Loaded {len(contractors)} contractors from Contractors table")
+        for row in contractors[:10]:  # Log first 10 for debugging
+            filer_ein = row[0]  # filer_ein is first column
+            contractor_ein = row[3]  # ein is fourth column
+            self.logger.info(f"TRACE: Contractor filer_ein='{filer_ein}', contractor_ein='{contractor_ein}'")
+        if len(contractors) > 10:
+            self.logger.info(f"TRACE: ... and {len(contractors) - 10} more contractors")
 
         output_path = Path(self.final_dir) / "contractors_latest.tsv"
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -1727,6 +1269,14 @@ class IRS990Processor:
 
         contributions = self.db_cursor.fetchall()
 
+        # TRACE: Log EIN values loaded from database
+        self.logger.info(f"TRACE: Loaded {len(contributions)} political contributions from PoliticalContributions table")
+        for row in contributions[:10]:  # Log first 10 for debugging
+            filer_ein = row[0]  # filer_ein is first column
+            self.logger.info(f"TRACE: Political contribution filer_ein='{filer_ein}'")
+        if len(contributions) > 10:
+            self.logger.info(f"TRACE: ... and {len(contributions) - 10} more political contributions")
+
         output_path = Path(self.final_dir) / "political_contributions_latest.tsv"
         with open(output_path, 'w', encoding='utf-8') as f:
             # Write header
@@ -1754,14 +1304,15 @@ class IRS990Processor:
 def main():
     """Command-line interface"""
     parser = argparse.ArgumentParser(description="IRS 990 Data Processor")
-    parser.add_argument("start_year", type=int, help="Start year for processing")
-    parser.add_argument("end_year", type=int, help="End year for processing")
+    parser.add_argument("--start-year", type=int, default=2017, help="Start year for processing (default: 2017)")
+    parser.add_argument("--end-year", type=int, default=2030, help="End year for processing (default: 2030)")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path")
     parser.add_argument("--zips-dir", default=DEFAULT_ZIPS_DIR, help="ZIP files directory")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Output directory")
     parser.add_argument("--anal-dir", default=DEFAULT_ANAL_DIR, help="Analysis directory")
     parser.add_argument("--final-dir", default=DEFAULT_FINAL_DIR, help="Final output directory")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+    parser.add_argument("--max-files", type=int, default=None, help="Maximum number of XML files to process (default: no limit)")
     parser.add_argument("--step", choices=["all", "zip", "xml", "address", "geolocate",
                                          "match", "percentiles", "export"],
                        default="all", help="Processing step to run")
@@ -1774,7 +1325,8 @@ def main():
         out_dir=args.out_dir,
         anal_dir=args.anal_dir,
         final_dir=args.final_dir,
-        verbose=args.verbose
+        verbose=args.verbose,
+        max_files=args.max_files
     )
 
     try:
@@ -1784,8 +1336,7 @@ def main():
         if args.step in ["all", "xml"]:
             processor.process_xml_files()
 
-        if args.step in ["all", "address"]:
-            pass  # Address processing is part of XML processing
+        # Address processing is part of XML processing
 
         if args.step in ["all", "geolocate"]:
             processor.geolocate_addresses()

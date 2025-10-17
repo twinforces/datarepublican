@@ -80,7 +80,7 @@ def parse_float_field(text):
 
     return 0.0
 
-def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins, form_type):
+def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins, form_type, backfill_entries=None, seen_backfill_keys=None):
     grants = []
     try:
         parser = etree.XMLParser(recover=True)
@@ -121,23 +121,22 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 'grant_amt': grant_amt,
                                 'tax_year': tax_year
                             })
-                            # Skip backfill logic for now - causing import issues
-                            # if grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999" and not is_foreign:
-                            #     is_valid, reason = validate_ein(grant_ein)
-                            #     if is_valid:
-                            #         address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                            #         canonical_address, po_box, zip_code, _ = canonicalize_address([comp for comp in address_components if comp.text], None)
-                            #         if canonical_address or po_box or zip_code:
-                            #             backfill_key = (grant_ein, grantee_name, zip_code)
-                            #             if backfill_key not in seen_backfill_keys:
-                            #                 seen_backfill_keys.add(backfill_key)
-                            #                 backfill_entries.append({
-                            #                     'grant_ein': grant_ein,
-                            #                     'name': grantee_name,
-                            #                     'canonical_address': canonical_address,
-                            #                     'po_box': po_box,
-                            #                     'zip_code': zip_code
-                            #                 })
+                            if backfill_entries is not None and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999" and not is_foreign:
+                                is_valid, reason = validate_ein(grant_ein)
+                                if is_valid:
+                                    address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
+                                    canonical_address, street, city, state, po_box, zip_code, _ = canonicalize_address([comp for comp in address_components if comp.text], None)
+                                    if canonical_address or po_box or zip_code:
+                                        backfill_key = (grant_ein, grantee_name, zip_code)
+                                        if backfill_key not in seen_backfill_keys:
+                                            seen_backfill_keys.add(backfill_key)
+                                            backfill_entries.append({
+                                                'grant_ein': grant_ein,
+                                                'name': grantee_name,
+                                                'canonical_address': canonical_address,
+                                                'po_box': po_box,
+                                                'zip_code': zip_code
+                                            })
                     except (ValueError, TypeError):
                         pass
     except Exception as e:

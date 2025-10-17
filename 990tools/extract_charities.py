@@ -32,7 +32,7 @@ from xpaths_990pf import XPATHS_990PF
 # Constants
 DEBUG_EINS = set()
 TSV_COLUMNS = [
-    "tax_year", "filer_ein", "filer_name", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
+    "tax_year", "filer_ein", "filer_name", "business_name_line1", "business_name_line2", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
     "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",
     "travel_pct", "travel_ptile", "conferences_pct", "conferences_ptile", "grants_pct", "grants_ptile",
     "foreign_expenses_pct", "foreign_expenses_ptile", "grift_ratio", "total_assets", "form_type",
@@ -220,9 +220,9 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
 
     # Format the message and log it through the master logger
     if ein:
-        logging.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
+        logger.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
     else:
-        logging.info(msg_format, *args, exc_info=exc_info)
+        logger.info(msg_format, *args, exc_info=exc_info)
 
 # Assign the master logger and log_error to each parse module
 parse_990.set_logger(logger, log_error)
