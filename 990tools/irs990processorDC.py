@@ -16,7 +16,7 @@ Key Features:
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from datetime import datetime
-import sqlite3
+import duckdb
 import os
 
 # Valid US state and territory abbreviations
@@ -62,7 +62,8 @@ class Address:
     address_line2: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
-    zip_code: Optional[str] = None
+    zip_code: Optional[str] = None  # First 5 digits
+    zip4: Optional[str] = None  # Last 4 digits
     po_box: Optional[str] = None
     address_type: str = "filer"  # 'filer' or 'grantee'
     geocoding_id: Optional[int] = None
@@ -71,8 +72,67 @@ class Address:
     colocator: Optional[str] = None  # LL:lat:long, PO:box:zip, FA:country_code
 
     def __post_init__(self):
+        # Initialize private backing field for canonical_address property
+        self._canonical_address = self.canonical_address or ""
         # Initialize private backing field for colocator property
         self._colocator = None
+        # If canonical_address wasn't provided, build it from components
+        if not self._canonical_address:
+            self._canonical_address = self._build_canonical_address()
+
+    @property
+    def canonical_address(self):
+        """Smart canonical address that assembles itself from components"""
+        if not hasattr(self, '_canonical_address') or not self._canonical_address:
+            self._canonical_address = self._build_canonical_address()
+        return self._canonical_address
+
+    @canonical_address.setter
+    def canonical_address(self, value):
+        self._canonical_address = value
+
+    def _build_canonical_address(self) -> str:
+        """Build canonical address from components, handling NULL address_line2 properly"""
+        address_parts = []
+
+        # Build street address from lines
+        street_parts = []
+        if self.address_line1:
+            street_parts.append(self.address_line1.strip())
+        if self.address_line2:  # Only include if not NULL/empty
+            street_parts.append(self.address_line2.strip())
+
+        if street_parts:
+            address_parts.append(" ".join(street_parts))
+
+        # Add city
+        if self.city:
+            address_parts.append(self.city.strip())
+
+        # Add state
+        if self.state:
+            address_parts.append(self.state.strip())
+
+        # Add ZIP (use zip5 to avoid ZIP+4 issues)
+        if self.zip5:
+            address_parts.append(self.zip5)
+
+        # If we have a PO box, prepend it to the address
+        if self.po_box and self.po_box.strip():
+            po_box_part = f"PO Box {self.po_box.strip()}"
+            if address_parts:
+                # Insert PO box at the beginning of the street part, or prepend if no street
+                if street_parts:
+                    address_parts[0] = f"{po_box_part} {address_parts[0]}"
+                else:
+                    address_parts.insert(0, po_box_part)
+            else:
+                address_parts.append(po_box_part)
+
+        # Join all parts with spaces and title case
+        if address_parts:
+            return ", ".join(address_parts)
+        return ""
 
     @property
     def colocator(self):
@@ -88,13 +148,34 @@ class Address:
     def colocator(self, value):
         self._colocator = value
 
+    @property
+    def zip5(self) -> Optional[str]:
+        """Extract the first 5 digits from zip_code"""
+        if self.zip_code:
+            stripped = self.zip_code.strip()
+            return stripped[:5] if len(stripped) >= 5 else stripped
+        return None
+
+    @property
+    def zip4(self) -> Optional[str]:
+        """Extract the last 4 digits from zip_code"""
+        if self.zip_code and len(self.zip_code.strip()) > 5:
+            stripped = self.zip_code.strip()
+            return stripped[5:9] if len(stripped) >= 9 else None
+        return None
+
+    @zip4.setter
+    def zip4(self, value: Optional[str]):
+        """Set the zip4 field directly"""
+        self._zip4 = value
+
     def insert(self, conn) -> int:
         """Insert this address into the database"""
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO Addresses (ein, name, canonical_address, address_line1, address_line2, city, state, zip_code, po_box, address_type, geocoding_id, latitude, longitude, colocator)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (self.ein, self.name, self.canonical_address, self.address_line1, self.address_line2, self.city, self.state, self.zip_code, self.po_box,
+            INSERT INTO Addresses (ein, name, canonical_address, address_line1, address_line2, city, state, zip_code, zip4, po_box, address_type, geocoding_id, latitude, longitude, colocator)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (self.ein, self.name, self.canonical_address, self.address_line1, self.address_line2, self.city, self.state, self.zip_code, self.zip4, self.po_box,
               self.address_type, self.geocoding_id, self.latitude, self.longitude, self.colocator))
         self.address_id = cursor.lastrowid
         return self.address_id
@@ -103,16 +184,15 @@ class Address:
 class DatabaseConsumer:
     """Database consumer for threaded XML processing"""
 
-    def __init__(self, db_path: str, logger):
-        self.db_path = db_path
+    def __init__(self, db_conn, logger):
+        self.db_conn = db_conn
         self.logger = logger
 
     def consume_batch(self, xml_queue, result_queue, batch_size: int = 100):
         """Consume XML processing results and insert into database"""
-        # Create database connection for consumer thread
-        consumer_conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        consumer_cursor = consumer_conn.cursor()
-        consumer_conn.execute("PRAGMA foreign_keys = ON")
+        # Use the shared database connection but create a new cursor for this thread
+        consumer_cursor = self.db_conn.cursor()
+        # DuckDB handles foreign keys differently, but we'll assume schema handles it
         self.logger.debug("Consumer database connection established")
 
         batch_data = []
@@ -330,23 +410,24 @@ class DatabaseManager:
     """Database initialization and management utilities"""
 
     @staticmethod
-    def init_database(db_path: str, schema_path: str = None) -> sqlite3.Connection:
-        """Initialize SQLite database with schema"""
+    def init_database(db_path: str, schema_path: str = None) -> duckdb.DuckDBPyConnection:
+        """Initialize DuckDB database with schema"""
         if schema_path is None:
-            schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema_duckdb.sql')
 
         # Check if database is already initialized
-        conn = sqlite3.connect(db_path)
+        conn = duckdb.connect(db_path)
         cursor = conn.cursor()
 
         try:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZipFiles'")
+            # Check if ZipFiles table exists using DuckDB system tables
+            cursor.execute("SELECT table_name FROM duckdb_tables() WHERE table_name='ZipFiles'")
             if not cursor.fetchone():
                 print("Database schema not found, initializing...")
-                # Read and execute schema.sql
+                # Read and execute schema_duckdb.sql
                 with open(schema_path, 'r') as f:
                     schema_sql = f.read()
-                cursor.executescript(schema_sql)
+                cursor.execute(schema_sql)
                 conn.commit()
                 print("Database schema initialized successfully")
             else:

@@ -243,8 +243,18 @@ def parse_address_990(root, xml_filename, context, xpath_cache, log_error=log_er
         state = parse_string_field(root, XPATHS_990, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
         zip_code = parse_string_field(root, XPATHS_990, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
 
+        # Split ZIP code into zip_code (first 5) and zip4 (last 4)
+        zip5 = None
+        zip4 = None
+        if zip_code:
+            stripped = zip_code.strip()
+            if len(stripped) >= 5:
+                zip5 = stripped[:5]
+                if len(stripped) >= 9:
+                    zip4 = stripped[5:9]
+
         # Build canonical address
-        address_parts = [part for part in [address_line1, address_line2, city, state, zip_code] if part]
+        address_parts = [part for part in [address_line1, address_line2, city, state, zip5] if part]
         canonical_address = ", ".join(address_parts) if address_parts else None
 
         if canonical_address:
@@ -252,7 +262,8 @@ def parse_address_990(root, xml_filename, context, xpath_cache, log_error=log_er
                 ein=context["filer_ein"],
                 name=context["filer_name"] or "Unknown",
                 canonical_address=canonical_address,
-                zip_code=zip_code,
+                zip_code=zip5,
+                zip4=zip4,
                 address_type="filer"
             )
         return None
@@ -320,11 +331,11 @@ def parse_990(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, l
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
     data["denominator"] = data["total_assets"] + data["receipt"]
-    data["comp_ptile"] = "n/y"
-    data["travel_ptile"] = "n/y"
-    data["conferences_ptile"] = "n/y"
-    data["grants_ptile"] = "n/y"
-    data["foreign_expenses_ptile"] = "n/y"
+    data["comp_ptile"] = None
+    data["travel_ptile"] = None
+    data["conferences_ptile"] = None
+    data["grants_ptile"] = None
+    data["foreign_expenses_ptile"] = None
     data["domestic_misrep_flag"] = data["grift_ratio"] > 10 and data["foreign_expenses_pct"] < 0.1 * 100 if data["total_exp"] > 0 else False
 
     # Create Charity dataclass

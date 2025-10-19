@@ -7,7 +7,7 @@ database-driven processing pipeline for IRS Form 990 data.
 
 Key Features:
 - Dataclass-based data models for type safety and clarity
-- SQLite database storage with proper relationships
+- DuckDB database storage with proper relationships
 - Geolocation using censusgeocode API
 - Comprehensive error handling and logging
 - Threaded processing for performance
@@ -18,7 +18,6 @@ import sys
 import argparse
 import time
 import zipfile
-import sqlite3
 import threading
 import logging
 from pathlib import Path
@@ -61,7 +60,7 @@ from parse_utils import parse_grants
 from irs990processorDC import Charity, Officer, Grant, Contractor, PoliticalContribution
 
 # Constants
-DEFAULT_DB_PATH = "irs990.db"
+DEFAULT_DB_PATH = "irs990.duckdb"
 DEFAULT_ZIPS_DIR = "/Volumes/Data/irs_zips"
 DEFAULT_OUT_DIR = "/Volumes/Data/tsvs"
 DEFAULT_ANAL_DIR = "/Volumes/Data/atsvs"
@@ -71,7 +70,7 @@ DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 CURRENT_PROCESSING_VERSION = 2  # Increment when processing logic changes (refactored)
 
 # Threading constants
-MAX_WORKERS = 4
+MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
 
@@ -84,8 +83,12 @@ class IRS990Processor:
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False):
-        self.db_path = os.path.join(final_dir, "irs990.db") if db_path == DEFAULT_DB_PATH else db_path
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS):
+        # Determine database path
+        if db_path == DEFAULT_DB_PATH:
+            db_path = os.path.join(final_dir, "irs990.duckdb")
+        self.db_path = db_path
+        self.final_dir = final_dir  # Store final_dir for later use
         self.zips_dir = zips_dir
         self.out_dir = out_dir
         self.anal_dir = anal_dir
@@ -109,22 +112,15 @@ class IRS990Processor:
         self.address_matching_strategy = AddressMatchingStrategy(self.db_ops, self.logger, log_sql=log_sql)
         self.stub_charity_strategy = StubCharityCreationStrategy(self.db_ops, self.logger, log_sql=log_sql)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
-        # Initialize TSV exporter (only if needed)
-        try:
-            self.tsv_exporter = self.db_ops.get_export_operations(final_dir) if self.db_ops.get_export_operations else None
-        except ImportError:
-            self.tsv_exporter = None
-        # Initialize bulk operations (only if needed)
-        try:
-            self.bulk_ops = self.db_ops.get_bulk_operations()
-        except ImportError:
-            self.bulk_ops = None
+        # Initialize TSV exporter
+        self.tsv_exporter = self.db_ops.get_export_operations(final_dir)
+        # Initialize bulk operations
+        self.bulk_ops = self.db_ops.get_bulk_operations()
 
         # Initialize database
         self._init_database()
 
-        # Initialize instance variables that were missing
-        self.db_path = db_path
+        # Initialize instance variables
         self.zips_dir = zips_dir
         self.out_dir = out_dir
         self.anal_dir = anal_dir
@@ -133,18 +129,16 @@ class IRS990Processor:
         self.quiet = quiet
         self.max_files = max_files
         self.log_sql = log_sql
+        self.workers = workers
 
     def _init_database(self):
-        """Initialize SQLite database with schema"""
-        from irs990processorDC import DatabaseManager
-        self.db_conn = DatabaseManager.init_database(self.db_path)
-        self.db_cursor = self.db_conn.cursor()
-        # Enable SQL logging if requested
-        if self.log_sql:
-            self.db_conn.set_trace_callback(print)
-        # Update db_ops to use the new connection
-        self.db_ops.db_conn = self.db_conn
-        self.db_ops.db_cursor = self.db_cursor
+        """Initialize DuckDB database with schema"""
+        # The database is already initialized by DatabaseOperations
+        # Just ensure the path is absolute
+        if not os.path.isabs(self.db_path):
+            self.db_path = os.path.join(self.final_dir, self.db_path)
+        # Use the existing connection from DatabaseOperations
+        self.db_conn = self.db_ops.db_conn
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context"""
@@ -181,205 +175,22 @@ class IRS990Processor:
 
     def _get_xml_files_to_process(self) -> List[Tuple]:
         """Get list of XML files to process from database"""
-        self.db_cursor.execute("""
+        query = """
             SELECT xml_id, zip_id, filename, internal_path
             FROM XmlFiles
             WHERE processed = FALSE
             ORDER BY xml_id
-        """)
-        return self.db_cursor.fetchall()
+        """
+        if self.max_files:
+            query += f" LIMIT {self.max_files}"
+        result = self.db_ops.execute_query(query)
+        return result.fetchall()
 
     def _process_xml_files_parallel(self, xml_files: List[Tuple]):
         """Process XML files using producer-consumer pattern for threading safety"""
-        # Create queues for communication between threads
-        xml_queue = Queue(maxsize=QUEUE_SIZE)  # Producer -> Consumer
-        result_queue = Queue(maxsize=QUEUE_SIZE)  # Consumer -> Main thread
+        # Use the parallel processing strategy instead of inline implementation
+        self.xml_processing_strategy.execute(self.max_files)
 
-        # Create database connection for consumer thread
-        consumer_conn = sqlite3.connect(self.db_ops.db_path, check_same_thread=False)
-        consumer_cursor = consumer_conn.cursor()
-        consumer_conn.execute("PRAGMA foreign_keys = ON")
-        # Enable SQL logging if requested
-        if self.log_sql:
-            consumer_conn.set_trace_callback(print)
-        self.log_debug("Consumer database connection established")
-
-        # Start consumer thread (single writer to database)
-        consumer_thread = threading.Thread(
-            target=self._database_consumer,
-            args=(xml_queue, result_queue, consumer_conn, consumer_cursor)
-        )
-        consumer_thread.daemon = True
-        consumer_thread.start()
-        self.log_debug("Consumer thread started")
-
-        # Start producer threads
-        producer_threads = []
-        num_producers = min(MAX_WORKERS, len(xml_files) // 1000 + 1)  # Scale with workload
-        self.log_info(f"Starting {num_producers} producer threads for {len(xml_files)} XML files")
-
-        # For debugging, start with just 1 producer thread
-        if len(xml_files) <= 10:
-            num_producers = 1
-
-        self.log_debug("Starting producer threads...")
-        for i in range(num_producers):
-            thread = threading.Thread(
-                target=self._xml_producer,
-                args=(xml_files, xml_queue, i, num_producers)
-            )
-            thread.daemon = True
-            producer_threads.append(thread)
-            thread.start()
-            self.log_debug(f"Started producer thread {i}")
-
-        # Monitor progress
-        total_processed = 0
-        last_update_time = time.time()
-        last_log_time = time.time()
-        self.log_debug("Starting progress monitoring loop")
-        if tqdm is not None:
-            with tqdm(total=len(xml_files), desc="Processing XML files") as pbar:
-                while total_processed < len(xml_files):
-                    # Check if consumer is still alive
-                    if not consumer_thread.is_alive():
-                        self.log_error("Database consumer thread died")
-                        break
-
-                    # Check for results from consumer
-                    try:
-                        self.log_debug("Waiting for result from consumer...")
-                        batch_size = result_queue.get(timeout=1.0)
-                        self.log_debug(f"Received batch_size: {batch_size}")
-                        total_processed += batch_size
-                        if pbar is not None:
-                            pbar.update(batch_size)
-                        last_update_time = time.time()
-                        self.log_debug(f"Progress: {total_processed}/{len(xml_files)} files processed")
-                    except:
-                        # No results yet, continue monitoring
-                        self.log_debug("No result available, continuing monitoring")
-                        pass
-        else:
-            pbar = None
-            while total_processed < len(xml_files):
-                self.log_debug(f"Monitoring loop: total_processed={total_processed}, total_files={len(xml_files)}")
-
-                # Check if consumer is still alive
-                if not consumer_thread.is_alive():
-                    self.log_error("Database consumer thread died")
-                    break
-
-                # Check for results from consumer
-                try:
-                    self.log_debug("Waiting for result from consumer...")
-                    batch_size = result_queue.get(timeout=1.0)
-                    self.log_debug(f"Received batch_size: {batch_size}")
-                    total_processed += batch_size
-                    if pbar is not None:
-                        pbar.update(batch_size)
-                    last_update_time = time.time()
-                    self.log_debug(f"Progress: {total_processed}/{len(xml_files)} files processed")
-                except:
-                    # No results yet, continue monitoring
-                    self.log_debug("No result available, continuing monitoring")
-                    pass
-
-                # Periodic update every 60 seconds regardless of batch completion
-                if time.time() - last_update_time >= 60:
-                    if pbar is not None:
-                        pbar.update(0)
-                    last_update_time = time.time()
-
-                # Log progress every 30 seconds
-                if time.time() - last_log_time >= 30:
-                    self.log_info(f"Still processing: {total_processed}/{len(xml_files)} files done")
-                    last_log_time = time.time()
-
-                # Check if we should pause for manual review - reduce for debugging
-                if self.max_files and total_processed >= self.max_files:  # Process max_files then stop for now
-                    self.log_info(f"Processed {total_processed} files, pausing for manual review")
-                    break
-
-        # Wait for producers to finish first
-        self.log_info("Waiting for producers to finish")
-        for thread in producer_threads:
-            thread.join(timeout=30.0)  # Increased timeout
-            if thread.is_alive():
-                self.log_debug(f"Producer thread did not finish gracefully")
-
-        # Now signal consumer to stop - send multiple signals to ensure it's received
-        self.log_info("Signaling consumer to stop")
-        for _ in range(3):  # Send multiple shutdown signals
-            xml_queue.put(None)
-        consumer_thread.join(timeout=10.0)
-        if consumer_thread.is_alive():
-            self.log_debug("Consumer thread did not finish gracefully")
-
-        # Close consumer connection
-        consumer_conn.close()
-
-        self.log_info(f"Parallel processing complete: {total_processed} files processed")
-
-    def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
-        """Producer thread: parses XML and sends results to consumer"""
-        self.log_debug(f"Producer {producer_id} started")
-
-        # Create thread-local database connection for read-only operations
-        local_conn = sqlite3.connect(self.db_ops.db_path, check_same_thread=False)
-        local_cursor = local_conn.cursor()
-        # Enable SQL logging if requested
-        if self.log_sql:
-            local_conn.set_trace_callback(print)
-
-        processed_count = 0
-        for i in range(producer_id, len(xml_files), num_producers):
-            xml_id, zip_id, filename, internal_path = xml_files[i]
-            self.log_debug(f"Producer {producer_id}: processing XML {xml_id} - {filename}")
-
-            # Get ZIP file path using thread-local connection
-            local_cursor.execute("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,))
-            zip_path_result = local_cursor.fetchone()
-            if not zip_path_result:
-                self.log_error(f"No ZIP file found for xml_id {xml_id}")
-                continue
-
-            zip_path = zip_path_result[0]
-
-            try:
-                # Parse XML (CPU-intensive, thread-safe)
-                result = self._process_single_xml(xml_id, zip_path, filename, internal_path)
-                if result:
-                    # Send result to consumer
-                    self.log_debug(f"Producer {producer_id}: sending result to consumer for {filename}")
-                    xml_queue.put(result)
-                    processed_count += 1
-                    self.log_debug(f"Producer {producer_id}: sent result, processed {processed_count} files so far")
-                    if processed_count % 100 == 0:
-                        self.log_debug(f"Producer {producer_id}: processed {processed_count} files")
-                else:
-                    self.log_debug(f"Producer {producer_id}: no result from processing {filename}")
-            except Exception as e:
-                self.log_error(f"XML processing failed for {filename}: {e}", exc_info=True)
-                # Mark as processed even on error
-                xml_queue.put(('error', xml_id))
-
-        self.log_debug(f"Producer {producer_id}: completed, processed {processed_count} files")
-        # Signal that this producer is done
-        xml_queue.put(None)
-        local_conn.close()
-
-    def _database_consumer(self, xml_queue, result_queue, conn, cursor):
-        """Consumer thread: writes results to database (single-threaded for SQLite safety)"""
-        from irs990processorDC import DatabaseConsumer
-        consumer = DatabaseConsumer(self.db_path, self.logger)
-        consumer.consume_batch(xml_queue, result_queue, BATCH_SIZE)
-
-    def _bulk_insert_batch(self, batch_data, conn=None, cursor=None):
-        """Bulk insert a batch of processed XML data"""
-        from irs990processorDC import DatabaseConsumer
-        consumer = DatabaseConsumer(self.db_path, self.logger)
-        consumer._bulk_insert_batch(batch_data, conn, cursor)
 
 
     def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str):
@@ -482,19 +293,19 @@ class IRS990Processor:
 
     def _mark_xml_error(self, xml_id: int, error_msg: str):
         """Mark XML file as having an error"""
-        self.db_ops.db_cursor.execute("""
+        self.db_ops.execute_query("""
             UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
             WHERE xml_id = ?
         """, (CURRENT_PROCESSING_VERSION, error_msg, xml_id))
-        self.db_ops.db_conn.commit()
+        self.db_ops.commit()
 
     def _mark_xml_processed(self, xml_id: int):
         """Mark XML file as processed"""
-        self.db_ops.db_cursor.execute("""
+        self.db_ops.execute_query("""
             UPDATE XmlFiles SET processed = TRUE, processing_version = ?
             WHERE xml_id = ?
         """, (CURRENT_PROCESSING_VERSION, xml_id))
-        self.db_ops.db_conn.commit()
+        self.db_ops.commit()
 
     def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
         """Parse Form 990 data"""
@@ -618,16 +429,14 @@ class IRS990Processor:
         self.log_info("Starting address geolocation")
 
         # DEBUG: Check if we have addresses to geocode
-        from database_operations import DatabaseOperations
-        db_ops = DatabaseOperations(self.db_path)
-        addresses = db_ops.get_addresses_for_geocoding()
+        addresses = self.db_ops.get_addresses_for_geocoding()
         self.log_info(f"DEBUG: Found {len(addresses)} addresses for geocoding")
 
         if not addresses:
             self.log_error("No addresses found for geocoding - XML processing may not have completed successfully")
             return 0
 
-        return self.geocoding_strategy.execute([])
+        return self.geocoding_strategy.execute(addresses)
 
     def _geolocate_batch(self, batch: List[Tuple]) -> List[Tuple]:
         """Geolocate a batch of addresses"""
@@ -671,7 +480,6 @@ def main():
     parser = argparse.ArgumentParser(description="IRS 990 Data Processor")
     parser.add_argument("--start-year", type=int, default=2017, help="Start year for processing (default: 2017)")
     parser.add_argument("--end-year", type=int, default=2030, help="End year for processing (default: 2030)")
-    parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path")
     parser.add_argument("--zips-dir", default=DEFAULT_ZIPS_DIR, help="ZIP files directory")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Output directory")
     parser.add_argument("--anal-dir", default=DEFAULT_ANAL_DIR, help="Analysis directory")
@@ -680,9 +488,11 @@ def main():
     parser.add_argument("--quiet", "-q", action="store_true", help="Quiet mode - minimal logging")
     parser.add_argument("--max-files", type=int, default=None, help="Maximum number of XML files to process (default: no limit)")
     parser.add_argument("--log-sql", action="store_true", help="Enable SQL logging")
+    parser.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Number of worker threads (default: {MAX_WORKERS})")
+    parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--step", choices=["all", "zip", "xml", "address", "geolocate",
-                                         "match", "percentiles", "export"],
-                       default="all", help="Processing step to run")
+                                          "match", "percentiles", "export"],
+                        default="all", help="Processing step to run")
 
     args = parser.parse_args()
 
@@ -695,7 +505,8 @@ def main():
         verbose=args.verbose,
         quiet=args.quiet,
         max_files=args.max_files,
-        log_sql=args.log_sql
+        log_sql=args.log_sql,
+        workers=args.workers
     )
 
     try:

@@ -72,55 +72,79 @@ class GeolocationProcessor:
         return None
 
     def _parse_address_components(self, canonical_address: str, db_zip: str) -> Optional[dict]:
-        """Parse address components from canonical address string with robust handling"""
+        """Parse address components from canonical address string with robust handling for real-world variations"""
         if not canonical_address:
             return None
-
-        # The canonical address is built from parsed components, so we need to parse it back
-        # But we should use the individual components that were already parsed during XML processing
-        # For now, since we don't have access to the original parsed components here,
-        # we'll improve the parsing logic to handle the canonical format better
 
         # Clean up the canonical address - remove extra spaces and normalize
         canonical_address = ' '.join(canonical_address.split())
 
         # Check if it's a PO Box address
-        if canonical_address.upper().startswith('PO BOX'):
+        if canonical_address.upper().startswith('PO BOX') or 'PO BOX' in canonical_address.upper():
             # For PO Box addresses, we can't geocode them, so return None
             return None
 
+        # Handle various real-world address formats
         # Split by spaces and work backwards
         words = canonical_address.split()
-        if len(words) < 4:
+        if len(words) < 3:  # Minimum: street city state or street city zip
             logger.debug(f"Address too short to parse: '{canonical_address}'")
             return None
 
-        # Last word should be ZIP
-        zip_part = words[-1]
-        if not (zip_part.isdigit() and len(zip_part) == 5):
+        # Try to identify ZIP code - it could be at the end or second to last
+        zip_part = None
+        state = None
+        remaining_words = words[:]
+
+        # Look for ZIP pattern (5 digits, possibly with extension)
+        for i in range(len(words) - 1, -1, -1):
+            word = words[i]
+            # Check for 5-digit ZIP
+            if word.isdigit() and len(word) == 5:
+                zip_part = word
+                remaining_words = words[:i]
+                break
+            # Check for ZIP+4
+            elif '-' in word and len(word.split('-')[0]) == 5 and word.split('-')[0].isdigit():
+                zip_part = word.split('-')[0]  # Take first 5 digits
+                remaining_words = words[:i]
+                break
+
+        # If no ZIP found, use the database ZIP
+        if not zip_part:
             zip_part = db_zip or ''
             if not zip_part:
                 logger.debug(f"No valid ZIP found in '{canonical_address}'")
                 return None
 
-        # Second to last word should be state
-        state = words[-2].upper()
-        if state not in self.VALID_STATES and state not in self.STATE_NAME_TO_ABBREV:
-            # Try to normalize state name
-            normalized_state = self._normalize_state(state)
-            if not normalized_state:
-                logger.debug(f"Invalid state '{state}' in address: '{canonical_address}'")
-                return None
-            state = normalized_state
+        # Now look for state in remaining words
+        if remaining_words:
+            # State is typically the last word before ZIP
+            potential_state = remaining_words[-1].upper()
+            if potential_state in self.VALID_STATES:
+                state = potential_state
+                remaining_words = remaining_words[:-1]
+            elif potential_state in self.STATE_NAME_TO_ABBREV:
+                state = self.STATE_NAME_TO_ABBREV[potential_state]
+                remaining_words = remaining_words[:-1]
+            else:
+                # Try to normalize state name
+                normalized_state = self._normalize_state(potential_state)
+                if normalized_state:
+                    state = normalized_state
+                    remaining_words = remaining_words[:-1]
 
-        # Everything before state and zip is city and street
-        # We need to split this into street and city
+        if not state:
+            logger.debug(f"Could not identify state in address: '{canonical_address}'")
+            return None
+
+        # Everything remaining is city and street
         # Look for common street suffixes to identify where street ends and city begins
         street_suffixes = {'STREET', 'ST', 'AVENUE', 'AVE', 'ROAD', 'RD', 'DRIVE', 'DR', 'LANE', 'LN',
-                          'BOULEVARD', 'BLVD', 'PLACE', 'PL', 'COURT', 'CT', 'CIRCLE', 'CIR',
-                          'PARKWAY', 'PKWY', 'HIGHWAY', 'HWY', 'SQUARE', 'SQ', 'TERRACE', 'TER'}
+                           'BOULEVARD', 'BLVD', 'PLACE', 'PL', 'COURT', 'CT', 'CIRCLE', 'CIR',
+                           'PARKWAY', 'PKWY', 'HIGHWAY', 'HWY', 'SQUARE', 'SQ', 'TERRACE', 'TER',
+                           'WAY', 'TRAIL', 'TRL', 'CRESCENT', 'CRES', 'PLAZA', 'PLZ', 'CROSSING', 'XING'}
 
-        remaining_words = words[:-2]  # Everything except state and zip
         street_parts = []
         city_parts = []
 
@@ -128,21 +152,42 @@ class GeolocationProcessor:
         found_city_start = False
         for i in range(len(remaining_words) - 1, -1, -1):
             word = remaining_words[i].upper()
-            if word in street_suffixes or word.replace('.', '') in street_suffixes:
-                # This looks like a street suffix, so everything before it + suffix is street
+            # Check for exact suffix match
+            if word in street_suffixes:
+                street_parts = remaining_words[:i+1]
+                city_parts = remaining_words[i+1:]
+                found_city_start = True
+                break
+            # Check for abbreviated suffix (remove dots)
+            elif word.replace('.', '') in street_suffixes:
                 street_parts = remaining_words[:i+1]
                 city_parts = remaining_words[i+1:]
                 found_city_start = True
                 break
 
         if not found_city_start:
-            # Fallback: assume last 1-2 words are city, rest is street
+            # Fallback: try to split based on common patterns
             if len(remaining_words) >= 3:
-                street_parts = remaining_words[:-1]  # Leave more for street
-                city_parts = remaining_words[-1:]   # Just last word as city
+                # Assume last 1-2 words are city, rest is street
+                # Look for city-like patterns (multiple words, no numbers, etc.)
+                for split_point in range(len(remaining_words) - 1, 0, -1):
+                    potential_city = remaining_words[split_point:]
+                    potential_street = remaining_words[:split_point]
+
+                    # City should be 1-3 words, street should be at least 1 word
+                    if 1 <= len(potential_city) <= 3 and len(potential_street) >= 1:
+                        # Check if potential city contains numbers (less likely for city)
+                        has_numbers = any(any(char.isdigit() for char in word) for word in potential_city)
+                        if not has_numbers:
+                            street_parts = potential_street
+                            city_parts = potential_city
+                            found_city_start = True
+                            break
             elif len(remaining_words) == 2:
+                # Assume first word is street, second is city
                 street_parts = remaining_words[:1]
                 city_parts = remaining_words[1:]
+                found_city_start = True
             else:
                 # Can't parse
                 logger.debug(f"Unable to split street/city in: '{canonical_address}'")
@@ -154,6 +199,11 @@ class GeolocationProcessor:
         # Validate we have reasonable components
         if not street or not city:
             logger.debug(f"Missing street or city in parsed address: street='{street}', city='{city}'")
+            return None
+
+        # Additional validation: street should contain some numbers (address numbers)
+        if not any(char.isdigit() for char in street):
+            logger.debug(f"Street address missing numbers (likely invalid): '{street}' in '{canonical_address}'")
             return None
 
         return {
@@ -180,8 +230,14 @@ class GeolocationProcessor:
         # DEBUG: Log sample addresses to verify data
         if addresses:
             logger.info(f"Sample address data: {addresses[:3]}")
+            # Additional debug: Check if addresses have valid data
+            for addr in addresses[:3]:
+                logger.info(f"Address details: id={addr[0]}, canonical='{addr[1]}', po_box='{addr[2]}', zip='{addr[3]}'")
         else:
             logger.warning("No addresses found for geocoding - check if XML processing completed successfully")
+            # DEBUG: Check database state
+            geocoding_stats = self.db_ops.get_geocoding_stats()
+            logger.warning(f"Geocoding stats: {geocoding_stats}")
             return 0
 
         # Deduplicate by canonical address to avoid redundant API calls

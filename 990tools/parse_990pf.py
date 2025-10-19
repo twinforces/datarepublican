@@ -242,8 +242,18 @@ def parse_address_990pf(root, xml_filename, context, xpath_cache, log_error=log_
                         po_box = number_match.group(0)
                         break
 
+        # Split ZIP code into zip_code (first 5) and zip4 (last 4)
+        zip5 = None
+        zip4 = None
+        if zip_code:
+            stripped = zip_code.strip()
+            if len(stripped) >= 5:
+                zip5 = stripped[:5]
+                if len(stripped) >= 9:
+                    zip4 = stripped[5:9]
+
         # Build canonical address
-        address_parts = [part for part in [address_line1, address_line2, city, state, zip_code] if part]
+        address_parts = [part for part in [address_line1, address_line2, city, state, zip5] if part]
         canonical_address = ", ".join(address_parts) if address_parts else None
 
         # Prepend PO Box to canonical address if found and not already present
@@ -260,7 +270,8 @@ def parse_address_990pf(root, xml_filename, context, xpath_cache, log_error=log_
                 city=city,
                 state=state,
                 po_box=po_box,
-                zip_code=zip_code,
+                zip_code=zip5,
+                zip4=zip4,
                 address_type="filer"
             )
         return None
@@ -319,18 +330,18 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
     data["denominator"] = data["total_assets"] + data["receipt"]
-    data["comp_ptile"] = "n/y"
-    data["travel_ptile"] = "n/y"
-    data["conferences_ptile"] = "n/y"
-    data["grants_ptile"] = "n/y"
-    data["foreign_expenses_ptile"] = "n/y"
-    data["foreign_expenses_pct"] = "n/a"
-    data["foreign_expenses"] = "n/a"
-    data["foreign_office"] = "n/a"
+    data["comp_ptile"] = None
+    data["travel_ptile"] = None
+    data["conferences_ptile"] = None
+    data["grants_ptile"] = None
+    data["foreign_expenses_ptile"] = None
+    data["foreign_expenses_pct"] = None
+    data["foreign_expenses"] = None
+    data["foreign_office"] = None
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
 
-    data["govt_grants"] = "n/a"
-    data["contributions"] = "n/a"
+    data["govt_grants"] = None
+    data["contributions"] = None
     data["domestic_misrep_flag"] = False
 
     # Create Charity dataclass

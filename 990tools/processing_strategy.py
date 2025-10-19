@@ -77,14 +77,14 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
     def _get_xml_files_to_process(self) -> List[Tuple]:
         """Get list of XML files to process from database"""
-        self.db_ops.db_cursor.execute("""
+        result = self.db_ops.execute_query("""
             SELECT xf.xml_id, zf.file_path, xf.filename, xf.internal_path
             FROM XmlFiles xf
             JOIN ZipFiles zf ON xf.zip_id = zf.zip_id
             WHERE xf.processed = FALSE
             ORDER BY xf.xml_id
         """)
-        return self.db_ops.db_cursor.fetchall()
+        return result.fetchall()
 
     def execute(self, max_files: Optional[int] = None) -> int:
         """Process XML files using producer-consumer pattern"""
@@ -97,19 +97,14 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         xml_queue = deque(maxlen=self.QUEUE_SIZE)  # Producer -> Consumer
         result_queue = deque(maxlen=self.QUEUE_SIZE)  # Consumer -> Main thread
 
-        # Create database connection for consumer thread
-        consumer_conn = sqlite3.connect(self.db_ops.db_path, check_same_thread=False)
-        consumer_cursor = consumer_conn.cursor()
-        consumer_conn.execute("PRAGMA foreign_keys = ON")
-        # Enable SQL logging if requested
-        if self.log_sql:
-            consumer_conn.set_trace_callback(print)
+        # Use shared database connection for consumer thread
+        consumer_conn = self.db_ops.db_conn
         self.log_debug("Consumer database connection established")
 
         # Start consumer thread (single writer to database)
         consumer_thread = threading.Thread(
             target=self._database_consumer,
-            args=(xml_queue, result_queue, consumer_conn, consumer_cursor)
+            args=(xml_queue, result_queue, consumer_conn)
         )
         consumer_thread.daemon = True
         consumer_thread.start()
@@ -205,8 +200,6 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         if consumer_thread.is_alive():
             self.log_error("Consumer thread did not finish gracefully")
 
-        # Close consumer connection
-        consumer_conn.close()
 
         self.log_info(f"Parallel processing complete: {total_processed} files processed")
         return total_processed
@@ -241,8 +234,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         # Signal that this producer is done
         xml_queue.append(None)
 
-    def _database_consumer(self, xml_queue, result_queue, conn, cursor):
-        """Consumer thread: writes results to database (single-threaded for SQLite safety)"""
+    def _database_consumer(self, xml_queue, result_queue, conn):
+        """Consumer thread: writes results to database (single-threaded for DuckDB safety)"""
         batch_data = []
         total_processed = 0
         self.log_debug("Consumer thread started")
@@ -272,11 +265,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 if isinstance(item, tuple) and item[0] == 'error':
                     # Mark XML as processed with error
                     xml_id = item[1]
-                    cursor.execute("""
+                    self.db_ops.execute_query("""
                         UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
                         WHERE xml_id = ?
                     """, (2, "Processing error", xml_id))  # CURRENT_PROCESSING_VERSION = 2
-                    conn.commit()
+                    self.db_ops.commit()
                     continue
 
                 # Add to batch
@@ -286,7 +279,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 # Process batch when it gets large enough
                 if len(batch_data) >= self.BATCH_SIZE or len(batch_data) >= 1:  # Process every item for debugging
                     self.log_debug(f"Consumer: processing batch of {len(batch_data)} items (total: {total_processed})")
-                    self._bulk_insert_batch(batch_data, conn, cursor)
+                    self._bulk_insert_batch(batch_data, conn)
                     result_queue.append(len(batch_data))  # Signal progress
                     batch_data = []
                 else:
@@ -300,7 +293,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         # Process remaining batch
         if batch_data:
             self.log_debug(f"Consumer: processing final batch of {len(batch_data)} items (total: {total_processed})")
-            self._bulk_insert_batch(batch_data, conn, cursor)
+            self._bulk_insert_batch(batch_data, conn)
             result_queue.append(len(batch_data))
 
         self.log_debug(f"Consumer: completed, processed {total_processed} total items")
@@ -332,12 +325,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         return sql, values
 
-    def _bulk_insert_batch(self, batch_data, conn=None, cursor=None):
+    def _bulk_insert_batch(self, batch_data, conn=None):
         """Bulk insert a batch of processed XML data"""
         if conn is None:
             conn = self.db_ops.db_conn
-        if cursor is None:
-            cursor = self.db_ops.db_cursor
 
         charities = []
         officers = []
@@ -390,7 +381,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 charity_data.append(values)
 
             try:
-                cursor.executemany(sql, charity_data)
+                conn.executemany(sql, charity_data)
                 self.log_debug(f"Inserted {len(charity_data)} charities")
             except Exception as e:
                 self.log_error(f"Failed to insert charities: {e}", exc_info=True)
@@ -402,12 +393,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 ein_list = [c.ein for c in charities]
                 tax_year_list = [c.tax_year for c in charities]
                 placeholders = ','.join('?' for _ in ein_list)
-                cursor.execute(f"""
+                conn.execute(f"""
                     SELECT charity_id FROM Charities
                     WHERE ein IN ({placeholders}) AND tax_year IN ({placeholders})
                     ORDER BY charity_id
                 """, ein_list + tax_year_list)
-                charity_ids = [row[0] for row in cursor.fetchall()]
+                charity_ids = [row[0] for row in conn.fetchall()]
             else:
                 charity_ids = []
 
@@ -422,7 +413,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         officer_data.append(values)
 
                 try:
-                    cursor.executemany(sql, officer_data)
+                    conn.executemany(sql, officer_data)
                     self.log_debug(f"Inserted {len(officer_data)} officers")
                 except Exception as e:
                     self.log_error(f"Failed to insert officers: {e}", exc_info=True)
@@ -435,7 +426,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     grant_data.append(values)
 
                 try:
-                    cursor.executemany(sql, grant_data)
+                    conn.executemany(sql, grant_data)
                     self.log_debug(f"Inserted {len(grant_data)} grants")
                 except Exception as e:
                     self.log_error(f"Failed to insert grants: {e}", exc_info=True)
@@ -448,7 +439,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     contractor_data.append(values)
 
                 try:
-                    cursor.executemany(sql, contractor_data)
+                    conn.executemany(sql, contractor_data)
                     self.log_debug(f"Inserted {len(contractor_data)} contractors")
                 except Exception as e:
                     self.log_error(f"Failed to insert contractors: {e}", exc_info=True)
@@ -461,7 +452,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     contribution_data.append(values)
 
                 try:
-                    cursor.executemany(sql, contribution_data)
+                    conn.executemany(sql, contribution_data)
                     self.log_debug(f"Inserted {len(contribution_data)} contributions")
                 except Exception as e:
                     self.log_error(f"Failed to insert contributions: {e}", exc_info=True)
@@ -485,7 +476,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     address_data.append(values)
 
                 try:
-                    cursor.executemany(sql, address_data)
+                    conn.executemany(sql, address_data)
                     self.log_debug(f"Inserted {len(address_data)} addresses")
                 except Exception as e:
                     self.log_error(f"Failed to insert addresses: {e}", exc_info=True)
@@ -702,7 +693,7 @@ class GeocodingBatchStrategy(ProcessingStrategy):
             # Skip if PO box
             if po_box and po_box.strip():
                 colocator = f"PO:{po_box.strip()}:{zip_code or ''}"
-                self.db_ops.db_cursor.execute("""
+                self.db_ops.execute_query("""
                     UPDATE Addresses SET colocator = ? WHERE address_id = ?
                 """, (colocator, address_id))
                 continue
@@ -752,33 +743,33 @@ class GeocodingBatchStrategy(ProcessingStrategy):
                     colocator = f"LL:{lat}:{lon}"
 
                     # Insert geocoding record
-                    self.db_ops.db_cursor.execute("""
+                    self.db_ops.execute_query("""
                         INSERT INTO Geocoding (address_hash, normalized_address, latitude, longitude, geocoding_status)
                         VALUES (?, ?, ?, ?, 'success')
                     """, (hash(result['address']), result['address'], lat, lon))
 
-                    geocoding_id = self.db_ops.db_cursor.lastrowid
+                    geocoding_id = self.db_ops.execute_query("SELECT last_insert_rowid()").fetchone()[0]
 
                     # Update address
-                    self.db_ops.db_cursor.execute("""
+                    self.db_ops.execute_query("""
                         UPDATE Addresses SET geocoding_id = ?, latitude = ?, longitude = ?, colocator = ?
                         WHERE address_id = ?
                     """, (geocoding_id, lat, lon, colocator, address_id))
                 else:
                     # Failed
-                    self.db_ops.db_cursor.execute("""
+                    self.db_ops.execute_query("""
                         INSERT INTO Geocoding (address_hash, normalized_address, geocoding_status)
                         VALUES (?, ?, 'failed')
                     """, (hash(result.get('address', '')), result.get('address', '')))
 
-                    geocoding_id = self.db_ops.db_cursor.lastrowid
+                    geocoding_id = self.db_ops.execute_query("SELECT last_insert_rowid()").fetchone()[0]
 
                     # Update address with failed geocoding
-                    self.db_ops.db_cursor.execute("""
+                    self.db_ops.execute_query("""
                         UPDATE Addresses SET geocoding_id = ? WHERE address_id = ?
                     """, (geocoding_id, address_id))
 
-            self.db_ops.db_conn.commit()
+            self.db_ops.commit()
             self.log_info(f"Geolocated batch of {len(addresses_to_geocode)} addresses")
 
         except Exception as e:
@@ -794,36 +785,36 @@ class AddressMatchingStrategy(ProcessingStrategy):
     def execute(self) -> int:
         """Match grants with unknown EINs by address/colocator"""
         # Get grants without EINs
-        self.db_ops.db_cursor.execute("""
+        result = self.db_ops.execute_query("""
             SELECT grant_id, filer_ein, grant_amt, tax_year
             FROM Grants
             WHERE grant_ein IS NULL OR grant_ein = ''
         """)
-        grants = self.db_ops.db_cursor.fetchall()
+        grants = result.fetchall()
 
         matched_count = 0
         for grant_id, filer_ein, grant_amt, tax_year in grants:
             # Try to find matching charity by address
             matched_ein = self._find_charity_by_grant_info(grant_id, filer_ein, grant_amt, tax_year)
             if matched_ein:
-                self.db_ops.db_cursor.execute("""
+                self.db_ops.execute_query("""
                     UPDATE Grants SET grant_ein = ? WHERE grant_id = ?
                 """, (matched_ein, grant_id))
                 matched_count += 1
 
-        self.db_ops.db_conn.commit()
+        self.db_ops.commit()
         self.log_info(f"Matched {matched_count} grants by address/colocator")
         return matched_count
 
     def _find_charity_by_grant_info(self, grant_id: int, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
         """Find charity EIN by grant information"""
         # Get grant details
-        self.db_ops.db_cursor.execute("""
+        result = self.db_ops.execute_query("""
             SELECT filer_name, grantee_name, grantee_address, grantee_zip, grantee_po_box
             FROM Grants
             WHERE grant_id = ?
         """, (grant_id,))
-        grant_info = self.db_ops.db_cursor.fetchone()
+        grant_info = result.fetchone()
 
         if not grant_info:
             return None
@@ -831,7 +822,7 @@ class AddressMatchingStrategy(ProcessingStrategy):
         filer_name, grantee_name, grantee_address, grantee_zip, grantee_po_box = grant_info
 
         # Try exact address match
-        self.db_ops.db_cursor.execute("""
+        result = self.db_ops.execute_query("""
             SELECT DISTINCT c.ein
             FROM Charities c
             JOIN Addresses a ON c.ein = a.ein
@@ -839,13 +830,13 @@ class AddressMatchingStrategy(ProcessingStrategy):
             AND LOWER(TRIM(a.canonical_address)) = LOWER(TRIM(?))
         """, (tax_year, grantee_address or ""))
 
-        result = self.db_ops.db_cursor.fetchone()
-        if result:
-            return result[0]
+        row = result.fetchone()
+        if row:
+            return row[0]
 
         # Try name + ZIP match
         if grantee_name and grantee_zip:
-            self.db_ops.db_cursor.execute("""
+            result = self.db_ops.execute_query("""
                 SELECT DISTINCT c.ein
                 FROM Charities c
                 JOIN Addresses a ON c.ein = a.ein
@@ -854,13 +845,13 @@ class AddressMatchingStrategy(ProcessingStrategy):
                 AND a.zip_code = ?
             """, (tax_year, grantee_name, grantee_zip))
 
-            result = self.db_ops.db_cursor.fetchone()
-            if result:
-                return result[0]
+            row = result.fetchone()
+            if row:
+                return row[0]
 
         # Try colocator match
         if grantee_address and grantee_zip:
-            self.db_ops.db_cursor.execute("""
+            result = self.db_ops.execute_query("""
                 SELECT DISTINCT c.ein, c.colocator
                 FROM Charities c
                 JOIN Addresses a ON c.ein = a.ein
@@ -869,7 +860,7 @@ class AddressMatchingStrategy(ProcessingStrategy):
                 AND c.colocator LIKE 'LL:%'
             """, (tax_year, grantee_zip))
 
-            candidates = self.db_ops.db_cursor.fetchall()
+            candidates = result.fetchall()
             for ein, colocator in candidates:
                 if colocator and colocator.startswith('LL:'):
                     return ein
@@ -889,8 +880,8 @@ class StubCharityCreationStrategy(ProcessingStrategy):
         stub_ein = f"STUB{hash(name + (address or '') + str(tax_year)) % 1000000000:09d}"
 
         # Check if stub already exists
-        self.db_ops.db_cursor.execute("SELECT 1 FROM Charities WHERE ein = ?", (stub_ein,))
-        if self.db_ops.db_cursor.fetchone():
+        result = self.db_ops.execute_query("SELECT 1 FROM Charities WHERE ein = ?", (stub_ein,))
+        if result.fetchone():
             return stub_ein
 
         # Create stub charity
@@ -905,7 +896,7 @@ class StubCharityCreationStrategy(ProcessingStrategy):
 
         # Create address record if we have address info
         if address or zip_code:
-            from database_operations import Address as DBAddress
+            from irs990processorDC import Address as DBAddress
             addr = DBAddress(
                 ein=stub_ein,
                 name=name or "Unknown",

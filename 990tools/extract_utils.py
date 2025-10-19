@@ -347,9 +347,15 @@ def canonicalize_address(address_components, output_dir):
         state = None
         canonical = " ".join(comp for comp in [street, city, zip_code] if comp).title()
     if zip_code:
-        zip_code_digits = re.sub(r'\D', '', zip_code)
-        if len(zip_code_digits) > 5:
-            zip_code = zip_code_digits[:5]
+        match = re.match(r'^\s*(\d{5})(?:-(\d{4}))?\s*$', zip_code)
+        if match:
+            zip_code = match.group(1)
+        else:
+            zip_code_digits = re.sub(r'\D', '', zip_code)
+            if len(zip_code_digits) >= 5:
+                zip_code = zip_code_digits[:5]
+            else:
+                zip_code = None
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
     return AddressInfo(canonical, address_line, address_line2, city, state, po_box, zip_code)
