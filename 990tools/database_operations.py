@@ -18,115 +18,8 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 
-# Import Address from irs990processorDC
-from irs990processorDC import Address
-
-# Define dataclasses locally to avoid import issues
-@dataclass
-class ZipFile:
-    filename: str
-    file_path: str
-    tax_year: int
-    file_size: Optional[int] = None
-    checksum: Optional[str] = None
-    download_date: Optional[datetime] = None
-    processed_date: Optional[datetime] = None
-    status: str = "pending"
-    zip_id: int = 0
-
-@dataclass
-class XMLFile:
-    zip_id: int
-    filename: str
-    internal_path: str
-    ein: Optional[str] = None
-    tax_year: int = 0
-    form_type: str = "Unknown"
-    processed: bool = False
-    processing_version: int = 1
-    error_message: Optional[str] = None
-    xml_id: int = 0
-
-
-@dataclass
-class Charity:
-    ein: str
-    tax_year: int
-    filer_name: str
-    receipt_amt: Optional[float] = None
-    govt_amt: Optional[float] = None
-    contrib_amt: Optional[float] = None
-    org_type: Optional[str] = None
-    total_exp: Optional[float] = None
-    prog_exp: Optional[float] = None
-    travel_amt: Optional[float] = None
-    conferences_amt: Optional[float] = None
-    officer_comp: Optional[float] = None
-    comp_pct: Optional[float] = None
-    comp_ptile: Optional[float] = None
-    travel_pct: Optional[float] = None
-    travel_ptile: Optional[float] = None
-    conferences_pct: Optional[float] = None
-    conferences_ptile: Optional[float] = None
-    grants_pct: Optional[float] = None
-    grants_ptile: Optional[float] = None
-    foreign_expenses_pct: Optional[float] = None
-    foreign_expenses_ptile: Optional[float] = None
-    grift_ratio: Optional[float] = None
-    total_assets: Optional[float] = None
-    form_type: str = "Unknown"
-    denominator: Optional[float] = None
-    foreign_office: Optional[bool] = None
-    foreign_expenses: Optional[float] = None
-    grants_to_others: Optional[float] = None
-    domestic_misrep_flag: Optional[bool] = None
-    xml_name: Optional[str] = None
-    charity_id: int = 0
-
-@dataclass
-class Grant:
-    filer_ein: str
-    filer_name: str
-    grant_ein: Optional[str] = None
-    grant_amt: float = 0
-    tax_year: int = 0
-    filer_colocator: Optional[str] = None
-    grantee_colocator: Optional[str] = None
-    grant_id: int = 0
-
-@dataclass
-class Officer:
-    first_name: str
-    last_name: str
-    compensation: float
-    tax_year: int
-    charity_id: int = 0
-    officer_id: int = 0
-
-@dataclass
-class Contractor:
-    filer_ein: str
-    name: str
-    amount: float
-    ein: Optional[str] = None
-    address: Optional[str] = None
-    zip_code: Optional[str] = None
-    po_box: Optional[str] = None
-    tax_year: int = 0
-    colocator: Optional[str] = None
-    contractor_id: int = 0
-
-@dataclass
-class PoliticalContribution:
-    filer_ein: str
-    recipient: str
-    amount: float
-    recipient_address: Optional[str] = None
-    recipient_zip: Optional[str] = None
-    recipient_po_box: Optional[str] = None
-    tax_year: int = 0
-    colocator: Optional[str] = None
-    political_id: int = 0
+# Import all dataclasses from irs990processorDC
+from irs990processorDC import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution
 
 
 class DatabaseOperations:
@@ -135,8 +28,9 @@ class DatabaseOperations:
     # Valid US state and territory abbreviations
     VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, log_sql: bool = False):
         self.db_path = db_path
+        self.log_sql = log_sql
         self.db_conn: sqlite3.Connection
         self.db_cursor: sqlite3.Cursor
         self._init_connection()
@@ -147,6 +41,9 @@ class DatabaseOperations:
         self.db_cursor = self.db_conn.cursor()
         # Enable foreign keys
         self.db_cursor.execute("PRAGMA foreign_keys = ON")
+        # Enable SQL logging if requested
+        if self.log_sql:
+            self.db_conn.set_trace_callback(print)
         # Initialize schema if needed
         self._init_schema()
 

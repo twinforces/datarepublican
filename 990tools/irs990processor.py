@@ -84,7 +84,7 @@ class IRS990Processor:
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None):
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False):
         self.db_path = os.path.join(final_dir, "irs990.db") if db_path == DEFAULT_DB_PATH else db_path
         self.zips_dir = zips_dir
         self.out_dir = out_dir
@@ -93,6 +93,7 @@ class IRS990Processor:
         self.verbose = verbose
         self.quiet = quiet
         self.max_files = max_files
+        self.log_sql = log_sql
 
         # Setup logging
         self.logger = IRS990Logger.setup_logger(
@@ -101,12 +102,12 @@ class IRS990Processor:
         )
 
         # Initialize components
-        self.db_ops = DatabaseOperations(self.db_path)
+        self.db_ops = DatabaseOperations(self.db_path, log_sql=log_sql)
         self.zip_processor = ZipProcessor(self.db_ops, zips_dir)
-        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger)
-        self.geocoding_strategy = GeocodingBatchStrategy(self.db_ops, self.logger)
-        self.address_matching_strategy = AddressMatchingStrategy(self.db_ops, self.logger)
-        self.stub_charity_strategy = StubCharityCreationStrategy(self.db_ops, self.logger)
+        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, log_sql=log_sql)
+        self.geocoding_strategy = GeocodingBatchStrategy(self.db_ops, self.logger, log_sql=log_sql)
+        self.address_matching_strategy = AddressMatchingStrategy(self.db_ops, self.logger, log_sql=log_sql)
+        self.stub_charity_strategy = StubCharityCreationStrategy(self.db_ops, self.logger, log_sql=log_sql)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter (only if needed)
         try:
@@ -131,12 +132,16 @@ class IRS990Processor:
         self.verbose = verbose
         self.quiet = quiet
         self.max_files = max_files
+        self.log_sql = log_sql
 
     def _init_database(self):
         """Initialize SQLite database with schema"""
         from irs990processorDC import DatabaseManager
         self.db_conn = DatabaseManager.init_database(self.db_path)
         self.db_cursor = self.db_conn.cursor()
+        # Enable SQL logging if requested
+        if self.log_sql:
+            self.db_conn.set_trace_callback(print)
         # Update db_ops to use the new connection
         self.db_ops.db_conn = self.db_conn
         self.db_ops.db_cursor = self.db_cursor
@@ -194,6 +199,9 @@ class IRS990Processor:
         consumer_conn = sqlite3.connect(self.db_ops.db_path, check_same_thread=False)
         consumer_cursor = consumer_conn.cursor()
         consumer_conn.execute("PRAGMA foreign_keys = ON")
+        # Enable SQL logging if requested
+        if self.log_sql:
+            consumer_conn.set_trace_callback(print)
         self.log_debug("Consumer database connection established")
 
         # Start consumer thread (single writer to database)
@@ -320,6 +328,9 @@ class IRS990Processor:
         # Create thread-local database connection for read-only operations
         local_conn = sqlite3.connect(self.db_ops.db_path, check_same_thread=False)
         local_cursor = local_conn.cursor()
+        # Enable SQL logging if requested
+        if self.log_sql:
+            local_conn.set_trace_callback(print)
 
         processed_count = 0
         for i in range(producer_id, len(xml_files), num_producers):
@@ -668,6 +679,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     parser.add_argument("--quiet", "-q", action="store_true", help="Quiet mode - minimal logging")
     parser.add_argument("--max-files", type=int, default=None, help="Maximum number of XML files to process (default: no limit)")
+    parser.add_argument("--log-sql", action="store_true", help="Enable SQL logging")
     parser.add_argument("--step", choices=["all", "zip", "xml", "address", "geolocate",
                                          "match", "percentiles", "export"],
                        default="all", help="Processing step to run")
@@ -682,7 +694,8 @@ def main():
         final_dir=args.final_dir,
         verbose=args.verbose,
         quiet=args.quiet,
-        max_files=args.max_files
+        max_files=args.max_files,
+        log_sql=args.log_sql
     )
 
     try:

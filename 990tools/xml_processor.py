@@ -12,8 +12,8 @@ from io import BytesIO
 from typing import Optional, List, Tuple, Dict, Any
 from lxml import etree as ET
 
-# Charity, Officer, Grant, Contractor, PoliticalContribution are imported from database_operations
-from database_operations import DatabaseOperations, Charity, Officer, Grant, Contractor, PoliticalContribution, Address
+from database_operations import DatabaseOperations
+from irs990processorDC import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from parse_utils import parse_grants
 import parse_990
 import parse_990ez

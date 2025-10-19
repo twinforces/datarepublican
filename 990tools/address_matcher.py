@@ -9,8 +9,8 @@ based on address and colocator information.
 from typing import Optional, List, Tuple
 from tqdm import tqdm
 
-from database_operations import DatabaseOperations, Charity, Address
-# Charity and Address are imported from database_operations
+from database_operations import DatabaseOperations
+from irs990processorDC import Charity, Address
 
 
 class AddressMatcher:

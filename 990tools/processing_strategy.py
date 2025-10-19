@@ -31,9 +31,10 @@ from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF
 class ProcessingStrategy(ABC):
     """Abstract base class for processing strategies"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
         self.db_ops = db_ops
         self.logger = logger
+        self.log_sql = log_sql
 
     @abstractmethod
     def execute(self, *args, **kwargs) -> Any:
@@ -69,6 +70,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     QUEUE_SIZE = 1000
     BATCH_SIZE = 100
 
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
+        super().__init__(db_ops, logger, log_sql)
+
     # Lock-free queue implementation for single-file processing
 
     def _get_xml_files_to_process(self) -> List[Tuple]:
@@ -97,6 +101,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         consumer_conn = sqlite3.connect(self.db_ops.db_path, check_same_thread=False)
         consumer_cursor = consumer_conn.cursor()
         consumer_conn.execute("PRAGMA foreign_keys = ON")
+        # Enable SQL logging if requested
+        if self.log_sql:
+            consumer_conn.set_trace_callback(print)
         self.log_debug("Consumer database connection established")
 
         # Start consumer thread (single writer to database)
@@ -684,6 +691,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 class GeocodingBatchStrategy(ProcessingStrategy):
     """Strategy for batch geocoding addresses"""
 
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
+        super().__init__(db_ops, logger, log_sql)
+
     def execute(self, batch: List[Tuple]) -> None:
         """Geolocate a batch of addresses"""
         addresses_to_geocode = []
@@ -778,6 +788,9 @@ class GeocodingBatchStrategy(ProcessingStrategy):
 class AddressMatchingStrategy(ProcessingStrategy):
     """Strategy for matching grants by address/colocator"""
 
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
+        super().__init__(db_ops, logger, log_sql)
+
     def execute(self) -> int:
         """Match grants with unknown EINs by address/colocator"""
         # Get grants without EINs
@@ -867,6 +880,9 @@ class AddressMatchingStrategy(ProcessingStrategy):
 class StubCharityCreationStrategy(ProcessingStrategy):
     """Strategy for creating stub charities for unmatched grants"""
 
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
+        super().__init__(db_ops, logger, log_sql)
+
     def execute(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
         """Create a stub charity record for unmatched grants"""
         # Generate a pseudo-EIN for stub records
@@ -878,7 +894,7 @@ class StubCharityCreationStrategy(ProcessingStrategy):
             return stub_ein
 
         # Create stub charity
-        from database_operations import Charity as DBCharity
+        from irs990processorDC import Charity as DBCharity
         charity = DBCharity(
             ein=stub_ein,
             tax_year=tax_year,
