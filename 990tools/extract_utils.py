@@ -19,6 +19,17 @@ from tqdm import tqdm
 from collections import defaultdict
 import hashlib
 from io import BytesIO
+from dataclasses import dataclass
+
+@dataclass
+class AddressInfo:
+    canonical_address: str
+    address_line1: str
+    address_line2: str
+    city: str
+    state: str
+    po_box: str
+    zip_code: str
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 ADDRESS_XPATHS = [
@@ -253,7 +264,7 @@ def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
 
 def canonicalize_address(address_components, output_dir):
     if not address_components:
-        return "", None, None, None, None, None, "", ""
+        return AddressInfo("", None, None, None, None, None, "")
     address_line = ""
     address_line2 = ""
     address_line3 = ""
@@ -329,7 +340,7 @@ def canonicalize_address(address_components, output_dir):
     address_parts = [comp for comp in [street, city, state, zip_code] if comp]
     if not address_parts:
         log_error("No valid address components: {}", address_components)
-        return "", None, None, None, None, None, ""
+        return AddressInfo("", None, None, None, None, None, "")
     canonical = " ".join(address_parts).title()
     if state and state.upper() not in VALID_STATES:
         log_error("Invalid state '{}' in address: {}; resetting state", state, canonical)
@@ -341,7 +352,7 @@ def canonicalize_address(address_components, output_dir):
             zip_code = zip_code_digits[:5]
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
-    return canonical, address_line, address_line2, city, state, po_box, zip_code, ""
+    return AddressInfo(canonical, address_line, address_line2, city, state, po_box, zip_code)
 
 def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
     global thread_local
@@ -447,7 +458,14 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             for elem in elements:
                 if elem.text:
                     address_components.append(elem)
-        canonical_address, address_line1, address_line2, city, state, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        address_info = canonicalize_address(address_components, output_dir)
+        canonical_address = address_info.canonical_address
+        address_line1 = address_info.address_line1
+        address_line2 = address_info.address_line2
+        city = address_info.city
+        state = address_info.state
+        po_box = address_info.po_box
+        zip_code = address_info.zip_code
         raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
@@ -537,7 +555,14 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
             for elem in elements:
                 if elem.text:
                     address_components.append(elem)
-        canonical_address, address_line1, address_line2, city, state, po_box, zip_code, _ = canonicalize_address(address_components, output_dir)
+        address_info = canonicalize_address(address_components, output_dir)
+        canonical_address = address_info.canonical_address
+        address_line1 = address_info.address_line1
+        address_line2 = address_info.address_line2
+        city = address_info.city
+        state = address_info.state
+        po_box = address_info.po_box
+        zip_code = address_info.zip_code
         raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
         address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]
         if not canonical_address:

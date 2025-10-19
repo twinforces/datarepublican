@@ -534,7 +534,13 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 us_address = elem.xpath("irs:USAddress/*", namespaces=NAMESPACES)
                                 address_components.extend([comp for comp in us_address if comp.text])
                                 # Canonicalize address
-                                canonical_address, street, city, state, po_box, zip_code, _ = cu.canonicalize_address(address_components, output_dir=None)
+                                address_info = cu.canonicalize_address(address_components, output_dir=None)
+                                canonical_address = address_info.canonical_address
+                                street = address_info.address_line1
+                                city = address_info.city
+                                state = address_info.state
+                                po_box = address_info.po_box
+                                zip_code = address_info.zip_code
                                 if canonical_address or po_box or zip_code:
                                     backfill_key = (grant_ein, grantee_name, zip_code)
                                     with backfill_lock:

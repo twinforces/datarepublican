@@ -4,7 +4,8 @@ from lxml import etree
 from nameparser import HumanName
 from io import BytesIO
 import logging
-from xpaths import NAMESPACES, XPATHS_990EZ, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
+from xpaths import NAMESPACES, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
+from xpaths_990ez import XPATHS_990EZ
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
 from xpath_utils import find_element
 from extract_utils import canonicalize_address
@@ -125,7 +126,13 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 is_valid, reason = validate_ein(grant_ein)
                                 if is_valid:
                                     address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                                    canonical_address, street, city, state, po_box, zip_code, _ = canonicalize_address([comp for comp in address_components if comp.text], None)
+                                    address_info = canonicalize_address([comp for comp in address_components if comp.text], None)
+                                    canonical_address = address_info.canonical_address
+                                    street = address_info.address_line1
+                                    city = address_info.city
+                                    state = address_info.state
+                                    po_box = address_info.po_box
+                                    zip_code = address_info.zip_code
                                     if canonical_address or po_box or zip_code:
                                         backfill_key = (grant_ein, grantee_name, zip_code)
                                         if backfill_key not in seen_backfill_keys:

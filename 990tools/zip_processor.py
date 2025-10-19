@@ -15,7 +15,7 @@ from tqdm import tqdm
 # ZipFile and XMLFile are imported from database_operations
 from database_operations import DatabaseOperations
 import importlib.util
-spec = importlib.util.spec_from_file_location('990processorDC', '990processorDC.py')
+spec = importlib.util.spec_from_file_location('990processorDC', 'irs990processorDC.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 ZipFile = module.ZipFile

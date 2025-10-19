@@ -108,7 +108,10 @@ def test_grant_parsing():
             type('MockElement', (), {'tag': 'ZIPCd', 'text': '10018'})()
         ]
 
-        canonical, po_box, zip_code, _ = canonicalize_address(us_components, None)
+        address_info = canonicalize_address(us_components, None)
+        canonical = address_info.canonical_address
+        po_box = address_info.po_box
+        zip_code = address_info.zip_code
         expected_canonical = "520 Eighth Avenue 7Th Floor New York Ny 10018"  # Note: "7th" becomes "7Th"
 
         if canonical == expected_canonical:
@@ -124,7 +127,10 @@ def test_grant_parsing():
             type('MockElement', (), {'tag': 'ZIPCd', 'text': '981081226'})()
         ]
 
-        canonical, po_box, zip_code, _ = canonicalize_address(po_box_components, None)
+        address_info = canonicalize_address(po_box_components, None)
+        canonical = address_info.canonical_address
+        po_box = address_info.po_box
+        zip_code = address_info.zip_code
         if po_box == "81226" and "Po Box" in canonical:  # Note: title case makes it "Po Box"
             print("✓ PASS: PO Box detection and canonicalization")
         else:

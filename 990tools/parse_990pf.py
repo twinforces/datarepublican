@@ -6,9 +6,12 @@ import logging
 from nameparser import HumanName
 from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field
 from xpaths import XPATHS_990PF, NAMESPACES
+from irs990processorDC import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
+from typing import Optional, List, Tuple
 
 logger = None
 log_error = None
+log_debug = None
 verbose = False
 DEBUG_EINS = set()
 
@@ -18,10 +21,11 @@ ORG_TYPE_SUFFIXES = frozenset([
     "Organization4947a1TrtdPFInd"
 ])
 
-def set_logger(new_logger, new_log_error, is_verbose=False, debug_eins=None):
-    global logger, log_error, verbose, DEBUG_EINS
+def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None):
+    global logger, log_error, log_debug, verbose, DEBUG_EINS
     logger = new_logger
     log_error = new_log_error
+    log_debug = new_log_debug or new_log_error  # fallback to log_error if log_debug not provided
     verbose = is_verbose
     DEBUG_EINS = debug_eins if debug_eins is not None else set()
     
@@ -36,8 +40,22 @@ def stub_log_error(msg_format, *args, ein=None, exc_info=False):
     else:
         logger.info(msg_format.format(*args) if args else msg_format)
 
+def stub_log_debug(msg_format, *args, ein=None, exc_info=False):
+    global logger
+    if logger is None:
+        import logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        logger = logging.getLogger(__name__)
+    if exc_info:
+        logger.debug(msg_format.format(*args) if args else msg_format, exc_info=exc_info)
+    else:
+        logger.debug(msg_format.format(*args) if args else msg_format)
+
 if log_error is None:
     log_error = stub_log_error
+
+if log_debug is None:
+    log_debug = stub_log_debug
 
 def parse_org_type_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     elem = parse_string_field(root, XPATHS_990PF, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
@@ -128,13 +146,13 @@ def parse_grants_to_others_990pf(root, field, namespaces, xml_filename, context,
     
     debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
     if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
-        log_error("Non-zero grants_to_others $%s for EIN %s, Name %s, TaxYear %s, XML %s",
+        log_debug("Non-zero grants_to_others $%s for EIN %s, Name %s, TaxYear %s, XML %s",
                   total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename)
     elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
         return_data = parse_string_field(root, XPATHS_990PF, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
-        log_error("Zero grants_to_others for EIN {}, Name {}, File {}. ReturnData children: {}", 
-                  context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags, 
+        log_debug("Zero grants_to_others for EIN {}, Name {}, File {}. ReturnData children: {}",
+                  context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags,
                   ein=context.get('filer_ein', 'Unknown'))
     return total
 
@@ -198,7 +216,59 @@ def parse_total_assets_990pf(root, field, namespaces, xml_filename, context, xpa
 def parse_filer_name_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     return parse_string_field(root, XPATHS_990PF, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="Unknown")
 
-def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None):
+def parse_address_990pf(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+    """Parse address information from Form 990PF"""
+    try:
+        import re
+        namespaces = {'irs': 'http://www.irs.gov/efile'}
+        # Parse address components
+        address_line1 = parse_string_field(root, XPATHS_990PF, "address_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+        address_line2 = parse_string_field(root, XPATHS_990PF, "address_line2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+        city = parse_string_field(root, XPATHS_990PF, "city", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+        state = parse_string_field(root, XPATHS_990PF, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+        zip_code = parse_string_field(root, XPATHS_990PF, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+
+        # Extract PO Box from address lines using the same logic as extract_utils.py
+        po_box = None
+        PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
+        PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
+        for line in [address_line1, address_line2]:
+            if line:
+                match = PO_BOX_REGEX.search(line)
+                if match:
+                    po_box_str = match.group(1)
+                    number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                    if number_match:
+                        po_box = number_match.group(0)
+                        break
+
+        # Build canonical address
+        address_parts = [part for part in [address_line1, address_line2, city, state, zip_code] if part]
+        canonical_address = ", ".join(address_parts) if address_parts else None
+
+        # Prepend PO Box to canonical address if found and not already present
+        if po_box and canonical_address and 'po box' not in canonical_address.lower():
+            canonical_address = f"PO Box {po_box}, {canonical_address}"
+
+        if canonical_address:
+            return DCAddress(
+                ein=context["filer_ein"],
+                name=context["filer_name"] or "Unknown",
+                canonical_address=canonical_address,
+                address_line1=address_line1,
+                address_line2=address_line2,
+                city=city,
+                state=state,
+                po_box=po_box,
+                zip_code=zip_code,
+                address_type="filer"
+            )
+        return None
+    except Exception as e:
+        log_error("Failed to parse address for EIN {} in {}: {}", context.get('filer_ein', 'Unknown'), xml_filename, str(e), ein=context.get('filer_ein', 'Unknown'))
+        return None
+
+def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None) -> Tuple[Optional[DCCharity], List[DCOfficer], List[DCGrant], List[DCContractor], List[DCPoliticalContribution], Optional[DCAddress]]:
     namespaces = {'irs': 'http://www.irs.gov/efile'}
     context = {
         'filer_ein': filer_ein,
@@ -207,10 +277,10 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     }
 
     if context["form_type"] != "990PF":
-        log_error("XML {} is not a Form 990PF (form_type: {}), skipping", 
-                  xml_filename, context['form_type'], 
+        log_error("XML {} is not a Form 990PF (form_type: {}), skipping",
+                  xml_filename, context['form_type'],
                   ein=context['filer_ein'])
-        return None, []
+        return None, [], [], [], [], None
 
     context["filer_name"] = parse_filer_name_990pf(root, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
     context["business_name_line1"] = parse_string_field(root, XPATHS_990PF, "business_name_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
@@ -263,16 +333,65 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["contributions"] = "n/a"
     data["domestic_misrep_flag"] = False
 
-    row = [
-        context["tax_year"], context["filer_ein"], context["filer_name"], context["business_name_line1"], context["business_name_line2"], data["receipt"], data["govt_grants"],
-        data["contributions"], data["org_type"], data["total_exp"], data["prog_exp"], data["travel"],
-        data["conferences"], data["officer_comp"], data["comp_pct"], data["comp_ptile"], data["travel_pct"],
-        data["travel_ptile"], data["conferences_pct"], data["conferences_ptile"], data["grants_pct"],
-        data["grants_ptile"], data["foreign_expenses_pct"], data["foreign_expenses_ptile"], data["grift_ratio"],
-        data["total_assets"], context["form_type"], data["denominator"], data["foreign_office"],
-        data["foreign_expenses"], data["grants_to_others"], data["domestic_misrep_flag"], xml_filename
-    ]
-    return row, officer_entries
+    # Create Charity dataclass
+    charity = DCCharity(
+        ein=context["filer_ein"],
+        tax_year=context["tax_year"],
+        filer_name=context["filer_name"] or "Unknown",
+        receipt_amt=data["receipt"],
+        govt_amt=data["govt_grants"],  # Will be "n/a"
+        contrib_amt=data["contributions"],  # Will be "n/a"
+        org_type=data["org_type"],
+        total_exp=data["total_exp"],
+        prog_exp=data["prog_exp"],
+        travel_amt=data["travel"],
+        conferences_amt=data["conferences"],
+        officer_comp=data["officer_comp"],
+        comp_pct=data["comp_pct"],
+        comp_ptile=data["comp_ptile"],
+        travel_pct=data["travel_pct"],
+        travel_ptile=data["travel_ptile"],
+        conferences_pct=data["conferences_pct"],
+        conferences_ptile=data["conferences_ptile"],
+        grants_pct=data["grants_pct"],
+        grants_ptile=data["grants_ptile"],
+        foreign_expenses_pct=data["foreign_expenses_pct"],  # Will be "n/a"
+        foreign_expenses_ptile=data["foreign_expenses_ptile"],  # Will be "n/y"
+        grift_ratio=data["grift_ratio"],
+        total_assets=data["total_assets"],
+        form_type=context["form_type"],
+        denominator=data["denominator"],
+        foreign_office=data["foreign_office"],  # Will be "n/a"
+        foreign_expenses=data["foreign_expenses"],  # Will be "n/a"
+        grants_to_others=data["grants_to_others"],
+        domestic_misrep_flag=data["domestic_misrep_flag"],
+        xml_name=xml_filename
+    )
+
+    # Convert officer entries to Officer dataclasses
+    officers = []
+    for entry in officer_entries:
+        officer = DCOfficer(
+            first_name=entry["first_name"],
+            last_name=entry["last_name"],
+            compensation=entry["amount"],
+            tax_year=tax_year
+        )
+        officers.append(officer)
+
+    # Parse address information
+    address = parse_address_990pf(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+
+    # Debug logging for address components
+    if address:
+        log_debug("DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', canonical='%s'",
+                  address.ein, address.address_line1, address.address_line2, address.city, address.state, address.zip_code, address.canonical_address,
+                  ein=address.ein)
+    else:
+        log_debug("DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
+
+    log_debug("TRACE: parse_990pf() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s", charity.ein, xml_filename, ein=charity.ein)
+    return charity, officers, [], [], [], address
 
 def main():
     if len(sys.argv) != 2:
@@ -335,8 +454,21 @@ def main():
             break
     filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
-    row, _ = parse_990pf(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
-    if row:
+    charity, officers = parse_990pf(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
+    if charity:
+        # For backward compatibility, create a row-like output
+        row = [
+            charity.tax_year, charity.ein, charity.filer_name, None, None,  # business_name_line1, business_name_line2
+            charity.receipt_amt, charity.govt_amt, charity.contrib_amt, charity.org_type,
+            charity.total_exp, charity.prog_exp, charity.travel_amt, charity.conferences_amt,
+            charity.officer_comp, charity.comp_pct, charity.comp_ptile, charity.travel_pct,
+            charity.travel_ptile, charity.conferences_pct, charity.conferences_ptile,
+            charity.grants_pct, charity.grants_ptile, charity.foreign_expenses_pct,
+            charity.foreign_expenses_ptile, charity.grift_ratio, charity.total_assets,
+            charity.form_type, charity.denominator, charity.foreign_office,
+            charity.foreign_expenses, charity.grants_to_others, charity.domestic_misrep_flag,
+            charity.xml_name
+        ]
         row_str = [str(x).replace('\t', ' ').replace('\n', ' ') for x in row]
         print('\t'.join(row_str))
 

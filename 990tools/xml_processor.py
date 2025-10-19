@@ -220,39 +220,43 @@ class XMLProcessor:
             self.logger.info(f"TRACE: parse_990() returned row with EIN: '{row[1]}' for file {filename}")
 
         # Convert row to Charity dataclass
+        self.logger.info(f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
         charity = Charity(
             ein=row[1],  # filer_ein
             tax_year=row[0],  # tax_year
             filer_name=row[2],  # filer_name
-            receipt_amt=row[3],  # receipt
-            govt_amt=row[4],  # govt_grants
-            contrib_amt=row[5],  # contributions
-            org_type=row[6],  # org_type
-            total_exp=row[7],  # total_exp
-            prog_exp=row[8],  # prog_exp
-            travel_amt=row[9],  # travel
-            conferences_amt=row[10],  # conferences
-            officer_comp=row[11],  # officer_comp
-            comp_pct=row[12],  # comp_pct
-            comp_ptile=row[13],  # comp_ptile
-            travel_pct=row[14],  # travel_pct
-            travel_ptile=row[15],  # travel_ptile
-            conferences_pct=row[16],  # conferences_pct
-            conferences_ptile=row[17],  # conferences_ptile
-            grants_pct=row[18],  # grants_pct
-            grants_ptile=row[19],  # grants_ptile
-            foreign_expenses_pct=row[20],  # foreign_expenses_pct
-            foreign_expenses_ptile=row[21],  # foreign_expenses_ptile
-            grift_ratio=row[22],  # grift_ratio
-            total_assets=row[23],  # total_assets
-            form_type=row[24],  # form_type
-            denominator=row[25],  # denominator
-            foreign_office=row[26],  # foreign_office
-            foreign_expenses=row[27],  # foreign_expenses
-            grants_to_others=row[28],  # grants_to_others
-            domestic_misrep_flag=row[29],  # domestic_misrep_flag
-            xml_name=row[30]  # xml_name
+            business_name_line1=row[3],  # business_name_line1
+            business_name_line2=row[4],  # business_name_line2
+            receipt_amt=row[5],  # receipt
+            govt_amt=row[6],  # govt_grants
+            contrib_amt=row[7],  # contributions
+            org_type=row[8],  # org_type
+            total_exp=row[9],  # total_exp
+            prog_exp=row[10],  # prog_exp
+            travel_amt=row[11],  # travel
+            conferences_amt=row[12],  # conferences
+            officer_comp=row[13],  # officer_comp
+            comp_pct=row[14],  # comp_pct
+            comp_ptile=row[15],  # comp_ptile
+            travel_pct=row[16],  # travel_pct
+            travel_ptile=row[17],  # travel_ptile
+            conferences_pct=row[18],  # conferences_pct
+            conferences_ptile=row[19],  # conferences_ptile
+            grants_pct=row[20],  # grants_pct
+            grants_ptile=row[21],  # grants_ptile
+            foreign_expenses_pct=row[22],  # foreign_expenses_pct
+            foreign_expenses_ptile=row[23],  # foreign_expenses_ptile
+            grift_ratio=row[24],  # grift_ratio
+            total_assets=row[25],  # total_assets
+            form_type=row[26],  # form_type
+            denominator=row[27],  # denominator
+            foreign_office=row[28],  # foreign_office
+            foreign_expenses=row[29],  # foreign_expenses
+            grants_to_others=row[30],  # grants_to_others
+            domestic_misrep_flag=row[31],  # domestic_misrep_flag
+            xml_name=row[32]  # xml_name
         )
+        self.logger.info(f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
         self.logger.info(f"TRACE: Created Charity dataclass with EIN: '{charity.ein}' from row[1] for file {filename}")
 
         # Convert officer entries
@@ -398,7 +402,13 @@ class XMLProcessor:
                 continue
 
         # Canonicalize address
-        canonical_address, street, city, state, po_box, zip_code, _ = canonicalize_address(address_components, ".")
+        address_info = canonicalize_address(address_components, ".")
+        canonical_address = address_info.canonical_address
+        street = address_info.address_line1
+        city = address_info.city
+        state = address_info.state
+        po_box = address_info.po_box
+        zip_code = address_info.zip_code
 
         if canonical_address:
             address = Address(
@@ -427,18 +437,21 @@ class XMLProcessor:
             return None, [], [], [], []
 
         # Convert row to Charity dataclass (similar to 990)
+        self.logger.info(f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
         charity = Charity(
-            ein=row[1], tax_year=row[0], filer_name=row[2], receipt_amt=row[3],
-            govt_amt=row[4], contrib_amt=row[5], org_type=row[6], total_exp=row[7],
-            prog_exp=row[8], travel_amt=row[9], conferences_amt=row[10],
-            officer_comp=row[11], comp_pct=row[12], comp_ptile=row[13],
-            travel_pct=row[14], travel_ptile=row[15], conferences_pct=row[16],
-            conferences_ptile=row[17], grants_pct=row[18], grants_ptile=row[19],
-            foreign_expenses_pct=row[20], foreign_expenses_ptile=row[21],
-            grift_ratio=row[22], total_assets=row[23], form_type=row[24],
-            denominator=row[25], foreign_office=row[26], foreign_expenses=row[27],
-            grants_to_others=row[28], domestic_misrep_flag=row[29], xml_name=row[30]
+            ein=row[1], tax_year=row[0], filer_name=row[2], business_name_line1=row[3],
+            business_name_line2=row[4], receipt_amt=row[5], govt_amt=row[6],
+            contrib_amt=row[7], org_type=row[8], total_exp=row[9], prog_exp=row[10],
+            travel_amt=row[11], conferences_amt=row[12], officer_comp=row[13],
+            comp_pct=row[14], comp_ptile=row[15], travel_pct=row[16],
+            travel_ptile=row[17], conferences_pct=row[18], conferences_ptile=row[19],
+            grants_pct=row[20], grants_ptile=row[21], foreign_expenses_pct=row[22],
+            foreign_expenses_ptile=row[23], grift_ratio=row[24], total_assets=row[25],
+            form_type=row[26], denominator=row[27], foreign_office=row[28],
+            foreign_expenses=row[29], grants_to_others=row[30], domestic_misrep_flag=row[31],
+            xml_name=row[32]
         )
+        self.logger.info(f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
 
         # Convert officer entries
         officers = []
@@ -469,18 +482,21 @@ class XMLProcessor:
             return None, [], [], [], []
 
         # Convert row to Charity dataclass (similar to 990)
+        self.logger.info(f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
         charity = Charity(
-            ein=row[1], tax_year=row[0], filer_name=row[2], receipt_amt=row[3],
-            govt_amt=row[4], contrib_amt=row[5], org_type=row[6], total_exp=row[7],
-            prog_exp=row[8], travel_amt=row[9], conferences_amt=row[10],
-            officer_comp=row[11], comp_pct=row[12], comp_ptile=row[13],
-            travel_pct=row[14], travel_ptile=row[15], conferences_pct=row[16],
-            conferences_ptile=row[17], grants_pct=row[18], grants_ptile=row[19],
-            foreign_expenses_pct=row[20], foreign_expenses_ptile=row[21],
-            grift_ratio=row[22], total_assets=row[23], form_type=row[24],
-            denominator=row[25], foreign_office=row[26], foreign_expenses=row[27],
-            grants_to_others=row[28], domestic_misrep_flag=row[29], xml_name=row[30]
+            ein=row[1], tax_year=row[0], filer_name=row[2], business_name_line1=row[3],
+            business_name_line2=row[4], receipt_amt=row[5], govt_amt=row[6],
+            contrib_amt=row[7], org_type=row[8], total_exp=row[9], prog_exp=row[10],
+            travel_amt=row[11], conferences_amt=row[12], officer_comp=row[13],
+            comp_pct=row[14], comp_ptile=row[15], travel_pct=row[16],
+            travel_ptile=row[17], conferences_pct=row[18], conferences_ptile=row[19],
+            grants_pct=row[20], grants_ptile=row[21], foreign_expenses_pct=row[22],
+            foreign_expenses_ptile=row[23], grift_ratio=row[24], total_assets=row[25],
+            form_type=row[26], denominator=row[27], foreign_office=row[28],
+            foreign_expenses=row[29], grants_to_others=row[30], domestic_misrep_flag=row[31],
+            xml_name=row[32]
         )
+        self.logger.info(f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
 
         # Convert officer entries
         officers = []

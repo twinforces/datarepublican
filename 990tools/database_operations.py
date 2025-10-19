@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 
+# Import Address from irs990processorDC
+from irs990processorDC import Address
+
 # Define dataclasses locally to avoid import issues
 @dataclass
 class ZipFile:
@@ -44,22 +47,6 @@ class XMLFile:
     error_message: Optional[str] = None
     xml_id: int = 0
 
-@dataclass
-class Address:
-    ein: str
-    name: str
-    street: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip_code: Optional[str] = None
-    po_box: Optional[str] = None
-    canonical_address: str
-    address_type: str = "charity"
-    geocoding_id: Optional[int] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    colocator: Optional[str] = None
-    address_id: int = 0
 
 @dataclass
 class Charity:
@@ -145,6 +132,9 @@ class PoliticalContribution:
 class DatabaseOperations:
     """Handles all database operations for IRS 990 data processing"""
 
+    # Valid US state and territory abbreviations
+    VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.db_conn: sqlite3.Connection
@@ -152,11 +142,31 @@ class DatabaseOperations:
         self._init_connection()
 
     def _init_connection(self):
-        """Initialize database connection"""
+        """Initialize database connection and schema"""
         self.db_conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.db_cursor = self.db_conn.cursor()
         # Enable foreign keys
         self.db_cursor.execute("PRAGMA foreign_keys = ON")
+        # Initialize schema if needed
+        self._init_schema()
+
+    def _init_schema(self):
+        """Initialize database schema if not already present"""
+        # Check if schema is already initialized
+        self.db_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZipFiles'")
+        if self.db_cursor.fetchone():
+            return  # Schema already exists
+
+        # Read and execute schema.sql
+        schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+        try:
+            with open(schema_path, 'r') as f:
+                schema_sql = f.read()
+            self.db_cursor.executescript(schema_sql)
+            self.db_conn.commit()
+        except Exception as e:
+            print(f"Failed to initialize database schema: {e}")
+            raise
 
     def __del__(self):
         """Cleanup database connection"""
@@ -166,15 +176,8 @@ class DatabaseOperations:
     # ZipFile operations
     def insert_zip_file(self, zip_file: ZipFile) -> int:
         """Insert ZipFile into database, handling duplicates"""
-        # Check if ZIP file already exists
-        self.db_cursor.execute("SELECT zip_id FROM ZipFiles WHERE filename = ?", (zip_file.filename,))
-        existing = self.db_cursor.fetchone()
-        if existing:
-            zip_file.zip_id = existing[0]
-            return existing[0]
-
         self.db_cursor.execute("""
-            INSERT INTO ZipFiles (filename, file_path, tax_year, file_size, checksum,
+            INSERT OR IGNORE INTO ZipFiles (filename, file_path, tax_year, file_size, checksum,
                                 download_date, processed_date, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (zip_file.filename, zip_file.file_path, zip_file.tax_year,
@@ -195,16 +198,8 @@ class DatabaseOperations:
     # XMLFile operations
     def insert_xml_file(self, xml_file: XMLFile) -> int:
         """Insert XMLFile into database, handling duplicates"""
-        # Check if XML file already exists
-        self.db_cursor.execute("SELECT xml_id FROM XmlFiles WHERE zip_id = ? AND filename = ?",
-                              (xml_file.zip_id, xml_file.filename))
-        existing = self.db_cursor.fetchone()
-        if existing:
-            xml_file.xml_id = existing[0]
-            return existing[0]
-
         self.db_cursor.execute("""
-            INSERT INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year,
+            INSERT OR IGNORE INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year,
                                 form_type, processed, processing_version, error_message)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (xml_file.zip_id, xml_file.filename, xml_file.internal_path,
@@ -255,24 +250,30 @@ class DatabaseOperations:
     # Address operations
     def insert_address(self, address: Address) -> int:
         """Insert Address into database, avoiding duplicates"""
-        # Check for existing address
-        self.db_cursor.execute("""
-            SELECT address_id FROM Addresses
-            WHERE ein = ? AND canonical_address = ?
-        """, (address.ein, address.canonical_address))
+        # Use the colocator that was set by __post_init__ instead of recalculating
+        colocator = address.colocator
 
-        existing = self.db_cursor.fetchone()
-        if existing:
-            address.address_id = existing[0]
-            return existing[0]
+        # Debug logging
+        if hasattr(address, 'ein') and address.ein:
+            print(f"DEBUG: Inserting address for EIN {address.ein}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', po_box='{address.po_box}', canonical='{address.canonical_address}', colocator='{colocator}'")
+            # Log the final colocator value being inserted
+            print(f"DEBUG insert_address: Final colocator value being inserted: '{colocator}' (from address.colocator)")
 
-        self.db_cursor.execute("""
-            INSERT INTO Addresses (ein, name, street, city, state, zip_code, po_box,
-                                  canonical_address, address_type, geocoding_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (address.ein, address.name, address.street, address.city, address.state,
-              address.zip_code, address.po_box, address.canonical_address,
-              address.address_type, address.geocoding_id))
+        sql = """
+            INSERT OR IGNORE INTO Addresses (ein, name, address_line1, address_line2, city, state, zip_code, po_box,
+                                  canonical_address, address_type, geocoding_id, latitude, longitude, colocator)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        values = (address.ein, address.name, getattr(address, 'address_line1', None), getattr(address, 'address_line2', None),
+                  getattr(address, 'city', None), getattr(address, 'state', None),
+                  address.zip_code, address.po_box, address.canonical_address,
+                  address.address_type, address.geocoding_id, address.latitude, address.longitude, colocator)
+
+        # Log the SQL statement and values
+        print(f"DEBUG insert_address: SQL: {sql.strip()}")
+        print(f"DEBUG insert_address: Values: {values}")
+
+        self.db_cursor.execute(sql, values)
         address.address_id = self.db_cursor.lastrowid or 0
         self.db_conn.commit()
         return address.address_id
@@ -288,74 +289,36 @@ class DatabaseOperations:
         """)
         return self.db_cursor.fetchall()
 
-    def update_address_geocoding(self, address_id: int, geocoding_id: int, latitude: float = None,
-                                longitude: float = None, colocator: str = None):
+    def update_address_geocoding(self, address_id: int, geocoding_id: int = None, colocator: str = None):
         """Update address with geocoding information"""
         self.db_cursor.execute("""
-            UPDATE Addresses SET geocoding_id = ?, latitude = ?, longitude = ?, colocator = ?
+            UPDATE Addresses SET geocoding_id = ?, colocator = ?
             WHERE address_id = ?
-        """, (geocoding_id, latitude, longitude, colocator, address_id))
+        """, (geocoding_id, colocator, address_id))
         self.db_conn.commit()
 
     # Charity operations
     def insert_charity(self, charity: Charity) -> int:
         """Insert Charity into database, handling duplicates by EIN and tax_year"""
-        # Check if charity already exists for this EIN and tax_year
         self.db_cursor.execute("""
-            SELECT charity_id FROM Charities
-            WHERE ein = ? AND tax_year = ?
-        """, (charity.ein, charity.tax_year))
-
-        existing = self.db_cursor.fetchone()
-        if existing:
-            # Update existing record instead of inserting duplicate
-            charity.charity_id = existing[0]
-            self.db_cursor.execute("""
-                UPDATE Charities SET
-                    filer_name = ?, receipt_amt = ?, govt_amt = ?, contrib_amt = ?,
-                    org_type = ?, total_exp = ?, prog_exp = ?, travel_amt = ?,
-                    conferences_amt = ?, officer_comp = ?, comp_pct = ?, comp_ptile = ?,
-                    travel_pct = ?, travel_ptile = ?, conferences_pct = ?, conferences_ptile = ?,
-                    grants_pct = ?, grants_ptile = ?, foreign_expenses_pct = ?,
-                    foreign_expenses_ptile = ?, grift_ratio = ?, total_assets = ?,
-                    form_type = ?, denominator = ?, foreign_office = ?, foreign_expenses = ?,
-                    grants_to_others = ?, domestic_misrep_flag = ?, xml_name = ?
-                WHERE charity_id = ?
-            """, (charity.filer_name, charity.receipt_amt, charity.govt_amt,
-                  charity.contrib_amt, charity.org_type, charity.total_exp,
-                  charity.prog_exp, charity.travel_amt, charity.conferences_amt,
-                  charity.officer_comp, charity.comp_pct, charity.comp_ptile,
-                  charity.travel_pct, charity.travel_ptile, charity.conferences_pct,
-                  charity.conferences_ptile, charity.grants_pct, charity.grants_ptile,
-                  charity.foreign_expenses_pct, charity.foreign_expenses_ptile,
-                  charity.grift_ratio, charity.total_assets, charity.form_type,
-                  charity.denominator, charity.foreign_office, charity.foreign_expenses,
-                  charity.grants_to_others, charity.domestic_misrep_flag, charity.xml_name,
-                  charity.charity_id))
-            self.db_conn.commit()
-            return charity.charity_id
-
-        # Insert new charity record
-        self.db_cursor.execute("""
-            INSERT INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
+            INSERT OR IGNORE INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
                                   contrib_amt, org_type, total_exp, prog_exp, travel_amt,
                                   conferences_amt, officer_comp, comp_pct, comp_ptile,
                                   travel_pct, travel_ptile, conferences_pct, conferences_ptile,
                                   grants_pct, grants_ptile, foreign_expenses_pct,
-                                  foreign_expenses_ptile, grift_ratio, total_assets,
-                                  form_type, denominator, foreign_office, foreign_expenses,
-                                  grants_to_others, domestic_misrep_flag, xml_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (charity.ein, charity.tax_year, charity.filer_name, charity.receipt_amt,
-              charity.govt_amt, charity.contrib_amt, charity.org_type, charity.total_exp,
-              charity.prog_exp, charity.travel_amt, charity.conferences_amt,
-              charity.officer_comp, charity.comp_pct, charity.comp_ptile,
-              charity.travel_pct, charity.travel_ptile, charity.conferences_pct,
+                                  foreign_expenses_ptile, grift_ratio, total_assets, form_type,
+                                  denominator, foreign_office, foreign_expenses, grants_to_others,
+                                  domestic_misrep_flag, xml_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (charity.ein, charity.tax_year, charity.filer_name, charity.receipt_amt, charity.govt_amt,
+              charity.contrib_amt, charity.org_type, charity.total_exp, charity.prog_exp,
+              charity.travel_amt, charity.conferences_amt, charity.officer_comp, charity.comp_pct,
+              charity.comp_ptile, charity.travel_pct, charity.travel_ptile, charity.conferences_pct,
               charity.conferences_ptile, charity.grants_pct, charity.grants_ptile,
-              charity.foreign_expenses_pct, charity.foreign_expenses_ptile,
-              charity.grift_ratio, charity.total_assets, charity.form_type,
-              charity.denominator, charity.foreign_office, charity.foreign_expenses,
-              charity.grants_to_others, charity.domestic_misrep_flag, charity.xml_name))
+              charity.foreign_expenses_pct, charity.foreign_expenses_ptile, charity.grift_ratio,
+              charity.total_assets, charity.form_type, charity.denominator, charity.foreign_office,
+              charity.foreign_expenses, charity.grants_to_others, charity.domestic_misrep_flag,
+              charity.xml_name))
         charity.charity_id = self.db_cursor.lastrowid or 0
         self.db_conn.commit()
         return charity.charity_id
@@ -403,7 +366,7 @@ class DatabaseOperations:
     def insert_grant(self, grant: Grant) -> int:
         """Insert Grant into database"""
         self.db_cursor.execute("""
-            INSERT INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
+            INSERT OR REPLACE INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
                               filer_colocator, grantee_colocator)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (grant.filer_ein, grant.filer_name, grant.grant_ein, grant.grant_amt,
@@ -441,7 +404,7 @@ class DatabaseOperations:
             raise ValueError(f"charity_id {officer.charity_id} does not exist in Charities table for officer {officer.first_name} {officer.last_name}")
 
         self.db_cursor.execute("""
-            INSERT INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
+            INSERT OR REPLACE INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
             VALUES (?, ?, ?, ?, ?)
         """, (officer.charity_id, officer.first_name, officer.last_name,
               officer.compensation, officer.tax_year))
@@ -453,7 +416,7 @@ class DatabaseOperations:
     def insert_contractor(self, contractor: Contractor) -> int:
         """Insert Contractor into database"""
         self.db_cursor.execute("""
-            INSERT INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
+            INSERT OR REPLACE INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
                                     po_box, tax_year, colocator)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (contractor.filer_ein, contractor.name, contractor.amount, contractor.ein,
@@ -466,7 +429,7 @@ class DatabaseOperations:
     def insert_political_contribution(self, contribution: PoliticalContribution) -> int:
         """Insert PoliticalContribution into database"""
         self.db_cursor.execute("""
-            INSERT INTO PoliticalContributions (filer_ein, recipient, amount,
+            INSERT OR REPLACE INTO PoliticalContributions (filer_ein, recipient, amount,
                                               recipient_address, recipient_zip,
                                               recipient_po_box, tax_year, colocator)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -489,154 +452,45 @@ class DatabaseOperations:
         geocoding_id = self.db_cursor.lastrowid or 0
         self.db_conn.commit()
         return geocoding_id
+    # Import bulk operations
+    try:
+        from bulk_operations import BulkOperations
+    except ImportError:
+        BulkOperations = None
+    else:
+        # Make it available as a class attribute
+        DatabaseOperations.BulkOperations = BulkOperations
 
-    # Bulk operations for performance
     def bulk_insert_xml_files(self, xml_files: List[XMLFile]):
         """Bulk insert XML files"""
-        if not xml_files:
-            return
+        xml_data = [(xml.zip_id, xml.filename, xml.internal_path, xml.ein, xml.tax_year,
+                    xml.form_type, xml.processed, xml.processing_version, xml.error_message)
+                   for xml in xml_files]
 
-        xml_data = [(xf.zip_id, xf.filename, xf.internal_path, xf.ein, xf.tax_year, xf.form_type,
-                    xf.processed, xf.processing_version, xf.error_message)
-                   for xf in xml_files]
         self.db_cursor.executemany("""
-            INSERT OR IGNORE INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year, form_type, processed, processing_version, error_message)
+            INSERT INTO XmlFiles (zip_id, filename, internal_path, ein, tax_year,
+                                form_type, processed, processing_version, error_message)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, xml_data)
         self.db_conn.commit()
 
-    def bulk_insert_charities(self, charities: List[Charity]):
-        """Bulk insert charities"""
-        if not charities:
-            return
+    def get_bulk_operations(self):
+        """Get bulk operations handler"""
+        if DatabaseOperations.BulkOperations is None:
+            raise ImportError("BulkOperations module not available")
+        return DatabaseOperations.BulkOperations(self)
 
-        charity_data = [(c.ein, c.tax_year, c.filer_name, c.receipt_amt, c.govt_amt,
-                        c.contrib_amt, c.org_type, c.total_exp, c.prog_exp, c.travel_amt,
-                        c.conferences_amt, c.officer_comp, c.comp_pct, c.comp_ptile,
-                        c.travel_pct, c.travel_ptile, c.conferences_pct, c.conferences_ptile,
-                        c.grants_pct, c.grants_ptile, c.foreign_expenses_pct,
-                        c.foreign_expenses_ptile, c.grift_ratio, c.total_assets,
-                        c.form_type, c.denominator, c.foreign_office, c.foreign_expenses,
-                        c.grants_to_others, c.domestic_misrep_flag, c.xml_name)
-                       for c in charities]
-        self.db_cursor.executemany("""
-            INSERT INTO Charities (ein, tax_year, filer_name, receipt_amt, govt_amt,
-                                  contrib_amt, org_type, total_exp, prog_exp, travel_amt,
-                                  conferences_amt, officer_comp, comp_pct, comp_ptile,
-                                  travel_pct, travel_ptile, conferences_pct, conferences_ptile,
-                                  grants_pct, grants_ptile, foreign_expenses_pct,
-                                  foreign_expenses_ptile, grift_ratio, total_assets,
-                                  form_type, denominator, foreign_office, foreign_expenses,
-                                  grants_to_others, domestic_misrep_flag, xml_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, charity_data)
-        self.db_conn.commit()
+    # Import export operations
+    try:
+        from export_processor import TSVExporter
+    except ImportError:
+        TSVExporter = None
+    else:
+        # Make it available as a class attribute
+        DatabaseOperations.TSVExporter = TSVExporter
 
-    def bulk_insert_officers(self, officers: List[Officer]):
-        """Bulk insert officers"""
-        if not officers:
-            return
-
-        officer_data = [(o.charity_id, o.first_name, o.last_name, o.compensation, o.tax_year)
-                       for o in officers]
-        self.db_cursor.executemany("""
-            INSERT INTO Officers (charity_id, first_name, last_name, compensation, tax_year)
-            VALUES (?, ?, ?, ?, ?)
-        """, officer_data)
-        self.db_conn.commit()
-
-    def bulk_insert_grants(self, grants: List[Grant]):
-        """Bulk insert grants"""
-        if not grants:
-            return
-
-        grant_data = [(g.filer_ein, g.filer_name, g.grant_ein, g.grant_amt, g.tax_year,
-                      g.filer_colocator, g.grantee_colocator) for g in grants]
-        self.db_cursor.executemany("""
-            INSERT INTO Grants (filer_ein, filer_name, grant_ein, grant_amt, tax_year,
-                              filer_colocator, grantee_colocator)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, grant_data)
-        self.db_conn.commit()
-
-    def bulk_insert_contractors(self, contractors: List[Contractor]):
-        """Bulk insert contractors"""
-        if not contractors:
-            return
-
-        contractor_data = [(c.filer_ein, c.name, c.amount, c.ein, c.address, c.zip_code,
-                          c.po_box, c.tax_year) for c in contractors]
-        self.db_cursor.executemany("""
-            INSERT INTO Contractors (filer_ein, name, amount, ein, address, zip_code,
-                                    po_box, tax_year)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, contractor_data)
-        self.db_conn.commit()
-
-    def bulk_insert_political_contributions(self, contributions: List[PoliticalContribution]):
-        """Bulk insert political contributions"""
-        if not contributions:
-            return
-
-        contribution_data = [(c.filer_ein, c.recipient, c.amount, c.recipient_address,
-                            c.recipient_zip, c.recipient_po_box, c.tax_year, c.colocator) for c in contributions]
-        self.db_cursor.executemany("""
-            INSERT INTO PoliticalContributions (filer_ein, recipient, amount,
-                                              recipient_address, recipient_zip,
-                                              recipient_po_box, tax_year, colocator)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, contribution_data)
-        self.db_conn.commit()
-
-    # Export operations
-    def get_latest_charities_for_export(self) -> List[Tuple]:
-        """Get latest charities for TSV export"""
-        self.db_cursor.execute("""
-            SELECT
-                tax_year, ein, filer_name, receipt_amt, govt_amt, contrib_amt,
-                org_type, total_exp, prog_exp, travel_amt, conferences_amt,
-                officer_comp, comp_pct, comp_ptile_value, travel_pct, travel_ptile_value,
-                conferences_pct, conferences_ptile_value, grants_pct, grants_ptile_value,
-                foreign_expenses_pct, foreign_expenses_ptile_value, grift_ratio,
-                total_assets, form_type, denominator, foreign_office, foreign_expenses,
-                grants_to_others, domestic_misrep_flag, xml_name
-            FROM LatestCharities
-            ORDER BY ein
-        """)
-        return self.db_cursor.fetchall()
-
-    def get_grants_for_export(self) -> List[Tuple]:
-        """Get grants for TSV export"""
-        self.db_cursor.execute("""
-            SELECT
-                g.filer_ein, g.filer_name, g.grant_ein, g.grant_amt, g.tax_year,
-                g.filer_colocator, g.grantee_colocator
-            FROM Grants g
-            JOIN LatestCharities lc ON g.filer_ein = lc.ein
-            ORDER BY g.filer_ein, g.tax_year
-        """)
-        return self.db_cursor.fetchall()
-
-    def get_contractors_for_export(self) -> List[Tuple]:
-        """Get contractors for TSV export"""
-        self.db_cursor.execute("""
-            SELECT
-                c.filer_ein, c.name, c.amount, c.ein, c.address, c.zip_code,
-                c.po_box, c.tax_year, c.colocator
-            FROM Contractors c
-            JOIN LatestCharities lc ON c.filer_ein = lc.ein
-            ORDER BY c.filer_ein, c.tax_year
-        """)
-        return self.db_cursor.fetchall()
-
-    def get_political_contributions_for_export(self) -> List[Tuple]:
-        """Get political contributions for TSV export"""
-        self.db_cursor.execute("""
-            SELECT
-                pc.filer_ein, pc.recipient, pc.amount, pc.recipient_address,
-                pc.recipient_zip, pc.recipient_po_box, pc.tax_year, pc.colocator
-            FROM PoliticalContributions pc
-            JOIN LatestCharities lc ON pc.filer_ein = lc.ein
-            ORDER BY pc.filer_ein, pc.tax_year
-        """)
-        return self.db_cursor.fetchall()
+    def get_export_operations(self, final_dir: str):
+        """Get export operations handler"""
+        if DatabaseOperations.TSVExporter is None:
+            raise ImportError("TSVExporter module not available")
+        return DatabaseOperations.TSVExporter(self, final_dir)

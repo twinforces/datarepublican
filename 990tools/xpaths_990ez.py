@@ -125,4 +125,24 @@ XPATHS_990EZ = {
         etree.XPath(".//irs:ReturnData", namespaces=NAMESPACES),
         etree.XPath(".//ReturnData", namespaces=NAMESPACES),
     ],
+    "address_line1": [
+        etree.XPath(".//irs:Filer/irs:USAddress/irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress/AddressLine1Txt", namespaces=NAMESPACES),
+    ],
+    "address_line2": [
+        etree.XPath(".//irs:Filer/irs:USAddress/irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress/AddressLine2Txt", namespaces=NAMESPACES),
+    ],
+    "city": [
+        etree.XPath(".//irs:Filer/irs:USAddress/irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress/CityNm", namespaces=NAMESPACES),
+    ],
+    "state": [
+        etree.XPath(".//irs:Filer/irs:USAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress/StateAbbreviationCd", namespaces=NAMESPACES),
+    ],
+    "zip_code": [
+        etree.XPath(".//irs:Filer/irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath(".//Filer/USAddress/ZIPCd", namespaces=NAMESPACES),
+    ],
 }

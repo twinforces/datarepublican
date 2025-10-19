@@ -103,7 +103,7 @@ def test_database_integrity():
 
         # Insert address - using real address
         cursor.execute("""
-            INSERT INTO Addresses (ein, name, street, city, state, canonical_address, zip_code, address_type)
+            INSERT INTO Addresses (ein, name, address_line1, city, state, canonical_address, zip_code, address_type)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, ('123456789', 'Test Charity', '520 Eighth Avenue 7Th Floor', 'New York', 'NY', '520 Eighth Avenue 7Th Floor New York Ny 10018', '10018', 'filer'))
 
@@ -173,7 +173,13 @@ def test_database_integrity():
             type('MockElement', (), {'tag': 'ZIPCd', 'text': '10018'})()
         ]
 
-        canonical, street, city, state, po_box, zip_code, _ = canonicalize_address(address_components, None)
+        address_info = canonicalize_address(address_components, None)
+        canonical = address_info.canonical_address
+        street = address_info.address_line1
+        city = address_info.city
+        state = address_info.state
+        po_box = address_info.po_box
+        zip_code = address_info.zip_code
 
         if canonical and zip_code:
             print("✓ PASS: Address canonicalization integrates properly")

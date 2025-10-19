@@ -62,6 +62,8 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
                 # Only update stats, don't log individual matches
                 if field and form_type and xpath_match_stats is not None:
                     stats_key = f"{form_type}:{field}:{xpath}"
+                    if stats_key not in xpath_match_stats:
+                        xpath_match_stats[stats_key] = 0
                     xpath_match_stats[stats_key] += 1
                 return elem[0]
         except etree.XPathEvalError as e:
@@ -75,6 +77,8 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
                     xpath_cache[cache_key] = elem[0]
                     if field and form_type and xpath_match_stats is not None:
                         stats_key = f"{form_type}:{field}:{xpath}"
+                        if stats_key not in xpath_match_stats:
+                            xpath_match_stats[stats_key] = 0
                         xpath_match_stats[stats_key] += 1
                     return elem[0]
             except etree.XPathEvalError as e:

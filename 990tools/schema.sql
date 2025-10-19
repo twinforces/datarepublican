@@ -10,11 +10,7 @@ CREATE TABLE Charities (
     tax_year INTEGER NOT NULL,
     -- Tax year of filing
     filer_name TEXT NOT NULL,
-    -- Organization name
-    business_name_line1 TEXT,
-    -- First line of business name
-    business_name_line2 TEXT,
-    -- Second line of business name
+    -- Organization name (concatenated from business_name_line1 and business_name_line2)
     receipt_amt REAL,
     -- Total receipts
     govt_amt REAL,
@@ -81,10 +77,13 @@ CREATE TABLE Charities (
     -- Domestic misrepresentation flag
     xml_name TEXT UNIQUE,
     -- XML filename reference
+    colocator TEXT,
+    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
     grift REAL,
     -- Grift amount
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(ein, tax_year) -- Prevent duplicate charity records per EIN per year
 );
 -- Grants table - Grant data from charity filings
 CREATE TABLE Grants (
@@ -147,6 +146,12 @@ CREATE TABLE Addresses (
     -- Address type
     geocoding_id INTEGER,
     -- Reference to geocoding cache
+    latitude REAL,
+    -- Latitude coordinate
+    longitude REAL,
+    -- Longitude coordinate
+    colocator TEXT,
+    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (geocoding_id) REFERENCES Geocoding(geocoding_id) ON DELETE
     SET NULL,
