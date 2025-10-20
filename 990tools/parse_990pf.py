@@ -219,7 +219,6 @@ def parse_filer_name_990pf(root, field, namespaces, xml_filename, context, xpath
 def parse_address_990pf(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     """Parse address information from Form 990PF"""
     try:
-        import re
         namespaces = {'irs': 'http://www.irs.gov/efile'}
         # Parse address components
         address_line1 = parse_string_field(root, XPATHS_990PF, "address_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
@@ -228,50 +227,16 @@ def parse_address_990pf(root, xml_filename, context, xpath_cache, log_error=log_
         state = parse_string_field(root, XPATHS_990PF, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
         zip_code = parse_string_field(root, XPATHS_990PF, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
 
-        # Extract PO Box from address lines using the same logic as extract_utils.py
-        po_box = None
-        PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
-        PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
-        for line in [address_line1, address_line2]:
-            if line:
-                match = PO_BOX_REGEX.search(line)
-                if match:
-                    po_box_str = match.group(1)
-                    number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                    if number_match:
-                        po_box = number_match.group(0)
-                        break
-
-        # Split ZIP code into zip_code (first 5) and zip4 (last 4)
-        zip5 = None
-        zip4 = None
-        if zip_code:
-            stripped = zip_code.strip()
-            if len(stripped) >= 5:
-                zip5 = stripped[:5]
-                if len(stripped) >= 9:
-                    zip4 = stripped[5:9]
-
-        # Build canonical address
-        address_parts = [part for part in [address_line1, address_line2, city, state, zip5] if part]
-        canonical_address = ", ".join(address_parts) if address_parts else None
-
-        # Prepend PO Box to canonical address if found and not already present
-        if po_box and canonical_address and 'po box' not in canonical_address.lower():
-            canonical_address = f"PO Box {po_box}, {canonical_address}"
-
-        if canonical_address:
+        # Check if we have at least some address components
+        if any([address_line1, address_line2, city, state, zip_code]):
             return DCAddress(
                 ein=context["filer_ein"],
                 name=context["filer_name"] or "Unknown",
-                canonical_address=canonical_address,
                 address_line1=address_line1,
                 address_line2=address_line2,
                 city=city,
                 state=state,
-                po_box=po_box,
-                zip_code=zip5,
-                zip4=zip4,
+                zip_code=zip_code,
                 address_type="filer"
             )
         return None
@@ -336,6 +301,7 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["grants_ptile"] = None
     data["foreign_expenses_ptile"] = None
     data["foreign_expenses_pct"] = None
+    data["grift_ratio"] = None
     data["foreign_expenses"] = None
     data["foreign_office"] = None
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])

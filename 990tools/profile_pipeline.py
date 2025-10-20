@@ -63,7 +63,8 @@ def profile_pipeline():
         print(f"Found {len(xml_files)} unprocessed XML files")
 
         # Process files for exactly 120 seconds
-        for xml_id, zip_id, filename, internal_path in xml_files:
+        for xml_file_tuple in xml_files:
+            xml_id, zip_id, filename, internal_path = xml_file_tuple
             if time.time() - start_time >= target_duration:
                 print(f"Reached 120-second limit after processing {processed_files} files")
                 break
@@ -86,9 +87,9 @@ def profile_pipeline():
                     processed_files += 1
                     # Mark as processed
                     processor.db_cursor.execute("""
-                        UPDATE XmlFiles SET processed = TRUE, processing_version = 1
+                        UPDATE XmlFiles SET processed = TRUE, processing_version = 1, error_message = ?
                         WHERE xml_id = ?
-                    """, (xml_id,))
+                    """, ("success", xml_id))
                     processor.db_conn.commit()
                 else:
                     error_count += 1

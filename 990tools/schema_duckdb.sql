@@ -5,7 +5,7 @@
 -- LOAD uuid;
 -- Charities table - Core charity data from IRS 990 filings
 CREATE TABLE Charities (
-    charity_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    charity_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein VARCHAR NOT NULL,
     -- Employer Identification Number (9 digits)
     tax_year INTEGER NOT NULL,
@@ -84,11 +84,11 @@ CREATE TABLE Charities (
     -- Grift amount
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(ein, tax_year) -- Prevent duplicate charity records per EIN per year
+    UNIQUE(xml_name) -- Prevent duplicate charity records per EIN per year
 );
 -- Grants table - Grant data from charity filings
 CREATE TABLE Grants (
-    grant_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    grant_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein VARCHAR NOT NULL,
     -- Filer EIN (foreign key to Charities)
     filer_name VARCHAR NOT NULL,
@@ -108,7 +108,7 @@ CREATE TABLE Grants (
 );
 -- Contributions table - Contribution data from filings
 CREATE TABLE Contributions (
-    contribution_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    contribution_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein VARCHAR NOT NULL,
     -- Filer EIN
     filer_name VARCHAR NOT NULL,
@@ -124,9 +124,11 @@ CREATE TABLE Contributions (
 );
 -- Addresses table - Address data for charities and grantees
 CREATE TABLE Addresses (
-    address_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    address_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein VARCHAR NOT NULL,
     -- EIN this address belongs to
+    owner_id VARCHAR,
+    -- Owner ID for loose foreign key relationships
     name VARCHAR NOT NULL,
     -- Organization name
     address_line1 VARCHAR,
@@ -155,15 +157,13 @@ CREATE TABLE Addresses (
     -- Longitude coordinate
     colocator VARCHAR,
     -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- FOREIGN KEY (geocoding_id) REFERENCES Geocoding(geocoding_id) -- DuckDB doesn't support SET NULL
-    UNIQUE(ein, canonical_address) -- Prevent duplicate addresses per EIN
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- FOREIGN KEY (geocoding_id) REFERENCES Geocoding(geocoding_id) -- DuckDB doesn't support SET NULL
 );
 -- Geocoding table - Cached geocoding results
 CREATE TABLE Geocoding (
-    geocoding_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-    address_hash VARCHAR NOT NULL UNIQUE,
-    -- Hash of normalized address
+    geocoding_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    address_hash VARCHAR NOT NULL,
+    -- Hash of normalized address (removed UNIQUE constraint to prevent duplicate key errors)
     normalized_address VARCHAR NOT NULL,
     -- Normalized address string
     latitude DOUBLE,
@@ -171,7 +171,7 @@ CREATE TABLE Geocoding (
     longitude DOUBLE,
     -- Longitude coordinate
     geocoding_status VARCHAR DEFAULT 'pending' CHECK(
-        geocoding_status IN ('pending', 'success', 'failed')
+        geocoding_status IN ('pending', 'success', 'failed', 'parse_error')
     ),
     last_attempt TIMESTAMP,
     -- Last geocoding attempt
@@ -182,7 +182,7 @@ CREATE TABLE Geocoding (
 );
 -- ZipFiles table - ZIP file metadata
 CREATE TABLE ZipFiles (
-    zip_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    zip_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filename VARCHAR NOT NULL UNIQUE,
     -- ZIP filename
     file_path VARCHAR NOT NULL,
@@ -202,7 +202,7 @@ CREATE TABLE ZipFiles (
 );
 -- XmlFiles table - XML file metadata within ZIPs
 CREATE TABLE XmlFiles (
-    xml_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    xml_id UUID DEFAULT uuidv7() PRIMARY KEY,
     zip_id UUID NOT NULL,
     -- Reference to ZIP file
     filename VARCHAR NOT NULL,
@@ -227,7 +227,7 @@ CREATE TABLE XmlFiles (
 );
 -- Backfill table - Additional grantee data for unknown EINs
 CREATE TABLE Backfill (
-    backfill_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    backfill_id UUID DEFAULT uuidv7() PRIMARY KEY,
     grant_ein VARCHAR NOT NULL,
     -- Grantee EIN
     name VARCHAR NOT NULL,
@@ -245,7 +245,7 @@ CREATE TABLE Backfill (
 );
 -- PipelineProgress table - Track processing pipeline status
 CREATE TABLE PipelineProgress (
-    progress_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    progress_id UUID DEFAULT uuidv7() PRIMARY KEY,
     step_name VARCHAR NOT NULL,
     -- Pipeline step name
     start_year INTEGER NOT NULL,
@@ -269,7 +269,7 @@ CREATE TABLE PipelineProgress (
 );
 -- Officers table - Officer compensation data
 CREATE TABLE Officers (
-    officer_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    officer_id UUID DEFAULT uuidv7() PRIMARY KEY,
     charity_id VARCHAR NOT NULL,
     -- Reference to Charities
     first_name VARCHAR NOT NULL,
@@ -281,7 +281,7 @@ CREATE TABLE Officers (
 );
 -- Contractors table - Contractor payment data
 CREATE TABLE Contractors (
-    contractor_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    contractor_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein VARCHAR NOT NULL,
     -- Filer EIN
     name VARCHAR NOT NULL,
@@ -305,7 +305,7 @@ CREATE TABLE Contractors (
 );
 -- PoliticalContributions table - Political contribution data
 CREATE TABLE PoliticalContributions (
-    political_id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    political_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein VARCHAR NOT NULL,
     -- Filer EIN
     recipient VARCHAR NOT NULL,

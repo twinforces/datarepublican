@@ -14,12 +14,7 @@ from tqdm import tqdm
 
 # ZipFile and XMLFile are imported from database_operations
 from database_operations import DatabaseOperations
-import importlib.util
-spec = importlib.util.spec_from_file_location('990processorDC', '990tools/irs990processorDC.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-ZipFile = module.ZipFile
-XMLFile = module.XMLFile
+from irs990processorDC import ZipFile, XMLFile
 
 
 class ZipProcessor:
@@ -52,6 +47,18 @@ class ZipProcessor:
         with tqdm(total=len(zip_files), desc="Processing ZIP files") as pbar:
             for zip_path in zip_files:
                 try:
+                    # Check if ZIP file is already processed
+                    zip_filename = zip_path.name
+                    existing_zip = self.db_ops.execute_query(
+                        "SELECT status FROM ZipFiles WHERE filename = ?",
+                        (zip_filename,)
+                    ).fetchone()
+
+                    if existing_zip and existing_zip[0] == 'processed':
+                        print(f"Skipping already processed ZIP file: {zip_filename}")
+                        pbar.update(1)
+                        continue
+
                     self._process_single_zip(zip_path)
                     processed_zips.append(zip_path)
                     pbar.update(1)

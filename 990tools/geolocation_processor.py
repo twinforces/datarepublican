@@ -18,7 +18,8 @@ except ImportError:
     #               "To enable geocoding, install with: pip install censusgeocode")
 
 from database_operations import DatabaseOperations
-# Address is imported from database_operations
+from irs990processorDC import Address
+from extract_utils import PO_BOX_REGEX, PO_BOX_NUMBER_REGEX
 
 # Set up logging
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,147 +72,25 @@ class GeolocationProcessor:
         # Not recognized
         return None
 
-    def _parse_address_components(self, canonical_address: str, db_zip: str) -> Optional[dict]:
-        """Parse address components from canonical address string with robust handling for real-world variations"""
-        if not canonical_address:
-            return None
+    def _detect_po_box_from_address_lines(self, address: Address) -> Optional[str]:
+        """Detect PO Box from address lines using regex"""
+        address_lines_to_check = []
+        if address.address_line1:
+            address_lines_to_check.append(address.address_line1)
+        if address.address_line2:
+            address_lines_to_check.append(address.address_line2)
 
-        # Clean up the canonical address - remove extra spaces and normalize
-        canonical_address = ' '.join(canonical_address.split())
+        for line_idx, line in enumerate(address_lines_to_check):
+            match = PO_BOX_REGEX.search(line)
+            if match:
+                po_box_str = match.group(1)
+                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                if number_match:
+                    po_box = number_match.group(0)
+                    logger.info(f"Fallback PO Box detection for address {address.address_id}: found '{po_box}' in line{line_idx + 1}='{line}'")
+                    return po_box
+        return None
 
-        # Check if it's a PO Box address
-        if canonical_address.upper().startswith('PO BOX') or 'PO BOX' in canonical_address.upper():
-            # For PO Box addresses, we can't geocode them, so return None
-            return None
-
-        # Handle various real-world address formats
-        # Split by spaces and work backwards
-        words = canonical_address.split()
-        if len(words) < 3:  # Minimum: street city state or street city zip
-            logger.debug(f"Address too short to parse: '{canonical_address}'")
-            return None
-
-        # Try to identify ZIP code - it could be at the end or second to last
-        zip_part = None
-        state = None
-        remaining_words = words[:]
-
-        # Look for ZIP pattern (5 digits, possibly with extension)
-        for i in range(len(words) - 1, -1, -1):
-            word = words[i]
-            # Check for 5-digit ZIP
-            if word.isdigit() and len(word) == 5:
-                zip_part = word
-                remaining_words = words[:i]
-                break
-            # Check for ZIP+4
-            elif '-' in word and len(word.split('-')[0]) == 5 and word.split('-')[0].isdigit():
-                zip_part = word.split('-')[0]  # Take first 5 digits
-                remaining_words = words[:i]
-                break
-
-        # If no ZIP found, use the database ZIP
-        if not zip_part:
-            zip_part = db_zip or ''
-            if not zip_part:
-                logger.debug(f"No valid ZIP found in '{canonical_address}'")
-                return None
-
-        # Now look for state in remaining words
-        if remaining_words:
-            # State is typically the last word before ZIP
-            potential_state = remaining_words[-1].upper()
-            if potential_state in self.VALID_STATES:
-                state = potential_state
-                remaining_words = remaining_words[:-1]
-            elif potential_state in self.STATE_NAME_TO_ABBREV:
-                state = self.STATE_NAME_TO_ABBREV[potential_state]
-                remaining_words = remaining_words[:-1]
-            else:
-                # Try to normalize state name
-                normalized_state = self._normalize_state(potential_state)
-                if normalized_state:
-                    state = normalized_state
-                    remaining_words = remaining_words[:-1]
-
-        if not state:
-            logger.debug(f"Could not identify state in address: '{canonical_address}'")
-            return None
-
-        # Everything remaining is city and street
-        # Look for common street suffixes to identify where street ends and city begins
-        street_suffixes = {'STREET', 'ST', 'AVENUE', 'AVE', 'ROAD', 'RD', 'DRIVE', 'DR', 'LANE', 'LN',
-                           'BOULEVARD', 'BLVD', 'PLACE', 'PL', 'COURT', 'CT', 'CIRCLE', 'CIR',
-                           'PARKWAY', 'PKWY', 'HIGHWAY', 'HWY', 'SQUARE', 'SQ', 'TERRACE', 'TER',
-                           'WAY', 'TRAIL', 'TRL', 'CRESCENT', 'CRES', 'PLAZA', 'PLZ', 'CROSSING', 'XING'}
-
-        street_parts = []
-        city_parts = []
-
-        # Work backwards from the end to find where city starts
-        found_city_start = False
-        for i in range(len(remaining_words) - 1, -1, -1):
-            word = remaining_words[i].upper()
-            # Check for exact suffix match
-            if word in street_suffixes:
-                street_parts = remaining_words[:i+1]
-                city_parts = remaining_words[i+1:]
-                found_city_start = True
-                break
-            # Check for abbreviated suffix (remove dots)
-            elif word.replace('.', '') in street_suffixes:
-                street_parts = remaining_words[:i+1]
-                city_parts = remaining_words[i+1:]
-                found_city_start = True
-                break
-
-        if not found_city_start:
-            # Fallback: try to split based on common patterns
-            if len(remaining_words) >= 3:
-                # Assume last 1-2 words are city, rest is street
-                # Look for city-like patterns (multiple words, no numbers, etc.)
-                for split_point in range(len(remaining_words) - 1, 0, -1):
-                    potential_city = remaining_words[split_point:]
-                    potential_street = remaining_words[:split_point]
-
-                    # City should be 1-3 words, street should be at least 1 word
-                    if 1 <= len(potential_city) <= 3 and len(potential_street) >= 1:
-                        # Check if potential city contains numbers (less likely for city)
-                        has_numbers = any(any(char.isdigit() for char in word) for word in potential_city)
-                        if not has_numbers:
-                            street_parts = potential_street
-                            city_parts = potential_city
-                            found_city_start = True
-                            break
-            elif len(remaining_words) == 2:
-                # Assume first word is street, second is city
-                street_parts = remaining_words[:1]
-                city_parts = remaining_words[1:]
-                found_city_start = True
-            else:
-                # Can't parse
-                logger.debug(f"Unable to split street/city in: '{canonical_address}'")
-                return None
-
-        street = ' '.join(street_parts)
-        city = ' '.join(city_parts)
-
-        # Validate we have reasonable components
-        if not street or not city:
-            logger.debug(f"Missing street or city in parsed address: street='{street}', city='{city}'")
-            return None
-
-        # Additional validation: street should contain some numbers (address numbers)
-        if not any(char.isdigit() for char in street):
-            logger.debug(f"Street address missing numbers (likely invalid): '{street}' in '{canonical_address}'")
-            return None
-
-        return {
-            'street': street.strip(),
-            'city': city.strip(),
-            'state': state.strip(),
-            'zip': zip_part
-        }
 
     def geolocate_addresses(self) -> int:
         """Geolocate addresses using census API (step 7)"""
@@ -220,103 +99,103 @@ class GeolocationProcessor:
         # Check if censusgeocode is available
         if cg is None:
             logger.warning("censusgeocode library not available. Skipping geocoding. "
-                          "To enable geocoding, install with: pip install censusgeocode")
+                           "To enable geocoding, install with: pip install censusgeocode")
             return 0
 
-        # Get addresses that need geocoding, deduplicated by canonical address
-        addresses = self.db_ops.get_addresses_for_geocoding()
-        logger.info(f"Found {len(addresses)} addresses to geolocate")
-
-        # DEBUG: Log sample addresses to verify data
-        if addresses:
-            logger.info(f"Sample address data: {addresses[:3]}")
-            # Additional debug: Check if addresses have valid data
-            for addr in addresses[:3]:
-                logger.info(f"Address details: id={addr[0]}, canonical='{addr[1]}', po_box='{addr[2]}', zip='{addr[3]}'")
-        else:
-            logger.warning("No addresses found for geocoding - check if XML processing completed successfully")
-            # DEBUG: Check database state
-            geocoding_stats = self.db_ops.get_geocoding_stats()
-            logger.warning(f"Geocoding stats: {geocoding_stats}")
-            return 0
-
-        # Deduplicate by canonical address to avoid redundant API calls
-        unique_addresses = {}
-        for addr in addresses:
-            canonical = addr[1]  # canonical_address
-            if canonical not in unique_addresses:
-                unique_addresses[canonical] = addr
-
-        deduplicated_addresses = list(unique_addresses.values())
-        logger.info(f"After deduplication: {len(deduplicated_addresses)} unique addresses to geolocate")
-
-        # Process in batches of 5000 with progress bar
+        # Process in batches of 5000 with progress bar (under 10,000 API limit)
         batch_size = 5000
         total_geolocated = 0
 
-        with tqdm(total=len(deduplicated_addresses), desc="Geocoding addresses") as pbar:
-            for i in range(0, len(deduplicated_addresses), batch_size):
-                batch = deduplicated_addresses[i:i + batch_size]
-                batch_geolocated = self._geolocate_batch(batch)
-                total_geolocated += batch_geolocated
-                pbar.update(len(batch))
+        logger.info(f"Starting batch processing with batch_size={batch_size}")
+        with tqdm(desc="Geocoding addresses") as pbar:
+            while True:
+                # Get next batch of addresses
+                logger.info(f"DEBUG geolocate_addresses: Calling get_addresses_for_geocoding with limit={batch_size}")
+                batch_addresses = self.db_ops.get_addresses_for_geocoding(limit=batch_size)
+                if not batch_addresses:
+                    logger.info("No more addresses to process, ending batch processing")
+                    break
+
+                logger.info(f"Processing batch with {len(batch_addresses)} addresses")
+
+                # Process all addresses - _geolocate_batch will handle canonical address grouping
+                if batch_addresses:
+                    logger.info(f"DEBUG: Batch sample addresses: {[addr.canonical_address for addr in batch_addresses[:3]]}")
+                    batch_geolocated = self._geolocate_batch(batch_addresses)
+                    logger.info(f"Batch geolocated {batch_geolocated} addresses")
+                    total_geolocated += batch_geolocated
+
+                pbar.update(len(batch_addresses))
 
         logger.info(f"Geolocation complete: {total_geolocated} addresses geolocated")
         return total_geolocated
 
-    def _geolocate_batch(self, batch: List[Tuple]) -> int:
+    def _geolocate_batch(self, batch: List[Address]) -> int:
         """Geolocate a batch of addresses"""
         logger.debug(f"Processing batch of {len(batch)} addresses")
+        logger.info(f"DEBUG: Batch input addresses: {len(batch)}")
         addresses_to_geocode = []
         address_id_lists = []  # list of lists of address_ids, parallel to addresses_to_geocode
         full_address_to_index = {}  # full_address -> index in addresses_to_geocode
 
-        for idx, (address_id, canonical_address, po_box, zip_code) in enumerate(batch):
-            logger.debug(f"Processing address_id {address_id}: canonical='{canonical_address}', po_box='{po_box}', zip='{zip_code}'")
+        parsed_count = 0
+        skipped_po_box = 0
+        failed_parse = 0
 
-            # Skip if PO box - colocator already set during insertion
-            if po_box and po_box.strip():
-                logger.debug(f"Skipping PO box address {address_id} - colocator already set")
+        for idx, address in enumerate(batch):
+            address_id = address.address_id
+            canonical_address = address.canonical_address
+            logger.info(f"Processing address_id {address_id}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', po_box='{address.po_box}'")
+
+            # Check for PO Box detection during geocoding
+            fallback_po_box = self._detect_po_box_from_address_lines(address)
+
+            if fallback_po_box:
+                # Update the record with detected PO Box and set colocator
+                logger.info(f"Updating address {address_id} with fallback PO Box detection: po_box='{fallback_po_box}'")
+                colocator = f"PO:{fallback_po_box}:{address.zip_code or ''}"
+                self.db_ops.update_address_po_box_and_colocator(address_id, fallback_po_box, colocator)
+                logger.info(f"Updated address {address_id} with po_box='{fallback_po_box}' and colocator='{colocator}'")
+                logger.info(f"Skipping PO box address {address_id} - newly detected")
+                skipped_po_box += 1
                 continue
+            logger.info(f"Canonical address for {address_id}: '{canonical_address}'")
 
-            # Prepare address for geocoding
-            # Parse canonical_address back to components with improved logic
-            parsed_components = self._parse_address_components(canonical_address, zip_code)
-            logger.debug(f"Parsed components for {address_id}: {parsed_components}")
+            if canonical_address and canonical_address.strip():
+                # Use the smart canonical_address property
+                full_address = canonical_address
+                logger.info(f"Using canonical address for {address_id}: '{full_address}'")
 
-            if parsed_components:
-                street = parsed_components['street']
-                city = parsed_components['city']
-                state = parsed_components['state']
-                zip_part = parsed_components['zip']
-
-                # Normalize state
-                normalized_state = self._normalize_state(state)
-                if normalized_state:
-                    full_address = f"{street}, {city}, {normalized_state} {zip_part}"
-                    logger.debug(f"Parsed address for {address_id}: '{full_address}'")
-
-                    # Group addresses by full_address for batch geocoding
-                    if full_address not in full_address_to_index:
-                        full_address_to_index[full_address] = len(addresses_to_geocode)
-                        addresses_to_geocode.append({
-                            'full_address': full_address,
-                            'street': street,
-                            'city': city,
-                            'state': normalized_state,
-                            'zip': zip_part
-                        })
-                        address_id_lists.append([address_id])
-                    else:
-                        addr_idx = full_address_to_index[full_address]
-                        address_id_lists[addr_idx].append(address_id)
+                # Group addresses by full_address for batch geocoding
+                if full_address not in full_address_to_index:
+                    full_address_to_index[full_address] = len(addresses_to_geocode)
+                    addresses_to_geocode.append({
+                        'full_address': full_address,
+                        'street': f"{address.address_line1 or ''} {address.address_line2 or ''}".strip(),
+                        'city': address.city or '',
+                        'state': address.state or '',
+                        'zip': address.zip_code or ''
+                    })
+                    address_id_lists.append([address_id])
                 else:
-                    logger.warning(f"Invalid state '{state}' for address {address_id} - canonical: '{canonical_address}'")
+                    addr_idx = full_address_to_index[full_address]
+                    address_id_lists[addr_idx].append(address_id)
+                parsed_count += 1
             else:
-                logger.warning(f"Failed to parse address for {address_id}: '{canonical_address}'")
+                logger.warning(f"Failed to generate canonical address for {address_id}: components line1='{address.address_line1}', city='{address.city}', state='{address.state}', zip='{address.zip_code}'")
+                failed_parse += 1
+
+        logger.info(f"Batch parsing summary: {parsed_count} parsed, {skipped_po_box} PO boxes skipped (from DB), {failed_parse} failed to parse")
+        logger.info(f"DEBUG: Total addresses in batch: {len(batch)}, processed: {parsed_count + skipped_po_box + failed_parse}")
+        logger.info(f"DEBUG: Addresses that passed PO box check: {parsed_count + failed_parse}")
+        logger.info(f"DEBUG: Addresses that failed PO box check: {skipped_po_box}")
+        logger.info(f"DEBUG: Addresses to send to API: {len(addresses_to_geocode)}")
+        if addresses_to_geocode:
+            logger.info(f"DEBUG: Sample addresses to API: {addresses_to_geocode[:2]}")
 
         if not addresses_to_geocode:
-            logger.debug("No addresses to geocode in this batch")
+            logger.warning("No addresses to geocode in this batch after parsing - all addresses were PO boxes or failed parsing")
+            logger.warning(f"DEBUG: Batch breakdown - PO boxes: {skipped_po_box}, failed parse: {failed_parse}, total batch: {len(batch)}")
             return 0
 
         # Call census geocoding API
@@ -338,10 +217,13 @@ class GeolocationProcessor:
             # Geocode batch
             if cg is None:
                 logger.error("censusgeocode library not available, skipping geocoding. "
-                           "To install, run: pip install censusgeocode")
+                            "To install, run: pip install censusgeocode")
                 return 0
 
+            logger.info("Calling censusgeocode.addressbatch()...")
             results = cg.addressbatch(batch_addresses)
+            logger.info(f"API call completed, received {len(results)} results")
+            logger.info(f"DEBUG: First few API results: {results[:3] if results else 'No results'}")
             logger.debug(f"API response received: {results}")
             geolocated_count = 0
 

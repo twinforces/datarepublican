@@ -19,7 +19,7 @@ import inspect
 from lxml import etree  # Import for XML parsing
 from io import BytesIO  # Import for BytesIO
 import json
-from parse_utils import ORG_TYPE_PATTERN
+# ORG_TYPE_PATTERN is not used in this file, removing import
 
 # Import parsing functions from new scripts
 import parse_990
@@ -28,6 +28,7 @@ import parse_990pf
 from xpaths_990 import XPATHS_990
 from xpaths_990ez import XPATHS_990EZ
 from xpaths_990pf import XPATHS_990PF
+from database_operations import DatabaseOperations
 
 # Constants
 DEBUG_EINS = set()
@@ -480,12 +481,13 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         else:
             log_error("Unsupported form type {} in {}, skipping", form_type, xml_filename)
             file_counter_local.skipped += 1
-            return [], None, xml_filename
+            return [], None, xml_filename, []
 
         if row is None:
             log_error("Parsing returned None for {}, skipping", xml_filename)
             file_counter_local.skipped += 1
             return [], None, xml_filename, []
+        results = [row]
         tax_year = row[0]
         org_type = row[6]
         total_exp = float(row[7]) if row[7] else 0
@@ -494,13 +496,153 @@ def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
         if grift_ratio > 100 and total_exp > 0:
             log_error("Suspicious grift_ratio {}% for EIN {} in {}", grift_ratio, ein, xml_filename, ein=ein)
         row[-1] = f"{zip_path}/{xml_filename}"
-        results = [row]
         log_error("Finished processing XML {}, took {:.2f} seconds, memory usage: {}%", xml_filename, time.time() - start_time, psutil.virtual_memory().percent, ein=ein)
         return results, org_type, f"{zip_path}/{xml_filename}", officer_entries
     except Exception as e:
         log_error("Error processing {}: {}", xml_filename, str(e), exc_info=True, ein=None)
         file_counter_local.skipped += 1
         return [], None, xml_filename, []
+
+def process_batch(xml_files_batch, db_ops, processing_version, worker_threads, batch_size):
+    """Process a batch of XML files from database"""
+    initialize_thread_local_counters()
+    global pending_tasks, total_entries
+    log_error("Processing batch of {} XML files", len(xml_files_batch))
+
+    # Group XML files by ZIP path for efficient ZIP access
+    zip_groups = {}
+    for xml_file in xml_files_batch:
+        zip_path = xml_file.zip_id  # This should be the ZIP path, but we need to get it from database
+        # Actually, we need to get the ZIP path from the database
+        zip_info = db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (xml_file.zip_id,)).fetchone()
+        if zip_info:
+            zip_path = zip_info[0]
+            if zip_path not in zip_groups:
+                zip_groups[zip_path] = []
+            zip_groups[zip_path].append(xml_file)
+
+    with ThreadPoolExecutor(max_workers=worker_threads) as executor:
+        futures = []
+        with tqdm(total=len(xml_files_batch), desc="Processing XML batch") as pbar:
+            for zip_path, xml_files in zip_groups.items():
+                try:
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        for xml_file in xml_files:
+                            try:
+                                with zip_ref.open(xml_file.filename) as xml_file_handle:
+                                    xml_content = xml_file_handle.read()
+                            except Exception as e:
+                                log_error("Error reading XML {} from {}: {}", xml_file.filename, zip_path, str(e), exc_info=True)
+                                db_ops.mark_xml_error(xml_file.xml_id, processing_version, str(e))
+                                pbar.update(1)
+                                continue
+
+                            future = executor.submit(parse_xml_file, xml_content, xml_file.filename, xml_file.filename[:4], zip_path)
+                            futures.append((future, xml_file))
+
+                            if len(futures) >= batch_size:
+                                for future, xml_file in futures:
+                                    try:
+                                        result = future.result(timeout=300)
+                                        if not isinstance(result, tuple) or len(result) != 4:
+                                            log_error("Invalid return value from parse_xml_file for {}: expected 4-tuple, got {}", xml_file.filename, result)
+                                            db_ops.mark_xml_error(xml_file.xml_id, processing_version, "Invalid parse result")
+                                            file_counter_local.skipped += 1
+                                            pbar.update(1)
+                                            continue
+                                        results, org_type, xml_name, officer_entries = result
+                                        if results is None or org_type is None:
+                                            log_error("Parsing failed for {}, skipping", xml_file.filename)
+                                            db_ops.mark_xml_error(xml_file.xml_id, processing_version, "Parsing failed")
+                                            file_counter_local.skipped += 1
+                                            pbar.update(1)
+                                            continue
+                                        for row in results:
+                                            tax_year = row[0]
+                                            if tax_year == "Unknown":
+                                                tax_year = xml_file.filename[:4]
+                                                row[0] = tax_year
+                                            try:
+                                                tsv_write_queue.put_nowait((tax_year, org_type, row, xml_name))
+                                                total_entries += 1
+                                            except queue.Full:
+                                                log_error("TSV write queue full, waiting to put row for {}", xml_name)
+                                                tsv_write_queue.put((tax_year, org_type, row, xml_name), block=True)
+                                                total_entries += 1
+                                        for entry in officer_entries:
+                                            try:
+                                                officer_queue.put_nowait(entry)
+                                            except queue.Full:
+                                                log_error("Officer queue full, waiting to put entry for {} {}", entry["first_name"], entry["last_name"])
+                                                officer_queue.put(entry, block=True)
+                                        # Mark as processed
+                                        db_ops.mark_xml_processed(xml_file.xml_id, processing_version)
+                                        pbar.update(1)
+                                    except TimeoutError:
+                                        log_error("Timeout processing XML {} in {}", xml_file.filename, zip_path)
+                                        db_ops.mark_xml_error(xml_file.xml_id, processing_version, "Timeout")
+                                        file_counter_local.skipped += 1
+                                        pbar.update(1)
+                                    except Exception as e:
+                                        log_error("Error processing XML {} in {}: {}", xml_file.filename, zip_path, str(e), exc_info=True)
+                                        db_ops.mark_xml_error(xml_file.xml_id, processing_version, str(e))
+                                        file_counter_local.skipped += 1
+                                        pbar.update(1)
+                                futures = []
+                except Exception as e:
+                    log_error("Error processing ZIP {}: {}", zip_path, str(e), exc_info=True)
+                    # Mark all XML files in this ZIP as error
+                    for xml_file in xml_files:
+                        db_ops.mark_xml_error(xml_file.xml_id, processing_version, f"ZIP error: {str(e)}")
+
+            # Process remaining futures
+            for future, xml_file in futures:
+                try:
+                    result = future.result(timeout=300)
+                    if not isinstance(result, tuple) or len(result) != 4:
+                        log_error("Invalid return value from parse_xml_file for {}: expected 4-tuple, got {}", xml_file.filename, result)
+                        db_ops.mark_xml_error(xml_file.xml_id, processing_version, "Invalid parse result")
+                        file_counter_local.skipped += 1
+                        pbar.update(1)
+                        continue
+                    results, org_type, xml_name, officer_entries = result
+                    if results is None or org_type is None:
+                        log_error("Parsing failed for {}, skipping", xml_file.filename)
+                        db_ops.mark_xml_error(xml_file.xml_id, processing_version, "Parsing failed")
+                        file_counter_local.skipped += 1
+                        pbar.update(1)
+                        continue
+                    for row in results:
+                        tax_year = row[0]
+                        if tax_year == "Unknown":
+                            tax_year = xml_file.filename[:4]
+                            row[0] = tax_year
+                        try:
+                            tsv_write_queue.put_nowait((tax_year, org_type, row, xml_name))
+                            total_entries += 1
+                        except queue.Full:
+                            log_error("TSV write queue full, waiting to put row for {}", xml_name)
+                            tsv_write_queue.put((tax_year, org_type, row, xml_name), block=True)
+                            total_entries += 1
+                    for entry in officer_entries:
+                        try:
+                            officer_queue.put_nowait(entry)
+                        except queue.Full:
+                            log_error("Officer queue full, waiting to put entry for {} {}", entry["first_name"], entry["last_name"])
+                            officer_queue.put(entry, block=True)
+                    # Mark as processed
+                    db_ops.mark_xml_processed(xml_file.xml_id, processing_version)
+                    pbar.update(1)
+                except TimeoutError:
+                    log_error("Timeout processing XML {} in {}", xml_file.filename, zip_path)
+                    db_ops.mark_xml_error(xml_file.xml_id, processing_version, "Timeout")
+                    file_counter_local.skipped += 1
+                    pbar.update(1)
+                except Exception as e:
+                    log_error("Error processing XML {} in {}: {}", xml_file.filename, zip_path, str(e), exc_info=True)
+                    db_ops.mark_xml_error(xml_file.xml_id, processing_version, str(e))
+                    file_counter_local.skipped += 1
+                    pbar.update(1)
 
 def process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size):
     initialize_thread_local_counters()
@@ -675,6 +817,7 @@ def main():
     parser.add_argument("--worker-threads", type=int, default=16, help="Number of worker threads for XML parsing")
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size for processing futures")
     parser.add_argument("--writer-threads", type=int, default=1, help="Number of TSV writer threads")
+    parser.add_argument("--max-files", type=int, default=0, help="Maximum number of XML files to process (0 for all)")
     args = parser.parse_args()
     verbose = args.verbose
     quiet = args.quiet
@@ -701,14 +844,28 @@ def main():
         DEBUG_EINS = set(args.eins.split(','))
         log_error("Set DEBUG_EINS for extra logging: {}", ",".join(DEBUG_EINS))
     print(f"DEBUG: verbose is set to {verbose}")
+
+    # Initialize database operations
+    db_path = os.path.join(args.output_dir, "irs990.duckdb")
+    db_ops = DatabaseOperations(db_path, log_sql=False, read_only=False, memory_limit="4GB", threads=4)
+
     parse_990.set_logger(logger, log_error, verbose, DEBUG_EINS)
     parse_990ez.set_logger(logger, log_error, verbose, DEBUG_EINS)
     parse_990pf.set_logger(logger, log_error, verbose, DEBUG_EINS)
     initialize_xpath_stats()
-    zip_files = sorted(glob.glob(os.path.join(args.input_dir, "*.zip")))
-    if not zip_files:
-        print(f"No ZIP files found in {args.input_dir}")
+
+    # Determine batch size based on max_files
+    xml_batch_size = min(args.max_files, 1000) if args.max_files > 0 else 1000
+    processing_version = 2  # Current processing version
+
+    # Get unprocessed XML files from database
+    unprocessed_xml_files = db_ops.get_unprocessed_xml_files(processing_version, args.max_files)
+    log_error("Found {} unprocessed XML files to process", len(unprocessed_xml_files))
+
+    if not unprocessed_xml_files:
+        log_error("No unprocessed XML files found. Exiting.")
         return
+
     tsv_files = preallocate_tsv_files(start_year, end_year)
     writer_threads_list = []
     buffers = [defaultdict(list) for _ in range(writer_threads)]
@@ -716,14 +873,25 @@ def main():
         thread = threading.Thread(target=tsv_writer_thread, args=(tsv_files, f"writer-{i}", buffers[i], write_buffer_size))
         thread.start()
         writer_threads_list.append(thread)
-    
+
     # Start officer writer thread
     officer_writer = threading.Thread(target=officer_writer_thread, args=(f"officer-writer-0",))
     officer_writer.start()
-    
+
     try:
-        for zip_path in zip_files:
-            process_zip_file(zip_path, start_year, end_year, worker_threads, batch_size)
+        # Process in batches
+        batch_start = 0
+        while batch_start < len(unprocessed_xml_files):
+            batch_end = min(batch_start + xml_batch_size, len(unprocessed_xml_files))
+            xml_batch = unprocessed_xml_files[batch_start:batch_end]
+            log_error("Processing batch {} to {} of {} total XML files", batch_start + 1, batch_end, len(unprocessed_xml_files))
+            process_batch(xml_batch, db_ops, processing_version, worker_threads, batch_size)
+            batch_start = batch_end
+
+            # If max_files is specified and we've processed that many, break
+            if args.max_files > 0 and batch_start >= args.max_files:
+                break
+
     finally:
         done_queuing = True
         for _ in range(writer_threads):
@@ -738,6 +906,7 @@ def main():
         save_xpath_stats()
         reorder_xpaths()
         listener.stop()
+        db_ops.close()
     print(f"Total entries processed: {total_entries}")
 
 if __name__ == "__main__":

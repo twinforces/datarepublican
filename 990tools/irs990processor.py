@@ -45,6 +45,7 @@ from processing_strategy import (
     AddressMatchingStrategy,
     StubCharityCreationStrategy
 )
+from geolocation_processor import GeolocationProcessor
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
@@ -107,13 +108,13 @@ class IRS990Processor:
         # Initialize components
         self.db_ops = DatabaseOperations(self.db_path, log_sql=log_sql)
         self.zip_processor = ZipProcessor(self.db_ops, zips_dir)
-        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, log_sql=log_sql)
-        self.geocoding_strategy = GeocodingBatchStrategy(self.db_ops, self.logger, log_sql=log_sql)
+        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, log_sql=log_sql, workers=workers)
+        self.geolocation_processor = GeolocationProcessor(self.db_ops)
         self.address_matching_strategy = AddressMatchingStrategy(self.db_ops, self.logger, log_sql=log_sql)
         self.stub_charity_strategy = StubCharityCreationStrategy(self.db_ops, self.logger, log_sql=log_sql)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter
-        self.tsv_exporter = self.db_ops.get_export_operations(final_dir)
+        self.tsv_exporter = TSVExporter(self.db_ops, final_dir)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -160,6 +161,13 @@ class IRS990Processor:
             self.logger.debug(f"EIN {ein}: {msg}", *args)
         else:
             self.logger.debug(msg, *args)
+
+    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
+        """Log warning with optional EIN context"""
+        if ein:
+            self.logger.warning(f"EIN {ein}: {msg}", *args)
+        else:
+            self.logger.warning(msg, *args)
 
     # Main processing methods that delegate to modules
 
@@ -302,17 +310,17 @@ class IRS990Processor:
     def _mark_xml_processed(self, xml_id: int):
         """Mark XML file as processed"""
         self.db_ops.execute_query("""
-            UPDATE XmlFiles SET processed = TRUE, processing_version = ?
+            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
             WHERE xml_id = ?
-        """, (CURRENT_PROCESSING_VERSION, xml_id))
+        """, (CURRENT_PROCESSING_VERSION, "success", xml_id))
         self.db_ops.commit()
 
     def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
         """Parse Form 990 data"""
         # Use the refactored parse_990 function that returns dataclasses directly
-        charity, officers = parse_990(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
+        charity, officers, grants, contractors, contributions, address = parse_990(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
 
-        # Extract grants, contractors, and political contributions
+        # Extract grants, contractors, and political contributions (override the empty lists from parse_990)
         grants = self._extract_grants_990(root, filename, filer_ein, tax_year)
         contractors = self._extract_contractors_990(root, filename, filer_ein, tax_year)
         contributions = self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
@@ -403,21 +411,21 @@ class IRS990Processor:
     def _parse_990ez_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
         """Parse Form 990EZ data"""
         # Use the refactored parse_990ez function that returns dataclasses directly
-        charity, officers = parse_990ez(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
+        charity, officers, grants, contractors, contributions, address = parse_990ez(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
 
-        # Extract grants, contractors, and political contributions
-        grants: List[Grant] = self._extract_grants_990ez(root, filename, filer_ein, tax_year)
-        contractors: List[Contractor] = self._extract_contractors_990ez(root, filename, filer_ein, tax_year)
-        contributions: List[PoliticalContribution] = self._extract_political_contributions_990ez(root, filename, filer_ein, tax_year)
+        # Extract grants, contractors, and political contributions (override the empty lists from parse_990ez)
+        grants = self._extract_grants_990ez(root, filename, filer_ein, tax_year)
+        contractors = self._extract_contractors_990ez(root, filename, filer_ein, tax_year)
+        contributions = self._extract_political_contributions_990ez(root, filename, filer_ein, tax_year)
 
         return charity, officers, grants, contractors, contributions
 
     def _parse_990pf_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
         """Parse Form 990PF data"""
         # Use the refactored parse_990pf function that returns dataclasses directly
-        charity, officers = parse_990pf(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
+        charity, officers, grants, contractors, contributions, address = parse_990pf(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
 
-        # Extract grants, contractors, and political contributions
+        # Extract grants, contractors, and political contributions (override the empty lists from parse_990pf)
         grants = self._extract_grants_990pf(root, filename, filer_ein, tax_year)
         contractors = self._extract_contractors_990pf(root, filename, filer_ein, tax_year)
         contributions = self._extract_political_contributions_990pf(root, filename, filer_ein, tax_year)
@@ -426,17 +434,7 @@ class IRS990Processor:
 
     def geolocate_addresses(self):
         """Geolocate addresses using census API (step 7)"""
-        self.log_info("Starting address geolocation")
-
-        # DEBUG: Check if we have addresses to geocode
-        addresses = self.db_ops.get_addresses_for_geocoding()
-        self.log_info(f"DEBUG: Found {len(addresses)} addresses for geocoding")
-
-        if not addresses:
-            self.log_error("No addresses found for geocoding - XML processing may not have completed successfully")
-            return 0
-
-        return self.geocoding_strategy.execute(addresses)
+        return self.geolocation_processor.geolocate_addresses()
 
     def _geolocate_batch(self, batch: List[Tuple]) -> List[Tuple]:
         """Geolocate a batch of addresses"""
@@ -471,8 +469,7 @@ class IRS990Processor:
     def export_final_tsvs(self):
         """Export final TSV files (step 11)"""
         self.log_info("Exporting final TSV files")
-        if self.tsv_exporter:
-            self.tsv_exporter.export_final_tsvs()
+        self.tsv_exporter.export_final_tsvs()
 
 
 def main():
@@ -492,9 +489,44 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--step", choices=["all", "zip", "xml", "address", "geolocate",
                                           "match", "percentiles", "export"],
-                        default="all", help="Processing step to run")
+                        default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
+    parser.add_argument("--start-step", choices=["zip", "xml", "address", "geolocate",
+                                                "match", "percentiles", "export"],
+                        help="Starting step for processing")
+    parser.add_argument("--stop-step", choices=["zip", "xml", "address", "geolocate",
+                                               "match", "percentiles", "export"],
+                        help="Stopping step for processing")
 
     args = parser.parse_args()
+
+    # Define processing steps in order
+    steps = ["zip", "xml", "address", "geolocate", "match", "percentiles", "export"]
+
+    # Define step actions
+    step_actions = {
+        "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
+        "xml": lambda: processor.process_xml_files(),
+        "address": lambda: None,  # Address processing is part of XML processing
+        "geolocate": lambda: processor.geolocate_addresses(),
+        "match": lambda: processor.match_grants_by_address(),
+        "percentiles": lambda: processor.calculate_percentiles(),
+        "export": lambda: processor.export_final_tsvs()
+    }
+
+    # Handle backward compatibility with --step
+    if args.step != "all":
+        args.start_step = args.step
+        args.stop_step = args.step
+
+    # Set defaults if not specified
+    if not args.start_step:
+        args.start_step = "zip"
+    if not args.stop_step:
+        args.stop_step = "export"
+
+    # Validate start and stop steps
+    if steps.index(args.start_step) > steps.index(args.stop_step):
+        parser.error("--start-step must come before --stop-step in the processing order")
 
     processor = IRS990Processor(
         db_path=args.db_path,
@@ -510,27 +542,17 @@ def main():
     )
 
     try:
-        if args.step in ["all", "zip"]:
-            processor.process_zip_files(args.start_year, args.end_year)
+        # Execute steps from start_step to stop_step
+        start_idx = steps.index(args.start_step)
+        stop_idx = steps.index(args.stop_step)
 
-        if args.step in ["all", "xml"]:
-            processor.process_xml_files()
-
-        if args.step in ["all", "address"]:
-            # Address processing is part of XML processing
-            pass
-
-        if args.step in ["all", "geolocate"]:
-            processor.geolocate_addresses()
-
-        if args.step in ["all", "match"]:
-            processor.match_grants_by_address()
-
-        if args.step in ["all", "percentiles"]:
-            processor.calculate_percentiles()
-
-        if args.step in ["all", "export"]:
-            processor.export_final_tsvs()
+        for i in range(start_idx, stop_idx + 1):
+            step = steps[i]
+            processor.log_info(f"Starting step: {step}")
+            action = step_actions[step]
+            if action:
+                action()
+            processor.log_info(f"Completed step: {step}")
 
     except Exception as e:
         processor.logger.error(f"Processing failed: {e}", exc_info=True)

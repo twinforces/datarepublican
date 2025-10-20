@@ -29,19 +29,19 @@ class AddressMatcher:
 
         matched_count = 0
         with tqdm(total=len(grants), desc="Matching grants") as pbar:
-            for grant_id, filer_ein, grant_amt, tax_year in grants:
+            for grant in grants:
                 # Try to find matching charity
-                matched_ein = self._find_charity_by_grant_info(grant_id, filer_ein, grant_amt, tax_year)
+                matched_ein = self._find_charity_by_grant_info(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
                 if matched_ein:
-                    self.db_ops.update_grant_ein(grant_id, matched_ein)
+                    self.db_ops.update_grant_ein(grant.grant_id, matched_ein)
                     matched_count += 1
-                    print(f"Matched grant {grant_id} to charity {matched_ein}")
+                    print(f"Matched grant {grant.grant_id} to charity {matched_ein}")
                 else:
                     # Create stub charity
-                    stub_ein = self._create_stub_charity_for_grant(grant_id, filer_ein, grant_amt, tax_year)
+                    stub_ein = self._create_stub_charity_for_grant(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
                     if stub_ein:
-                        self.db_ops.update_grant_ein(grant_id, stub_ein)
-                        print(f"Created stub charity {stub_ein} for grant {grant_id}")
+                        self.db_ops.update_grant_ein(grant.grant_id, stub_ein)
+                        print(f"Created stub charity {stub_ein} for grant {grant.grant_id}")
 
                 pbar.update(1)
 

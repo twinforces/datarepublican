@@ -264,7 +264,17 @@ def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
 
 def canonicalize_address(address_components, output_dir):
     if not address_components:
+        log_error("canonicalize_address: No address components provided")
         return AddressInfo("", None, None, None, None, None, "")
+    log_error("canonicalize_address: Processing {} address components", len(address_components))
+    for i, elem in enumerate(address_components):
+        log_error("  Component {}: tag={}, text='{}'", i, elem.tag, elem.text)
+    # Check for required components
+    has_city = any(elem.tag.endswith('CityNm') and elem.text for elem in address_components)
+    has_state = any(elem.tag.endswith('StateAbbreviationCd') and elem.text for elem in address_components)
+    has_zip = any(elem.tag.endswith('ZIPCd') and elem.text for elem in address_components)
+    has_address_line = any(elem.tag.endswith('AddressLine1Txt') and elem.text for elem in address_components)
+    log_error("canonicalize_address: Has city={}, state={}, zip={}, address_line={}", has_city, has_state, has_zip, has_address_line)
     address_line = ""
     address_line2 = ""
     address_line3 = ""
@@ -339,25 +349,35 @@ def canonicalize_address(address_components, output_dir):
 
     address_parts = [comp for comp in [street, city, state, zip_code] if comp]
     if not address_parts:
-        log_error("No valid address components: {}", address_components)
+        log_error("canonicalize_address: No valid address components after processing: street='{}', city='{}', state='{}', zip_code='{}'", street, city, state, zip_code)
         return AddressInfo("", None, None, None, None, None, "")
     canonical = " ".join(address_parts).title()
+    log_error("canonicalize_address: Initial canonical='{}', state='{}', zip_code='{}', po_box='{}'", canonical, state, zip_code, po_box)
+    if not has_city or not has_state or not has_zip:
+        log_error("canonicalize_address: WARNING - Missing required components: city={}, state={}, zip={}", has_city, has_state, has_zip)
     if state and state.upper() not in VALID_STATES:
-        log_error("Invalid state '{}' in address: {}; resetting state", state, canonical)
+        log_error("canonicalize_address: Invalid state '{}' in address: {}; resetting state", state, canonical)
         state = None
         canonical = " ".join(comp for comp in [street, city, zip_code] if comp).title()
+        log_error("canonicalize_address: After state reset, canonical='{}'", canonical)
     if zip_code:
         match = re.match(r'^\s*(\d{5})(?:-(\d{4}))?\s*$', zip_code)
         if match:
             zip_code = match.group(1)
+            log_error("canonicalize_address: ZIP cleaned to '{}'", zip_code)
         else:
             zip_code_digits = re.sub(r'\D', '', zip_code)
             if len(zip_code_digits) >= 5:
                 zip_code = zip_code_digits[:5]
+                log_error("canonicalize_address: ZIP extracted to '{}'", zip_code)
             else:
                 zip_code = None
+                log_error("canonicalize_address: ZIP invalid, set to None")
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
+        log_error("canonicalize_address: Added PO Box, final canonical='{}'", canonical)
+    log_error("canonicalize_address: Returning AddressInfo(canonical='{}', address_line1='{}', city='{}', state='{}', po_box='{}', zip_code='{}')", canonical, address_line, city, state, po_box, zip_code)
+    log_error("DEBUG: PO Box detection - po_box='{}', canonical contains 'PO BOX'={}", po_box, 'PO BOX' in canonical.upper() if canonical else False)
     return AddressInfo(canonical, address_line, address_line2, city, state, po_box, zip_code)
 
 def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
@@ -457,13 +477,25 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 'reason': 'No filer name in XML'
             })
             return False, None
+        # Count USAddress elements to diagnose multiple addresses
+        us_addresses = root.findall(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES) or \
+                      root.findall(".//Filer/USAddress", namespaces=NAMESPACES) or \
+                      root.findall(".//USAddress", namespaces=NAMESPACES)
+        log_error("parse_filer_address: Found {} USAddress elements in XML {}", len(us_addresses), xml_filename)
+
         address_components = []
         xpaths = ADDRESS_XPATHS
+        log_error("parse_filer_address: Extracting address components for XML {}", xml_filename)
         for xpath in xpaths:
             elements = xpath(root)
+            log_error("parse_filer_address: XPath '{}' found {} elements", xpath.path, len(elements))
             for elem in elements:
                 if elem.text:
+                    log_error("parse_filer_address: Adding component: tag={}, text='{}'", elem.tag, elem.text.strip())
                     address_components.append(elem)
+        log_error("parse_filer_address: Total address components: {}", len(address_components))
+        if len(address_components) == 0:
+            log_error("parse_filer_address: WARNING - No address components found for XML {}", xml_filename)
         address_info = canonicalize_address(address_components, output_dir)
         canonical_address = address_info.canonical_address
         address_line1 = address_info.address_line1
@@ -476,6 +508,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
         if canonical_address:
+            log_error("parse_filer_address: SUCCESS - Created address entry for EIN {}: canonical='{}', city='{}', state='{}', zip='{}', po_box='{}'", xml_ein, canonical_address, city, state, zip_code, po_box)
             result['address_entries'].append({
                 'filer_ein': xml_ein,
                 'filer_name': filer_name,
@@ -505,6 +538,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             result['total_addresses'] += 1
             result['total_queue_puts'] += 1
         else:
+            log_error("parse_filer_address: ERROR - No canonical address for EIN {}: components={}, raw_components='{}'", xml_ein, len(address_components), raw_components_str)
             result['total_address_errors'] += 1
             result['debug_address_entries'].append({
                 'filer_ein': xml_ein or '',

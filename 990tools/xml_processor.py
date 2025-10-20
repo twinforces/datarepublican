@@ -54,20 +54,74 @@ class XMLProcessor:
         else:
             self.logger.info(f"Found {len(xml_files)} unprocessed XML files")
 
-        total_processed = 0
-        for xml_id, zip_id, filename, internal_path in xml_files:
+        # Filter out already processed XML files based on EIN and tax_year to prevent reprocessing
+        filtered_xml_files = []
+        for xml_file in xml_files:
+            # Check if this XML file has already been processed by looking for existing charity data
+            # We need to extract EIN and tax_year first to check
             try:
-                result = self._process_single_xml(xml_id, zip_id, filename, internal_path)
+                # Get ZIP file path from database
+                zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (xml_file.zip_id,)).fetchone()
+                if not zip_result:
+                    self.logger.error(f"No ZIP file found for xml_id {xml_file.xml_id}")
+                    continue
+                zip_path = zip_result[0]
+
+                # Extract XML content from ZIP
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    with zip_ref.open(xml_file.internal_path) as xml_file_handle:
+                        xml_content = xml_file_handle.read()
+
+                # Parse XML to get EIN and tax_year
+                parser = ET.XMLParser(recover=True)
+                tree = ET.parse(BytesIO(xml_content), parser)
+                root = tree.getroot()
+
+                form_type = self._extract_form_type(root)
+                tax_year = self._extract_tax_year(root)
+                filer_ein = self._extract_filer_ein(root)
+
+                if not filer_ein or filer_ein == "Unknown":
+                    # Skip files with invalid EIN
+                    filtered_xml_files.append(xml_file)
+                    continue
+
+                # Check if charity data already exists for this EIN and tax_year
+                existing_charity = self.db_ops.execute_query(
+                    "SELECT charity_id FROM Charities WHERE ein = ? AND tax_year = ?",
+                    (filer_ein, tax_year)
+                ).fetchone()
+
+                if existing_charity:
+                    self.logger.info(f"Skipping already processed XML file: {xml_file.filename} (EIN: {filer_ein}, Year: {tax_year})")
+                    # Mark as processed to avoid reprocessing
+                    self.db_ops.mark_xml_processed(xml_file.xml_id, self.processing_version)
+                    continue
+
+                # Add to filtered list for processing
+                filtered_xml_files.append(xml_file)
+
+            except Exception as e:
+                self.logger.warning(f"Could not check processing status for XML {xml_file.filename}: {e}")
+                # Include in processing list if we can't determine status
+                filtered_xml_files.append(xml_file)
+
+        self.logger.info(f"After filtering already processed files: {len(filtered_xml_files)} XML files to process")
+
+        total_processed = 0
+        for xml_file in filtered_xml_files:
+            try:
+                result = self._process_single_xml(xml_file.xml_id, xml_file.zip_id, xml_file.filename, xml_file.internal_path)
                 if result:
                     total_processed += 1
-                    # Mark as processed
-                    self.db_ops.mark_xml_processed(xml_id, self.processing_version)
+                    # Mark as processed with success message
+                    self.db_ops.mark_xml_processed(xml_file.xml_id, self.processing_version)
                 else:
                     # Mark as error
-                    self.db_ops.mark_xml_error(xml_id, self.processing_version, "Processing failed")
+                    self.db_ops.mark_xml_error(xml_file.xml_id, self.processing_version, "Processing failed")
             except Exception as e:
-                self.logger.error(f"Failed to process XML {filename}: {e}")
-                self.db_ops.mark_xml_error(xml_id, self.processing_version, str(e))
+                self.logger.error(f"Failed to process XML {xml_file.filename}: {e}")
+                self.db_ops.mark_xml_error(xml_file.xml_id, self.processing_version, str(e))
 
         self.logger.info(f"XML processing complete: {total_processed} files processed")
         return total_processed
@@ -78,8 +132,7 @@ class XMLProcessor:
             self.logger.debug(f"Processing XML {filename} (ID: {xml_id})")
 
             # Get ZIP file path from database
-            self.db_ops.db_cursor.execute("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,))
-            zip_result = self.db_ops.db_cursor.fetchone()
+            zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,)).fetchone()
             if not zip_result:
                 self.logger.error(f"No ZIP file found for xml_id {xml_id}")
                 return False
@@ -134,6 +187,7 @@ class XMLProcessor:
                 address = self._extract_address(root, filename, filer_ein)
                 if address:
                     self.logger.debug(f"Inserting address for EIN {filer_ein}")
+                    self.logger.info(f"DEBUG: Address to insert: ein={address.ein}, canonical='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
                     self.db_ops.insert_address(address)
 
                 # Insert related data
@@ -414,12 +468,12 @@ class XMLProcessor:
             address = Address(
                 ein=filer_ein,
                 name=filer_name,
-                street=street,
+                address_line1=street,
                 city=city,
                 state=state,
-                canonical_address=canonical_address,
                 zip_code=zip_code,
                 po_box=po_box,
+                canonical_address=canonical_address,
                 address_type="filer"
             )
             return address

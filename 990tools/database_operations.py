@@ -9,7 +9,8 @@ This module now uses DuckDB exclusively.
 """
 
 import duckdb
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Any, Type
+from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 import uuid
@@ -147,6 +148,97 @@ class DatabaseOperations:
         else:
             return self.db_conn.execute(query)
 
+    def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: tuple = None,
+                        order_by: str = "", limit: int = None, offset: int = None) -> List[Any]:
+        """
+        Generic method to select records and convert them to dataclass instances using reflection.
+
+        Args:
+            dataclass_type: The dataclass type to instantiate (e.g., Charity, Address)
+            where_clause: Optional WHERE clause (without the WHERE keyword)
+            params: Parameters for the WHERE clause
+            order_by: Optional ORDER BY clause (without the ORDER BY keyword)
+            limit: Optional LIMIT clause
+
+        Returns:
+            List of dataclass instances
+        """
+        print(f"DEBUG select_dataclass: Called with limit={limit}, offset={offset}")
+        # Get table name from dataclass name (pluralize by adding 's' or 'ies')
+        table_name = self._get_table_name(dataclass_type)
+
+        # Get field names from dataclass, but filter out fields that don't exist in the table
+        all_field_names = [f.name for f in fields(dataclass_type)]
+        field_names = self._filter_existing_columns(table_name, all_field_names)
+
+        # Build SELECT query
+        select_fields = ", ".join(field_names)
+        query = f"SELECT {select_fields} FROM {table_name}"
+
+        if where_clause:
+            query += f" WHERE {where_clause}"
+
+        if order_by:
+            query += f" ORDER BY {order_by}"
+
+        if limit:
+            query += f" LIMIT {limit}"
+            print(f"DEBUG select_dataclass: Added LIMIT {limit} to query")
+
+        if offset:
+            query += f" OFFSET {offset}"
+            print(f"DEBUG select_dataclass: Added OFFSET {offset} to query")
+
+        # Execute query
+        result = self.execute_query(query, params)
+        rows = result.fetchall()
+
+        # Convert rows to dataclass instances
+        instances = []
+        for row in rows:
+            # Create dict from row data
+            row_dict = dict(zip(field_names, row))
+            # Instantiate dataclass with only the fields that were selected
+            instance = dataclass_type(**row_dict)
+            instances.append(instance)
+
+        return instances
+
+    def _filter_existing_columns(self, table_name: str, field_names: List[str]) -> List[str]:
+        """Filter field names to only include columns that exist in the table"""
+        try:
+            # Get column names from the table
+            result = self.execute_query(f"DESCRIBE {table_name}")
+            table_columns = [row[0] for row in result.fetchall()]
+
+            # Filter field names to only include existing columns
+            existing_fields = [field for field in field_names if field in table_columns]
+            return existing_fields
+        except Exception:
+            # If DESCRIBE fails, return all fields (fallback)
+            return field_names
+
+    def _get_table_name(self, dataclass_type: Type) -> str:
+        """Get table name from dataclass type"""
+        class_name = dataclass_type.__name__
+        # Special cases based on actual table names in schema
+        table_name_map = {
+            'XMLFile': 'XmlFiles',
+            'ZipFile': 'ZipFiles',
+            'PoliticalContribution': 'PoliticalContributions'
+        }
+
+        if class_name in table_name_map:
+            return table_name_map[class_name]
+
+        # Simple pluralization rules
+        if class_name.endswith('y'):
+            return class_name[:-1] + 'ies'
+        elif class_name.endswith('s') or class_name.endswith('sh') or class_name.endswith('ch') or class_name.endswith('x') or class_name.endswith('z'):
+            return class_name + 'es'
+        else:
+            return class_name + 's'
+
     def commit(self):
         """Commit current transaction"""
         self.db_conn.commit()
@@ -198,29 +290,21 @@ class DatabaseOperations:
         self.commit()
         return xml_id
 
-    def get_unprocessed_xml_files(self, processing_version: int, max_files: Optional[int] = None) -> List[Tuple]:
+    def get_unprocessed_xml_files(self, processing_version: int, max_files: Optional[int] = None) -> List[XMLFile]:
         """Get unprocessed XML files"""
-        query = """
-            SELECT xml_id, zip_id, filename, internal_path
-            FROM XmlFiles
-            WHERE processed = FALSE OR processing_version < ?
-            ORDER BY zip_id, filename
-        """
+        where_clause = "processed = FALSE OR processing_version < ?"
         params = (processing_version,)
+        order_by = "zip_id, filename"
+        limit = max_files
 
-        if max_files:
-            query += " LIMIT ?"
-            params = (processing_version, max_files)
-
-        result = self.execute_query(query, params)
-        return result.fetchall()
+        return self.select_dataclass(XMLFile, where_clause=where_clause, params=params, order_by=order_by, limit=limit)
 
     def mark_xml_processed(self, xml_id: str, processing_version: int):
         """Mark XML file as processed"""
         self.execute_query("""
-            UPDATE XmlFiles SET processed = TRUE, processing_version = ?
+            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
             WHERE xml_id = ?
-        """, (processing_version, xml_id))
+        """, (processing_version, "success", xml_id))
         self.commit()
 
     def mark_xml_error(self, xml_id: str, processing_version: int, error_msg: str):
@@ -245,9 +329,19 @@ class DatabaseOperations:
         # Ensure canonical_address is built from components if not provided
         canonical_address = address.canonical_address
 
+        # Check for existing address before insertion
+        existing_check = self.execute_query("""
+            SELECT address_id FROM Addresses
+            WHERE ein = ? AND canonical_address = ?
+        """, (address.ein, canonical_address)).fetchone()
+
+        if existing_check:
+            print(f"DEBUG insert_address: DUPLICATE FOUND - Address for EIN {address.ein} with canonical_address '{canonical_address}' already exists (address_id: {existing_check[0]}). Skipping insertion.")
+            return existing_check[0]  # Return existing address_id
+
         # Debug logging
         if hasattr(address, 'ein') and address.ein:
-            print(f"DEBUG: Inserting address for EIN {address.ein}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', po_box='{address.po_box}', canonical='{canonical_address}', colocator='{colocator}'")
+            print(f"DEBUG: Inserting NEW address for EIN {address.ein}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', po_box='{address.po_box}', canonical='{canonical_address}', colocator='{colocator}'")
             # Log the final colocator value being inserted
             print(f"DEBUG insert_address: Final colocator value being inserted: '{colocator}' (from address.colocator)")
 
@@ -266,13 +360,41 @@ class DatabaseOperations:
         print(f"DEBUG insert_address: SQL: {sql.strip()}")
         print(f"DEBUG insert_address: Values: {values}")
 
-        self.execute_query(sql, values)
-        address.address_id = address_id
-        self.commit()
-        return address_id
+        result = self.execute_query(sql, values)
 
-    def get_addresses_for_geocoding(self) -> List[Tuple]:
-        """Get addresses that need geocoding"""
+        # Check if the insert actually happened (DuckDB INSERT OR IGNORE returns affected rows)
+        # For DuckDB, we need to check the result differently
+        try:
+            # Try to get the row count affected
+            affected_rows = result.fetchall()  # This might not work for INSERT
+            print(f"DEBUG insert_address: Query executed, result: {affected_rows}")
+        except:
+            print(f"DEBUG insert_address: Query executed (unable to get affected rows)")
+
+        # Verify the address was actually inserted
+        verify_check = self.execute_query("""
+            SELECT address_id FROM Addresses
+            WHERE address_id = ?
+        """, (address_id,)).fetchone()
+
+        if verify_check:
+            print(f"DEBUG insert_address: SUCCESS - Address inserted with address_id: {address_id}")
+            address.address_id = address_id
+            self.commit()
+            return address_id
+        else:
+            print(f"DEBUG insert_address: FAILURE - Address was not inserted despite no duplicate found. Checking for constraint violations...")
+            # Check for any constraint issues by trying a simple select
+            constraint_check = self.execute_query("""
+                SELECT COUNT(*) FROM Addresses
+                WHERE ein = ? AND canonical_address = ?
+            """, (address.ein, canonical_address)).fetchone()
+            print(f"DEBUG insert_address: After failed insert, found {constraint_check[0]} existing addresses with same ein+canonical_address")
+            return None
+
+    def get_addresses_for_geocoding(self, limit: int = None, offset: int = 0) -> List[Address]:
+        """Get addresses that need geocoding, with optional batching support"""
+        print(f"DEBUG get_addresses_for_geocoding: Called with limit={limit}, offset={offset}")
         # DEBUG: First get overall statistics
         total_count = self.execute_query("SELECT COUNT(*) FROM Addresses").fetchone()[0]
         null_geocoding_count = self.execute_query("SELECT COUNT(*) FROM Addresses WHERE geocoding_id IS NULL").fetchone()[0]
@@ -280,7 +402,8 @@ class DatabaseOperations:
 
         print(f"DEBUG get_addresses_for_geocoding: Total addresses: {total_count}")
         print(f"DEBUG get_addresses_for_geocoding: Addresses with NULL geocoding_id: {null_geocoding_count}")
-        print(f"DEBUG get_addresses_for_geocoding: Addresses meeting geocoding criteria: {po_box_condition_count}")
+        print(f"DEBUG get_addresses_for_geocoding: Addresses meeting geocoding criteria (no PO box): {po_box_condition_count}")
+        print(f"DEBUG get_addresses_for_geocoding: Addresses excluded by PO box condition: {null_geocoding_count - po_box_condition_count}")
 
         # DEBUG: Check why addresses are excluded
         if null_geocoding_count > 0 and po_box_condition_count == 0:
@@ -292,31 +415,53 @@ class DatabaseOperations:
 
             # Sample of excluded addresses
             excluded_sample = self.execute_query("""
-                SELECT address_id, canonical_address, po_box, geocoding_id
+                SELECT address_id, address_line1, address_line2, city, state, zip_code, po_box, geocoding_id
                 FROM Addresses
                 WHERE geocoding_id IS NULL
                 LIMIT 5
             """).fetchall()
             print(f"DEBUG get_addresses_for_geocoding: Sample excluded addresses: {excluded_sample}")
 
-        result = self.execute_query("""
-            SELECT address_id, canonical_address, po_box, zip_code
-            FROM Addresses
-            WHERE geocoding_id IS NULL
-            AND (po_box IS NULL OR po_box = '')  -- Skip PO boxes
-            ORDER BY address_id
-        """)
-        addresses = result.fetchall()
-        print(f"DEBUG get_addresses_for_geocoding: Final query returned {len(addresses)} addresses")
+        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '')"
+        print(f"DEBUG get_addresses_for_geocoding: Calling select_dataclass with limit={limit}, offset={offset}")
+        addresses = self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
+
+        print(f"DEBUG get_addresses_for_geocoding: Final query returned {len(addresses)} addresses (limit={limit}, offset={offset})")
+        if addresses:
+            print(f"DEBUG get_addresses_for_geocoding: Sample addresses: {addresses[:3]}")
         return addresses
 
     def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: str = None):
         """Update address with geocoding information"""
-        self.execute_query("""
-            UPDATE Addresses SET geocoding_id = ?, colocator = ?
-            WHERE address_id = ?
-        """, (geocoding_id, colocator, address_id))
+        if geocoding_id is not None and colocator is not None:
+            self.execute_query("""
+                UPDATE Addresses SET geocoding_id = ?, colocator = ?
+                WHERE address_id = ?
+            """, (geocoding_id, colocator, address_id))
+        elif geocoding_id is not None:
+            self.execute_query("""
+                UPDATE Addresses SET geocoding_id = ?
+                WHERE address_id = ?
+            """, (geocoding_id, address_id))
+        elif colocator is not None:
+            self.execute_query("""
+                UPDATE Addresses SET colocator = ?
+                WHERE address_id = ?
+            """, (colocator, address_id))
         self.commit()
+
+        # Debug logging
+        if geocoding_id is not None or colocator is not None:
+            print(f"DEBUG update_address_geocoding: Updated address {address_id} with geocoding_id={geocoding_id}, colocator={colocator}")
+
+    def update_address_po_box_and_colocator(self, address_id: str, po_box: str, colocator: str):
+        """Update address with PO Box and colocator information"""
+        self.execute_query("""
+            UPDATE Addresses SET po_box = ?, colocator = ?
+            WHERE address_id = ?
+        """, (po_box, colocator, address_id))
+        self.commit()
+        print(f"DEBUG update_address_po_box_and_colocator: Updated address {address_id} with po_box='{po_box}', colocator='{colocator}'")
 
     # Charity operations
     def insert_charity(self, charity: Charity) -> str:
@@ -362,6 +507,8 @@ class DatabaseOperations:
 
     def get_charities_for_percentiles(self) -> List[Tuple]:
         """Get charities for percentile calculation"""
+        # This method returns specific fields as tuples, not Charity instances
+        # So we keep the original implementation
         result = self.execute_query("""
             SELECT org_type, tax_year, ein, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct
             FROM Charities
@@ -405,14 +552,9 @@ class DatabaseOperations:
         """, (grant_ein, grant_id))
         self.commit()
 
-    def get_grants_without_ein(self) -> List[Tuple]:
+    def get_grants_without_ein(self) -> List[Grant]:
         """Get grants with unknown EINs for matching"""
-        result = self.execute_query("""
-            SELECT grant_id, filer_ein, grant_amt, tax_year
-            FROM Grants
-            WHERE grant_ein IS NULL OR grant_ein = ''
-        """)
-        return result.fetchall()
+        return self.select_dataclass(Grant, where_clause="grant_ein IS NULL OR grant_ein = ''")
 
     # Officer operations
     def insert_officer(self, officer: Officer) -> str:
@@ -540,6 +682,7 @@ class DatabaseOperations:
 
     def get_top_grant_recipients(self, limit: int = 10) -> List[Tuple]:
         """Get top grant recipients by total amount"""
+        # This method performs aggregation, so we keep the original implementation
         result = self.execute_query("""
             SELECT grant_ein, SUM(grant_amt) as total_grants, COUNT(*) as grant_count
             FROM Grants

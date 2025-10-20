@@ -18,9 +18,13 @@ from typing import Optional, List, Tuple
 from datetime import datetime
 import duckdb
 import os
+import re
 
 # Valid US state and territory abbreviations
 VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
+
+# PO Box regex for extracting PO Box numbers
+PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
 
 
 @dataclass
@@ -57,7 +61,6 @@ class Address:
     address_id: Optional[int] = None
     ein: str = ""
     name: str = ""
-    canonical_address: str = ""
     address_line1: Optional[str] = None
     address_line2: Optional[str] = None
     city: Optional[str] = None
@@ -65,6 +68,7 @@ class Address:
     zip_code: Optional[str] = None  # First 5 digits
     zip4: Optional[str] = None  # Last 4 digits
     po_box: Optional[str] = None
+    canonical_address: Optional[str] = None
     address_type: str = "filer"  # 'filer' or 'grantee'
     geocoding_id: Optional[int] = None
     latitude: Optional[float] = None
@@ -72,81 +76,40 @@ class Address:
     colocator: Optional[str] = None  # LL:lat:long, PO:box:zip, FA:country_code
 
     def __post_init__(self):
-        # Initialize private backing field for canonical_address property
-        self._canonical_address = self.canonical_address or ""
-        # Initialize private backing field for colocator property
+        # Initialize private backing fields
         self._colocator = None
-        # If canonical_address wasn't provided, build it from components
-        if not self._canonical_address:
-            self._canonical_address = self._build_canonical_address()
+        self._po_box = None
+        self._zip4 = None
 
-    @property
-    def canonical_address(self):
-        """Smart canonical address that assembles itself from components"""
-        if not hasattr(self, '_canonical_address') or not self._canonical_address:
-            self._canonical_address = self._build_canonical_address()
-        return self._canonical_address
+        # Resolve smart properties immediately for serialization compatibility
+        # This ensures properties are computed once and stored for database operations
+        self._resolve_smart_properties()
 
-    @canonical_address.setter
-    def canonical_address(self, value):
-        self._canonical_address = value
-
-    def _build_canonical_address(self) -> str:
-        """Build canonical address from components, handling NULL address_line2 properly"""
-        address_parts = []
-
-        # Build street address from lines
-        street_parts = []
-        if self.address_line1:
-            street_parts.append(self.address_line1.strip())
-        if self.address_line2:  # Only include if not NULL/empty
-            street_parts.append(self.address_line2.strip())
-
-        if street_parts:
-            address_parts.append(" ".join(street_parts))
-
-        # Add city
-        if self.city:
-            address_parts.append(self.city.strip())
-
-        # Add state
-        if self.state:
-            address_parts.append(self.state.strip())
-
-        # Add ZIP (use zip5 to avoid ZIP+4 issues)
-        if self.zip5:
-            address_parts.append(self.zip5)
-
-        # If we have a PO box, prepend it to the address
-        if self.po_box and self.po_box.strip():
-            po_box_part = f"PO Box {self.po_box.strip()}"
-            if address_parts:
-                # Insert PO box at the beginning of the street part, or prepend if no street
-                if street_parts:
-                    address_parts[0] = f"{po_box_part} {address_parts[0]}"
-                else:
-                    address_parts.insert(0, po_box_part)
-            else:
-                address_parts.append(po_box_part)
-
-        # Join all parts with spaces and title case
-        if address_parts:
-            return ", ".join(address_parts)
-        return ""
+        # Ensure canonical_address is resolved to a string for marshalling
+        if not isinstance(self.canonical_address, str):
+            self.canonical_address = ""
 
     @property
     def colocator(self):
-        if self.po_box and self.zip_code:
-            po_box_stripped = self.po_box.strip()
-            if po_box_stripped:
-                return f"PO:{po_box_stripped}:{self.zip_code}"
-        elif self.state and self.state.upper() not in VALID_STATES:
-            return f"FA:{self.state}"
+        """Return the resolved colocator value"""
         return self._colocator
 
     @colocator.setter
     def colocator(self, value):
         self._colocator = value
+        # Re-resolve colocator if po_box or zip_code change
+        self._resolve_smart_properties()
+
+    @property
+    def po_box(self) -> Optional[str]:
+        """Return the resolved po_box value"""
+        return self._po_box
+
+    @po_box.setter
+    def po_box(self, value: Optional[str]):
+        self._po_box = value
+        # Re-resolve colocator when po_box changes
+        self._resolve_smart_properties()
 
     @property
     def zip5(self) -> Optional[str]:
@@ -168,6 +131,50 @@ class Address:
     def zip4(self, value: Optional[str]):
         """Set the zip4 field directly"""
         self._zip4 = value
+        # Note: zip4 changes don't automatically trigger re-resolution since it's derived from zip_code
+        # If zip_code changes, the caller should set it directly
+
+    def _resolve_smart_properties(self):
+        """Resolve all smart properties and store their values for serialization"""
+        # Resolve po_box from address_line1 if not already set
+        if self._po_box is None and self.address_line1:
+            match = PO_BOX_REGEX.search(self.address_line1)
+            if match:
+                self._po_box = match.group(1)
+
+        # Resolve colocator based on po_box and state
+        if self._po_box and self.zip_code:
+            if isinstance(self._po_box, str):
+                po_box_stripped = self._po_box.strip()
+                if po_box_stripped:
+                    self._colocator = f"PO:{po_box_stripped}:{self.zip_code}"
+            else:
+                self._colocator = None
+        elif self.state and self.state.upper() not in VALID_STATES:
+            self._colocator = f"FA:{self.state}"
+        else:
+            self._colocator = None
+
+        # Compute canonical_address from components if not already set
+        if self.canonical_address is None or not isinstance(self.canonical_address, str):
+            street = self.address_line1 or ""
+            if self.address_line2:
+                street += " " + self.address_line2
+            # Ensure state is uppercase
+            state_upper = self.state.upper() if self.state else None
+            address_parts = [comp for comp in [street.strip(), self.city, state_upper, self.zip_code] if comp]
+            if address_parts:
+                canonical = ", ".join(address_parts).title()
+                if self._po_box and isinstance(self._po_box, str) and 'po box' not in canonical.lower():
+                    canonical = f"PO Box {self._po_box}, {', '.join(address_parts[1:])}".title()
+                self.canonical_address = canonical
+            else:
+                self.canonical_address = ""
+
+    @property
+    def po_box_number(self) -> Optional[str]:
+        """Extract PO Box number from address_line1 using regex"""
+        return self.po_box
 
     def insert(self, conn) -> int:
         """Insert this address into the database"""
@@ -175,7 +182,7 @@ class Address:
         cursor.execute("""
             INSERT INTO Addresses (ein, name, canonical_address, address_line1, address_line2, city, state, zip_code, zip4, po_box, address_type, geocoding_id, latitude, longitude, colocator)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (self.ein, self.name, self.canonical_address, self.address_line1, self.address_line2, self.city, self.state, self.zip_code, self.zip4, self.po_box,
+        """, (self.ein, self.name, self.canonical_address, self.address_line1, self.address_line2, self.city, self.state, self.zip_code, self.zip4, self.po_box_number,
               self.address_type, self.geocoding_id, self.latitude, self.longitude, self.colocator))
         self.address_id = cursor.lastrowid
         return self.address_id
@@ -222,7 +229,7 @@ class DatabaseConsumer:
                         UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
                         WHERE xml_id = ?
                     """, (2, "Processing error", xml_id))  # CURRENT_PROCESSING_VERSION
-                    consumer_conn.commit()
+                    conn.commit()
                     continue
 
                 # Add to batch
@@ -232,10 +239,9 @@ class DatabaseConsumer:
                 # Process batch when it gets large enough
                 if len(batch_data) >= batch_size:
                     self.logger.debug(f"Consumer: processing batch of {len(batch_data)} items (total: {total_processed})")
-                    self._bulk_insert_batch(batch_data, consumer_conn, consumer_cursor)
+                    self._bulk_insert_batch(batch_data, conn, consumer_cursor)
                     result_queue.put(len(batch_data))
                     batch_data = []
-                    time.sleep(0.01)  # Small delay to prevent busy waiting
 
             except Exception as e:
                 self.logger.error(f"Consumer error: {e}", exc_info=True)
@@ -244,13 +250,13 @@ class DatabaseConsumer:
         # Process remaining batch
         if batch_data:
             self.logger.debug(f"Consumer: processing final batch of {len(batch_data)} items (total: {total_processed})")
-            self._bulk_insert_batch(batch_data, consumer_conn, consumer_cursor)
+            self._bulk_insert_batch(batch_data, conn, consumer_cursor)
             result_queue.put(len(batch_data))
 
         self.logger.debug(f"Consumer: completed, processed {total_processed} total items")
 
         # Close consumer connection
-        consumer_conn.close()
+        conn.close()
 
     def _bulk_insert_batch(self, batch_data, conn=None, cursor=None):
         """Bulk insert a batch of processed XML data"""
