@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""
+models/zip_file.py - ZIP file data model
+
+This module contains the ZipFile dataclass and related business logic.
+ZIP files represent compressed archives containing IRS 990 XML filings.
+"""
+
+from dataclasses import dataclass, field
+from typing import Optional, List
+from datetime import datetime
+
+
+@dataclass
+class ZipFile:
+    """Represents a ZIP file containing IRS 990 XML filings"""
+
+    zip_id: Optional[int] = None
+    filename: str = ""
+    file_path: str = ""
+    tax_year: int = 0
+    file_size: Optional[int] = None
+    checksum: Optional[str] = None
+    download_date: Optional[datetime] = None
+    processed_date: Optional[datetime] = None
+    status: str = "downloaded"
+    xml_files: List['XMLFile'] = field(default_factory=list)
+
+    def is_processed_successfully(self) -> bool:
+        """Check if ZIP file was processed without errors"""
+        return self.processed and not self.error_message
+
+    def mark_processed(self, xml_count: int = 0, error_message: Optional[str] = None):
+        """Mark ZIP file as processed"""
+        self.processed = True
+        self.processed_at = datetime.now()
+        self.xml_count = xml_count
+        self.error_message = error_message
+
+    def is_processed_successfully(self) -> bool:
+        """Check if ZIP file was processed without errors"""
+        return self.status == 'processed' and not self.error_message
+
+    def mark_processed(self, xml_count: int = 0, error_message: Optional[str] = None):
+        """Mark ZIP file as processed"""
+        self.status = 'processed'
+        self.processed_date = datetime.now()
+        # self.xml_count = xml_count  # Not in schema
+        # self.error_message = error_message  # Not in schema
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for database operations"""
+        return {
+            'zip_id': self.zip_id,
+            'filename': self.filename,
+            'file_path': self.file_path,
+            'tax_year': self.tax_year,
+            'file_size': self.file_size,
+            'checksum': self.checksum,
+            'download_date': self.download_date.isoformat() if self.download_date else None,
+            'processed_date': self.processed_date.isoformat() if self.processed_date else None,
+            'status': self.status
+        }

@@ -11,7 +11,7 @@ from typing import Optional, List, Tuple, Dict, Any
 import logging
 import time
 import threading
-from collections import deque
+import queue
 from pathlib import Path
 import sqlite3
 from io import BytesIO
@@ -20,21 +20,24 @@ from dataclasses import fields
 import zipfile
 
 from database_operations import DatabaseOperations
-from irs990processorDC import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
+from models import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
 from parse_990 import parse_990
 from parse_990ez import parse_990ez
 from parse_990pf import parse_990pf
 from parse_utils import parse_grants
 from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF
+from geolocation_processor import GeolocationProcessor
+from address_matcher import AddressMatcher
+from constants import VALID_STATES
+from zip_processor import ZipProcessor
 
 
 class ProcessingStrategy(ABC):
     """Abstract base class for processing strategies"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
         self.db_ops = db_ops
         self.logger = logger
-        self.log_sql = log_sql
 
     @abstractmethod
     def execute(self, *args, **kwargs) -> Any:
@@ -69,9 +72,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     MAX_WORKERS = 16
     QUEUE_SIZE = 1000
     BATCH_SIZE = 100
+    STALL_THRESHOLD = 30
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False, workers: int = MAX_WORKERS):
-        super().__init__(db_ops, logger, log_sql)
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, workers: int = MAX_WORKERS):
+        super().__init__(db_ops, logger)
         self.workers = workers
 
     # Lock-free queue implementation for single-file processing
@@ -88,297 +92,125 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         return result.fetchall()
 
     def execute(self, max_files: Optional[int] = None) -> int:
-        """Process XML files using producer-consumer pattern"""
-        # Get XML files from database
+        """Process XML files using producer-consumer pattern with thread-safe queues"""
         xml_files = self._get_xml_files_to_process()
         if max_files:
             xml_files = xml_files[:max_files]
+        if not xml_files:
+            return 0
 
-        # Create deques for communication between threads (lock-free)
-        xml_queue = deque(maxlen=self.QUEUE_SIZE)  # Producer -> Consumer
-        result_queue = deque(maxlen=self.QUEUE_SIZE)  # Consumer -> Main thread
+        num_producers = min(self.workers, len(xml_files))
+        self.log_info(f"Processing {len(xml_files)} files with {num_producers} producers")
 
-        # Add thread safety checks
-        self.log_info(f"Threading configuration: WORKERS={self.workers}, QUEUE_SIZE={self.QUEUE_SIZE}, BATCH_SIZE={self.BATCH_SIZE}")
-        # num_producers will be calculated below, so log it after assignment
-        self.log_info(f"Processing {len(xml_files)} XML files")
-
-        # Use shared database connection for consumer thread
-        consumer_conn = self.db_ops.db_conn
-        self.log_debug("Consumer database connection established")
+        # Use thread-safe queues with backpressure
+        xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
+        progress_queue = queue.Queue(maxsize=10)
 
         # Start consumer thread (single writer to database)
         consumer_thread = threading.Thread(
             target=self._database_consumer,
-            args=(xml_queue, result_queue, consumer_conn)
+            args=(xml_queue, progress_queue, num_producers, self.db_ops.db_conn)
         )
         consumer_thread.daemon = True
         consumer_thread.start()
-        self.log_debug("Consumer thread started")
 
         # Start producer threads
         producer_threads = []
-        num_producers = min(self.workers, len(xml_files))  # Use workers parameter directly
-        self.log_info(f"Starting {num_producers} producer threads for {len(xml_files)} XML files")
-        self.log_info(f"Threading configuration: WORKERS={self.workers}, QUEUE_SIZE={self.QUEUE_SIZE}, BATCH_SIZE={self.BATCH_SIZE}")
-        self.log_info(f"Processing {len(xml_files)} XML files with {num_producers} producer threads")
-
-        # For debugging, start with just 1 producer thread
-        if len(xml_files) <= 10:
-            num_producers = 1
-            self.log_info(f"Debug mode: using 1 producer thread for {len(xml_files)} files")
-
-        self.log_debug("Starting producer threads...")
         for i in range(num_producers):
-            thread = threading.Thread(
-                target=self._xml_producer,
-                args=(xml_files, xml_queue, i, num_producers)
-            )
-            thread.daemon = True
-            producer_threads.append(thread)
-            thread.start()
-            self.log_debug(f"Started producer thread {i} of {num_producers}")
+            t = threading.Thread(target=self._xml_producer, args=(xml_files, xml_queue, i, num_producers))
+            t.daemon = True
+            producer_threads.append(t)
+            t.start()
 
-        # Monitor progress
-        total_processed = 0
-        last_update_time = time.time()
-        last_log_time = time.time()
-        stall_start_time = None
-        stall_threshold = 30  # seconds without progress
-
-        try:
-            from tqdm import tqdm
-            with tqdm(total=len(xml_files), desc="Processing XML files") as pbar:
-                while total_processed < len(xml_files):
-                    # Check if consumer is still alive
-                    if not consumer_thread.is_alive():
-                        self.log_error("Database consumer thread died")
-                        break
-
-                    # Check for results from consumer (lock-free polling)
-                    if result_queue:
-                        batch_size = result_queue.popleft()
-                        total_processed += batch_size
-                        pbar.update(batch_size)
-                        last_update_time = time.time()
-                        stall_start_time = None  # Reset stall timer
-                        self.log_info(f"Progress update: {total_processed}/{len(xml_files)} files done")
-
-                    # Check for stalls (no progress for extended period)
-                    current_time = time.time()
-                    if stall_start_time is None and current_time - last_update_time > stall_threshold:
-                        stall_start_time = current_time
-                        self.log_error(f"POTENTIAL STALL DETECTED: No progress for {stall_threshold} seconds")
-                        self.log_error(f"Current state: total_processed={total_processed}, queue_size={len(xml_queue)}, consumer_alive={consumer_thread.is_alive()}")
-                        # Check producer thread states
-                        alive_producers = sum(1 for t in producer_threads if t.is_alive())
-                        self.log_error(f"Producer threads: {alive_producers}/{len(producer_threads)} alive")
-
-                    # Periodic update every 60 seconds
-                    if time.time() - last_update_time >= 60:
-                        pbar.update(0)
-                        last_update_time = time.time()
-
-                    # Log progress every 10 seconds for debugging
-                    if time.time() - last_log_time >= 10:
-                        self.log_info(f"Still processing: {total_processed}/{len(xml_files)} files done, queue size: {len(xml_queue)}")
-                        last_log_time = time.time()
-
-                    # Check if we should pause for manual review
-                    if max_files and total_processed >= max_files:  # Process max_files then stop for now
-                        self.log_info(f"Processed {total_processed} files, pausing for manual review")
-                        break
-        except ImportError:
-            # tqdm not available, use simple monitoring
-            while total_processed < len(xml_files):
-                if not consumer_thread.is_alive():
-                    self.log_error("Database consumer thread died")
-                    break
-
-                # Poll result_queue for progress updates (lock-free)
-                if result_queue:
-                    batch_size = result_queue.popleft()
-                    total_processed += batch_size
-                    stall_start_time = None  # Reset stall timer
-
-                # Check for stalls (no progress for extended period)
-                current_time = time.time()
-                if stall_start_time is None and current_time - last_update_time > stall_threshold:
-                    stall_start_time = current_time
-                    self.log_error(f"POTENTIAL STALL DETECTED: No progress for {stall_threshold} seconds")
-                    self.log_error(f"Current state: total_processed={total_processed}, queue_size={len(xml_queue)}, consumer_alive={consumer_thread.is_alive()}")
-                    # Check producer thread states
-                    alive_producers = sum(1 for t in producer_threads if t.is_alive())
-                    self.log_error(f"Producer threads: {alive_producers}/{len(producer_threads)} alive")
-
-                if time.time() - last_log_time >= 10:
-                    self.log_info(f"Still processing: {total_processed}/{len(xml_files)} files done, queue size: {len(xml_queue)}")
-                    last_log_time = time.time()
-
-                if max_files and total_processed >= max_files:
-                    self.log_info(f"Processed {total_processed} files, pausing for manual review")
-                    break
-
-        # Wait for producers to finish
-        self.log_info("Waiting for producers to finish")
-        active_producers = 0
-        for i, thread in enumerate(producer_threads):
-            thread.join(timeout=30.0)
-            if thread.is_alive():
-                self.log_error(f"Producer thread {i} did not finish gracefully (timeout after 30s)")
-                active_producers += 1
+        # Wait for producers to finish (parse-heavy operations)
+        for i, t in enumerate(producer_threads):
+            t.join(timeout=60.0)
+            if t.is_alive():
+                self.log_error(f"Producer {i} timeout")
             else:
-                self.log_info(f"Producer thread {i} finished successfully")
+                self.log_info(f"Producer {i} done")
 
-        # Check queue state before shutdown
-        queue_size_before_shutdown = len(xml_queue)
-        self.log_info(f"Queue size before shutdown signals: {queue_size_before_shutdown}")
-
-        # Signal consumer to stop
-        self.log_info("Signaling consumer to stop")
-        for i in range(3):  # Send multiple shutdown signals
-            xml_queue.append(None)
-            self.log_debug(f"Sent shutdown signal #{i+1}")
-
-        consumer_thread.join(timeout=10.0)
+        # Drain queue and wait for consumer
+        xml_queue.join()
+        consumer_thread.join(timeout=30.0)
         if consumer_thread.is_alive():
-            self.log_error("Consumer thread did not finish gracefully (timeout after 10s)")
-            # Additional diagnostic info for consumer thread death
-            self.log_error(f"Final diagnostic state: total_processed={total_processed}, queue_size={len(xml_queue)}, active_producers={active_producers}")
-        else:
-            self.log_info("Consumer thread finished successfully")
+            self.log_error("Consumer timeout")
 
-        # Final queue state
-        final_queue_size = len(xml_queue)
-        self.log_info(f"Final queue size: {final_queue_size}, active producers at end: {active_producers}")
+        # Tally progress from consumer signals
+        total_processed = 0
+        try:
+            while True:
+                batch_size = progress_queue.get_nowait()
+                total_processed += abs(batch_size)
+                if batch_size < 0:
+                    self.log_error(f"Error in batch of {-batch_size}")
+        except queue.Empty:
+            pass
 
-
-        self.log_info(f"Parallel processing complete: {total_processed} files processed")
-        self.log_info(f"Final thread status: producers={len(producer_threads)}, consumer_alive={consumer_thread.is_alive()}")
+        self.log_info(f"Complete: {total_processed} files")
         return total_processed
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
         """Producer thread: parses XML and sends results to consumer"""
-        self.log_info(f"Producer {producer_id} started with {len(xml_files)} files, step {num_producers}")
-
-        processed_count = 0
-        for i in range(producer_id, len(xml_files), num_producers):
-            xml_id, file_path, filename, internal_path = xml_files[i]
-            self.log_info(f"Producer {producer_id}: STARTING XML {xml_id} - {filename}")
-
+        processed = 0
+        start = producer_id
+        for i in range(start, len(xml_files), num_producers):
+            xml_id, path, filename, internal = xml_files[i]
             try:
-                # Parse XML (CPU-intensive, thread-safe)
-                result = self._process_single_xml(xml_id, file_path, filename, internal_path)
-                if result:
-                    # Send result to consumer
-                    self.log_info(f"Producer {producer_id}: FINISHED XML {xml_id} - {filename}, sending to consumer")
-                    xml_queue.append(result)
-                    processed_count += 1
-                    if processed_count % 10 == 0:  # More frequent logging for debugging
-                        self.log_info(f"Producer {producer_id}: processed {processed_count} files so far")
-                else:
-                    self.log_info(f"Producer {producer_id}: NO RESULT from XML {xml_id} - {filename}")
+                result = self._process_single_xml(xml_id, path, filename, internal)
+                xml_queue.put(result, block=True)
+                processed += 1
+                if processed % 50 == 0:
+                    self.log_info(f"Producer {producer_id}: {processed} queued")
             except Exception as e:
-                self.log_error(f"XML processing failed for {filename}: {e}", exc_info=True)
-                # Mark as processed even on error
-                xml_queue.append(('error', xml_id))
+                self.log_error(f"Producer {producer_id} error on {filename}: {e}", exc_info=True)
+                xml_queue.put(('error', xml_id, str(e)), block=True)
+        xml_queue.put(None)  # Sentinel
+        self.log_info(f"Producer {producer_id} done: {processed} files")
 
-        self.log_info(f"Producer {producer_id}: COMPLETED, processed {processed_count} files total")
-        # Signal that this producer is done - only send None if we're the last producer
-        # This prevents premature shutdown when multiple producers are still working
-        self.log_debug(f"Producer {producer_id}: checking if should send shutdown signal")
-        # Don't send shutdown signal here - let main thread handle it after all producers finish
-
-    def _database_consumer(self, xml_queue, result_queue, conn):
+    def _database_consumer(self, xml_queue, progress_queue, num_expected, conn):
         """Consumer thread: writes results to database (single-threaded for DuckDB safety)"""
         batch_data = []
-        total_processed = 0
-        self.log_info("Consumer thread started")
-
-        shutdown_signals_received = 0
-        last_activity_time = time.time()
-        consecutive_empty_polls = 0
-
-        while True:
-            try:
-                # Poll the deque for items (lock-free)
-                if xml_queue:
-                    item = xml_queue.popleft()
-                    last_activity_time = time.time()
-                    consecutive_empty_polls = 0
-                    self.log_debug(f"Consumer: received item from queue, queue size now: {len(xml_queue)}")
-                else:
-                    # No items available, small delay to prevent busy waiting
-                    consecutive_empty_polls += 1
-
-                    # Check for inactivity (potential deadlock) - but be more lenient
-                    if time.time() - last_activity_time > 120:  # Increased timeout
-                        self.log_error(f"Consumer thread inactive for 120 seconds, potential deadlock")
-                        self.log_error(f"Queue size: {len(xml_queue)}, batch size: {len(batch_data)}, total processed: {total_processed}, consecutive empty polls: {consecutive_empty_polls}")
-                        # Check database connection health
-                        try:
-                            conn.execute("SELECT 1").fetchone()
-                            self.log_error("Database connection appears healthy")
-                        except Exception as db_e:
-                            self.log_error(f"Database connection error: {db_e}")
-                        break
-                    continue
-
-                if item is None:  # Shutdown signal
-                    shutdown_signals_received += 1
-                    self.log_info(f"Consumer received shutdown signal #{shutdown_signals_received}")
-                    if shutdown_signals_received >= 3:  # Need multiple shutdown signals
-                        self.log_info("Consumer: received all shutdown signals, exiting")
-                        break
-                    continue
-
-                if item == ('error', None):
-                    continue
-
-                if isinstance(item, tuple) and item[0] == 'error':
-                    # Mark XML as processed with error
-                    xml_id = item[1]
-                    self.log_info(f"Consumer: marking XML {xml_id} as processed with error")
-                    self.db_ops.execute_query("""
-                        UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
-                        WHERE xml_id = ?
-                    """, (2, "Processing error", xml_id))  # CURRENT_PROCESSING_VERSION = 2
-                    self.db_ops.commit()
-                    continue
-
-                # Add to batch
-                batch_data.append(item)
-                total_processed += 1
-                self.log_debug(f"Consumer: added item to batch, batch size now: {len(batch_data)}, total processed: {total_processed}")
-
-                # Process batch when it gets large enough
-                if len(batch_data) >= self.BATCH_SIZE:
-                    self.log_info(f"Consumer: STARTING batch processing of {len(batch_data)} items (total: {total_processed})")
+        total = 0
+        signals = 0
+        while signals < num_expected:
+            item = xml_queue.get(block=True)
+            if item is None:
+                signals += 1
+                xml_queue.task_done()
+                continue
+            if isinstance(item, tuple) and item[0] == 'error':
+                xml_id = item[1]
+                msg = item[2] if len(item) > 2 else "Error"
+                self.db_ops.execute_query(
+                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                    (msg, xml_id)
+                )
+                self.db_ops.commit()
+                xml_queue.task_done()
+                continue
+            batch_data.append(item)
+            total += 1
+            xml_queue.task_done()
+            if len(batch_data) >= self.BATCH_SIZE:
+                try:
                     self._bulk_insert_batch(batch_data, conn)
-                    result_queue.append(len(batch_data))  # Signal progress
-                    self.log_debug(f"Consumer: FINISHED batch processing, signaled progress")
-                    batch_data = []
+                    progress_queue.put(len(batch_data))
+                except Exception as e:
+                    self.log_error(f"Batch error: {e}", exc_info=True)
+                    progress_queue.put(-len(batch_data))
+                batch_data = []
 
-            except Exception as e:
-                self.log_error(f"Consumer error: {e}", exc_info=True)
-                # Log additional diagnostic information
-                self.log_error(f"Consumer state at error: batch_size={len(batch_data)}, total_processed={total_processed}, queue_size={len(xml_queue)}")
-                break
-
-        # Process remaining batch
+        # Final batch
         if batch_data:
-            self.log_info(f"Consumer: processing FINAL batch of {len(batch_data)} items (total: {total_processed})")
             try:
                 self._bulk_insert_batch(batch_data, conn)
-                result_queue.append(len(batch_data))
-                self.log_info(f"Consumer: FINAL batch processed successfully, signaled progress")
+                progress_queue.put(len(batch_data))
             except Exception as e:
-                self.log_error(f"Consumer: FAILED to process final batch of {len(batch_data)} items: {e}", exc_info=True)
-                # Still signal progress even on failure, but with negative value to indicate error
-                result_queue.append(-len(batch_data))
-                self.log_info(f"Consumer: Signaled progress with error indicator for final batch")
+                self.log_error(f"Final batch error: {e}", exc_info=True)
+                progress_queue.put(-len(batch_data))
 
-        self.log_info(f"Consumer: COMPLETED, processed {total_processed} total items, final batch size: {len(batch_data)}")
+        self.log_info(f"Consumer done: {total} items, {signals} signals")
 
     def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: List[str] = None) -> Tuple[str, Tuple]:
         """Build INSERT statement and values tuple from dataclass using reflection"""
@@ -567,7 +399,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                             po_box_stripped = address.po_box.strip()
                             if po_box_stripped:
                                 address.colocator = f"PO:{po_box_stripped}:{address.zip_code}"
-                        elif address.state and address.state.upper() not in DatabaseOperations.VALID_STATES:
+                        elif address.state and address.state.upper() not in VALID_STATES:
                             address.colocator = f"FA:{address.state}"
                         else:
                             address.colocator = None
@@ -600,10 +432,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         try:
             self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
 
-            # Read XML content directly from ZIP file
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                with zip_ref.open(internal_path) as f:
-                    xml_content = f.read()
+            # Read XML content directly from ZIP file using cached connection
+            xml_content = self._extract_xml_from_zip(zip_path, internal_path)
 
             self.log_debug(f"Retrieved XML content for {filename}, size: {len(xml_content)} bytes")
 
@@ -726,6 +556,36 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 tax_year=tax_year
             )
             grants.append(grant)
+    def _extract_xml_from_zip(self, zip_path: str, internal_path: str) -> bytes:
+        """Extract XML content from ZIP file using cached connection"""
+        zip_key = str(zip_path)
+
+        with ZipProcessor._zip_cache_lock:
+            if zip_key not in ZipProcessor._zip_cache:
+                # Open ZIP file and cache the connection
+                ZipProcessor._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
+                self.log_debug(f"Opened and cached ZIP connection for {zip_path}")
+
+            zip_ref = ZipProcessor._zip_cache[zip_key]
+
+        # Extract XML content from cached connection
+        with zip_ref.open(internal_path) as f:
+            return f.read()
+
+    def _extract_grants_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCGrant]:
+        """Extract grants from Form 990"""
+        grants = []
+        xml_content = BytesIO(ET.tostring(root))
+        grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
+        for grant_data in grants_data:
+            grant = DCGrant(
+                filer_ein=filer_ein,
+                filer_name="",
+                grant_ein=grant_data.get("grant_ein"),
+                grant_amt=grant_data.get("grant_amt", 0),
+                tax_year=tax_year
+            )
+            grants.append(grant)
         return grants
 
     def _extract_grants_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCGrant]:
@@ -786,259 +646,43 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
 
 class GeocodingBatchStrategy(ProcessingStrategy):
-    """Strategy for batch geocoding addresses"""
+    """Strategy for batch geocoding addresses - DEPRECATED: Use GeolocationProcessor instead"""
 
-    # Valid US state and territory abbreviations
-    VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
-
-    # State full name to abbreviation mapping
-    STATE_NAME_TO_ABBREV = {
-        'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA',
-        'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA',
-        'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA',
-        'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
-        'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO',
-        'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
-        'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH',
-        'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
-        'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT',
-        'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY',
-        'DISTRICT OF COLUMBIA': 'DC', 'PUERTO RICO': 'PR', 'VIRGIN ISLANDS': 'VI', 'GUAM': 'GU',
-        'AMERICAN SAMOA': 'AS', 'NORTHERN MARIANA ISLANDS': 'MP', 'FEDERATED STATES OF MICRONESIA': 'FM',
-        'MARSHALL ISLANDS': 'MH', 'PALAU': 'PW', 'ARMED FORCES AMERICAS': 'AA', 'ARMED FORCES EUROPE': 'AE',
-        'ARMED FORCES PACIFIC': 'AP'
-    }
-
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
-        super().__init__(db_ops, logger, log_sql)
-
-    def _normalize_state(self, state: str) -> Optional[str]:
-        """Normalize state to uppercase abbreviation, handling full names and case issues"""
-        if not state:
-            return None
-
-        # Uppercase the input
-        state_upper = state.upper().strip()
-
-        # If it's already a valid abbreviation, return it
-        if state_upper in self.VALID_STATES:
-            return state_upper
-
-        # If it's a full state name, map to abbreviation
-        if state_upper in self.STATE_NAME_TO_ABBREV:
-            return self.STATE_NAME_TO_ABBREV[state_upper]
-
-        # Not recognized
-        return None
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
+        super().__init__(db_ops, logger)
+        self.logger.warning("GeocodingBatchStrategy is deprecated. Use GeolocationProcessor instead.")
 
     def execute(self, batch: List[DCAddress]) -> int:
-        """Geolocate a batch of addresses"""
-        self.log_info(f"GeocodingBatchStrategy: Processing batch of {len(batch)} addresses")
-        addresses_to_geocode = []
-
-        for address in batch:
-            # Parse address components directly from individual fields
-            street = address.address_line1 or ""
-            city = address.city or ""
-            state = self._normalize_state(address.state or "")
-            zip_code = address.zip_code or ""
-
-            # Validate we have minimum required components
-            if not street.strip() or not city.strip() or not state or not zip_code.strip():
-                self.log_debug(f"Skipping address {address.address_id}: missing required components (street='{street}', city='{city}', state='{state}', zip='{zip_code}')")
-                continue
-
-            addresses_to_geocode.append({
-                'address_id': address.address_id,
-                'street': street.strip(),
-                'city': city.strip(),
-                'state': state,
-                'zip': zip_code.strip()
-            })
-
-        self.log_info(f"GeocodingBatchStrategy: {len(addresses_to_geocode)} addresses to geocode")
-
-        if not addresses_to_geocode:
-            self.log_info("GeocodingBatchStrategy: No addresses to geocode after filtering")
-            return 0
-
-        # Call census geocoding API
-        try:
-            import censusgeocode as cg
-
-            # Prepare batch for censusgeocode
-            batch_addresses = []
-            for addr in addresses_to_geocode:
-                batch_addresses.append({
-                    'id': addr['address_id'],
-                    'street': addr['street'],
-                    'city': addr['city'],
-                    'state': addr['state'],
-                    'zip': addr['zip']
-                })
-
-            # Geocode batch
-            self.log_info(f"GeocodingBatchStrategy: Calling censusgeocode.addressbatch() with {len(batch_addresses)} addresses")
-            results = cg.addressbatch(batch_addresses)
-            self.log_info(f"GeocodingBatchStrategy: API call completed, received {len(results)} results")
-
-            for i, result in enumerate(results):
-                addr_data = addresses_to_geocode[i]
-                address_id = addr_data['address_id']
-
-                lat = result.get('lat')
-                lon = result.get('lon')
-                if lat is not None and lon is not None and str(lat).strip() and str(lon).strip():
-                    # Success - round to nearest 10 meters (~0.0001 degrees)
-                    lat = round(float(lat), 4)
-                    lon = round(float(lon), 4)
-                    colocator = f"LL:{lat}:{lon}"
-
-                    # Insert geocoding record
-                    self.db_ops.execute_query("""
-                        INSERT INTO Geocoding (address_hash, normalized_address, latitude, longitude, geocoding_status)
-                        VALUES (?, ?, ?, ?, 'success')
-                    """, (hash(f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}"), f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}", lat, lon))
-
-                    geocoding_id = self.db_ops.insert_geocoding_record(
-                        hash(f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}"),
-                        f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}",
-                        lat, lon, 'success'
-                    )
-
-                    # Update address
-                    self.db_ops.execute_query("""
-                        UPDATE Addresses SET geocoding_id = ?, latitude = ?, longitude = ?, colocator = ?
-                        WHERE address_id = ?
-                    """, (geocoding_id, lat, lon, colocator, address_id))
-                else:
-                    # Failed
-                    self.db_ops.execute_query("""
-                        INSERT INTO Geocoding (address_hash, normalized_address, geocoding_status)
-                        VALUES (?, ?, 'failed')
-                    """, (hash(f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}"), f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}"))
-
-                    geocoding_id = self.db_ops.insert_geocoding_record(
-                        hash(f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}"),
-                        f"{addr_data['street']}, {addr_data['city']}, {addr_data['state']} {addr_data['zip']}",
-                        status='failed'
-                    )
-
-                    # Update address with failed geocoding
-                    self.db_ops.execute_query("""
-                        UPDATE Addresses SET geocoding_id = ? WHERE address_id = ?
-                    """, (geocoding_id, address_id))
-
-            self.db_ops.commit()
-            self.log_info(f"Geolocated batch of {len(addresses_to_geocode)} addresses")
-            return len(addresses_to_geocode)
-
-        except Exception as e:
-            self.log_error(f"Failed to geolocate batch: {e}", exc_info=True)
-            return 0
+        """Geolocate a batch of addresses - DEPRECATED"""
+        self.logger.warning("GeocodingBatchStrategy.execute() is deprecated. Use GeolocationProcessor.geolocate_addresses() instead.")
+        processor = GeolocationProcessor(self.db_ops)
+        return processor._geolocate_batch(batch)
 
 
 class AddressMatchingStrategy(ProcessingStrategy):
-    """Strategy for matching grants by address/colocator"""
+    """Strategy for matching grants by address/colocator - DEPRECATED: Use AddressMatcher instead"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
-        super().__init__(db_ops, logger, log_sql)
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
+        super().__init__(db_ops, logger)
+        self.logger.warning("AddressMatchingStrategy is deprecated. Use AddressMatcher instead.")
 
     def execute(self) -> int:
-        """Match grants with unknown EINs by address/colocator"""
-        # Get grants without EINs
-        result = self.db_ops.execute_query("""
-            SELECT grant_id, filer_ein, grant_amt, tax_year
-            FROM Grants
-            WHERE grant_ein IS NULL OR grant_ein = ''
-        """)
-        grants = result.fetchall()
-
-        matched_count = 0
-        for grant_tuple in grants:
-            grant_id, filer_ein, grant_amt, tax_year = grant_tuple
-            # Try to find matching charity by address
-            matched_ein = self._find_charity_by_grant_info(grant_id, filer_ein, grant_amt, tax_year)
-            if matched_ein:
-                self.db_ops.execute_query("""
-                    UPDATE Grants SET grant_ein = ? WHERE grant_id = ?
-                """, (matched_ein, grant_id))
-                matched_count += 1
-
-        self.db_ops.commit()
-        self.log_info(f"Matched {matched_count} grants by address/colocator")
-        return matched_count
-
-    def _find_charity_by_grant_info(self, grant_id: int, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
-        """Find charity EIN by grant information"""
-        # Get grant details
-        result = self.db_ops.execute_query("""
-            SELECT filer_name, grantee_name, grantee_address, grantee_zip, grantee_po_box
-            FROM Grants
-            WHERE grant_id = ?
-        """, (grant_id,))
-        grant_info = result.fetchone()
-
-        if not grant_info:
-            return None
-
-        filer_name, grantee_name, grantee_address, grantee_zip, grantee_po_box = grant_info
-
-        # Try exact address match
-        result = self.db_ops.execute_query("""
-            SELECT DISTINCT c.ein
-            FROM Charities c
-            JOIN Addresses a ON c.ein = a.ein
-            WHERE c.tax_year = ?
-            AND LOWER(TRIM(a.canonical_address)) = LOWER(TRIM(?))
-        """, (tax_year, grantee_address or ""))
-
-        row = result.fetchone()
-        if row:
-            return row[0]
-
-        # Try name + ZIP match
-        if grantee_name and grantee_zip:
-            result = self.db_ops.execute_query("""
-                SELECT DISTINCT c.ein
-                FROM Charities c
-                JOIN Addresses a ON c.ein = a.ein
-                WHERE c.tax_year = ?
-                AND LOWER(TRIM(c.filer_name)) = LOWER(TRIM(?))
-                AND a.zip_code = ?
-            """, (tax_year, grantee_name, grantee_zip))
-
-            row = result.fetchone()
-            if row:
-                return row[0]
-
-        # Try colocator match
-        if grantee_address and grantee_zip:
-            result = self.db_ops.execute_query("""
-                SELECT DISTINCT c.ein, c.colocator
-                FROM Charities c
-                JOIN Addresses a ON c.ein = a.ein
-                WHERE c.tax_year = ?
-                AND a.zip_code = ?
-                AND c.colocator LIKE 'LL:%'
-            """, (tax_year, grantee_zip))
-
-            candidates = result.fetchall()
-            for ein, colocator in candidates:
-                if colocator and colocator.startswith('LL:'):
-                    return ein
-
-        return None
+        """Match grants with unknown EINs by address/colocator - DEPRECATED"""
+        self.logger.warning("AddressMatchingStrategy.execute() is deprecated. Use AddressMatcher.match_grants_by_address() instead.")
+        matcher = AddressMatcher(self.db_ops)
+        return matcher.match_grants_by_address()
 
 
 class StubCharityCreationStrategy(ProcessingStrategy):
-    """Strategy for creating stub charities for unmatched grants"""
+    """Strategy for creating stub charities for unmatched grants - DEPRECATED: Use AddressMatcher instead"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, log_sql: bool = False):
-        super().__init__(db_ops, logger, log_sql)
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
+        super().__init__(db_ops, logger)
+        self.logger.warning("StubCharityCreationStrategy is deprecated. Use AddressMatcher instead.")
 
     def execute(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
-        """Create a stub charity record for unmatched grants"""
+        """Create a stub charity record for unmatched grants - DEPRECATED"""
+        self.logger.warning("StubCharityCreationStrategy.execute() is deprecated. Use AddressMatcher._create_stub_charity_for_grant() instead.")
         # Generate a pseudo-EIN for stub records
         stub_ein = f"STUB{hash(name + (address or '') + str(tax_year)) % 1000000000:09d}"
 
@@ -1048,7 +692,7 @@ class StubCharityCreationStrategy(ProcessingStrategy):
             return stub_ein
 
         # Create stub charity
-        from irs990processorDC import Charity as DBCharity
+        from models import Charity as DBCharity
         charity = DBCharity(
             ein=stub_ein,
             tax_year=tax_year,
@@ -1059,7 +703,7 @@ class StubCharityCreationStrategy(ProcessingStrategy):
 
         # Create address record if we have address info
         if address or zip_code:
-            from irs990processorDC import Address as DBAddress
+            from models import Address as DBAddress
             addr = DBAddress(
                 ein=stub_ein,
                 name=name or "Unknown",

@@ -9,8 +9,7 @@ from xpaths_990ez import XPATHS_990EZ
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
 from xpath_utils import find_element
 from extract_utils import canonicalize_address
-MONEY_PATTERN = re.compile(r'\$([\d,]+(?:\.\d{2})?)')
-FLOAT_PATTERN = re.compile(r'-?[\d,]+\.?\d*')
+from constants import MONEY_PATTERN, FLOAT_PATTERN
 
 def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False):
     elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)

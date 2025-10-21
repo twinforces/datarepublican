@@ -10,7 +10,7 @@ from typing import Optional, List, Tuple
 from tqdm import tqdm
 
 from database_operations import DatabaseOperations
-from irs990processorDC import Charity, Address
+from models import Charity, Address
 
 
 class AddressMatcher:

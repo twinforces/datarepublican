@@ -6,20 +6,14 @@ import logging
 from nameparser import HumanName
 from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field
 from xpaths import XPATHS_990PF, NAMESPACES
-from irs990processorDC import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
+from models import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
 from typing import Optional, List, Tuple
 
 logger = None
 log_error = None
 log_debug = None
 verbose = False
-DEBUG_EINS = set()
-
-ORG_TYPE_SUFFIXES = frozenset([
-    "Organization501c3ExemptPFInd", "Organization501c3TaxablePFInd",
-    "Organization4947a1NotExemptCharitableTrustInd", "Organization4947a1Ind",
-    "Organization4947a1TrtdPFInd"
-])
+from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES
 
 def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None):
     global logger, log_error, log_debug, verbose, DEBUG_EINS
@@ -71,8 +65,15 @@ def parse_org_type_990pf(root, field, namespaces, xml_filename, context, xpath_c
                 org_type = "4947(a)(1)"
             else:
                 org_type = "Unknown"
-                log_error("Unexpected org_type tag {} for EIN {} in {}, defaulting to Unknown", 
-                          elem.tag, context.get('filer_ein', 'Unknown'), xml_filename, 
+                log_error("Unexpected org_type tag {} for EIN {} in {}, defaulting to Unknown",
+                          elem.tag, context.get('filer_ein', 'Unknown'), xml_filename,
+                          ein=context.get('filer_ein', 'Unknown'))
+        elif elem.tag.endswith("Organization501c3ExemptPFInd"):
+            # Handle the case where the tag doesn't end with the expected suffixes but is still valid
+            org_type = "501(c)(3)"
+            if verbose:
+                log_error("Found org_type tag {} for EIN {} in {} (handled as 501(c)(3))",
+                          elem.tag, context.get('filer_ein', 'Unknown'), xml_filename,
                           ein=context.get('filer_ein', 'Unknown'))
         else:
             org_type = "Unknown"

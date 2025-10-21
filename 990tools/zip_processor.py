@@ -4,21 +4,27 @@ zip_processor.py - ZIP file processing for IRS 990 data
 
 This module handles the processing of IRS ZIP files, including
 downloading, listing contents, and registering files in the database.
+Includes ZIP file connection caching for improved performance.
 """
 
 import os
 import zipfile
+import threading
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 from tqdm import tqdm
 
 # ZipFile and XMLFile are imported from database_operations
 from database_operations import DatabaseOperations
-from irs990processorDC import ZipFile, XMLFile
+from models import ZipFile, XMLFile
 
 
 class ZipProcessor:
     """Handles ZIP file processing operations"""
+
+    # Class-level cache for ZIP file connections to avoid reopening
+    _zip_cache: Dict[str, zipfile.ZipFile] = {}
+    _zip_cache_lock = threading.Lock()
 
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
         self.db_ops = db_ops
@@ -78,7 +84,8 @@ class ZipProcessor:
             filename=zip_filename,
             file_path=str(zip_path),
             tax_year=zip_year,
-            file_size=zip_path.stat().st_size if zip_path.exists() else None
+            file_size=zip_path.stat().st_size if zip_path.exists() else None,
+            status='downloaded'
         )
 
         # Use filename + size as simple integrity check (no checksum needed)
@@ -89,10 +96,9 @@ class ZipProcessor:
         zip_id = self.db_ops.insert_zip_file(zip_file)
         print(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
 
-        # Extract XML file listing using Python zipfile (unzip has issues with these ZIP files)
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            xml_files = [f for f in zip_ref.namelist() if f.endswith('.xml')]
-        print(f"Found {len(xml_files)} XML files using Python zipfile")
+        # Extract XML file listing using cached ZIP connection
+        xml_files = self._get_xml_files_from_zip(zip_path)
+        print(f"Found {len(xml_files)} XML files using cached ZIP connection")
 
         # Batch insert all XML files for this ZIP
         xml_file_objects = []
@@ -109,9 +115,33 @@ class ZipProcessor:
             self.db_ops.bulk_insert_xml_files(xml_file_objects)
             print(f"Bulk inserted {len(xml_file_objects)} XML files for ZIP {zip_filename}")
 
-        print(f"Registered {len(xml_files)} XML files from {zip_filename}")
-
         # Update ZIP status
         self.db_ops.update_zip_status(zip_id, 'processed')
 
-        print(f"Registered {len(xml_files)} XML files from {zip_filename}")
+    def _get_xml_files_from_zip(self, zip_path: Path) -> List[str]:
+        """Get XML files from ZIP using cached connection"""
+        zip_key = str(zip_path)
+
+        with self._zip_cache_lock:
+            if zip_key not in self._zip_cache:
+                # Open ZIP file and cache the connection
+                self._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
+                print(f"Opened and cached ZIP connection for {zip_path.name}")
+
+            zip_ref = self._zip_cache[zip_key]
+
+        # Get XML files from cached connection
+        xml_files = [f for f in zip_ref.namelist() if f.endswith('.xml')]
+        return xml_files
+
+    @classmethod
+    def cleanup_zip_cache(cls):
+        """Clean up cached ZIP connections"""
+        with cls._zip_cache_lock:
+            for zip_ref in cls._zip_cache.values():
+                try:
+                    zip_ref.close()
+                except:
+                    pass  # Ignore errors during cleanup
+            cls._zip_cache.clear()
+            print("Cleaned up ZIP file cache")

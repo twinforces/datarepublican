@@ -39,17 +39,13 @@ except ImportError:
 
 # Import extracted modules
 from database_operations import DatabaseOperations
-from processing_strategy import (
-    ParallelXMLProcessingStrategy,
-    GeocodingBatchStrategy,
-    AddressMatchingStrategy,
-    StubCharityCreationStrategy
-)
+from processing_strategy import ParallelXMLProcessingStrategy
 from geolocation_processor import GeolocationProcessor
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
-from logging_utils import IRS990Logger
+from address_matcher import AddressMatcher
+from logging_utils import get_logger
 
 # Import parsing functions
 from parse_990 import parse_990
@@ -58,7 +54,7 @@ from parse_990pf import parse_990pf
 from parse_utils import parse_grants
 
 # Import dataclasses
-from irs990processorDC import Charity, Officer, Grant, Contractor, PoliticalContribution
+from models import Charity, Officer, Grant, Contractor, PoliticalContribution
 
 # Constants
 DEFAULT_DB_PATH = "irs990.duckdb"
@@ -84,7 +80,7 @@ class IRS990Processor:
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS):
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False):
         # Determine database path
         if db_path == DEFAULT_DB_PATH:
             db_path = os.path.join(final_dir, "irs990.duckdb")
@@ -100,18 +96,20 @@ class IRS990Processor:
         self.log_sql = log_sql
 
         # Setup logging
-        self.logger = IRS990Logger.setup_logger(
-            name="irs990",
-            level=logging.ERROR if quiet else (logging.DEBUG if verbose else logging.WARNING)
-        )
+        self.logger = get_logger("irs990")
+        if quiet:
+            self.logger.setLevel(logging.ERROR)
+        elif verbose:
+            self.logger.setLevel(logging.DEBUG)
+        else:
+            self.logger.setLevel(logging.WARNING)
 
         # Initialize components
-        self.db_ops = DatabaseOperations(self.db_path, log_sql=log_sql)
+        self.db_ops = DatabaseOperations(self.db_path, log_sql=log_sql, dbUI=dbUI)
         self.zip_processor = ZipProcessor(self.db_ops, zips_dir)
-        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, log_sql=log_sql, workers=workers)
+        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, workers=workers)
         self.geolocation_processor = GeolocationProcessor(self.db_ops)
-        self.address_matching_strategy = AddressMatchingStrategy(self.db_ops, self.logger, log_sql=log_sql)
-        self.stub_charity_strategy = StubCharityCreationStrategy(self.db_ops, self.logger, log_sql=log_sql)
+        self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter
         self.tsv_exporter = TSVExporter(self.db_ops, final_dir)
@@ -130,6 +128,7 @@ class IRS990Processor:
         self.quiet = quiet
         self.max_files = max_files
         self.log_sql = log_sql
+        self.dbUI = dbUI
         self.workers = workers
 
     def _init_database(self):
@@ -444,7 +443,7 @@ class IRS990Processor:
     def match_grants_by_address(self):
         """Match grants with unknown EINs by address or colocator (step 9)"""
         self.log_info("Matching grants with unknown EINs by address/colocator")
-        return self.address_matching_strategy.execute()
+        return self.address_matcher.match_grants_by_address()
 
     def _find_charity_by_address(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
         """Find charity EIN by address/colocator matching"""
@@ -487,6 +486,7 @@ def main():
     parser.add_argument("--log-sql", action="store_true", help="Enable SQL logging")
     parser.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Number of worker threads (default: {MAX_WORKERS})")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
+    parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--step", choices=["all", "zip", "xml", "address", "geolocate",
                                           "match", "percentiles", "export"],
                         default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")

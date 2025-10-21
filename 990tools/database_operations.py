@@ -22,15 +22,16 @@ import os
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(__file__))
 
-# Import all dataclasses from irs990processorDC
-from irs990processorDC import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution
+# Import all dataclasses from models package
+from models import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution
+from constants import VALID_STATES
 
 
 class DatabaseOperations:
     """Handles all DuckDB operations for IRS 990 data processing"""
 
-    # Valid US state and territory abbreviations
-    VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
+    # Class variable for SQL logging - can be set via constructor
+    log_sql: bool = False
 
     @staticmethod
     def generate_uuid_v7() -> str:
@@ -69,7 +70,7 @@ class DatabaseOperations:
         uuid_hex = f"{uuid_int:032x}"
         return f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-{uuid_hex[16:20]}-{uuid_hex[20:32]}"
 
-    def __init__(self, db_path: str, log_sql: bool = False, read_only: bool = False, memory_limit: str = "4GB", threads: int = None):
+    def __init__(self, db_path: str, log_sql: bool = False, read_only: bool = False, memory_limit: str = "4GB", threads: int = None, dbUI: bool = False):
         """
         Initialize DuckDB connection
 
@@ -81,10 +82,12 @@ class DatabaseOperations:
             threads: Number of threads for DuckDB (default: auto)
         """
         self.db_path = db_path
-        self.log_sql = log_sql
+        # Set class variable for SQL logging
+        DatabaseOperations.log_sql = log_sql
         self.read_only = read_only
         self.memory_limit = memory_limit
         self.threads = threads
+        self.dbUI = dbUI
         self.db_conn: duckdb.DuckDBPyConnection
         self._init_connection()
 
@@ -115,6 +118,15 @@ class DatabaseOperations:
         # Initialize schema if needed
         self._init_schema()
 
+        # Check for --dbUI flag and start UI if present
+        if self.dbUI:
+            try:
+                self.db_conn.execute("CALL start_ui();")
+                print("Database UI started successfully")
+            except Exception as e:
+                print(f"Failed to start database UI: {e}")
+                print("Continuing without UI...")
+
     def _init_schema(self):
         """Initialize database schema if not already present"""
         # Check if schema is already initialized
@@ -138,7 +150,7 @@ class DatabaseOperations:
 
     def execute_query(self, query: str, params: tuple = None) -> duckdb.DuckDBPyRelation:
         """Execute a query and return results"""
-        if self.log_sql:
+        if DatabaseOperations.log_sql:
             print(f"Executing: {query}")
             if params:
                 print(f"Parameters: {params}")
@@ -159,11 +171,11 @@ class DatabaseOperations:
             params: Parameters for the WHERE clause
             order_by: Optional ORDER BY clause (without the ORDER BY keyword)
             limit: Optional LIMIT clause
+            offset: Optional OFFSET clause
 
         Returns:
             List of dataclass instances
         """
-        print(f"DEBUG select_dataclass: Called with limit={limit}, offset={offset}")
         # Get table name from dataclass name (pluralize by adding 's' or 'ies')
         table_name = self._get_table_name(dataclass_type)
 
@@ -183,11 +195,9 @@ class DatabaseOperations:
 
         if limit:
             query += f" LIMIT {limit}"
-            print(f"DEBUG select_dataclass: Added LIMIT {limit} to query")
 
         if offset:
             query += f" OFFSET {offset}"
-            print(f"DEBUG select_dataclass: Added OFFSET {offset} to query")
 
         # Execute query
         result = self.execute_query(query, params)
@@ -323,27 +333,14 @@ class DatabaseOperations:
     # Address operations
     def insert_address(self, address: Address) -> str:
         """Insert Address into database, avoiding duplicates. Returns UUID."""
-        # Use the colocator that was set by __post_init__ instead of recalculating
-        colocator = address.colocator
-
-        # Ensure canonical_address is built from components if not provided
-        canonical_address = address.canonical_address
-
         # Check for existing address before insertion
         existing_check = self.execute_query("""
             SELECT address_id FROM Addresses
             WHERE ein = ? AND canonical_address = ?
-        """, (address.ein, canonical_address)).fetchone()
+        """, (address.ein, address.canonical_address)).fetchone()
 
         if existing_check:
-            print(f"DEBUG insert_address: DUPLICATE FOUND - Address for EIN {address.ein} with canonical_address '{canonical_address}' already exists (address_id: {existing_check[0]}). Skipping insertion.")
             return existing_check[0]  # Return existing address_id
-
-        # Debug logging
-        if hasattr(address, 'ein') and address.ein:
-            print(f"DEBUG: Inserting NEW address for EIN {address.ein}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', po_box='{address.po_box}', canonical='{canonical_address}', colocator='{colocator}'")
-            # Log the final colocator value being inserted
-            print(f"DEBUG insert_address: Final colocator value being inserted: '{colocator}' (from address.colocator)")
 
         address_id = self.generate_uuid_v7()
         sql = """
@@ -353,23 +350,10 @@ class DatabaseOperations:
         """
         values = (address_id, address.ein, address.name, getattr(address, 'address_line1', None), getattr(address, 'address_line2', None),
                   getattr(address, 'city', None), getattr(address, 'state', None),
-                  address.zip_code, address.po_box, canonical_address,
-                  address.address_type, address.geocoding_id, address.latitude, address.longitude, colocator)
+                  address.zip_code, address.po_box, address.canonical_address,
+                  address.address_type, address.geocoding_id, address.latitude, address.longitude, address.colocator)
 
-        # Log the SQL statement and values
-        print(f"DEBUG insert_address: SQL: {sql.strip()}")
-        print(f"DEBUG insert_address: Values: {values}")
-
-        result = self.execute_query(sql, values)
-
-        # Check if the insert actually happened (DuckDB INSERT OR IGNORE returns affected rows)
-        # For DuckDB, we need to check the result differently
-        try:
-            # Try to get the row count affected
-            affected_rows = result.fetchall()  # This might not work for INSERT
-            print(f"DEBUG insert_address: Query executed, result: {affected_rows}")
-        except:
-            print(f"DEBUG insert_address: Query executed (unable to get affected rows)")
+        self.execute_query(sql, values)
 
         # Verify the address was actually inserted
         verify_check = self.execute_query("""
@@ -378,58 +362,16 @@ class DatabaseOperations:
         """, (address_id,)).fetchone()
 
         if verify_check:
-            print(f"DEBUG insert_address: SUCCESS - Address inserted with address_id: {address_id}")
             address.address_id = address_id
             self.commit()
             return address_id
         else:
-            print(f"DEBUG insert_address: FAILURE - Address was not inserted despite no duplicate found. Checking for constraint violations...")
-            # Check for any constraint issues by trying a simple select
-            constraint_check = self.execute_query("""
-                SELECT COUNT(*) FROM Addresses
-                WHERE ein = ? AND canonical_address = ?
-            """, (address.ein, canonical_address)).fetchone()
-            print(f"DEBUG insert_address: After failed insert, found {constraint_check[0]} existing addresses with same ein+canonical_address")
             return None
 
     def get_addresses_for_geocoding(self, limit: int = None, offset: int = 0) -> List[Address]:
         """Get addresses that need geocoding, with optional batching support"""
-        print(f"DEBUG get_addresses_for_geocoding: Called with limit={limit}, offset={offset}")
-        # DEBUG: First get overall statistics
-        total_count = self.execute_query("SELECT COUNT(*) FROM Addresses").fetchone()[0]
-        null_geocoding_count = self.execute_query("SELECT COUNT(*) FROM Addresses WHERE geocoding_id IS NULL").fetchone()[0]
-        po_box_condition_count = self.execute_query("SELECT COUNT(*) FROM Addresses WHERE geocoding_id IS NULL AND (po_box IS NULL OR po_box = '')").fetchone()[0]
-
-        print(f"DEBUG get_addresses_for_geocoding: Total addresses: {total_count}")
-        print(f"DEBUG get_addresses_for_geocoding: Addresses with NULL geocoding_id: {null_geocoding_count}")
-        print(f"DEBUG get_addresses_for_geocoding: Addresses meeting geocoding criteria (no PO box): {po_box_condition_count}")
-        print(f"DEBUG get_addresses_for_geocoding: Addresses excluded by PO box condition: {null_geocoding_count - po_box_condition_count}")
-
-        # DEBUG: Check why addresses are excluded
-        if null_geocoding_count > 0 and po_box_condition_count == 0:
-            excluded_by_po_box = self.execute_query("""
-                SELECT COUNT(*) FROM Addresses
-                WHERE geocoding_id IS NULL AND po_box IS NOT NULL AND po_box != ''
-            """).fetchone()[0]
-            print(f"DEBUG get_addresses_for_geocoding: Excluded by PO box condition: {excluded_by_po_box}")
-
-            # Sample of excluded addresses
-            excluded_sample = self.execute_query("""
-                SELECT address_id, address_line1, address_line2, city, state, zip_code, po_box, geocoding_id
-                FROM Addresses
-                WHERE geocoding_id IS NULL
-                LIMIT 5
-            """).fetchall()
-            print(f"DEBUG get_addresses_for_geocoding: Sample excluded addresses: {excluded_sample}")
-
         where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '')"
-        print(f"DEBUG get_addresses_for_geocoding: Calling select_dataclass with limit={limit}, offset={offset}")
-        addresses = self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
-
-        print(f"DEBUG get_addresses_for_geocoding: Final query returned {len(addresses)} addresses (limit={limit}, offset={offset})")
-        if addresses:
-            print(f"DEBUG get_addresses_for_geocoding: Sample addresses: {addresses[:3]}")
-        return addresses
+        return self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
 
     def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: str = None):
         """Update address with geocoding information"""
@@ -450,10 +392,6 @@ class DatabaseOperations:
             """, (colocator, address_id))
         self.commit()
 
-        # Debug logging
-        if geocoding_id is not None or colocator is not None:
-            print(f"DEBUG update_address_geocoding: Updated address {address_id} with geocoding_id={geocoding_id}, colocator={colocator}")
-
     def update_address_po_box_and_colocator(self, address_id: str, po_box: str, colocator: str):
         """Update address with PO Box and colocator information"""
         self.execute_query("""
@@ -461,7 +399,6 @@ class DatabaseOperations:
             WHERE address_id = ?
         """, (po_box, colocator, address_id))
         self.commit()
-        print(f"DEBUG update_address_po_box_and_colocator: Updated address {address_id} with po_box='{po_box}', colocator='{colocator}'")
 
     # Charity operations
     def insert_charity(self, charity: Charity) -> str:
@@ -496,19 +433,17 @@ class DatabaseOperations:
         """Update charity percentile rankings"""
         self.execute_query("""
             UPDATE Charities SET
-                comp_ptile_value = ?,
-                travel_ptile_value = ?,
-                conferences_ptile_value = ?,
-                grants_ptile_value = ?,
-                foreign_expenses_ptile_value = ?
+                comp_ptile = ?,
+                travel_ptile = ?,
+                conferences_ptile = ?,
+                grants_ptile = ?,
+                foreign_expenses_ptile = ?
             WHERE ein = ? AND tax_year = ?
         """, (comp_ptile, travel_ptile, conferences_ptile, grants_ptile, foreign_ptile, ein, tax_year))
         self.commit()
 
     def get_charities_for_percentiles(self) -> List[Tuple]:
         """Get charities for percentile calculation"""
-        # This method returns specific fields as tuples, not Charity instances
-        # So we keep the original implementation
         result = self.execute_query("""
             SELECT org_type, tax_year, ein, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct
             FROM Charities
@@ -559,15 +494,6 @@ class DatabaseOperations:
     # Officer operations
     def insert_officer(self, officer: Officer) -> str:
         """Insert Officer into database. Returns UUID."""
-        # Debug: Validate charity_id before insertion
-        if officer.charity_id is None or officer.charity_id <= 0:
-            raise ValueError(f"Invalid charity_id {officer.charity_id} for officer {officer.first_name} {officer.last_name}")
-
-        # Debug: Check if charity_id exists in Charities table
-        result = self.execute_query("SELECT 1 FROM Charities WHERE charity_id = ?", (officer.charity_id,))
-        if not result.fetchone():
-            raise ValueError(f"charity_id {officer.charity_id} does not exist in Charities table for officer {officer.first_name} {officer.last_name}")
-
         officer_id = self.generate_uuid_v7()
         self.execute_query("""
             INSERT OR REPLACE INTO Officers (officer_id, charity_id, first_name, last_name, compensation, tax_year)
@@ -670,7 +596,6 @@ class DatabaseOperations:
 
         result = self.execute_query(query).fetchone()
         if result:
-            # DuckDB returns tuples, not dict-like objects
             return {
                 'total_charities': result[0],
                 'avg_expenses': result[1],
@@ -682,7 +607,6 @@ class DatabaseOperations:
 
     def get_top_grant_recipients(self, limit: int = 10) -> List[Tuple]:
         """Get top grant recipients by total amount"""
-        # This method performs aggregation, so we keep the original implementation
         result = self.execute_query("""
             SELECT grant_ein, SUM(grant_amt) as total_grants, COUNT(*) as grant_count
             FROM Grants
@@ -717,22 +641,17 @@ class DatabaseOperations:
         # Get table sizes
         table_sizes = self.execute_query("""
             SELECT table_name,
-                   estimated_size as size_bytes,
-                   ROUND(estimated_size / 1024.0 / 1024.0, 2) as size_mb
+                    estimated_size as size_bytes,
+                    ROUND(estimated_size / 1024.0 / 1024.0, 2) as size_mb
             FROM duckdb_tables()
             WHERE table_name IN ('Charities', 'Grants', 'Addresses', 'Officers', 'Geocoding')
         """).fetchall()
 
         stats['table_sizes'] = {row[0]: {'bytes': row[1], 'mb': row[2]} for row in table_sizes}
 
-        # Get query performance info
-        try:
-            # This would require PRAGMA statements or system tables
-            # For now, return basic stats
-            stats['memory_usage'] = self.memory_limit
-            stats['threads'] = self.threads or 'auto'
-        except:
-            pass
+        # Get basic stats
+        stats['memory_usage'] = self.memory_limit
+        stats['threads'] = self.threads or 'auto'
 
         return stats
 

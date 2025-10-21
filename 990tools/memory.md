@@ -101,8 +101,10 @@
 - **Verbose Logging**: Detailed progress and performance metrics
 
 ### Best Practices
+- Read https://raw.githubusercontent.com/twinforces/grok-prompts/refs/heads/better-code/better_code.j2 for coding instructions.
 - Add comprehensive tests for new functionality
 - Include performance benchmarks for optimizations
 - Maintain backward compatibility
 - Update documentation for changes
 - Monitor error logs and performance metrics regularly
+- The live database is in /Volumes/Data/final/irs990.duckdb always use that if you want real data. 

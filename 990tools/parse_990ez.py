@@ -7,21 +7,14 @@ import re
 from nameparser import HumanName
 from parse_utils import parse_int_field, parse_string_field, parse_schedule, clean_name, MONEY_PATTERN, parse_float_field
 from xpaths_990ez import XPATHS_990EZ, NAMESPACES
-from irs990processorDC import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
+from models import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
 from typing import Optional, List, Tuple
 
 logger = None
 log_error = None
 log_debug = None
 verbose = False
-DEBUG_EINS = set()
-
-ORG_TYPE_SUFFIXES = frozenset([
-    "Organization501c3Ind", "Organization501c4Ind", "Organization501c5Ind",
-    "Organization501c6Ind", "Organization501c7Ind", "Organization501c8Ind",
-    "Organization501c9Ind", "Organization501c10Ind", "Organization501c19Ind",
-    "Organization501c12Ind", "Organization501c15Ind", "Organization501c25Ind"
-])
+from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES, TRAVEL_KEYWORDS, CONFERENCE_KEYWORDS
 
 def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None):
     global logger, log_error, log_debug, verbose, DEBUG_EINS
@@ -210,15 +203,39 @@ def parse_travel_990ez(root, field, namespaces, xml_filename, context, xpath_cac
         desc = parse_string_field(elem, XPATHS_990EZ, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
         if desc is not None:
             desc_text = desc.upper()
-            if "TRAVEL" in desc_text:
+            # Check for travel keywords anywhere in the description
+            has_travel_keywords = any(keyword in desc_text for keyword in TRAVEL_KEYWORDS)
+            if has_travel_keywords:
+                # Look for any money pattern in the description
                 match = MONEY_PATTERN.search(desc)
                 if match:
-                    amount = int(parse_float_field(match.group(1)))
-                    total += amount
-                    if verbose:
-                        log_error("Parsed travel_amt ${} from Schedule O in {}",
-                                  amount, xml_filename,
+                    try:
+                        amount = int(parse_float_field(match.group(1)))
+                        total += amount
+                        if verbose:
+                            log_error("Parsed travel_amt ${} from Schedule O in {}",
+                                      amount, xml_filename,
+                                      ein=context.get('filer_ein', 'Unknown'))
+                    except IndexError:
+                        log_error("Failed to parse travel amount from '{}' in {}",
+                                  desc, xml_filename,
                                   ein=context.get('filer_ein', 'Unknown'))
+                else:
+                    # If no money pattern found but keywords present, try to extract any number
+                    # Look for patterns like "AMOUNT: $1234" or just "$1234"
+                    alt_match = re.search(r'(?:AMOUNT:\s*)?\$?([\d,]+\.?\d*)', desc, re.IGNORECASE)
+                    if alt_match:
+                        try:
+                            amount = int(parse_float_field(alt_match.group(1)))
+                            total += amount
+                            if verbose:
+                                log_error("Parsed travel_amt ${} (alt pattern) from Schedule O in {}",
+                                          amount, xml_filename,
+                                          ein=context.get('filer_ein', 'Unknown'))
+                        except (ValueError, IndexError):
+                            log_error("Failed to parse travel amount from '{}' in {}",
+                                      desc, xml_filename,
+                                      ein=context.get('filer_ein', 'Unknown'))
     return total
 
 def parse_conferences_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
@@ -237,15 +254,39 @@ def parse_conferences_990ez(root, field, namespaces, xml_filename, context, xpat
         desc = parse_string_field(elem, XPATHS_990EZ, "schedule_o_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
         if desc is not None:
             desc_text = desc.upper()
-            if "CONFERENCE" in desc_text or "MEETING" in desc_text:
+            # Check for conference/meeting keywords anywhere in the description
+            has_conference_keywords = any(keyword in desc_text for keyword in CONFERENCE_KEYWORDS)
+            if has_conference_keywords:
+                # Look for any money pattern in the description
                 match = MONEY_PATTERN.search(desc)
                 if match:
-                    amount = int(parse_float_field(match.group(1)))
-                    total += amount
-                    if verbose:
-                        log_error("Parsed conferences_amt ${} from Schedule O in {}",
-                                  amount, xml_filename,
+                    try:
+                        amount = int(parse_float_field(match.group(1)))
+                        total += amount
+                        if verbose:
+                            log_error("Parsed conferences_amt ${} from Schedule O in {}",
+                                      amount, xml_filename,
+                                      ein=context.get('filer_ein', 'Unknown'))
+                    except IndexError:
+                        log_error("Failed to parse conference amount from '{}' in {}",
+                                  desc, xml_filename,
                                   ein=context.get('filer_ein', 'Unknown'))
+                else:
+                    # If no money pattern found but keywords present, try to extract any number
+                    # Look for patterns like "AMOUNT: $1234" or just "$1234"
+                    alt_match = re.search(r'(?:AMOUNT:\s*)?\$?([\d,]+\.?\d*)', desc, re.IGNORECASE)
+                    if alt_match:
+                        try:
+                            amount = int(parse_float_field(alt_match.group(1)))
+                            total += amount
+                            if verbose:
+                                log_error("Parsed conferences_amt ${} (alt pattern) from Schedule O in {}",
+                                          amount, xml_filename,
+                                          ein=context.get('filer_ein', 'Unknown'))
+                        except (ValueError, IndexError):
+                            log_error("Failed to parse conference amount from '{}' in {}",
+                                      desc, xml_filename,
+                                      ein=context.get('filer_ein', 'Unknown'))
     return total
 
 def parse_total_assets_990ez(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
@@ -302,7 +343,7 @@ def parse_address_990ez(root, xml_filename, context, xpath_cache, log_error=log_
         log_error("Failed to parse address for EIN %s in %s: %s", context.get('filer_ein', 'Unknown'), xml_filename, str(e), ein=context.get('filer_ein', 'Unknown'))
         return None
 
-def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None) -> Tuple[Optional[DCCharity], List[DCOfficer], List[DCGrant], List[DCContractor], List[DCPoliticalContribution], Optional[DCAddress]]:
+def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None):
     namespaces = {'irs': 'http://www.irs.gov/efile'}
     context = {
         'filer_ein': filer_ein,
@@ -489,7 +530,7 @@ def main():
             break
     filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
-    charity, officers = parse_990ez(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
+    charity, officers, grants, contractors, contributions, address = parse_990ez(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
     if charity:
         # For backward compatibility, create a row-like output
         row = [

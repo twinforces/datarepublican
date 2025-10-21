@@ -31,7 +31,7 @@ from xpaths_990pf import XPATHS_990PF
 from database_operations import DatabaseOperations
 
 # Constants
-DEBUG_EINS = set()
+from constants import DEBUG_EINS
 TSV_COLUMNS = [
     "tax_year", "filer_ein", "filer_name", "business_name_line1", "business_name_line2", "receipt_amt", "govt_amt", "contrib_amt", "org_type",
     "total_exp", "prog_exp", "travel_amt", "conferences_amt", "officer_comp", "comp_pct", "comp_ptile",

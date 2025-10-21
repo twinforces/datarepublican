@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from xml_processor import XMLProcessor
 from database_operations import DatabaseOperations
-from irs990processorDC import Charity, Officer, Grant, Contractor, PoliticalContribution
+from models import Charity, Officer, Grant, Contractor, PoliticalContribution
 
 def create_test_database(db_path):
     """Create a test database with the required schema"""
