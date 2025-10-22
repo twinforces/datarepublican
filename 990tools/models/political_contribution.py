@@ -8,6 +8,7 @@ Political contributions represent payments made to political organizations.
 
 from dataclasses import dataclass
 from typing import Optional
+from models.address import Address
 
 
 @dataclass
@@ -27,6 +28,22 @@ class PoliticalContribution:
     def is_large_contribution(self) -> bool:
         """Check if contribution exceeds $10,000"""
         return self.amount > 10000.0
+
+    def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
+                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Address:
+        """Build an Address dataclass record owned by this political contribution"""
+        address = Address(
+            ein=None,  # Political contributions may not have EINs
+            name=self.recipient,
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            address_type="politicalcontribution",
+            owner_id=self.political_id  # Use the integer ID for political contributions
+        )
+        return address
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""

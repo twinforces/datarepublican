@@ -4,6 +4,14 @@ models/address.py - Address data model
 
 This module contains the Address dataclass and related business logic.
 Addresses represent physical locations associated with charities and other entities.
+
+Colocator Format:
+  LL:<lat>:<long>     - Latitude and longitude of the address, starts empty until geocoded
+  EIN:<EIN>           - Used for grants that provide an EIN so we don't need to geolocate an Address
+  PO:<po_box>:<zip5> - Used for addresses that are PO Boxes. No need to geolocate, it would be the post office anyways
+  FA:<countrycode>    - Used for foreign addresses
+
+This allows downstream database joins by location.
 """
 
 from dataclasses import dataclass, field
@@ -26,6 +34,7 @@ class Address:
     zip4: Optional[str] = None  # Last 4 digits
     po_box: Optional[str] = None
     address_type: str = "filer"  # filer, grant_recipient, etc.
+    owner_id: Optional[str] = None  # Loose relationship to owning entity (EIN or UUID)
     geocoding_id: Optional[int] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
@@ -86,6 +95,7 @@ class Address:
             'zip4': self.zip4,
             'po_box': self.po_box,
             'address_type': self.address_type,
+            'owner_id': self.owner_id,
             'geocoding_id': self.geocoding_id,
             'latitude': self.latitude,
             'longitude': self.longitude,

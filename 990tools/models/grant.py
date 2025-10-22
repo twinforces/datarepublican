@@ -6,22 +6,24 @@ This module contains the Grant dataclass and related business logic.
 Grants represent charitable contributions made by filers to other organizations.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+from uuid7 import generate_uuid_v7
+from models.address import Address
 
 
 @dataclass
 class Grant:
     """Represents a charitable grant from one organization to another"""
 
-    grant_id: Optional[int] = None
+    grant_id: Optional[str] = field(default=None, init=False)
     filer_ein: str = ""
     filer_name: str = ""
     grant_ein: Optional[str] = None
     grant_amt: float = 0.0
     tax_year: int = 0
-    filer_colocator: Optional[str] = None
-    grantee_colocator: Optional[str] = None
+    grantee_name: Optional[str] = None
+    colocator: Optional[str] = None
 
     def is_large_grant(self) -> bool:
         """Check if grant amount exceeds $100,000"""
@@ -29,7 +31,30 @@ class Grant:
 
     def is_foreign_grant(self) -> bool:
         """Check if grant is to a foreign recipient"""
-        return self.grant_ein.startswith('99') or self.grant_ein == '999'
+        return self.grant_ein and (self.grant_ein.startswith('99') or self.grant_ein == '999')
+
+    def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
+                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Address:
+        """Build an Address dataclass record owned by this grant"""
+        address = Address(
+            ein=self.grant_ein,
+            name=self.grantee_name or "Unknown Grantee",
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            address_type="grant",
+            owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
+        )
+        return address
+
+    @property
+    def id(self) -> str:
+        """Get the primary key, creating it if necessary"""
+        if self.grant_id is None:
+            self.grant_id = generate_uuid_v7()
+        return self.grant_id
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
@@ -40,6 +65,6 @@ class Grant:
             'grant_ein': self.grant_ein,
             'grant_amt': self.grant_amt,
             'tax_year': self.tax_year,
-            'filer_colocator': self.filer_colocator,
-            'grantee_colocator': self.grantee_colocator
+            'grantee_name': self.grantee_name,
+            'colocator': self.colocator
         }

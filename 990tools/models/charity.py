@@ -8,13 +8,18 @@ Charities represent the main IRS 990 filers and their financial information.
 
 from dataclasses import dataclass, field
 from typing import Optional
+from uuid7 import generate_uuid_v7
+from models.address import Address
+from models.grant import Grant
+from models.contractor import Contractor
+from models.political_contribution import PoliticalContribution
 
 
 @dataclass
 class Charity:
     """Represents a charity organization and its IRS 990 filing data"""
 
-    charity_id: Optional[int] = None
+    charity_id: Optional[str] = field(default=None, init=False)
     ein: str = ""
     tax_year: int = 0
     filer_name: str = ""
@@ -67,6 +72,63 @@ class Charity:
     def is_high_grift_risk(self) -> bool:
         """Check if charity has high grift risk indicators"""
         return self.grift_ratio and self.grift_ratio > 10
+
+    def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
+                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Address:
+        """Build an Address dataclass record owned by this charity"""
+        address = Address(
+            ein=self.ein,
+            name=self.filer_name or "Unknown",
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            address_type="charity",
+            owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
+        )
+        return address
+
+    def build_grant(self, grant_ein: Optional[str] = None, grant_amt: float = 0.0,
+                    grantee_name: Optional[str] = None) -> Grant:
+        """Build a Grant dataclass record owned by this charity"""
+        grant = Grant(
+            filer_ein=self.ein,
+            filer_name=self.filer_name or "Unknown",
+            grant_ein=grant_ein,
+            grant_amt=grant_amt,
+            tax_year=self.tax_year,
+            grantee_name=grantee_name
+        )
+        return grant
+
+    def build_contractor(self, name: str = "", amount: float = 0.0, ein: Optional[str] = None) -> Contractor:
+        """Build a Contractor dataclass record owned by this charity"""
+        contractor = Contractor(
+            filer_ein=self.ein,
+            name=name,
+            amount=amount,
+            ein=ein,
+            tax_year=self.tax_year
+        )
+        return contractor
+
+    def build_political_contribution(self, recipient: str = "", amount: float = 0.0) -> PoliticalContribution:
+        """Build a PoliticalContribution dataclass record owned by this charity"""
+        contribution = PoliticalContribution(
+            filer_ein=self.ein,
+            recipient=recipient,
+            amount=amount,
+            tax_year=self.tax_year
+        )
+        return contribution
+
+    @property
+    def id(self) -> str:
+        """Get the primary key, creating it if necessary"""
+        if self.charity_id is None:
+            self.charity_id = generate_uuid_v7()
+        return self.charity_id
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
