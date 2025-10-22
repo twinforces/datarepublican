@@ -14,12 +14,13 @@ from nameparser import HumanName
 from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field
 from models import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
 from typing import Optional, List, Tuple, Dict, Any, Callable
-from logging_utils import get_logger, log_info, log_error, log_debug
+from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
 
 logger = None
 log_error = None
 log_debug = None
 verbose = False
+quiet = False
 from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES
 
 
@@ -31,38 +32,29 @@ class BaseParser:
         self.XPATHS = xpaths_dict
         self.NAMESPACES = namespaces
 
-    def set_logger(self, new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None):
+    def set_logger(self, new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None, is_quiet=False):
         """Set logger functions for the parser"""
-        global logger, log_error, log_debug, verbose, DEBUG_EINS
+        global logger, log_error, log_debug, verbose, quiet, DEBUG_EINS
         logger = new_logger
         log_error = new_log_error
         log_debug = new_log_debug or new_log_error  # fallback to log_error if log_debug not provided
         verbose = is_verbose
+        quiet = is_quiet
         DEBUG_EINS = debug_eins if debug_eins is not None else set()
 
     def stub_log_error(self, msg_format, *args, ein=None, exc_info=False):
-        """Stub log_error function"""
+        """Fallback stub that uses proper logging with location info"""
         global logger
         if logger is None:
-            import logging
-            logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-            logger = logging.getLogger(__name__)
-        if exc_info:
-            logger.info(msg_format.format(*args) if args else msg_format, exc_info=exc_info)
-        else:
-            logger.error(msg_format.format(*args) if args else msg_format)
+            logger = get_logger(__name__)
+        proper_log_error(logger, msg_format.format(*args) if args else msg_format, ein=ein, exc_info=exc_info)
 
     def stub_log_debug(self, msg_format, *args, ein=None, exc_info=False):
-        """Stub log_debug function"""
+        """Fallback stub that uses proper logging with location info"""
         global logger
         if logger is None:
-            import logging
-            logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-            logger = logging.getLogger(__name__)
-        if exc_info:
-            logger.debug(msg_format.format(*args) if args else msg_format, exc_info=exc_info)
-        else:
-            logger.debug(msg_format.format(*args) if args else msg_format)
+            logger = get_logger(__name__)
+        proper_log_debug(logger, msg_format.format(*args) if args else msg_format, ein=ein, exc_info=exc_info)
 
     # Initialize stub functions if not set
     if log_error is None:
@@ -108,15 +100,16 @@ class BaseParser:
                     })
                     total += value
 
-                    if verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS:
+                    if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet:
                         log_error("Parsed officer {} {} compensation: ${} for EIN {} in {}",
                                   first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename,
                                   ein=context.get('filer_ein', 'Unknown'))
 
             if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
-                log_error("Suspicious officer_comp ${} exceeds total_exp ${} in {}",
-                          total, context.get('total_exp', 0), xml_filename,
-                          ein=context.get('filer_ein', 'Unknown'))
+                if not quiet:
+                    log_error("Suspicious officer_comp ${} exceeds total_exp ${} in {}",
+                              total, context.get('total_exp', 0), xml_filename,
+                              ein=context.get('filer_ein', 'Unknown'))
                 total = 0
                 officer_entries = []
 
@@ -167,7 +160,179 @@ class BaseParser:
         """Parse filer name"""
         return parse_string_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="Unknown")
 
-    def parse_address(self, root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+    def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
+        """Parse grants, contractors, and political contributions"""
+        from parse_utils import parse_string_field, parse_int_field
+        from xpaths import GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
+        from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
+
+        grants = []
+        contractors = []
+        contributions = []
+        addresses = []  # For recipient addresses
+
+        # Parse grants - common logic for 990, 990EZ, 990PF
+        if self.form_type in ["990", "990EZ", "990PF"]:
+            grant_elements = []
+            for xpath in GRANT_XPATHS.get(self.form_type, []):
+                result = xpath(root)
+                grant_elements.extend(result)
+
+            for grant_elem in grant_elements:
+                # Parse grant recipient EIN
+                grant_ein = None
+                for ein_xpath in GRANT_EIN_XPATHS:
+                    try:
+                        ein_result = ein_xpath(grant_elem)
+                        if ein_result:
+                            raw_ein = ein_result[0].text.strip()
+                            if raw_ein.isdigit():
+                                grant_ein = f"{int(raw_ein):09d}"
+                            break
+                    except:
+                        continue
+
+                # Parse grant recipient name
+                grant_name = None
+                for name_xpath in GRANT_NAME_XPATHS:
+                    try:
+                        name_result = name_xpath(grant_elem)
+                        if name_result:
+                            grant_name = name_result[0].text.strip()
+                            break
+                    except:
+                        continue
+
+                # Parse grant amount
+                grant_amount = 0
+                for amount_xpath in GRANT_AMOUNT_XPATHS:
+                    try:
+                        amount_result = amount_xpath(grant_elem)
+                        if amount_result:
+                            amount_text = amount_result[0].text.strip()
+                            try:
+                                grant_amount = int(float(amount_text.replace(',', '')))
+                                break
+                            except (ValueError, AttributeError):
+                                continue
+                    except:
+                        continue
+
+                if grant_amount > 0:
+                    # Set colocator based on EIN if available
+                    grantee_colocator = f"EIN:{grant_ein}" if grant_ein else None
+
+                    # Create grant record using charity factory method
+                    grant = charity.build_grant(
+                        grant_ein=grant_ein,
+                        grant_amt=grant_amount,
+                        grantee_name=grant_name
+                    )
+                    grants.append(grant)
+
+                    # Parse recipient address for grants (especially for 990PF)
+                    if self.form_type == "990PF":
+                        try:
+                            # Look for RecipientUSAddress in the grant element
+                            addr_elem = grant_elem.find(".//irs:RecipientUSAddress", namespaces=NAMESPACES)
+                            if addr_elem is not None:
+                                addr_line1 = addr_elem.find("irs:AddressLine1Txt", namespaces=NAMESPACES)
+                                city = addr_elem.find("irs:CityNm", namespaces=NAMESPACES)
+                                state = addr_elem.find("irs:StateAbbreviationCd", namespaces=NAMESPACES)
+                                zip_code = addr_elem.find("irs:ZIPCd", namespaces=NAMESPACES)
+
+                                if any([addr_line1, city, state, zip_code]):
+                                    recipient_address = DCAddress(
+                                        ein=grant_ein or f"grant_{len(addresses)}",
+                                        name=grant_name or "Unknown Grant Recipient",
+                                        address_line1=addr_line1.text.strip() if addr_line1 is not None else None,
+                                        city=city.text.strip() if city is not None else None,
+                                        state=state.text.strip() if state is not None else None,
+                                        zip_code=zip_code.text.strip() if zip_code is not None else None,
+                                        address_type="grant",
+                                        owner_id=grant.id if grant else None
+                                    )
+                                    addresses.append(recipient_address)
+                        except Exception as e:
+                            if not quiet:
+                                log_error(f"Failed to parse grant recipient address: {e}", ein=context.get('filer_ein', 'Unknown'))
+
+        # Parse political contributions - for 990 and 990EZ
+        if self.form_type in ["990", "990EZ"]:
+            contribution_elements = []
+            for xpath in SCHEDULE_C_XPATHS.get(self.form_type, []):
+                result = xpath(root)
+                contribution_elements.extend(result)
+
+            for contrib_elem in contribution_elements:
+                # Parse contribution recipient
+                recipient = None
+                for recipient_xpath in SCHEDULE_C_RECIPIENT_XPATHS:
+                    try:
+                        recipient_result = recipient_xpath(contrib_elem)
+                        if recipient_result:
+                            recipient = recipient_result[0].text.strip()
+                            break
+                    except:
+                        continue
+
+                # Parse contribution amount - try multiple fields
+                amount = 0
+                for amount_xpath in SCHEDULE_C_AMOUNT_XPATHS:
+                    try:
+                        amount_result = amount_xpath(contrib_elem)
+                        if amount_result:
+                            amount_text = amount_result[0].text.strip()
+                            try:
+                                amount = int(float(amount_text.replace(',', '')))
+                                break
+                            except (ValueError, AttributeError):
+                                continue
+                    except:
+                        continue
+
+                # Also try PoliticalExpendituresAmt directly
+                if amount == 0:
+                    try:
+                        pol_exp_elem = contrib_elem.find(".//irs:PoliticalExpendituresAmt", namespaces=NAMESPACES)
+                        if pol_exp_elem is not None and pol_exp_elem.text:
+                            amount = int(float(pol_exp_elem.text.replace(',', '')))
+                    except:
+                        pass
+
+                if amount > 0:
+                    # Create political contribution record using charity factory method
+                    contribution = charity.build_political_contribution(
+                        recipient=recipient or "Unknown Political Recipient",
+                        amount=amount
+                    )
+                    contributions.append(contribution)
+
+        # Parse contractors - for 990PF forms (ContractorPaidOver50kCnt)
+        if self.form_type == "990PF":
+            # Parse contractor count from ContractorPaidOver50kCnt
+            contractor_count = 0
+            try:
+                count_elem = root.find(".//irs:ContractorPaidOver50kCnt", namespaces=NAMESPACES)
+                if count_elem is not None and count_elem.text:
+                    contractor_count = int(count_elem.text.strip())
+            except:
+                pass
+
+            # If there are contractors, create placeholder records
+            # Note: Detailed contractor info is not available in the XML
+            for i in range(contractor_count):
+                contractor = DCContractor(
+                    filer_ein=context["filer_ein"],
+                    name=f"Contractor {i+1}",
+                    amount=50000,  # Minimum threshold amount
+                    tax_year=context["tax_year"]
+                )
+                contractors.append(contractor)
+
+        return grants, contractors, contributions
+
+    def parse_address(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
         """Parse address information"""
         try:
             namespaces = {'irs': 'http://www.irs.gov/efile'}
@@ -180,19 +345,18 @@ class BaseParser:
 
             # Check if we have at least some address components
             if any([address_line1, address_line2, city, state, zip_code]):
-                return DCAddress(
-                    ein=context["filer_ein"],
-                    name=context["filer_name"] or "Unknown",
+                # Charity must be available to build address - restructure if needed
+                return charity.build_address(
                     address_line1=address_line1,
                     address_line2=address_line2,
                     city=city,
                     state=state,
-                    zip_code=zip_code,
-                    address_type="filer"
+                    zip_code=zip_code
                 )
             return None
         except Exception as e:
-            log_error("Failed to parse address for EIN {} in {}: {}", context.get('filer_ein', 'Unknown'), xml_filename, str(e), ein=context.get('filer_ein', 'Unknown'), exc_info=True)
+            if not quiet:
+                log_error("Failed to parse address for EIN {} in {}: {}", context.get('filer_ein', 'Unknown'), xml_filename, str(e), ein=context.get('filer_ein', 'Unknown'))
             return None
 
     def calculate_percentage(self, value, denom):
@@ -215,9 +379,10 @@ class BaseParser:
         }
 
         if context["form_type"] != self.form_type:
-            log_error("XML {} is not a Form {} (form_type: {}), skipping",
-                      xml_filename, self.form_type, context['form_type'],
-                      ein=context['filer_ein'])
+            if not quiet:
+                log_error("XML {} is not a Form {} (form_type: {}), skipping",
+                          xml_filename, self.form_type, context['form_type'],
+                          ein=context['filer_ein'])
             return None, [], [], [], [], None
 
         context["filer_name"] = self.parse_filer_name(root, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
@@ -300,21 +465,24 @@ class BaseParser:
             )
             officers.append(officer)
 
+        # Parse grants, contractors, and political contributions in alphabetical order (Common, ScheduleA-Z)
+        grants, contractors, contributions = self.parse_related_entities(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
+
         # Parse address information
-        address = self.parse_address(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+        address = self.parse_address(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
         # Debug logging for address components
-        if address and log_debug is not None:
+        if address and log_debug is not None and not quiet:
             log_debug("DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', canonical='%s'",
                       address.ein, address.address_line1, address.address_line2, address.city, address.state, address.zip_code, address.canonical_address,
                       ein=address.ein)
-        elif log_debug is not None:
+        elif log_debug is not None and not quiet:
             log_debug("DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
-        if log_debug is not None:
+        if log_debug is not None and not quiet:
             log_debug("TRACE: parse_{}() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s",
                       self.form_type.lower(), charity.ein, xml_filename, ein=charity.ein)
-        return charity, officers, [], [], [], address
+        return charity, officers, grants, contractors, contributions, address
 
     def set_form_specific_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Set form-specific fields - to be implemented by subclasses"""

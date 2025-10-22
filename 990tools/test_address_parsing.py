@@ -12,6 +12,7 @@ from pathlib import Path
 from lxml import etree
 from io import BytesIO
 import logging
+from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
 
 # Import parsing functions
 from parse_990 import parse_address_990
@@ -25,7 +26,8 @@ logger = logging.getLogger(__name__)
 def test_address_parsing(xml_file_path):
     """Test address parsing for a single XML file"""
     try:
-        logger.info(f"Testing address parsing for: {xml_file_path}")
+        if not quiet:
+            logger.info(f"Testing address parsing for: {xml_file_path}")
 
         # Read XML file
         with open(xml_file_path, 'rb') as f:
@@ -41,7 +43,8 @@ def test_address_parsing(xml_file_path):
         tax_year = extract_tax_year(root)
         filer_ein = extract_filer_ein(root)
 
-        logger.info(f"Form type: {form_type}, Tax year: {tax_year}, EIN: {filer_ein}")
+        if not quiet:
+            logger.info(f"Form type: {form_type}, Tax year: {tax_year}, EIN: {filer_ein}")
 
         # Parse address based on form type
         address = None
@@ -58,12 +61,14 @@ def test_address_parsing(xml_file_path):
         elif form_type == "990PF":
             address = parse_address_990pf(root, xml_file_path, context, {})
         else:
-            logger.error(f"Unsupported form type: {form_type}")
+            if not quiet:
+                logger.error(f"Unsupported form type: {form_type}")
             return None
 
         if address:
-            logger.info(f"Successfully parsed address: {address.canonical_address}")
-            logger.info(f"ZIP code: {address.zip_code}, Address type: {address.address_type}")
+            if not quiet:
+                logger.info(f"Successfully parsed address: {address.canonical_address}")
+                logger.info(f"ZIP code: {address.zip_code}, Address type: {address.address_type}")
             return {
                 'file': xml_file_path,
                 'form_type': form_type,
@@ -74,7 +79,8 @@ def test_address_parsing(xml_file_path):
                 'address_type': address.address_type
             }
         else:
-            logger.warning(f"No address found for {xml_file_path}")
+            if not quiet:
+                logger.warning(f"No address found for {xml_file_path}")
             return {
                 'file': xml_file_path,
                 'form_type': form_type,
@@ -86,7 +92,8 @@ def test_address_parsing(xml_file_path):
             }
 
     except Exception as e:
-        logger.error(f"Failed to parse {xml_file_path}: {e}")
+        if not quiet:
+            logger.error(f"Failed to parse {xml_file_path}: {e}")
         return {
             'file': xml_file_path,
             'form_type': 'Unknown',
@@ -145,14 +152,16 @@ def main():
     test_xmls_dir = Path("./test_xmls")
 
     if not test_xmls_dir.exists():
-        logger.error(f"Test XMLs directory not found: {test_xmls_dir}")
+        if not quiet:
+            logger.error(f"Test XMLs directory not found: {test_xmls_dir}")
         sys.exit(1)
 
     # Get all XML files
     xml_files = list(test_xmls_dir.glob("*.xml"))
     xml_files.sort()
 
-    logger.info(f"Found {len(xml_files)} XML files to test")
+    if not quiet:
+        logger.info(f"Found {len(xml_files)} XML files to test")
 
     results = []
 

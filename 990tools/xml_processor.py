@@ -18,6 +18,7 @@ from parse_utils import parse_grants
 import parse_990
 import parse_990ez
 import parse_990pf
+from logging_utils import log_info, log_error, log_debug, log_warning
 
 # Precompile XPaths used in parse_xml_file
 FORM_TYPE_XPATHS = [
@@ -37,22 +38,26 @@ FILER_EIN_XPATHS = [
 class XMLProcessor:
     """Handles XML file parsing and processing"""
 
-    def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
+    def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1, quiet: bool = False):
         self.db_ops = db_ops
         self.processing_version = processing_version
         self.logger = logging.getLogger(__name__)
+        self.quiet = quiet
 
     def process_xml_files(self, max_files: Optional[int] = None) -> int:
         """Parse XML files and extract data to dataclasses (step 5)"""
-        self.logger.info("Processing XML files and extracting data")
+        if not self.quiet:
+            log_info(self.logger, "Processing XML files and extracting data")
 
         # Get unprocessed XML files or files with outdated processing version
         xml_files = self.db_ops.get_unprocessed_xml_files(self.processing_version, max_files)
         if max_files is not None and len(xml_files) > max_files:
             xml_files = xml_files[:max_files]
-            self.logger.info(f"Limited to {len(xml_files)} XML files (max_files={max_files})")
+            if not self.quiet:
+                log_info(self.logger, f"Limited to {len(xml_files)} XML files (max_files={max_files})")
         else:
-            self.logger.info(f"Found {len(xml_files)} unprocessed XML files")
+            if not self.quiet:
+                log_info(self.logger, f"Found {len(xml_files)} unprocessed XML files")
 
         # Filter out already processed XML files based on EIN and tax_year to prevent reprocessing
         filtered_xml_files = []
@@ -63,7 +68,8 @@ class XMLProcessor:
                 # Get ZIP file path from database
                 zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (xml_file.zip_id,)).fetchone()
                 if not zip_result:
-                    self.logger.error(f"No ZIP file found for xml_id {xml_file.xml_id}")
+                    if not self.quiet:
+                        log_error(self.logger, f"No ZIP file found for xml_id {xml_file.xml_id}")
                     continue
                 zip_path = zip_result[0]
 
@@ -93,7 +99,8 @@ class XMLProcessor:
                 ).fetchone()
 
                 if existing_charity:
-                    self.logger.info(f"Skipping already processed XML file: {xml_file.filename} (EIN: {filer_ein}, Year: {tax_year})")
+                    if not self.quiet:
+                        log_info(self.logger, f"Skipping already processed XML file: {xml_file.filename} (EIN: {filer_ein}, Year: {tax_year})")
                     # Mark as processed to avoid reprocessing
                     self.db_ops.mark_xml_processed(xml_file.xml_id, self.processing_version)
                     continue
@@ -102,11 +109,13 @@ class XMLProcessor:
                 filtered_xml_files.append(xml_file)
 
             except Exception as e:
-                self.logger.warning(f"Could not check processing status for XML {xml_file.filename}: {e}")
+                if not self.quiet:
+                    log_warning(self.logger, f"Could not check processing status for XML {xml_file.filename}: {e}")
                 # Include in processing list if we can't determine status
                 filtered_xml_files.append(xml_file)
 
-        self.logger.info(f"After filtering already processed files: {len(filtered_xml_files)} XML files to process")
+        if not self.quiet:
+            log_info(self.logger, f"After filtering already processed files: {len(filtered_xml_files)} XML files to process")
 
         total_processed = 0
         for xml_file in filtered_xml_files:
@@ -120,21 +129,25 @@ class XMLProcessor:
                     # Mark as error
                     self.db_ops.mark_xml_error(xml_file.xml_id, self.processing_version, "Processing failed")
             except Exception as e:
-                self.logger.error(f"Failed to process XML {xml_file.filename}: {e}")
+                if not self.quiet:
+                    log_error(self.logger, f"Failed to process XML {xml_file.filename}: {e}")
                 self.db_ops.mark_xml_error(xml_file.xml_id, self.processing_version, str(e))
 
-        self.logger.info(f"XML processing complete: {total_processed} files processed")
+        if not self.quiet:
+            log_info(self.logger, f"XML processing complete: {total_processed} files processed")
         return total_processed
 
     def _process_single_xml(self, xml_id: int, zip_id: int, filename: str, internal_path: str) -> bool:
         """Process a single XML file"""
         try:
-            self.logger.debug(f"Processing XML {filename} (ID: {xml_id})")
+            if not self.quiet:
+                log_debug(self.logger, f"Processing XML {filename} (ID: {xml_id})")
 
             # Get ZIP file path from database
             zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,)).fetchone()
             if not zip_result:
-                self.logger.error(f"No ZIP file found for xml_id {xml_id}")
+                if not self.quiet:
+                    log_error(self.logger, f"No ZIP file found for xml_id {xml_id}")
                 return False
             zip_path = zip_result[0]
 
@@ -143,7 +156,8 @@ class XMLProcessor:
                 with zip_ref.open(internal_path) as xml_file:
                     xml_content = xml_file.read()
 
-            self.logger.debug(f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
+            if not self.quiet:
+                log_debug(self.logger, f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
 
             # Parse XML
             parser = ET.XMLParser(recover=True)
@@ -155,14 +169,16 @@ class XMLProcessor:
             tax_year = self._extract_tax_year(root)
             filer_ein = self._extract_filer_ein(root)
 
-            self.logger.debug(f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
+            if not self.quiet:
+                log_debug(self.logger, f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
 
             # Update XML file with EIN now that we have it
             if filer_ein and filer_ein != "Unknown":
                 self.db_ops.update_xml_ein(xml_id, filer_ein)
 
             if not filer_ein or filer_ein == "Unknown":
-                self.logger.error(f"Skipping XML {filename}: invalid EIN {filer_ein}")
+                if not self.quiet:
+                    log_error(self.logger, f"Skipping XML {filename}: invalid EIN {filer_ein}")
                 return False
 
             # Extract data based on form type
@@ -173,28 +189,34 @@ class XMLProcessor:
             elif form_type == "990PF":
                 charity, officers, grants, contractors, contributions = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
             else:
-                self.logger.error(f"Unsupported form type {form_type} in {filename}")
+                if not self.quiet:
+                    log_error(self.logger, f"Unsupported form type {form_type} in {filename}")
                 return False
 
             # Store in database
             if charity:
-                self.logger.debug(f"Inserting charity for EIN {filer_ein}, tax_year {tax_year}")
+                if not self.quiet:
+                    log_debug(self.logger, f"Inserting charity for EIN {filer_ein}, tax_year {tax_year}")
                 self.db_ops.insert_charity(charity)
                 charity_id = charity.charity_id
-                self.logger.debug(f"Charity inserted with charity_id: {charity_id}")
+                if not self.quiet:
+                    log_debug(self.logger, f"Charity inserted with charity_id: {charity_id}")
 
                 # Extract and store address
                 address = self._extract_address(root, filename, filer_ein)
                 if address:
-                    self.logger.debug(f"Inserting address for EIN {filer_ein}")
-                    self.logger.info(f"DEBUG: Address to insert: ein={address.ein}, canonical='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+                    if not self.quiet:
+                        log_debug(self.logger, f"Inserting address for EIN {filer_ein}")
+                        log_info(self.logger, f"DEBUG: Address to insert: ein={address.ein}, canonical='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
                     self.db_ops.insert_address(address)
 
                 # Insert related data
                 for officer in officers:
-                    self.logger.debug(f"Setting officer.charity_id to {charity_id} for officer {officer.first_name} {officer.last_name}")
+                    if not self.quiet:
+                        log_debug(self.logger, f"Setting officer.charity_id to {charity_id} for officer {officer.first_name} {officer.last_name}")
                     officer.charity_id = charity_id
-                    self.logger.debug(f"Inserting officer: charity_id={officer.charity_id}, first_name={officer.first_name}, last_name={officer.last_name}")
+                    if not self.quiet:
+                        log_debug(self.logger, f"Inserting officer: charity_id={officer.charity_id}, first_name={officer.first_name}, last_name={officer.last_name}")
                     self.db_ops.insert_officer(officer)
 
                 for grant in grants:
@@ -206,11 +228,13 @@ class XMLProcessor:
                 for contribution in contributions:
                     self.db_ops.insert_political_contribution(contribution)
 
-            self.logger.debug(f"Successfully parsed {filename}: charity={filer_ein}, grants={len(grants)}, officers={len(officers)}")
+            if not self.quiet:
+                log_debug(self.logger, f"Successfully parsed {filename}: charity={filer_ein}, grants={len(grants)}, officers={len(officers)}")
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to process XML {filename}: {e}")
+            if not self.quiet:
+                log_error(self.logger, f"Failed to process XML {filename}: {e}")
             return False
 
     def _extract_form_type(self, root) -> str:
@@ -244,37 +268,45 @@ class XMLProcessor:
                 result = xpath(root)
                 if result:
                     raw_ein = result[0].text.strip()
-                    self.logger.info(f"TRACE: Found raw EIN: '{raw_ein}' using xpath: {xpath.path}")
+                    if not self.quiet:
+                        log_info(self.logger, f"TRACE: Found raw EIN: '{raw_ein}' using xpath: {xpath.path}")
                     if raw_ein.isdigit():
                         formatted_ein = f"{int(raw_ein):09d}"
-                        self.logger.info(f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
+                        if not self.quiet:
+                            log_info(self.logger, f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
                         return formatted_ein
                     else:
-                        self.logger.warning(f"TRACE: Non-digit EIN found: '{raw_ein}', returning 'Unknown'")
+                        if not self.quiet:
+                            log_warning(self.logger, f"TRACE: Non-digit EIN found: '{raw_ein}', returning 'Unknown'")
                         return "Unknown"
             except Exception as e:
                 self.logger.debug(f"XPath {xpath.path} failed: {e}")
                 continue
-        self.logger.warning("TRACE: No EIN found in XML, returning 'Unknown'")
+        if not self.quiet:
+            log_warning(self.logger, "TRACE: No EIN found in XML, returning 'Unknown'")
         return "Unknown"
 
     def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
         """Parse Form 990 data"""
         xpath_cache: Dict = {}
 
-        self.logger.info(f"TRACE: _parse_990_data() called with EIN: '{filer_ein}' for file {filename}")
+        if not self.quiet:
+            log_info(self.logger, f"TRACE: _parse_990_data() called with EIN: '{filer_ein}' for file {filename}")
 
         # Extract charity data using existing parsing functions
         row, officer_entries = parse_990.parse_990(root, filename, xpath_cache, filer_ein, tax_year, form_type, log_error=self.logger.error)
 
         if not row:
-            self.logger.warning(f"TRACE: parse_990() returned None for EIN: '{filer_ein}' in file {filename}")
+            if not self.quiet:
+                log_warning(self.logger, f"TRACE: parse_990() returned None for EIN: '{filer_ein}' in file {filename}")
             return None, [], [], [], []
         else:
-            self.logger.info(f"TRACE: parse_990() returned row with EIN: '{row[1]}' for file {filename}")
+            if not self.quiet:
+                log_info(self.logger, f"TRACE: parse_990() returned row with EIN: '{row[1]}' for file {filename}")
 
         # Convert row to Charity dataclass
-        self.logger.info(f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
+        if not self.quiet:
+            log_info(self.logger, f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
         charity = Charity(
             ein=row[1],  # filer_ein
             tax_year=row[0],  # tax_year
@@ -310,8 +342,9 @@ class XMLProcessor:
             domestic_misrep_flag=row[31],  # domestic_misrep_flag
             xml_name=row[32]  # xml_name
         )
-        self.logger.info(f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
-        self.logger.info(f"TRACE: Created Charity dataclass with EIN: '{charity.ein}' from row[1] for file {filename}")
+        if not self.quiet:
+            log_info(self.logger, f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
+            log_info(self.logger, f"TRACE: Created Charity dataclass with EIN: '{charity.ein}' from row[1] for file {filename}")
 
         # Convert officer entries
         officers = []
@@ -434,7 +467,8 @@ class XMLProcessor:
                 continue
 
         if not address_components:
-            self.logger.debug(f"No address components found in {filename}")
+            if not self.quiet:
+                log_debug(self.logger, f"No address components found in {filename}")
             return None
 
         # Extract filer name for address
@@ -491,7 +525,8 @@ class XMLProcessor:
             return None, [], [], [], []
 
         # Convert row to Charity dataclass (similar to 990)
-        self.logger.info(f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
+        if not self.quiet:
+            log_info(self.logger, f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
         charity = Charity(
             ein=row[1], tax_year=row[0], filer_name=row[2], business_name_line1=row[3],
             business_name_line2=row[4], receipt_amt=row[5], govt_amt=row[6],
@@ -505,7 +540,8 @@ class XMLProcessor:
             foreign_expenses=row[29], grants_to_others=row[30], domestic_misrep_flag=row[31],
             xml_name=row[32]
         )
-        self.logger.info(f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
+        if not self.quiet:
+            log_info(self.logger, f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
 
         # Convert officer entries
         officers = []

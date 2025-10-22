@@ -7,25 +7,24 @@ log traceability across the IRS 990 processing system.
 """
 
 import logging
-import time
+import inspect
+import os
 from typing import Optional
 
 # Location-based logging utilities
 
-def get_location_tag(filename: str, lineno: int) -> str:
-    """Generate a location tag as filename:lineno"""
-    return f"{filename}:{lineno}"
+def get_debug_info():
+    """Get debug information about the caller's location"""
+    frame = inspect.currentframe().f_back  # Get caller's frame
+    if frame is None:
+        return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
 
-def log_with_location(logger: logging.Logger, level: int, message: str,
-                     frame=None, **kwargs) -> None:
-    """Log a message with file location tag for easy reference"""
-    if frame is not None:
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        location_tag = get_location_tag(filename, lineno)
-        kwargs['loc'] = location_tag
-
-    log_with_context(logger, level, message, **kwargs)
+    filename = os.path.basename(frame.f_code.co_filename) if frame.f_code.co_filename != '<string>' else '<interactive>'
+    return {
+        'file': filename,
+        'line': frame.f_lineno,
+        'function': frame.f_code.co_name
+    }
 
 # Standardized logging format
 LOG_FORMAT = '%(asctime)s [%(levelname)8s] %(name)s: %(message)s'
@@ -62,42 +61,37 @@ def log_with_context(logger: logging.Logger, level: int, message: str,
 
 # Convenience functions for common log levels
 def log_info(logger: logging.Logger, message: str, ein: Optional[str] = None, **kwargs) -> None:
-    """Log info message with context"""
+    """Log info message with context and location"""
+    # Add location info to message for precise identification
+    info = get_debug_info()
+    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
+    message = f"{location_tag} {message}"
     log_with_context(logger, logging.INFO, message, ein, **kwargs)
 
 def log_error(logger: logging.Logger, message: str, ein: Optional[str] = None, exc_info: bool = False, **kwargs) -> None:
-    """Log error message with context"""
+    """Log error message with context and location"""
+    # Add location info to message for precise identification
+    info = get_debug_info()
+    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
+    message = f"{location_tag} {message}"
     log_with_context(logger, logging.ERROR, message, ein, **kwargs)
     if exc_info:
         logger.exception("Exception details:")
 
 def log_debug(logger: logging.Logger, message: str, ein: Optional[str] = None, **kwargs) -> None:
-    """Log debug message with context"""
+    """Log debug message with context and location"""
+    # Add location info to message for precise identification
+    info = get_debug_info()
+    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
+    message = f"{location_tag} {message}"
     log_with_context(logger, logging.DEBUG, message, ein, **kwargs)
 
 def log_warning(logger: logging.Logger, message: str, ein: Optional[str] = None, **kwargs) -> None:
-    """Log warning message with context"""
+    """Log warning message with context and location"""
+    # Add location info to message for precise identification
+    info = get_debug_info()
+    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
+    message = f"{location_tag} {message}"
     log_with_context(logger, logging.WARNING, message, ein, **kwargs)
 
-# Location-aware logging functions (use these for precise location tracking)
-def log_info_at(logger: logging.Logger, message: str, frame=None,
-                ein: Optional[str] = None, **kwargs) -> None:
-    """Log info message with file location tag"""
-    log_with_location(logger, logging.INFO, message, frame=frame, ein=ein, **kwargs)
-
-def log_error_at(logger: logging.Logger, message: str, frame=None,
-                 ein: Optional[str] = None, exc_info: bool = False, **kwargs) -> None:
-    """Log error message with file location tag"""
-    log_with_location(logger, logging.ERROR, message, frame=frame, ein=ein, **kwargs)
-    if exc_info:
-        logger.exception("Exception details:")
-
-def log_debug_at(logger: logging.Logger, message: str, frame=None,
-                 ein: Optional[str] = None, **kwargs) -> None:
-    """Log debug message with file location tag"""
-    log_with_location(logger, logging.DEBUG, message, frame=frame, ein=ein, **kwargs)
-
-def log_warning_at(logger: logging.Logger, message: str, frame=None,
-                   ein: Optional[str] = None, **kwargs) -> None:
-    """Log warning message with file location tag"""
-    log_with_location(logger, logging.WARNING, message, frame=frame, ein=ein, **kwargs)
+# All logging functions now include location info automatically

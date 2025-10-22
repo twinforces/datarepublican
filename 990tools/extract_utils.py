@@ -20,6 +20,7 @@ from collections import defaultdict
 import hashlib
 from io import BytesIO
 from dataclasses import dataclass
+from logging_utils import log_info, log_error, log_debug, log_warning
 
 @dataclass
 class AddressInfo:
@@ -118,7 +119,8 @@ def validate_ein(ein):
     if not EIN_REGEX.match(ein):
         if ein.isdigit() and len(ein) > 9:
             # Assume it's a valid IRS file sequence number
-            log_error("Accepting IRS file sequence number: %s (length: %d)", ein, len(ein))
+            if not quiet:
+                log_error("Accepting IRS file sequence number: %s (length: %d)", ein, len(ein))
             return True, ""
         return False, f"EIN {ein} is not a digit string"
     if ein == "000000000":
@@ -131,11 +133,11 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
     if logger and not quiet:
         try:
             if ein:
-                logger.info(msg_format, *args, extra={'ein': ein}, exc_info=exc_info)
+                log_info(logger, msg_format.format(*args), ein=ein, exc_info=exc_info)
             else:
-                logger.info(msg_format, *args, exc_info=exc_info)
+                log_info(logger, msg_format.format(*args), exc_info=exc_info)
         except Exception as e:
-            logger.info("Log formatting error: {}; args: {}", str(e), args)
+            log_info(logger, "Log formatting error: {}; args: {}", str(e), args)
     elif ein is not None:
         # If logger is not set up but ein is provided, this might be the issue
         print(f"Logger not set up but ein parameter provided: {ein}")
@@ -182,9 +184,11 @@ def build_zip_index(zip_dir, start_year, end_year):
     zip_names = set()
     for year in range(start_year, end_year + 2):
         zip_files.extend(glob.glob(os.path.join(zip_dir, f"{year}*.zip")))
-    log_error("Found {} ZIP files in {}", len(zip_files), zip_dir)
+    if not quiet:
+        log_error("Found {} ZIP files in {}", len(zip_files), zip_dir)
     if not zip_files:
-        log_error("No ZIP files found in {} for years {}-{}", zip_dir, start_year, end_year + 1)
+        if not quiet:
+            log_error("No ZIP files found in {} for years {}-{}", zip_dir, start_year, end_year + 1)
         return index
     for zip_path in tqdm(zip_files, desc="Indexing ZIP files"):
         zip_names.add(os.path.basename(zip_path))
@@ -194,11 +198,14 @@ def build_zip_index(zip_dir, start_year, end_year):
                     if internal_path.endswith('.xml'):
                         filename = os.path.basename(internal_path)
                         if filename in index:
-                            log_error("Duplicate XML filename {} in ZIP {}, overwriting with {}", filename, index[filename][0], zip_path)
+                            if not quiet:
+                                log_error("Duplicate XML filename {} in ZIP {}, overwriting with {}", filename, index[filename][0], zip_path)
                         index[filename] = (zip_path, internal_path)
         except Exception as e:
-            log_error("Error indexing ZIP {}: {}", zip_path, str(e), exc_info=True)
-    log_error("Built ZIP index with {} XML files from {} ZIPs", len(index), len(zip_names))
+            if not quiet:
+                log_error("Error indexing ZIP {}: {}", zip_path, str(e), exc_info=True)
+    if not quiet:
+        log_error("Built ZIP index with {} XML files from {} ZIPs", len(index), len(zip_names))
     return index
 
 def load_zip_cache(cache_dir, start_year, end_year, zip_dir, checksums):
@@ -217,7 +224,8 @@ def load_zip_cache(cache_dir, start_year, end_year, zip_dir, checksums):
                         cached_data = pickle.load(f)
                     cache_valid = True
         except Exception as e:
-            log_error("Error loading ZIP index cache: {}", str(e), exc_info=True)
+            if not quiet:
+                log_error("Error loading ZIP index cache: {}", str(e), exc_info=True)
     return cache_valid, cached_data
 
 def save_zip_cache(cache_dir, start_year, end_year, checksums, zip_index):
@@ -229,19 +237,22 @@ def save_zip_cache(cache_dir, start_year, end_year, checksums, zip_index):
         with open(os.path.join(cache_dir, f'cached_zip_index_{start_year}_{end_year}.pkl'), 'wb') as f:
             pickle.dump(zip_index, f)
     except Exception as e:
-        log_error("Error saving ZIP index cache: {}", str(e), exc_info=True)
+        if not quiet:
+            log_error("Error saving ZIP index cache: {}", str(e), exc_info=True)
 
 def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
     rows = []
     if not os.path.exists(tsv_file):
-        log_error("TSV file {} does not exist.", tsv_file)
+        if not quiet:
+            log_error("TSV file {} does not exist.", tsv_file)
         return rows
     try:
         with open(tsv_file, 'r', encoding='utf-8') as f:
             header = f.readline().strip().split('\t')
             header_map = {col: idx for idx, col in enumerate(header)}
             if expected_columns and not all(col in header_map for col in expected_columns):
-                log_error("Missing required columns in TSV {}: {}", tsv_file, [col for col in expected_columns if col not in header_map])
+                if not quiet:
+                    log_error("Missing required columns in TSV {}: {}", tsv_file, [col for col in expected_columns if col not in header_map])
                 return rows
             for line in f:
                 fields = line.strip().split('\t')
@@ -254,27 +265,33 @@ def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
                         if start_year <= row_year <= end_year:
                             rows.append(row)
                     except ValueError:
-                        log_error("Invalid tax_year {} in TSV {}, skipping row", row.get('tax_year', ''), tsv_file)
+                        if not quiet:
+                            log_error("Invalid tax_year {} in TSV {}, skipping row", row.get('tax_year', ''), tsv_file)
                 else:
                     rows.append(row)
     except Exception as e:
-        log_error("Error reading TSV {}: {}", tsv_file, str(e), exc_info=True)
-    log_error("Read {} rows from {}", len(rows), tsv_file)
+        if not quiet:
+            log_error("Error reading TSV {}: {}", tsv_file, str(e), exc_info=True)
+    if not quiet:
+        log_error("Read {} rows from {}", len(rows), tsv_file)
     return rows
 
 def canonicalize_address(address_components, output_dir):
     if not address_components:
-        log_error("canonicalize_address: No address components provided")
+        if not quiet:
+            log_error("canonicalize_address: No address components provided")
         return AddressInfo("", None, None, None, None, None, "")
-    log_error("canonicalize_address: Processing {} address components", len(address_components))
-    for i, elem in enumerate(address_components):
-        log_error("  Component {}: tag={}, text='{}'", i, elem.tag, elem.text)
+    if not quiet:
+        log_error("canonicalize_address: Processing {} address components", len(address_components))
+        for i, elem in enumerate(address_components):
+            log_error("  Component {}: tag={}, text='{}'", i, elem.tag, elem.text)
     # Check for required components
     has_city = any(elem.tag.endswith('CityNm') and elem.text for elem in address_components)
     has_state = any(elem.tag.endswith('StateAbbreviationCd') and elem.text for elem in address_components)
     has_zip = any(elem.tag.endswith('ZIPCd') and elem.text for elem in address_components)
     has_address_line = any(elem.tag.endswith('AddressLine1Txt') and elem.text for elem in address_components)
-    log_error("canonicalize_address: Has city={}, state={}, zip={}, address_line={}", has_city, has_state, has_zip, has_address_line)
+    if not quiet:
+        log_error("canonicalize_address: Has city={}, state={}, zip={}, address_line={}", has_city, has_state, has_zip, has_address_line)
     address_line = ""
     address_line2 = ""
     address_line3 = ""
@@ -349,35 +366,45 @@ def canonicalize_address(address_components, output_dir):
 
     address_parts = [comp for comp in [street, city, state, zip_code] if comp]
     if not address_parts:
-        log_error("canonicalize_address: No valid address components after processing: street='{}', city='{}', state='{}', zip_code='{}'", street, city, state, zip_code)
+        if not quiet:
+            log_error("canonicalize_address: No valid address components after processing: street='{}', city='{}', state='{}', zip_code='{}'", street, city, state, zip_code)
         return AddressInfo("", None, None, None, None, None, "")
     canonical = " ".join(address_parts).title()
-    log_error("canonicalize_address: Initial canonical='{}', state='{}', zip_code='{}', po_box='{}'", canonical, state, zip_code, po_box)
+    if not quiet:
+        log_error("canonicalize_address: Initial canonical='{}', state='{}', zip_code='{}', po_box='{}'", canonical, state, zip_code, po_box)
     if not has_city or not has_state or not has_zip:
-        log_error("canonicalize_address: WARNING - Missing required components: city={}, state={}, zip={}", has_city, has_state, has_zip)
+        if not quiet:
+            log_error("canonicalize_address: WARNING - Missing required components: city={}, state={}, zip={}", has_city, has_state, has_zip)
     if state and state.upper() not in VALID_STATES:
-        log_error("canonicalize_address: Invalid state '{}' in address: {}; resetting state", state, canonical)
+        if not quiet:
+            log_error("canonicalize_address: Invalid state '{}' in address: {}; resetting state", state, canonical)
         state = None
         canonical = " ".join(comp for comp in [street, city, zip_code] if comp).title()
-        log_error("canonicalize_address: After state reset, canonical='{}'", canonical)
+        if not quiet:
+            log_error("canonicalize_address: After state reset, canonical='{}'", canonical)
     if zip_code:
         match = re.match(r'^\s*(\d{5})(?:-(\d{4}))?\s*$', zip_code)
         if match:
             zip_code = match.group(1)
-            log_error("canonicalize_address: ZIP cleaned to '{}'", zip_code)
+            if not quiet:
+                log_error("canonicalize_address: ZIP cleaned to '{}'", zip_code)
         else:
             zip_code_digits = re.sub(r'\D', '', zip_code)
             if len(zip_code_digits) >= 5:
                 zip_code = zip_code_digits[:5]
-                log_error("canonicalize_address: ZIP extracted to '{}'", zip_code)
+                if not quiet:
+                    log_error("canonicalize_address: ZIP extracted to '{}'", zip_code)
             else:
                 zip_code = None
-                log_error("canonicalize_address: ZIP invalid, set to None")
+                if not quiet:
+                    log_error("canonicalize_address: ZIP invalid, set to None")
     if po_box and 'po box' not in canonical.lower():
         canonical = f"PO Box {po_box} {canonical}"
-        log_error("canonicalize_address: Added PO Box, final canonical='{}'", canonical)
-    log_error("canonicalize_address: Returning AddressInfo(canonical='{}', address_line1='{}', city='{}', state='{}', po_box='{}', zip_code='{}')", canonical, address_line, city, state, po_box, zip_code)
-    log_error("DEBUG: PO Box detection - po_box='{}', canonical contains 'PO BOX'={}", po_box, 'PO BOX' in canonical.upper() if canonical else False)
+        if not quiet:
+            log_error("canonicalize_address: Added PO Box, final canonical='{}'", canonical)
+    if not quiet:
+        log_error("canonicalize_address: Returning AddressInfo(canonical='{}', address_line1='{}', city='{}', state='{}', po_box='{}', zip_code='{}')", canonical, address_line, city, state, po_box, zip_code)
+        log_error("DEBUG: PO Box detection - po_box='{}', canonical contains 'PO BOX'={}", po_box, 'PO BOX' in canonical.upper() if canonical else False)
     return AddressInfo(canonical, address_line, address_line2, city, state, po_box, zip_code)
 
 def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
@@ -414,7 +441,8 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 filer_name = elem[0].text.strip()
                 break
         if not xml_ein:
-            log_error("Skipping XML %s: No EIN in XML", xml_filename)
+            if not quiet:
+                log_error("Skipping XML %s: No EIN in XML", xml_filename)
             result['invalid_ein_entries'].append({
                 'tsv_ein': '',
                 'xml_ein': '',
@@ -439,7 +467,8 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             # Validate the EIN format
             valid, reason = validate_ein(xml_ein)
             if not valid:
-                log_error("Skipping XML %s: Invalid EIN %s (%s)", xml_filename, xml_ein, reason)
+                if not quiet:
+                    log_error("Skipping XML %s: Invalid EIN %s (%s)", xml_filename, xml_ein, reason)
                 result['invalid_ein_entries'].append({
                     'tsv_ein': '',
                     'xml_ein': xml_ein,
@@ -462,40 +491,48 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
         else:
             # Not a 9-digit number - could be a file sequence number or other identifier
             # Log but don't skip - this might be acceptable for processing
-            log_error("XML %s has non-standard EIN format: %s (length: %d)", xml_filename, xml_ein, len(xml_ein))
+            if not quiet:
+                log_error("XML %s has non-standard EIN format: %s (length: %d)", xml_filename, xml_ein, len(xml_ein))
         if not filer_name:
             filer_name = 'Unknown'
-            result['debug_address_entries'].append({
-                'filer_ein': xml_ein,
-                'filer_name': filer_name,
-                'xml_filename': xml_filename,
-                'raw_components': '',
-                'canonical_address': '',
-                'raw_zip': '',
-                'zip_code': '',
-                'status': 'skipped',
-                'reason': 'No filer name in XML'
-            })
+            if not quiet:
+                result['debug_address_entries'].append({
+                    'filer_ein': xml_ein,
+                    'filer_name': filer_name,
+                    'xml_filename': xml_filename,
+                    'raw_components': '',
+                    'canonical_address': '',
+                    'raw_zip': '',
+                    'zip_code': '',
+                    'status': 'skipped',
+                    'reason': 'No filer name in XML'
+                })
             return False, None
         # Count USAddress elements to diagnose multiple addresses
         us_addresses = root.findall(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES) or \
                       root.findall(".//Filer/USAddress", namespaces=NAMESPACES) or \
                       root.findall(".//USAddress", namespaces=NAMESPACES)
-        log_error("parse_filer_address: Found {} USAddress elements in XML {}", len(us_addresses), xml_filename)
+        if not quiet:
+            log_error("parse_filer_address: Found {} USAddress elements in XML {}", len(us_addresses), xml_filename)
 
         address_components = []
         xpaths = ADDRESS_XPATHS
-        log_error("parse_filer_address: Extracting address components for XML {}", xml_filename)
+        if not quiet:
+            log_error("parse_filer_address: Extracting address components for XML {}", xml_filename)
         for xpath in xpaths:
             elements = xpath(root)
-            log_error("parse_filer_address: XPath '{}' found {} elements", xpath.path, len(elements))
+            if not quiet:
+                log_error("parse_filer_address: XPath '{}' found {} elements", xpath.path, len(elements))
             for elem in elements:
                 if elem.text:
-                    log_error("parse_filer_address: Adding component: tag={}, text='{}'", elem.tag, elem.text.strip())
+                    if not quiet:
+                        log_error("parse_filer_address: Adding component: tag={}, text='{}'", elem.tag, elem.text.strip())
                     address_components.append(elem)
-        log_error("parse_filer_address: Total address components: {}", len(address_components))
+        if not quiet:
+            log_error("parse_filer_address: Total address components: {}", len(address_components))
         if len(address_components) == 0:
-            log_error("parse_filer_address: WARNING - No address components found for XML {}", xml_filename)
+            if not quiet:
+                log_error("parse_filer_address: WARNING - No address components found for XML {}", xml_filename)
         address_info = canonicalize_address(address_components, output_dir)
         canonical_address = address_info.canonical_address
         address_line1 = address_info.address_line1
@@ -508,7 +545,8 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
         if canonical_address:
-            log_error("parse_filer_address: SUCCESS - Created address entry for EIN {}: canonical='{}', city='{}', state='{}', zip='{}', po_box='{}'", xml_ein, canonical_address, city, state, zip_code, po_box)
+            if not quiet:
+                log_error("parse_filer_address: SUCCESS - Created address entry for EIN {}: canonical='{}', city='{}', state='{}', zip='{}', po_box='{}'", xml_ein, canonical_address, city, state, zip_code, po_box)
             result['address_entries'].append({
                 'filer_ein': xml_ein,
                 'filer_name': filer_name,
@@ -538,7 +576,8 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
             result['total_addresses'] += 1
             result['total_queue_puts'] += 1
         else:
-            log_error("parse_filer_address: ERROR - No canonical address for EIN {}: components={}, raw_components='{}'", xml_ein, len(address_components), raw_components_str)
+            if not quiet:
+                log_error("parse_filer_address: ERROR - No canonical address for EIN {}: components={}, raw_components='{}'", xml_ein, len(address_components), raw_components_str)
             result['total_address_errors'] += 1
             result['debug_address_entries'].append({
                 'filer_ein': xml_ein or '',
@@ -561,7 +600,8 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 result['filer_eins'][xml_filename] = (xml_ein, row, canonical_address)
         return True, xml_ein
     except Exception as e:
-        log_error("Error parsing XML {}: {}", xml_filename, str(e), exc_info=True)
+        if not quiet:
+            log_error("Error parsing XML {}: {}", xml_filename, str(e), exc_info=True)
         result['total_address_errors'] += 1
         result['debug_address_entries'].append({
             'filer_ein': xml_ein or '',
@@ -621,7 +661,8 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
             return "", None, None
         return canonical_address, address_line1, address_line2, city, state, po_box, zip_code
     except Exception as e:
-        log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
+        if not quiet:
+            log_error("Error parsing recipient address in XML {}: {}", xml_filename, str(e), exc_info=True)
         result['total_address_errors'] += 1
         result['debug_address_entries'].append({
             'filer_ein': recipient_ein or 'Unknown',
@@ -639,13 +680,15 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
 def write_tsv(file_path, entries, columns, quote_key, sort_keys=None):
     if sort_keys:
         entries = deduplicate_sorted_dicts(entries, sort_keys)
-    log_error("Opening TSV file: {}", file_path)
+    if not quiet:
+        log_error("Opening TSV file: {}", file_path)
     with open(file_path, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(columns)
         for entry in entries:
             writer.writerow([entry.get(col, '') for col in columns])
-    log_error("Wrote {} rows to {}", len(entries), file_path)
+    if not quiet:
+        log_error("Wrote {} rows to {}", len(entries), file_path)
 
 def deduplicate_sorted_dicts(entries, key_order):
     seen = set()
@@ -676,7 +719,8 @@ def load_address_cache(cache_dir, start_year, end_year, zip_dir):
                 cached_data = (address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index)
                 cache_valid = True
         except Exception as e:
-            log_error("Error loading address cache: {}", str(e), exc_info=True)
+            if not quiet:
+                log_error("Error loading address cache: {}", str(e), exc_info=True)
     return cache_valid, cached_data
 
 def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index):
@@ -688,7 +732,8 @@ def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_a
         with open(os.path.join(cache_dir, f'cached_mappings_{start_year}_{end_year}.pkl'), 'wb') as f:
             pickle.dump((po_box_entries, zip_code_index, po_box_zip_index), f)
     except Exception as e:
-        log_error("Error saving address cache: {}", str(e), exc_info=True)
+        if not quiet:
+            log_error("Error saving address cache: {}", str(e), exc_info=True)
 
 def normalize_file_path(arg_value, default_filename, base_dir=None):
     """Normalize a file path argument, appending default_filename to a directory or using the file path as-is."""

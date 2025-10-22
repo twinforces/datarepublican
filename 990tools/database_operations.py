@@ -35,40 +35,9 @@ class DatabaseOperations:
 
     @staticmethod
     def generate_uuid_v7() -> str:
-        """Generate a UUID v7 (time-ordered) instead of random v4"""
-        # Get current timestamp in milliseconds since Unix epoch
-        timestamp_ms = int(time.time() * 1000)
-
-        # UUID v7 format: timestamp (48 bits) + version (4 bits) + rand_a (12 bits) + variant (2 bits) + rand_b (62 bits)
-        # timestamp: 48 bits (milliseconds since 1970-01-01)
-        # version: 4 bits (set to 7)
-        # rand_a: 12 bits (random)
-        # variant: 2 bits (set to 2 for RFC 4122)
-        # rand_b: 62 bits (random)
-
-        # Extract timestamp components
-        timestamp_high = (timestamp_ms >> 16) & 0xFFFFFFFFFFFF  # 48 bits
-        timestamp_low = timestamp_ms & 0xFFFF  # 16 bits
-
-        # Generate random parts
-        rand_a = random.randint(0, 0xFFF)  # 12 bits
-        rand_b = random.randint(0, 0x3FFFFFFFFFFFFFFF)  # 62 bits
-
-        # Construct UUID v7
-        # Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        # timestamp_high (32 bits) | version (4 bits) | timestamp_low (16 bits) | rand_a (12 bits) | variant (2 bits) | rand_b (62 bits)
-
-        part1 = timestamp_high >> 16  # First 32 bits of timestamp
-        part2 = ((timestamp_high & 0xFFFF) << 16) | (7 << 12) | timestamp_low  # timestamp_low(16) + version(4) + timestamp_high_low(12)
-        part3 = (rand_a << 2) | 0x2  # rand_a(12) + variant(2)
-        part4 = rand_b  # rand_b(62 bits, but we'll take 32)
-
-        # Actually construct properly
-        uuid_int = (timestamp_high << 80) | (7 << 76) | (rand_a << 64) | (0x2 << 62) | rand_b
-
-        # Convert to hex and format as UUID string
-        uuid_hex = f"{uuid_int:032x}"
-        return f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-{uuid_hex[16:20]}-{uuid_hex[20:32]}"
+        """Generate a UUID v7 (time-ordered) - now delegates to uuid7 module"""
+        from uuid7 import generate_uuid_v7
+        return generate_uuid_v7()
 
     def __init__(self, db_path: str, log_sql: bool = False, read_only: bool = False, memory_limit: str = "4GB", threads: int = None, dbUI: bool = False):
         """
@@ -343,17 +312,49 @@ class DatabaseOperations:
             return existing_check[0]  # Return existing address_id
 
         address_id = self.generate_uuid_v7()
+
+        # Determine colocator for PO Box and foreign addresses
+        colocator = address.colocator
+        if not colocator:
+            # PO Box addresses get a colocator in format: PO:<po_box>:<zip5>
+            if address.po_box and address.po_box.strip():
+                zip5 = address.zip_code[:5] if address.zip_code and len(address.zip_code) >= 5 else ""
+                colocator = f"PO:{address.po_box}:{zip5}"
+            # Foreign addresses (non-US states) get a colocator in format: FA:<countrycode>
+            elif address.state and address.state not in ['AK', 'AL', 'AR', 'AZ', 'CA', 'CO', 'CT', 'DC', 'DE', 'FL', 'GA', 'HI', 'IA', 'ID', 'IL', 'IN', 'KS', 'KY', 'LA', 'MA', 'MD', 'ME', 'MI', 'MN', 'MO', 'MS', 'MT', 'NC', 'ND', 'NE', 'NH', 'NJ', 'NM', 'NV', 'NY', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VA', 'VT', 'WA', 'WI', 'WV', 'WY']:
+                # For now, use a generic foreign code - could be enhanced to detect actual country
+                colocator = "FA:XX"
+
         sql = """
             INSERT OR IGNORE INTO Addresses (address_id, ein, name, address_line1, address_line2, city, state, zip_code, po_box,
-                                    canonical_address, address_type, geocoding_id, latitude, longitude, colocator)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    canonical_address, address_type, owner_id, geocoding_id, latitude, longitude, colocator)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         values = (address_id, address.ein, address.name, getattr(address, 'address_line1', None), getattr(address, 'address_line2', None),
                   getattr(address, 'city', None), getattr(address, 'state', None),
                   address.zip_code, address.po_box, address.canonical_address,
-                  address.address_type, address.geocoding_id, address.latitude, address.longitude, address.colocator)
+                  address.address_type, address.owner_id, address.geocoding_id, address.latitude, address.longitude, colocator)
 
         self.execute_query(sql, values)
+
+        # If we set a colocator, also update the owner object
+        if colocator and address.owner_id:
+            if address.address_type == 'charity':
+                self.execute_query("""
+                    UPDATE Charities SET colocator = ? WHERE charity_id = ?
+                """, (colocator, address.owner_id))
+            elif address.address_type == 'grant':
+                self.execute_query("""
+                    UPDATE Grants SET grantee_colocator = ? WHERE grant_id = ?
+                """, (colocator, address.owner_id))
+            elif address.address_type == 'contractor':
+                self.execute_query("""
+                    UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
+                """, (colocator, address.owner_id))
+            elif address.address_type == 'politicalcontribution':
+                self.execute_query("""
+                    UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
+                """, (colocator, address.owner_id))
 
         # Verify the address was actually inserted
         verify_check = self.execute_query("""
@@ -374,7 +375,8 @@ class DatabaseOperations:
         return self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
 
     def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: str = None):
-        """Update address with geocoding information"""
+        """Update address with geocoding information and propagate colocator to owner"""
+        # First update the address
         if geocoding_id is not None and colocator is not None:
             self.execute_query("""
                 UPDATE Addresses SET geocoding_id = ?, colocator = ?
@@ -390,14 +392,68 @@ class DatabaseOperations:
                 UPDATE Addresses SET colocator = ?
                 WHERE address_id = ?
             """, (colocator, address_id))
+
+        # If colocator was set, also update the owner object
+        if colocator is not None:
+            # Get address details to determine owner type and ID
+            address_info = self.execute_query("""
+                SELECT address_type, owner_id FROM Addresses WHERE address_id = ?
+            """, (address_id,)).fetchone()
+
+            if address_info:
+                address_type, owner_id = address_info
+                if owner_id:  # Only update if we have an owner_id
+                    if address_type == 'charity':
+                        self.execute_query("""
+                            UPDATE Charities SET colocator = ? WHERE charity_id = ?
+                        """, (colocator, owner_id))
+                    elif address_type == 'grant':
+                        self.execute_query("""
+                            UPDATE Grants SET grantee_colocator = ? WHERE grant_id = ?
+                        """, (colocator, owner_id))
+                    elif address_type == 'contractor':
+                        self.execute_query("""
+                            UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
+                        """, (colocator, owner_id))
+                    elif address_type == 'politicalcontribution':
+                        self.execute_query("""
+                            UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
+                        """, (colocator, owner_id))
+
         self.commit()
 
     def update_address_po_box_and_colocator(self, address_id: str, po_box: str, colocator: str):
-        """Update address with PO Box and colocator information"""
+        """Update address with PO Box and colocator information and propagate colocator to owner"""
         self.execute_query("""
             UPDATE Addresses SET po_box = ?, colocator = ?
             WHERE address_id = ?
         """, (po_box, colocator, address_id))
+
+        # Also update the owner object with colocator
+        address_info = self.execute_query("""
+            SELECT address_type, owner_id FROM Addresses WHERE address_id = ?
+        """, (address_id,)).fetchone()
+
+        if address_info:
+            address_type, owner_id = address_info
+            if owner_id:  # Only update if we have an owner_id
+                if address_type == 'charity':
+                    self.execute_query("""
+                        UPDATE Charities SET colocator = ? WHERE charity_id = ?
+                    """, (colocator, owner_id))
+                elif address_type == 'grant':
+                    self.execute_query("""
+                        UPDATE Grants SET grantee_colocator = ? WHERE grant_id = ?
+                    """, (colocator, owner_id))
+                elif address_type == 'contractor':
+                    self.execute_query("""
+                        UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
+                    """, (colocator, owner_id))
+                elif address_type == 'politicalcontribution':
+                    self.execute_query("""
+                        UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
+                    """, (colocator, owner_id))
+
         self.commit()
 
     # Charity operations
@@ -654,6 +710,77 @@ class DatabaseOperations:
         stats['threads'] = self.threads or 'auto'
 
         return stats
+
+    def get_table_counts(self) -> dict:
+        """Get row counts for all tables"""
+        tables = [
+            'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
+            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding'
+        ]
+
+        counts = {}
+        for table in tables:
+            try:
+                result = self.execute_query(f"SELECT COUNT(*) FROM {table}").fetchone()
+                counts[table] = result[0] if result else 0
+            except Exception:
+                counts[table] = 0  # Table might not exist yet
+
+        return counts
+
+    def get_table_summaries(self) -> dict:
+        """Get SUMMARIZE data for all tables"""
+        tables = [
+            'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
+            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding'
+        ]
+
+        summaries = {}
+        for table in tables:
+            try:
+                result = self.execute_query(f"SUMMARIZE {table}")
+                summaries[table] = result.fetchall()
+            except Exception:
+                summaries[table] = []  # Table might not exist yet or SUMMARIZE might fail
+
+        return summaries
+
+    def generate_stats_report(self, step_name: str, notes: str = "") -> str:
+        """Generate a statistics report for the current database state"""
+        from datetime import datetime
+        from mako.template import Template
+        import os
+
+        # Get table counts and summaries
+        table_counts = self.get_table_counts()
+        table_summaries = self.get_table_summaries()
+        total_records = sum(table_counts.values())
+
+        # Prepare template data
+        template_data = {
+            'step_name': step_name,
+            'timestamp': datetime.now().isoformat(),
+            'db_path': self.db_path,
+            'table_counts': table_counts,
+            'table_summaries': table_summaries,
+            'total_records': total_records,
+            'notes': notes or "No additional notes."
+        }
+
+        # Load and render template
+        template_path = os.path.join(os.path.dirname(__file__), 'stats_template.mako')
+        with open(template_path, 'r') as f:
+            template_content = f.read()
+
+        template = Template(template_content)
+        report_content = template.render(**template_data)
+
+        # Write report to file
+        report_filename = f"stats_{step_name}.md"
+        with open(report_filename, 'w') as f:
+            f.write(report_content)
+
+        return report_filename
 
     def optimize_database(self):
         """Run database optimization commands"""

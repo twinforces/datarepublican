@@ -13,6 +13,8 @@ import time
 import sys
 import os
 from pathlib import Path
+from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
+quiet = False
 
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -96,7 +98,8 @@ def profile_pipeline():
 
             except Exception as e:
                 error_count += 1
-                processor.log_error(f"XML processing failed for {filename}: {e}")
+                if not quiet:
+                    processor.log_error(f"XML processing failed for {filename}: {e}")
 
     except Exception as e:
         print(f"Pipeline execution error: {e}")

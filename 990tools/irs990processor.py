@@ -20,6 +20,8 @@ import time
 import zipfile
 import threading
 import logging
+import requests
+from bs4 import BeautifulSoup
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from datetime import datetime
@@ -45,7 +47,7 @@ from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
 from address_matcher import AddressMatcher
-from logging_utils import get_logger
+from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
 
 # Import parsing functions
 from parse_990 import parse_990
@@ -107,7 +109,7 @@ class IRS990Processor:
         # Initialize components
         self.db_ops = DatabaseOperations(self.db_path, log_sql=log_sql, dbUI=dbUI)
         self.zip_processor = ZipProcessor(self.db_ops, zips_dir)
-        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, workers=workers)
+        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, workers=workers, quiet=quiet)
         self.geolocation_processor = GeolocationProcessor(self.db_ops)
         self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
@@ -141,37 +143,242 @@ class IRS990Processor:
         self.db_conn = self.db_ops.db_conn
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
-        """Log error with optional EIN context"""
-        if ein:
-            self.logger.error(f"EIN {ein}: {msg}", *args, exc_info=exc_info)
-        else:
-            self.logger.error(msg, *args, exc_info=exc_info)
+        """Log error with optional EIN context - always shown even in quiet mode"""
+        log_error(self.logger, msg, ein, exc_info, *args)
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
-        if ein:
-            self.logger.info(f"EIN {ein}: {msg}", *args)
-        else:
-            self.logger.info(msg, *args)
+        if not self.quiet:
+            log_info(self.logger, msg, ein, *args)
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
-        if ein:
-            self.logger.debug(f"EIN {ein}: {msg}", *args)
-        else:
-            self.logger.debug(msg, *args)
+        if not self.quiet:
+            log_debug(self.logger, msg, ein, *args)
 
     def log_warning(self, msg: str, *args, ein: Optional[str] = None):
-        """Log warning with optional EIN context"""
-        if ein:
-            self.logger.warning(f"EIN {ein}: {msg}", *args)
-        else:
-            self.logger.warning(msg, *args)
+        """Log warning with optional EIN context - always shown even in quiet mode"""
+        log_warning(self.logger, msg, ein, *args)
+
+    def _download_irs_zips(self, start_year: int, end_year: int):
+        """Download IRS 990 ZIP files from IRS website"""
+        def download_file(url, dest_folder):
+            filename = url.split('/')[-1]
+            dest_path = os.path.join(dest_folder, filename)
+            if os.path.exists(dest_path):
+                self.log_info(f"Skipping {filename} - already exists")
+                return
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            with open(dest_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            self.log_info(f"Downloaded {filename}")
+
+        def valid_year(year):
+            try:
+                year = int(year)
+                if 2015 <= year <= 2025:
+                    return year
+                raise argparse.ArgumentTypeError("Year must be between 2015 and 2025.")
+            except ValueError:
+                raise argparse.ArgumentTypeError("Year must be an integer.")
+
+        if not os.path.exists(self.zips_dir):
+            os.makedirs(self.zips_dir)
+
+        base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
+        response = requests.get(base_url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        for year in range(start_year, end_year + 1):
+            year_str = str(year)
+            # Find links containing the year and ending in .zip
+            zip_links = [a['href'] for a in soup.find_all('a', href=True)
+                         if year_str in a['href'] and a['href'].endswith('.zip') and 'TEOS_XML' in a['href']]
+
+            if not zip_links:
+                self.log_warning(f"No ZIP files found for {year}")
+                continue
+
+            for link in zip_links:
+                full_url = f"https://www.irs.gov{link}" if link.startswith('/') else link
+                download_file(full_url, self.zips_dir)
+
+    def _recompress_zips(self):
+        """Recompress ZIP files to standard format using 7z and zip"""
+        import glob
+        import shutil
+        import subprocess
+
+        def check_tools():
+            """Check if required tools (7z, zip) are available."""
+            for tool in ["7z", "zip"]:
+                if shutil.which(tool) is None:
+                    raise RuntimeError(f"Error: {tool} is not installed. Install with 'brew install {tool}'.")
+
+        def check_compression(zip_file):
+            """Check if ZIP file uses unsupported compression methods."""
+            try:
+                with zipfile.ZipFile(zip_file, "r") as zf:
+                    for file_info in zf.infolist():
+                        if file_info.compress_type not in (0, 8):  # ZIP_STORED=0, ZIP_DEFLATED=8
+                            return True, f"Unsupported compression type {file_info.compress_type} in {file_info.filename}"
+                return False, "All files use supported compression (Stored or Deflated)"
+            except zipfile.BadZipFile as e:
+                return True, f"Malformed ZIP file: {e}"
+            except Exception as e:
+                return True, f"Error reading ZIP: {e}"
+
+        def recompress_zip(zip_file):
+            """Recompress a single ZIP file using Deflate."""
+            base_name = os.path.basename(zip_file)
+            self.log_info(f"Recompressing {zip_file}...")
+            self.log_debug(f"Current working directory: {os.getcwd()}")
+
+            # Clean temp directory
+            temp_dir = os.path.join(self.zips_dir, "temp")
+            if os.path.exists(temp_dir):
+                for item in Path(temp_dir).glob("*"):
+                    if item.is_file():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+
+            # Create temp directory
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_path = temp_dir
+            self.log_debug(f"Using temp directory: {temp_path}")
+
+            # Extract with 7z
+            try:
+                subprocess.run(
+                    ["7z", "x", zip_file, f"-o{temp_path}", "-y"],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Error extracting {zip_file}: {e.stderr}"
+                self.log_error(error_msg)
+                return False
+
+            # Count extracted files
+            extracted_files = len(list(Path(temp_path).rglob("*.xml")))
+            self.log_info(f"Extracted {extracted_files} files from {zip_file}.")
+
+            # Recompress with zip in one go
+            temp_zip = os.path.join(temp_path, "temp.zip")
+            self.log_debug(f"Creating temp ZIP: {temp_zip}")
+            os.chdir(temp_path)
+            self.log_debug(f"Changed to directory: {os.getcwd()}")
+            try:
+                # Compress all XML files in one zip command
+                subprocess.run(
+                    ["zip", "-r", "-Z", "deflate", temp_zip, "."],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Error recompressing {zip_file}: {e.stderr}"
+                self.log_error(error_msg)
+                os.chdir(self.zips_dir)
+                return False
+
+            # Verify temp.zip exists
+            if not os.path.exists(temp_zip):
+                error_msg = f"Error: {temp_zip} was not created for {zip_file}."
+                self.log_error(error_msg)
+                os.chdir(self.zips_dir)
+                return False
+
+            # Move to output directory using absolute path
+            output_zip = os.path.join(self.zips_dir, "recompressed", base_name)
+            os.makedirs(os.path.dirname(output_zip), exist_ok=True)
+            self.log_debug(f"Moving {temp_zip} to {output_zip}")
+            try:
+                shutil.move(temp_zip, output_zip)
+            except (OSError, shutil.Error) as e:
+                error_msg = f"Error moving {temp_zip} to {output_zip}: {e}"
+                self.log_error(error_msg)
+                os.chdir(self.zips_dir)
+                return False
+
+            # Return to base directory and clean up
+            os.chdir(self.zips_dir)
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+            self.log_info(f"Successfully recompressed {zip_file} to recompressed/{base_name}")
+            return True
+
+        check_tools()
+
+        # Scan ZIPs - only check files that don't have recompressed versions
+        zip_files = glob.glob(os.path.join(self.zips_dir, "20*.zip"))
+        if not zip_files:
+            raise FileNotFoundError("No ZIP files found matching pattern '20*.zip'.")
+
+        # Filter to only new/unprocessed files
+        recompressed_dir = os.path.join(self.zips_dir, "recompressed")
+        os.makedirs(recompressed_dir, exist_ok=True)
+
+        to_check = []
+        for zip_file in zip_files:
+            base_name = os.path.basename(zip_file)
+            recompressed_path = os.path.join(recompressed_dir, base_name)
+            if not os.path.exists(recompressed_path):
+                to_check.append(zip_file)
+
+        if not to_check:
+            self.log_info("All ZIP files already have recompressed versions. Skipping recompression.")
+            return True
+
+        self.log_info(f"Found {len(to_check)} ZIP files to check for recompression.")
+
+        to_recompress = []
+        for zip_file in to_check:
+            self.log_debug(f"Checking {zip_file}...")
+            needs_recompress, reason = check_compression(zip_file)
+            if needs_recompress:
+                self.log_info(f"  {reason}")
+                to_recompress.append(zip_file)
+            else:
+                self.log_info(f"  {reason}. Skipping.")
+
+        if not to_recompress:
+            self.log_info("No ZIP files need recompression.")
+            return
+
+        self.log_info(f"ZIP files to recompress: {len(to_recompress)}")
+
+        # Recompress
+        success_count = 0
+        for zip_file in to_recompress:
+            if recompress_zip(zip_file):
+                success_count += 1
+            else:
+                self.log_error(f"Failed to recompress {zip_file}.")
+                return False
+
+        self.log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
+        return True
 
     # Main processing methods that delegate to modules
 
+    def download_irs_zips(self, start_year: int, end_year: int):
+        """Download IRS 990 ZIP files from IRS website (step 1)"""
+        self.log_info(f"Downloading IRS 990 ZIP files from {start_year} to {end_year}")
+        return self._download_irs_zips(start_year, end_year)
+
+    def recompress_zips(self):
+        """Recompress ZIP files to standard format (step 2)"""
+        self.log_info("Recompressing ZIP files to standard format")
+        return self._recompress_zips()
+
     def process_zip_files(self, start_year: int, end_year: int):
-        """Process ZIP files and register XML files (steps 2-4)"""
+        """Process ZIP files and register XML files (step 3)"""
         self.log_info(f"Processing ZIP files from {start_year} to {end_year}")
         return self.zip_processor.process_zip_files(start_year, end_year)
 
@@ -287,15 +494,15 @@ class IRS990Processor:
                     self.log_info(f"TRACE: Found raw EIN: '{raw_ein}' using xpath: {xpath.path}")
                     if raw_ein.isdigit():
                         formatted_ein = f"{int(raw_ein):09d}"
-                        self.log_info(f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
+                        log_info(self.logger, f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
                         return formatted_ein
                     else:
-                        self.logger.warning(f"TRACE: Non-digit EIN found: '{raw_ein}', returning 'Unknown'")
+                        log_warning(self.logger, f"TRACE: Non-digit EIN found: '{raw_ein}', returning 'Unknown'")
                         return "Unknown"
             except Exception as e:
                 self.log_debug(f"XPath {xpath.path} failed: {e}")
                 continue
-        self.logger.warning("TRACE: No EIN found in XML, returning 'Unknown'")
+        log_warning(self.logger, "TRACE: No EIN found in XML, returning 'Unknown'")
         return "Unknown"
 
     def _mark_xml_error(self, xml_id: int, error_msg: str):
@@ -487,23 +694,25 @@ def main():
     parser.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Number of worker threads (default: {MAX_WORKERS})")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
-    parser.add_argument("--step", choices=["all", "zip", "xml", "address", "geolocate",
+    parser.add_argument("--step", choices=["all", "down", "recompress", "zip", "xml", "address", "geolocate",
                                           "match", "percentiles", "export"],
                         default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["zip", "xml", "address", "geolocate",
+    parser.add_argument("--start-step", choices=["down", "recompress", "zip", "xml", "address", "geolocate",
                                                 "match", "percentiles", "export"],
                         help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["zip", "xml", "address", "geolocate",
+    parser.add_argument("--stop-step", choices=["down", "recompress", "zip", "xml", "address", "geolocate",
                                                "match", "percentiles", "export"],
                         help="Stopping step for processing")
 
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["zip", "xml", "address", "geolocate", "match", "percentiles", "export"]
+    steps = ["down", "recompress", "zip", "xml", "address", "geolocate", "match", "percentiles", "export"]
 
     # Define step actions
     step_actions = {
+        "down": lambda: processor.download_irs_zips(args.start_year, args.end_year),
+        "recompress": lambda: processor.recompress_zips(),
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
         "xml": lambda: processor.process_xml_files(),
         "address": lambda: None,  # Address processing is part of XML processing
@@ -520,7 +729,7 @@ def main():
 
     # Set defaults if not specified
     if not args.start_step:
-        args.start_step = "zip"
+        args.start_step = "down"
     if not args.stop_step:
         args.stop_step = "export"
 
@@ -554,8 +763,17 @@ def main():
                 action()
             processor.log_info(f"Completed step: {step}")
 
+            # Generate stats report after each step
+            try:
+                report_file = processor.db_ops.generate_stats_report(f"after_{step}", f"Completed step: {step}")
+                processor.log_info(f"Stats report generated: {report_file}")
+            except Exception as e:
+                if not processor.quiet:
+                    log_warning(processor.logger, f"Failed to generate stats report for step {step}: {e}")
+
     except Exception as e:
-        processor.logger.error(f"Processing failed: {e}", exc_info=True)
+        if not processor.quiet:
+            log_error(processor.logger, f"Processing failed: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":

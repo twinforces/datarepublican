@@ -30,14 +30,16 @@ from geolocation_processor import GeolocationProcessor
 from address_matcher import AddressMatcher
 from constants import VALID_STATES
 from zip_processor import ZipProcessor
+from logging_utils import log_info, log_error, log_debug, log_warning
 
 
 class ProcessingStrategy(ABC):
     """Abstract base class for processing strategies"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
         self.db_ops = db_ops
         self.logger = logger
+        self.quiet = quiet
 
     @abstractmethod
     def execute(self, *args, **kwargs) -> Any:
@@ -46,24 +48,21 @@ class ProcessingStrategy(ABC):
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
-        if ein:
-            self.logger.info("EIN %s: " + msg, ein, *args)
-        else:
-            self.logger.info(msg, *args)
+        if not self.quiet:
+            log_info(self.logger, msg, ein, *args)
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
-        """Log error with optional EIN context"""
-        if ein:
-            self.logger.error("EIN {}: {}".format(ein, msg.format(*args)), exc_info=exc_info)
-        else:
-            self.logger.error(msg.format(*args), exc_info=exc_info)
+        """Log error with optional EIN context - always shown even in quiet mode"""
+        log_error(self.logger, msg, ein, exc_info, *args)
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
-        if ein:
-            self.logger.debug("EIN %s: " + msg, ein, *args)
-        else:
-            self.logger.debug(msg, *args)
+        if not self.quiet:
+            log_debug(self.logger, msg, ein, *args)
+
+    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
+        """Log warning with optional EIN context - always shown even in quiet mode"""
+        log_warning(self.logger, msg, ein, *args)
 
 
 class ParallelXMLProcessingStrategy(ProcessingStrategy):
@@ -74,8 +73,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     BATCH_SIZE = 100
     STALL_THRESHOLD = 30
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, workers: int = MAX_WORKERS):
-        super().__init__(db_ops, logger)
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, workers: int = MAX_WORKERS, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
         self.workers = workers
 
     # Lock-free queue implementation for single-file processing
@@ -264,38 +263,30 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         contractors = []
         contributions = []
 
-        # Deduplicate charities by (ein, tax_year) - keep the one with the latest XML filename
-        charity_map = {}
+        # Process charities without deduplication (let database handle uniqueness constraints)
+        addresses = []
         for charity, officer_list, grant_list, contractor_list, contribution_list, address in batch_data:
             if charity:
-                key = (charity.ein, charity.tax_year)
-                # Compare XML filenames to keep the latest one (assuming sequential naming)
-                if key not in charity_map or charity.xml_name > charity_map[key][0].xml_name:
-                    charity_map[key] = (charity, officer_list, grant_list, contractor_list, contribution_list, address)
+                charities.append(charity)
+                charity_id = len(charities)  # Temporary ID for batch processing
 
-        # Process deduplicated charities
-        addresses = []
-        for charity, officer_list, grant_list, contractor_list, contribution_list, address in charity_map.values():
-            charities.append(charity)
-            charity_id = len(charities)  # Temporary ID for batch processing
+                for officer in officer_list:
+                    officer.charity_id = charity_id
+                    officers.append(officer)
 
-            for officer in officer_list:
-                officer.charity_id = charity_id
-                officers.append(officer)
+                for grant in grant_list:
+                    grants.append(grant)
 
-            for grant in grant_list:
-                grants.append(grant)
+                for contractor in contractor_list:
+                    contractors.append(contractor)
 
-            for contractor in contractor_list:
-                contractors.append(contractor)
+                for contribution in contribution_list:
+                    contributions.append(contribution)
 
-            for contribution in contribution_list:
-                contributions.append(contribution)
+                if address:
+                    addresses.append(address)
 
-            if address:
-                addresses.append(address)
-
-        self.log_info(f"Bulk insert batch: DEDUPLICATED to {len(charities)} charities, {len(officers)} officers, {len(grants)} grants, {len(contractors)} contractors, {len(contributions)} contributions, {len(addresses)} addresses")
+        self.log_info(f"Bulk insert batch: Processing {len(charities)} charities, {len(officers)} officers, {len(grants)} grants, {len(contractors)} contractors, {len(contributions)} contributions, {len(addresses)} addresses")
 
         # Bulk insert charities using reflection
         if charities:
@@ -392,7 +383,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             # Bulk insert addresses using reflection
             if addresses:
                 address_data = []
-                for address in addresses:
+                for i, address in enumerate(addresses):
                     # Compute colocator for DCAddress objects if not already set
                     if hasattr(address, 'colocator') and address.colocator is None:
                         if address.po_box and address.zip_code:
@@ -403,6 +394,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                             address.colocator = f"FA:{address.state}"
                         else:
                             address.colocator = None
+
+                    # Set owner_id for charity addresses (link to charity that owns this address)
+                    if hasattr(address, 'address_type') and address.address_type == 'charity':
+                        # Find the charity that owns this address by matching index in batch
+                        if i < len(charity_ids):
+                            address.owner_id = charity_ids[i]
 
                     sql, values = self._build_insert_from_dataclass(address, 'Addresses', ['address_id'])
                     address_data.append(values)
@@ -461,7 +458,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             elif form_type == "990PF":
                 charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
             else:
-                self.log_error(f"Unsupported form type {form_type} in {filename}")
+                self.log_info(f"Unsupported form type {form_type} in {filename}")
                 return ('error', xml_id)
 
             if charity:
@@ -648,13 +645,13 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 class GeocodingBatchStrategy(ProcessingStrategy):
     """Strategy for batch geocoding addresses - DEPRECATED: Use GeolocationProcessor instead"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
-        super().__init__(db_ops, logger)
-        self.logger.warning("GeocodingBatchStrategy is deprecated. Use GeolocationProcessor instead.")
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
+        self.log_warning("GeocodingBatchStrategy is deprecated. Use GeolocationProcessor instead.")
 
     def execute(self, batch: List[DCAddress]) -> int:
         """Geolocate a batch of addresses - DEPRECATED"""
-        self.logger.warning("GeocodingBatchStrategy.execute() is deprecated. Use GeolocationProcessor.geolocate_addresses() instead.")
+        self.log_warning("GeocodingBatchStrategy.execute() is deprecated. Use GeolocationProcessor.geolocate_addresses() instead.")
         processor = GeolocationProcessor(self.db_ops)
         return processor._geolocate_batch(batch)
 
@@ -662,13 +659,13 @@ class GeocodingBatchStrategy(ProcessingStrategy):
 class AddressMatchingStrategy(ProcessingStrategy):
     """Strategy for matching grants by address/colocator - DEPRECATED: Use AddressMatcher instead"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
-        super().__init__(db_ops, logger)
-        self.logger.warning("AddressMatchingStrategy is deprecated. Use AddressMatcher instead.")
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
+        self.log_warning("AddressMatchingStrategy is deprecated. Use AddressMatcher instead.")
 
     def execute(self) -> int:
         """Match grants with unknown EINs by address/colocator - DEPRECATED"""
-        self.logger.warning("AddressMatchingStrategy.execute() is deprecated. Use AddressMatcher.match_grants_by_address() instead.")
+        self.log_warning("AddressMatchingStrategy.execute() is deprecated. Use AddressMatcher.match_grants_by_address() instead.")
         matcher = AddressMatcher(self.db_ops)
         return matcher.match_grants_by_address()
 
@@ -676,13 +673,13 @@ class AddressMatchingStrategy(ProcessingStrategy):
 class StubCharityCreationStrategy(ProcessingStrategy):
     """Strategy for creating stub charities for unmatched grants - DEPRECATED: Use AddressMatcher instead"""
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger):
-        super().__init__(db_ops, logger)
-        self.logger.warning("StubCharityCreationStrategy is deprecated. Use AddressMatcher instead.")
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
+        self.log_warning("StubCharityCreationStrategy is deprecated. Use AddressMatcher instead.")
 
     def execute(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
         """Create a stub charity record for unmatched grants - DEPRECATED"""
-        self.logger.warning("StubCharityCreationStrategy.execute() is deprecated. Use AddressMatcher._create_stub_charity_for_grant() instead.")
+        self.log_warning("StubCharityCreationStrategy.execute() is deprecated. Use AddressMatcher._create_stub_charity_for_grant() instead.")
         # Generate a pseudo-EIN for stub records
         stub_ein = f"STUB{hash(name + (address or '') + str(tax_year)) % 1000000000:09d}"
 
