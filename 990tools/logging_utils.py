@@ -15,7 +15,7 @@ from typing import Optional
 
 def get_debug_info():
     """Get debug information about the caller's location"""
-    frame = inspect.currentframe().f_back  # Get caller's frame
+    frame = inspect.currentframe().f_back.f_back  # Get caller's frame
     if frame is None:
         return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
 

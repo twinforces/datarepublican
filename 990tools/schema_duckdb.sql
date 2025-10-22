@@ -90,8 +90,10 @@ CREATE TABLE Charities (
 CREATE TABLE Grants (
     grant_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein VARCHAR NOT NULL,
-    -- Filer EIN (foreign key to Charities)
+    -- Filer EIN (foreign key to Charities with tax_year)
     filer_name VARCHAR NOT NULL,
+    -- Grantee EIN (foreign key to Charities)
+    grantee_name VARCHAR NOT NULL,
     -- Filer name
     grant_ein VARCHAR,
     -- Grantee EIN (may be null for foreign)
@@ -99,9 +101,7 @@ CREATE TABLE Grants (
     -- Grant amount
     tax_year INTEGER NOT NULL,
     -- Tax year
-    filer_colocator VARCHAR,
-    -- Filer colocator data
-    grantee_colocator VARCHAR,
+    colocator VARCHAR,
     -- Grantee colocator data
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein, tax_year) REFERENCES Charities(ein, tax_year) -- DuckDB doesn't support CASCADE
@@ -127,8 +127,10 @@ CREATE TABLE Addresses (
     address_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein VARCHAR NOT NULL,
     -- EIN this address belongs to
-    owner_id VARCHAR,
+    owner_id UUID NOT NULL,
     -- Owner ID for loose foreign key relationships
+    master_id UUID,
+    -- Master address ID for deduplication (NULL for master addresses)
     name VARCHAR NOT NULL,
     -- Organization name
     address_line1 VARCHAR,
@@ -147,7 +149,7 @@ CREATE TABLE Addresses (
     -- PO Box if applicable
     canonical_address VARCHAR,
     -- Standardized address built from components
-    address_type VARCHAR NOT NULL CHECK(address_type IN ('filer', 'grantee')),
+    address_type VARCHAR NOT NULL,
     -- Address type
     geocoding_id VARCHAR,
     -- Reference to geocoding cache
@@ -346,6 +348,8 @@ CREATE INDEX idx_addresses_ein ON Addresses(ein);
 CREATE INDEX idx_addresses_zip_code ON Addresses(zip_code);
 CREATE INDEX idx_addresses_type ON Addresses(address_type);
 CREATE INDEX idx_addresses_geocoding ON Addresses(geocoding_id);
+CREATE INDEX idx_addresses_master_id ON Addresses(master_id);
+CREATE INDEX idx_addresses_canonical ON Addresses(canonical_address);
 -- Geocoding indexes
 CREATE INDEX idx_geocoding_address_hash ON Geocoding(address_hash);
 CREATE INDEX idx_geocoding_status ON Geocoding(geocoding_status);

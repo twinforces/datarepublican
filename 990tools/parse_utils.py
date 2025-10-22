@@ -93,7 +93,7 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                 ein_elem = elem.xpath(GRANT_EIN_XPATHS[0].path, namespaces=NAMESPACES)
                 name_elem = elem.xpath(GRANT_NAME_XPATHS[0].path, namespaces=NAMESPACES)
                 amount_elem = elem.xpath(GRANT_AMOUNT_XPATHS[0].path, namespaces=NAMESPACES)
-                grantee_name = name_elem[0].text.strip() if name_elem else "Unknown"
+                grantee_name = (name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown")
                 is_foreign = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
                 if is_foreign:
                     country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)

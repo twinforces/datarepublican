@@ -782,6 +782,54 @@ class DatabaseOperations:
 
         return report_filename
 
+    def get_latest_charities_for_export(self) -> List[Tuple]:
+        """Get latest charities for export"""
+        # Ensure LatestCharities table exists
+        self.create_latest_charities_table()
+
+        result = self.execute_query("""
+            SELECT tax_year, ein, filer_name, receipt_amt, govt_amt, contrib_amt,
+                   org_type, total_exp, prog_exp, travel_amt, conferences_amt,
+                   officer_comp, comp_pct, comp_ptile, travel_pct, travel_ptile,
+                   conferences_pct, conferences_ptile, grants_pct, grants_ptile,
+                   foreign_expenses_pct, foreign_expenses_ptile, grift_ratio,
+                   total_assets, form_type, denominator, foreign_office, foreign_expenses,
+                   grants_to_others, domestic_misrep_flag, xml_name
+            FROM LatestCharities
+            ORDER BY ein, tax_year
+        """)
+        return result.fetchall()
+
+    def get_grants_for_export(self) -> List[Tuple]:
+        """Get grants for export"""
+        result = self.execute_query("""
+            SELECT filer_ein, filer_name, grant_ein, grant_amt, tax_year,
+                   colocator, colocator
+            FROM Grants
+            ORDER BY filer_ein, tax_year
+        """)
+        return result.fetchall()
+
+    def get_contractors_for_export(self) -> List[Tuple]:
+        """Get contractors for export"""
+        result = self.execute_query("""
+            SELECT filer_ein, name, amount, ein, address, zip_code,
+                   po_box, tax_year, colocator
+            FROM Contractors
+            ORDER BY filer_ein, tax_year
+        """)
+        return result.fetchall()
+
+    def get_political_contributions_for_export(self) -> List[Tuple]:
+        """Get political contributions for export"""
+        result = self.execute_query("""
+            SELECT filer_ein, recipient, amount, recipient_address,
+                   recipient_zip, recipient_po_box, tax_year, colocator
+            FROM PoliticalContributions
+            ORDER BY filer_ein, tax_year
+        """)
+        return result.fetchall()
+
     def optimize_database(self):
         """Run database optimization commands"""
         # Analyze tables for better query planning

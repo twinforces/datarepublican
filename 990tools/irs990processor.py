@@ -20,8 +20,6 @@ import time
 import zipfile
 import threading
 import logging
-import requests
-from bs4 import BeautifulSoup
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from datetime import datetime
@@ -47,6 +45,8 @@ from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
 from address_matcher import AddressMatcher
+from address_deduplication_processor import AddressDeduplicationProcessor
+from irsfetch_processor import IRSFetchProcessor
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
 
 # Import parsing functions
@@ -115,6 +115,10 @@ class IRS990Processor:
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter
         self.tsv_exporter = TSVExporter(self.db_ops, final_dir)
+        # Initialize IRS fetch processor
+        self.irs_fetch_processor = IRSFetchProcessor(zips_dir, quiet)
+        # Initialize address deduplication processor
+        self.address_dedup_processor = AddressDeduplicationProcessor(self.db_ops, quiet)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -160,53 +164,6 @@ class IRS990Processor:
         """Log warning with optional EIN context - always shown even in quiet mode"""
         log_warning(self.logger, msg, ein, *args)
 
-    def _download_irs_zips(self, start_year: int, end_year: int):
-        """Download IRS 990 ZIP files from IRS website"""
-        def download_file(url, dest_folder):
-            filename = url.split('/')[-1]
-            dest_path = os.path.join(dest_folder, filename)
-            if os.path.exists(dest_path):
-                self.log_info(f"Skipping {filename} - already exists")
-                return
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-            with open(dest_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            self.log_info(f"Downloaded {filename}")
-
-        def valid_year(year):
-            try:
-                year = int(year)
-                if 2015 <= year <= 2025:
-                    return year
-                raise argparse.ArgumentTypeError("Year must be between 2015 and 2025.")
-            except ValueError:
-                raise argparse.ArgumentTypeError("Year must be an integer.")
-
-        if not os.path.exists(self.zips_dir):
-            os.makedirs(self.zips_dir)
-
-        base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
-        response = requests.get(base_url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        for year in range(start_year, end_year + 1):
-            year_str = str(year)
-            # Find links containing the year and ending in .zip
-            zip_links = [a['href'] for a in soup.find_all('a', href=True)
-                         if year_str in a['href'] and a['href'].endswith('.zip') and 'TEOS_XML' in a['href']]
-
-            if not zip_links:
-                self.log_warning(f"No ZIP files found for {year}")
-                continue
-
-            for link in zip_links:
-                full_url = f"https://www.irs.gov{link}" if link.startswith('/') else link
-                download_file(full_url, self.zips_dir)
-
-    def _recompress_zips(self):
         """Recompress ZIP files to standard format using 7z and zip"""
         import glob
         import shutil
@@ -367,15 +324,10 @@ class IRS990Processor:
 
     # Main processing methods that delegate to modules
 
-    def download_irs_zips(self, start_year: int, end_year: int):
-        """Download IRS 990 ZIP files from IRS website (step 1)"""
-        self.log_info(f"Downloading IRS 990 ZIP files from {start_year} to {end_year}")
-        return self._download_irs_zips(start_year, end_year)
-
-    def recompress_zips(self):
-        """Recompress ZIP files to standard format (step 2)"""
-        self.log_info("Recompressing ZIP files to standard format")
-        return self._recompress_zips()
+    def fetch_irs_zips(self, start_year: int, end_year: int):
+        """Fetch IRS 990 ZIP files from IRS website and recompress (step 1)"""
+        self.log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
+        return self.irs_fetch_processor.fetch_irs_zips(start_year, end_year)
 
     def process_zip_files(self, start_year: int, end_year: int):
         """Process ZIP files and register XML files (step 3)"""
@@ -672,6 +624,11 @@ class IRS990Processor:
         # This method is now handled by percentile_calculator.py
         return 0.0
 
+    def deduplicate_addresses(self):
+        """Deduplicate addresses and create master-child relationships (step 4)"""
+        self.log_info("Deduplicating addresses and creating master-child relationships")
+        return self.address_dedup_processor.deduplicate_addresses()
+
     def export_final_tsvs(self):
         """Export final TSV files (step 11)"""
         self.log_info("Exporting final TSV files")
@@ -694,28 +651,28 @@ def main():
     parser.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Number of worker threads (default: {MAX_WORKERS})")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
-    parser.add_argument("--step", choices=["all", "down", "recompress", "zip", "xml", "address", "geolocate",
-                                          "match", "percentiles", "export"],
-                        default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["down", "recompress", "zip", "xml", "address", "geolocate",
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "xml", "address", "geolocate",
+                                           "match", "percentiles", "export"],
+                         default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
+    parser.add_argument("--start-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
+                                                 "match", "percentiles", "export"],
+                         help="Starting step for processing")
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
                                                 "match", "percentiles", "export"],
-                        help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["down", "recompress", "zip", "xml", "address", "geolocate",
-                                               "match", "percentiles", "export"],
-                        help="Stopping step for processing")
+                         help="Stopping step for processing")
 
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["down", "recompress", "zip", "xml", "address", "geolocate", "match", "percentiles", "export"]
+    steps = ["irsfetch", "zip", "xml", "address", "geolocate",
+                                           "match", "percentiles", "export"]
 
     # Define step actions
     step_actions = {
-        "down": lambda: processor.download_irs_zips(args.start_year, args.end_year),
-        "recompress": lambda: processor.recompress_zips(),
+        "irsfetch": lambda: processor.fetch_irs_zips(args.start_year, args.end_year),
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
         "xml": lambda: processor.process_xml_files(),
-        "address": lambda: None,  # Address processing is part of XML processing
+        "address": lambda: processor.deduplicate_addresses(),  # Deduplicate addresses and create master-child relationships
         "geolocate": lambda: processor.geolocate_addresses(),
         "match": lambda: processor.match_grants_by_address(),
         "percentiles": lambda: processor.calculate_percentiles(),
@@ -729,7 +686,7 @@ def main():
 
     # Set defaults if not specified
     if not args.start_step:
-        args.start_step = "down"
+        args.start_step = "irsfetch"
     if not args.stop_step:
         args.stop_step = "export"
 

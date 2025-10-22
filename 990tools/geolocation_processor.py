@@ -23,6 +23,7 @@ from database_operations import DatabaseOperations
 from models import Address
 from constants import VALID_STATES, STATE_NAME_TO_ABBREV, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX
 from logging_utils import log_info, log_error, log_debug, log_warning
+from address_deduplication_processor import AddressDeduplicationProcessor
 
 # Set up logging
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,6 +41,7 @@ class GeolocationProcessor:
     def __init__(self, db_ops: DatabaseOperations, quiet: bool = False):
         self.db_ops = db_ops
         self.quiet = quiet
+        self.address_dedup = AddressDeduplicationProcessor(db_ops, quiet)
 
     def _normalize_state(self, state: str) -> Optional[str]:
         """Normalize state to uppercase abbreviation, handling full names and case issues"""
@@ -130,8 +132,10 @@ class GeolocationProcessor:
                 if not self.quiet:
                     log_info(logger, f"Batch {batch_count}: Getting addresses for geocoding")
 
-                # Get next batch of addresses
-                batch_addresses = self.db_ops.get_addresses_for_geocoding(limit=self.BATCH_SIZE)
+                # Get next batch of master addresses for geocoding
+                batch_addresses = self.address_dedup.get_master_addresses_for_geocoding()
+                if len(batch_addresses) > self.BATCH_SIZE:
+                    batch_addresses = batch_addresses[:self.BATCH_SIZE]
                 if not batch_addresses:
                     if not self.quiet:
                         log_info(logger, "No more addresses to process, breaking batch loop")
@@ -466,6 +470,9 @@ class GeolocationProcessor:
             # Bulk update addresses
             for address_id in address_ids:
                 self.db_ops.update_address_geocoding(address_id, geocoding_id, colocator)
+
+                # Propagate geocoding results to child addresses and related records
+                self.address_dedup.propagate_geocoding_results(str(address_id))
 
     # Keep the old single-threaded method for compatibility
     def _geolocate_batch(self, batch: List[Address]) -> int:
