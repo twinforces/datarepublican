@@ -144,27 +144,39 @@ def set_progress_total(total: int):
 # Enhanced logging functions with progress reporting integration
 def log_info(logger: logging.Logger, msg: str, ein: Optional[str] = None, *args, **kwargs):
     """Log info message with optional EIN context"""
+    if not logger.isEnabledFor(logging.INFO):
+        return
     if ein:
-        msg = f"[EIN:{ein}] {msg}"
-    logger.info(msg, *args, **kwargs)
+        logger.info(f"[EIN:{ein}] {msg}", *args, **kwargs)
+    else:
+        logger.info(msg, *args, **kwargs)
 
 def log_error(logger: logging.Logger, msg: str, ein: Optional[str] = None, exc_info: bool = False, *args, **kwargs):
     """Log error message with optional EIN context - always shown even in quiet mode"""
+    if not logger.isEnabledFor(logging.ERROR):
+        return
     if ein:
-        msg = f"[EIN:{ein}] {msg}"
-    logger.error(msg, *args, exc_info=exc_info, **kwargs)
+        logger.error(f"[EIN:{ein}] {msg}", *args, exc_info=exc_info, **kwargs)
+    else:
+        logger.error(msg, *args, exc_info=exc_info, **kwargs)
 
 def log_debug(logger: logging.Logger, msg: str, ein: Optional[str] = None, *args, **kwargs):
     """Log debug message with optional EIN context"""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
     if ein:
-        msg = f"[EIN:{ein}] {msg}"
-    logger.debug(msg, *args, **kwargs)
+        logger.debug(f"[EIN:{ein}] {msg}", *args, **kwargs)
+    else:
+        logger.debug(msg, *args, **kwargs)
 
 def log_warning(logger: logging.Logger, msg: str, ein: Optional[str] = None, *args, **kwargs):
     """Log warning message with optional EIN context - always shown even in quiet mode"""
+    if not logger.isEnabledFor(logging.WARNING):
+        return
     if ein:
-        msg = f"[EIN:{ein}] {msg}"
-    logger.warning(msg, *args, **kwargs)
+        logger.warning(f"[EIN:{ein}] {msg}", *args, **kwargs)
+    else:
+        logger.warning(msg, *args, **kwargs)
 
 def get_logger(name: str) -> logging.Logger:
     """Get a configured logger"""

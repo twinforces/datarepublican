@@ -184,10 +184,10 @@ def build_zip_index(zip_dir, start_year, end_year):
     for year in range(start_year, end_year + 2):
         zip_files.extend(glob.glob(os.path.join(zip_dir, f"{year}*.zip")))
     if not quiet:
-        log_error("Found {} ZIP files in {}", len(zip_files), zip_dir)
+        log_error(f"Found {len(zip_files)} ZIP files in {zip_dir}")
     if not zip_files:
         if not quiet:
-            log_error("No ZIP files found in {} for years {}-{}", zip_dir, start_year, end_year + 1)
+            log_error(f"No ZIP files found in {zip_dir} for years {start_year}-{end_year + 1}")
         return index
     # Start thread-safe progress reporting
     progress_reporter = start_progress_reporting(
@@ -205,11 +205,11 @@ def build_zip_index(zip_dir, start_year, end_year):
                         filename = os.path.basename(internal_path)
                         if filename in index:
                             if not quiet:
-                                log_error("Duplicate XML filename {} in ZIP {}, overwriting with {}", filename, index[filename][0], zip_path)
+                                log_error(f"Duplicate XML filename {filename} in ZIP {index[filename][0]}, overwriting with {zip_path}")
                         index[filename] = (zip_path, internal_path)
         except Exception as e:
             if not quiet:
-                log_error("Error indexing ZIP {}: {}", zip_path, str(e), exc_info=True)
+                log_error(f"Error indexing ZIP {zip_path}: {str(e)}", exc_info=True)
         update_progress(1)
     # Stop progress reporting
     stop_progress_reporting()

@@ -21,7 +21,7 @@ def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context,
         try:
             value = int(text)
             if verbose:
-                log_error("Parsed int field {}: {} for EIN {} in {}", field, value, context.get('filer_ein'), xml_filename)
+                log_error(f"Parsed int field {field}: {value} for EIN {context.get('filer_ein')} in {xml_filename}")
             return value
         except (ValueError, AttributeError):
             if log_error:
@@ -33,7 +33,7 @@ def parse_string_field(root, xpaths_dict, field, namespaces, xml_filename, conte
     if elem is not None:
         value = elem.text.strip() if elem.text else default
         if verbose:
-            log_error("Parsed string field {}: {} for EIN {} in {}", field, value, context.get('filer_ein'), xml_filename)
+            log_error(f"Parsed string field {field}: {value} for EIN {context.get('filer_ein')} in {xml_filename}")
         return elem if return_element else value
     return default
 

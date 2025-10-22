@@ -59,9 +59,8 @@ def parse_org_type_990ez(root, field, namespaces, xml_filename, context, xpath_c
     elem = parse_string_field(root, XPATHS_990EZ, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
     if elem is not None:
         if verbose and not quiet:
-            log_error("Found org_type element: tag={}, text={}, attrib={} for EIN {} in {}",
-                       elem.tag, elem.text, elem.attrib, context.get('filer_ein', 'Unknown'), xml_filename,
-                       ein=context.get('filer_ein', 'Unknown'))
+            log_error(f"Found org_type element: tag={elem.tag}, text={elem.text}, attrib={elem.attrib} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+                      ein=context.get('filer_ein', 'Unknown'))
         if elem.tag.endswith("Organization501cInd"):
             type_num = elem.get("organization501cTypeTxt")
             if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
@@ -190,9 +189,8 @@ def parse_grants_to_others_990ez(root, field, namespaces, xml_filename, context,
 
     if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
         if not quiet:
-            log_error("Non-zero grants_to_others ${} for EIN {}, Name {}, TaxYear {}, XML {}",
-                       total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename,
-                       ein=context.get('filer_ein', 'Unknown'))
+            log_error(f"Non-zero grants_to_others ${total} for EIN {context.get('filer_ein', 'Unknown')}, Name {context.get('filer_name', 'Unknown')}, TaxYear {context.get('tax_year', 'Unknown')}, XML {xml_filename}",
+                      ein=context.get('filer_ein', 'Unknown'))
     elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
         return_data = parse_string_field(root, XPATHS_990EZ, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []

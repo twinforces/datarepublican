@@ -101,14 +101,12 @@ class BaseParser:
                     total += value
 
                     if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet:
-                        log_error("Parsed officer {} {} compensation: ${} for EIN {} in {}",
-                                  first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename,
+                        log_error(f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
                                   ein=context.get('filer_ein', 'Unknown'))
 
             if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
                 if not quiet:
-                    log_error("Suspicious officer_comp ${} exceeds total_exp ${} in {}",
-                              total, context.get('total_exp', 0), xml_filename,
+                    log_error(f"Suspicious officer_comp ${total} exceeds total_exp ${context.get('total_exp', 0)} in {xml_filename}",
                               ein=context.get('filer_ein', 'Unknown'))
                 total = 0
                 officer_entries = []
@@ -356,7 +354,7 @@ class BaseParser:
             return None
         except Exception as e:
             if not quiet:
-                log_error("Failed to parse address for EIN {} in {}: {}", context.get('filer_ein', 'Unknown'), xml_filename, str(e), ein=context.get('filer_ein', 'Unknown'))
+                log_error(f"Failed to parse address for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}: {str(e)}", ein=context.get('filer_ein', 'Unknown'))
             return None
 
     def calculate_percentage(self, value, denom):
@@ -380,8 +378,7 @@ class BaseParser:
 
         if context["form_type"] != self.form_type:
             if not quiet:
-                log_error("XML {} is not a Form {} (form_type: {}), skipping",
-                          xml_filename, self.form_type, context['form_type'],
+                log_error(f"XML {xml_filename} is not a Form {self.form_type} (form_type: {context['form_type']}), skipping",
                           ein=context['filer_ein'])
             return None, [], [], [], [], None
 
@@ -480,8 +477,8 @@ class BaseParser:
             log_debug("DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
 
         if log_debug is not None and not quiet:
-            log_debug("TRACE: parse_{}() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s",
-                      self.form_type.lower(), charity.ein, xml_filename, ein=charity.ein)
+            log_debug(f"TRACE: parse_{self.form_type.lower()}() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '{charity.ein}' in file {xml_filename}",
+                      ein=charity.ein)
         return charity, officers, grants, contractors, contributions, address
 
     def set_form_specific_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
