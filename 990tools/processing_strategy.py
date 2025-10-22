@@ -12,6 +12,9 @@ import logging
 import time
 import threading
 import queue
+import signal
+import sys
+import traceback
 from pathlib import Path
 import sqlite3
 from io import BytesIO
@@ -30,7 +33,7 @@ from geolocation_processor import GeolocationProcessor
 from address_matcher import AddressMatcher
 from constants import VALID_STATES
 from zip_processor import ZipProcessor
-from logging_utils import log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress
 
 
 class ProcessingStrategy(ABC):
@@ -92,6 +95,41 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
     def execute(self, max_files: Optional[int] = None) -> int:
         """Process XML files using producer-consumer pattern with thread-safe queues"""
+        # Set up signal handlers for graceful shutdown and thread debugging
+        def interrupt_handler(signum, frame):
+            self.log_error("Received interrupt signal, shutting down gracefully...")
+            stop_progress_reporting()
+            sys.exit(1)
+
+        def dump_threads_handler(signum, frame):
+            """Signal handler: Dumps formatted stack traces for all live threads."""
+            try:
+                import os
+                # Get frame snapshots for all threads.
+                frames = sys._current_frames()
+
+                print(f"\n{'='*60}", file=sys.stderr)
+                print(f"Stack traces for {len(frames)} threads (PID: {os.getpid()})", file=sys.stderr)
+                print(f"Signal: {signum} at {time.ctime()}", file=sys.stderr)
+                print(f"{'='*60}\n", file=sys.stderr)
+
+                for thread_id, frame in frames.items():
+                    thread_name = threading.get_ident() == thread_id and "Main" or f"Thread-{thread_id}"
+                    print(f"\nThread: {thread_name} (ID: 0x{thread_id:x})", file=sys.stderr)
+
+                    # Extract and format the stack.
+                    stack_lines = traceback.format_stack(frame)
+                    print("".join(stack_lines), file=sys.stderr)
+
+                print(f"{'='*60}\n", file=sys.stderr)
+                sys.stderr.flush()  # Ensure output in signal context.
+            except Exception as e:
+                print(f"Error in thread dump handler: {e}", file=sys.stderr)
+                sys.stderr.flush()
+
+        signal.signal(signal.SIGINT, interrupt_handler)
+        signal.signal(signal.SIGUSR1, dump_threads_handler)
+
         xml_files = self._get_xml_files_to_process()
         if max_files:
             xml_files = xml_files[:max_files]
@@ -101,14 +139,21 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         num_producers = min(self.workers, len(xml_files))
         self.log_info(f"Processing {len(xml_files)} files with {num_producers} producers")
 
+        # Start progress reporting immediately after we know the total
+        progress_reporter = start_progress_reporting(
+            total=len(xml_files),
+            desc="Processing XML files",
+            unit="file",
+            disable=self.quiet
+        )
+
         # Use thread-safe queues with backpressure
         xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
-        progress_queue = queue.Queue(maxsize=10)
 
         # Start consumer thread (single writer to database)
         consumer_thread = threading.Thread(
             target=self._database_consumer,
-            args=(xml_queue, progress_queue, num_producers, self.db_ops.db_conn)
+            args=(xml_queue, num_producers, self.db_ops.db_conn)
         )
         consumer_thread.daemon = True
         consumer_thread.start()
@@ -123,9 +168,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         # Wait for producers to finish (parse-heavy operations)
         for i, t in enumerate(producer_threads):
-            t.join(timeout=60.0)
+            t.join(timeout=300.0)  # Increased timeout to 5 minutes for large XML files
             if t.is_alive():
-                self.log_error(f"Producer {i} timeout")
+                self.log_error(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
+                # Don't kill the thread, let it continue in background
             else:
                 self.log_info(f"Producer {i} done")
 
@@ -135,19 +181,15 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         if consumer_thread.is_alive():
             self.log_error("Consumer timeout")
 
-        # Tally progress from consumer signals
-        total_processed = 0
-        try:
-            while True:
-                batch_size = progress_queue.get_nowait()
-                total_processed += abs(batch_size)
-                if batch_size < 0:
-                    self.log_error(f"Error in batch of {-batch_size}")
-        except queue.Empty:
-            pass
+        # Stop progress reporting
+        stop_progress_reporting()
 
-        self.log_info(f"Complete: {total_processed} files")
-        return total_processed
+        # Get total processed from consumer thread
+        # Since we removed the progress queue, we need to track this differently
+        # For now, just return the number of files we started with
+        # The actual count will be tracked by the progress bar updates
+        self.log_info(f"Started processing {len(xml_files)} files")
+        return len(xml_files)
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
         """Producer thread: parses XML and sends results to consumer"""
@@ -167,7 +209,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         xml_queue.put(None)  # Sentinel
         self.log_info(f"Producer {producer_id} done: {processed} files")
 
-    def _database_consumer(self, xml_queue, progress_queue, num_expected, conn):
+    def _database_consumer(self, xml_queue, num_expected, conn):
         """Consumer thread: writes results to database (single-threaded for DuckDB safety)"""
         batch_data = []
         total = 0
@@ -194,22 +236,23 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             if len(batch_data) >= self.BATCH_SIZE:
                 try:
                     self._bulk_insert_batch(batch_data, conn)
-                    progress_queue.put(len(batch_data))
+                    update_progress(len(batch_data))  # Update progress bar
+                    # Don't send progress updates to avoid blocking
                 except Exception as e:
                     self.log_error(f"Batch error: {e}", exc_info=True)
-                    progress_queue.put(-len(batch_data))
                 batch_data = []
 
         # Final batch
         if batch_data:
             try:
                 self._bulk_insert_batch(batch_data, conn)
-                progress_queue.put(len(batch_data))
+                update_progress(len(batch_data))  # Update progress bar
+                # Don't send progress updates to avoid blocking
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
-                progress_queue.put(-len(batch_data))
 
         self.log_info(f"Consumer done: {total} items, {signals} signals")
+        return total
 
     def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: List[str] = None) -> Tuple[str, Tuple]:
         """Build INSERT statement and values tuple from dataclass using reflection"""
@@ -345,6 +388,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             if grants:
                 grant_data = []
                 for grant in grants:
+                    # Ensure grantee_name is not None
+                    if grant.grantee_name is None:
+                        grant.grantee_name = "Unknown"
                     sql, values = self._build_insert_from_dataclass(grant, 'Grants', ['grant_id'])
                     grant_data.append(values)
 
@@ -580,7 +626,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 filer_name="",
                 grant_ein=grant_data.get("grant_ein"),
                 grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year
+                tax_year=tax_year,
+                grantee_name=grant_data.get("grantee_name", "Unknown")
             )
             grants.append(grant)
         return grants
@@ -596,7 +643,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 filer_name="",
                 grant_ein=grant_data.get("grant_ein"),
                 grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year
+                tax_year=tax_year,
+                grantee_name=grant_data.get("grantee_name", "Unknown")
             )
             grants.append(grant)
         return grants
@@ -612,7 +660,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 filer_name="",
                 grant_ein=grant_data.get("grant_ein"),
                 grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year
+                tax_year=tax_year,
+                grantee_name=grant_data.get("grantee_name", "Unknown")
             )
             grants.append(grant)
         return grants

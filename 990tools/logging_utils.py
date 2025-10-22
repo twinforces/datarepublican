@@ -1,97 +1,171 @@
-#!/usr/bin/env python3
-"""
-logging_utils.py - Standardized logging utilities for IRS 990 processing
-
-This module provides standardized logging patterns and UUID constants for
-log traceability across the IRS 990 processing system.
-"""
+# logging_utils.py - Enhanced logging utilities with thread-safe progress reporting
 
 import logging
-import inspect
-import os
-from typing import Optional
+import threading
+import queue
+import time
+from typing import Optional, Callable
+from tqdm import tqdm
 
-# Location-based logging utilities
+class ThreadSafeProgressReporter:
+    """Thread-safe progress reporting mechanism for multi-threaded operations"""
 
-def get_debug_info():
-    """Get debug information about the caller's location"""
-    frame = inspect.currentframe().f_back.f_back  # Get caller's frame
-    if frame is None:
-        return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
+    def __init__(self, total: Optional[int] = None, desc: str = "", unit: str = "it", disable: bool = False):
+        self.total = total
+        self.desc = desc
+        self.unit = unit
+        self.disable = disable
+        self.progress_queue = queue.Queue(maxsize=1000)
+        self.stop_event = threading.Event()
+        self.progress_thread = None
+        self.pbar = None
 
-    filename = os.path.basename(frame.f_code.co_filename) if frame.f_code.co_filename != '<string>' else '<interactive>'
-    return {
-        'file': filename,
-        'line': frame.f_lineno,
-        'function': frame.f_code.co_name
-    }
+    def start(self):
+        """Start the progress reporting thread"""
+        if self.progress_thread is not None:
+            return
 
-# Standardized logging format
-LOG_FORMAT = '%(asctime)s [%(levelname)8s] %(name)s: %(message)s'
-LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+        self.progress_thread = threading.Thread(target=self._progress_worker, daemon=True)
+        self.progress_thread.start()
 
-def setup_logger(name: str, level: int = logging.INFO) -> logging.Logger:
-    """Set up a standardized logger"""
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
-        logger.addHandler(handler)
-        logger.setLevel(level)
-    return logger
+    def stop(self):
+        """Stop the progress reporting thread"""
+        if self.progress_thread is None:
+            return
+
+        self.stop_event.set()
+        self.progress_queue.put(None)  # Signal to stop
+        self.progress_thread.join(timeout=1.0)
+
+        if self.pbar:
+            self.pbar.close()
+
+    def update(self, n: int = 1):
+        """Update progress by n steps"""
+        if not self.stop_event.is_set():
+            try:
+                self.progress_queue.put(('update', n), block=False)
+            except queue.Full:
+                pass  # Drop updates if queue is full
+
+    def set_description(self, desc: str):
+        """Set progress bar description"""
+        if not self.stop_event.is_set():
+            try:
+                self.progress_queue.put(('desc', desc), block=False)
+            except queue.Full:
+                pass
+
+    def set_total(self, total: int):
+        """Set total for progress bar"""
+        if not self.stop_event.is_set():
+            try:
+                self.progress_queue.put(('total', total), block=False)
+            except queue.Full:
+                pass
+
+    def _progress_worker(self):
+        """Worker thread that manages the tqdm progress bar"""
+        with tqdm(total=self.total, desc=self.desc, unit=self.unit, disable=self.disable) as pbar:
+            self.pbar = pbar
+
+            while not self.stop_event.is_set():
+                try:
+                    # Check for stop signal first
+                    if self.stop_event.is_set():
+                        break
+
+                    # Wait up to 10 seconds for progress updates
+                    item = self.progress_queue.get(timeout=10.0)
+                    if item is None:  # Stop signal
+                        break
+
+                    action, value = item
+                    if action == 'update':
+                        pbar.update(value)
+                    elif action == 'desc':
+                        pbar.set_description(value)
+                    elif action == 'total':
+                        pbar.total = value
+                        pbar.refresh()
+
+                except queue.Empty:
+                    # No progress updates in 10 seconds, continue waiting
+                    continue
+                except Exception as e:
+                    # Log error but continue
+                    print(f"Progress worker error: {e}")
+                    break
+
+# Global progress reporter instance
+_progress_reporter = None
+
+def get_progress_reporter(total: Optional[int] = None, desc: str = "", unit: str = "it", disable: bool = False) -> ThreadSafeProgressReporter:
+    """Get or create a global thread-safe progress reporter"""
+    global _progress_reporter
+    if _progress_reporter is None:
+        _progress_reporter = ThreadSafeProgressReporter(total=total, desc=desc, unit=unit, disable=disable)
+    return _progress_reporter
+
+def start_progress_reporting(total: Optional[int] = None, desc: str = "", unit: str = "it", disable: bool = False):
+    """Start global progress reporting"""
+    global _progress_reporter
+    if _progress_reporter:
+        _progress_reporter.stop()
+    _progress_reporter = ThreadSafeProgressReporter(total=total, desc=desc, unit=unit, disable=disable)
+    _progress_reporter.start()
+    return _progress_reporter
+
+def stop_progress_reporting():
+    """Stop global progress reporting"""
+    global _progress_reporter
+    if _progress_reporter:
+        _progress_reporter.stop()
+        _progress_reporter = None
+
+def update_progress(n: int = 1):
+    """Update global progress"""
+    global _progress_reporter
+    if _progress_reporter:
+        _progress_reporter.update(n)
+
+def set_progress_description(desc: str):
+    """Set global progress description"""
+    global _progress_reporter
+    if _progress_reporter:
+        _progress_reporter.set_description(desc)
+
+def set_progress_total(total: int):
+    """Set global progress total"""
+    global _progress_reporter
+    if _progress_reporter:
+        _progress_reporter.set_total(total)
+
+# Enhanced logging functions with progress reporting integration
+def log_info(logger: logging.Logger, msg: str, ein: Optional[str] = None, *args, **kwargs):
+    """Log info message with optional EIN context"""
+    if ein:
+        msg = f"[EIN:{ein}] {msg}"
+    logger.info(msg, *args, **kwargs)
+
+def log_error(logger: logging.Logger, msg: str, ein: Optional[str] = None, exc_info: bool = False, *args, **kwargs):
+    """Log error message with optional EIN context - always shown even in quiet mode"""
+    if ein:
+        msg = f"[EIN:{ein}] {msg}"
+    logger.error(msg, *args, exc_info=exc_info, **kwargs)
+
+def log_debug(logger: logging.Logger, msg: str, ein: Optional[str] = None, *args, **kwargs):
+    """Log debug message with optional EIN context"""
+    if ein:
+        msg = f"[EIN:{ein}] {msg}"
+    logger.debug(msg, *args, **kwargs)
+
+def log_warning(logger: logging.Logger, msg: str, ein: Optional[str] = None, *args, **kwargs):
+    """Log warning message with optional EIN context - always shown even in quiet mode"""
+    if ein:
+        msg = f"[EIN:{ein}] {msg}"
+    logger.warning(msg, *args, **kwargs)
 
 def get_logger(name: str) -> logging.Logger:
-    """Get or create a standardized logger"""
-    return setup_logger(name)
-
-# Context-aware logging helpers
-def log_with_context(logger: logging.Logger, level: int, message: str,
-                     ein: Optional[str] = None, **kwargs) -> None:
-    """Log a message with optional context information"""
-    if ein or kwargs:
-        context_parts = []
-        if ein:
-            context_parts.append(f"ein={ein}")
-        for key, value in kwargs.items():
-            context_parts.append(f"{key}={value}")
-
-        message = f"[{','.join(context_parts)}] {message}"
-
-    logger.log(level, message)
-
-# Convenience functions for common log levels
-def log_info(logger: logging.Logger, message: str, ein: Optional[str] = None, **kwargs) -> None:
-    """Log info message with context and location"""
-    # Add location info to message for precise identification
-    info = get_debug_info()
-    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
-    message = f"{location_tag} {message}"
-    log_with_context(logger, logging.INFO, message, ein, **kwargs)
-
-def log_error(logger: logging.Logger, message: str, ein: Optional[str] = None, exc_info: bool = False, **kwargs) -> None:
-    """Log error message with context and location"""
-    # Add location info to message for precise identification
-    info = get_debug_info()
-    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
-    message = f"{location_tag} {message}"
-    log_with_context(logger, logging.ERROR, message, ein, **kwargs)
-    if exc_info:
-        logger.exception("Exception details:")
-
-def log_debug(logger: logging.Logger, message: str, ein: Optional[str] = None, **kwargs) -> None:
-    """Log debug message with context and location"""
-    # Add location info to message for precise identification
-    info = get_debug_info()
-    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
-    message = f"{location_tag} {message}"
-    log_with_context(logger, logging.DEBUG, message, ein, **kwargs)
-
-def log_warning(logger: logging.Logger, message: str, ein: Optional[str] = None, **kwargs) -> None:
-    """Log warning message with context and location"""
-    # Add location info to message for precise identification
-    info = get_debug_info()
-    location_tag = f"[{info['file']}:{info['line']}:{info['function']}]"
-    message = f"{location_tag} {message}"
-    log_with_context(logger, logging.WARNING, message, ein, **kwargs)
-
-# All logging functions now include location info automatically
+    """Get a configured logger"""
+    return logging.getLogger(name)

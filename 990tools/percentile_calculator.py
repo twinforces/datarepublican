@@ -11,6 +11,7 @@ from collections import defaultdict
 from tqdm import tqdm
 
 from database_operations import DatabaseOperations
+from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -58,14 +59,20 @@ class PercentileCalculator:
         total_groups = sum(len(years) for years in groups.values())
         processed_groups = 0
 
+        # Start thread-safe progress reporting
+        progress_reporter = start_progress_reporting(
+            total=total_groups,
+            desc="Calculating percentiles",
+            unit="group"
+        )
+
         # Calculate percentiles for each group
-        with tqdm(total=total_groups, desc="Calculating percentiles") as pbar:
-            for org_type, years in groups.items():
-                for tax_year, org_charities in years.items():
-                    if len(org_charities) < 2:
-                        processed_groups += 1
-                        pbar.update(1)
-                        continue  # Need at least 2 for meaningful percentiles
+        for org_type, years in groups.items():
+            for tax_year, org_charities in years.items():
+                if len(org_charities) < 2:
+                    processed_groups += 1
+                    update_progress(1)
+                    continue  # Need at least 2 for meaningful percentiles
 
                     # Extract values for each metric, filtering out NULL values and converting strings to floats
                     comp_values = []
@@ -174,8 +181,11 @@ class PercentileCalculator:
                         )
 
                     processed_groups += 1
-                    pbar.update(1)
+                    update_progress(1)
                     print(f"Calculated percentiles for {org_type} {tax_year}: {len(org_charities)} charities")
+
+        # Stop progress reporting
+        stop_progress_reporting()
 
         print(f"Percentile calculation complete: {processed_groups} groups processed")
         return processed_groups

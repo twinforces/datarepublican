@@ -22,7 +22,7 @@ except ImportError:
 from database_operations import DatabaseOperations
 from models import Address
 from constants import VALID_STATES, STATE_NAME_TO_ABBREV, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX
-from logging_utils import log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description
 from address_deduplication_processor import AddressDeduplicationProcessor
 
 # Set up logging
@@ -125,34 +125,39 @@ class GeolocationProcessor:
         total_geolocated = 0
         batch_count = 0
 
-        logger.info("Starting batch processing loop")
-        with tqdm(desc="Geocoding addresses", unit="addr") as pbar:
-            while True:
-                batch_count += 1
+        # Start thread-safe progress reporting
+        progress_reporter = start_progress_reporting(
+            desc="Geocoding addresses",
+            unit="addr",
+            disable=self.quiet
+        )
+
+        while True:
+            batch_count += 1
+            if not self.quiet:
+                log_info(logger, f"Batch {batch_count}: Getting addresses for geocoding")
+
+            # Get next batch of master addresses for geocoding
+            batch_addresses = self.address_dedup.get_master_addresses_for_geocoding()
+            if len(batch_addresses) > self.BATCH_SIZE:
+                batch_addresses = batch_addresses[:self.BATCH_SIZE]
+            if not batch_addresses:
                 if not self.quiet:
-                    log_info(logger, f"Batch {batch_count}: Getting addresses for geocoding")
+                    log_info(logger, "No more addresses to process, breaking batch loop")
+                break
 
-                # Get next batch of master addresses for geocoding
-                batch_addresses = self.address_dedup.get_master_addresses_for_geocoding()
-                if len(batch_addresses) > self.BATCH_SIZE:
-                    batch_addresses = batch_addresses[:self.BATCH_SIZE]
-                if not batch_addresses:
-                    if not self.quiet:
-                        log_info(logger, "No more addresses to process, breaking batch loop")
-                    break
+            if not self.quiet:
+                log_info(logger, f"Batch {batch_count}: Processing {len(batch_addresses)} addresses")
 
-                if not self.quiet:
-                    log_info(logger, f"Batch {batch_count}: Processing {len(batch_addresses)} addresses")
+            # Process batch with multithreading
+            batch_geolocated = self._geolocate_batch_multithreaded(
+                batch_addresses, work_queue, result_queue, batch_count
+            )
+            total_geolocated += batch_geolocated
+            if not self.quiet:
+                log_info(logger, f"Batch {batch_count}: Geolocation complete, {batch_geolocated} addresses processed")
 
-                # Process batch with multithreading
-                batch_geolocated = self._geolocate_batch_multithreaded(
-                    batch_addresses, work_queue, result_queue, batch_count
-                )
-                total_geolocated += batch_geolocated
-                if not self.quiet:
-                    log_info(logger, f"Batch {batch_count}: Geolocation complete, {batch_geolocated} addresses processed")
-
-                pbar.update(batch_geolocated)  # Update by actual geolocated count, not batch size
+            update_progress(batch_geolocated)  # Update by actual geolocated count
 
         if not self.quiet:
             log_info(logger, f"All batches processed, total geolocated: {total_geolocated}")
@@ -180,6 +185,9 @@ class GeolocationProcessor:
         if consumer_thread.is_alive():
             if not self.quiet:
                 log_warning(logger, "Consumer thread did not stop cleanly")
+
+        # Stop progress reporting
+        stop_progress_reporting()
 
         if not self.quiet:
             log_info(logger, f"Geolocation complete: {total_geolocated} addresses geolocated")

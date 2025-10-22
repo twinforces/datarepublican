@@ -15,12 +15,11 @@ import pickle
 import json
 import xml.etree.ElementTree as ET
 import threading
-from tqdm import tqdm
 from collections import defaultdict
 import hashlib
 from io import BytesIO
 from dataclasses import dataclass
-from logging_utils import log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress
 
 @dataclass
 class AddressInfo:
@@ -190,7 +189,14 @@ def build_zip_index(zip_dir, start_year, end_year):
         if not quiet:
             log_error("No ZIP files found in {} for years {}-{}", zip_dir, start_year, end_year + 1)
         return index
-    for zip_path in tqdm(zip_files, desc="Indexing ZIP files"):
+    # Start thread-safe progress reporting
+    progress_reporter = start_progress_reporting(
+        total=len(zip_files),
+        desc="Indexing ZIP files",
+        unit="zip"
+    )
+
+    for zip_path in zip_files:
         zip_names.add(os.path.basename(zip_path))
         try:
             with zipfile.ZipFile(zip_path, 'r') as zf:
@@ -204,6 +210,10 @@ def build_zip_index(zip_dir, start_year, end_year):
         except Exception as e:
             if not quiet:
                 log_error("Error indexing ZIP {}: {}", zip_path, str(e), exc_info=True)
+        update_progress(1)
+    # Stop progress reporting
+    stop_progress_reporting()
+
     if not quiet:
         log_error("Built ZIP index with {} XML files from {} ZIPs", len(index), len(zip_names))
     return index

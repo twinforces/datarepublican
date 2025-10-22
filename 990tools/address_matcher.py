@@ -7,10 +7,10 @@ based on address and colocator information.
 """
 
 from typing import Optional, List, Tuple
-from tqdm import tqdm
 
 from database_operations import DatabaseOperations
 from models import Charity, Address
+from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress
 
 
 class AddressMatcher:
@@ -27,23 +27,32 @@ class AddressMatcher:
         grants = self.db_ops.get_grants_without_ein()
         print(f"Found {len(grants)} grants with unknown EINs to match")
 
-        matched_count = 0
-        with tqdm(total=len(grants), desc="Matching grants") as pbar:
-            for grant in grants:
-                # Try to find matching charity
-                matched_ein = self._find_charity_by_grant_info(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
-                if matched_ein:
-                    self.db_ops.update_grant_ein(grant.grant_id, matched_ein)
-                    matched_count += 1
-                    print(f"Matched grant {grant.grant_id} to charity {matched_ein}")
-                else:
-                    # Create stub charity
-                    stub_ein = self._create_stub_charity_for_grant(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
-                    if stub_ein:
-                        self.db_ops.update_grant_ein(grant.grant_id, stub_ein)
-                        print(f"Created stub charity {stub_ein} for grant {grant.grant_id}")
+        # Start thread-safe progress reporting
+        progress_reporter = start_progress_reporting(
+            total=len(grants),
+            desc="Matching grants",
+            unit="grant"
+        )
 
-                pbar.update(1)
+        matched_count = 0
+        for grant in grants:
+            # Try to find matching charity
+            matched_ein = self._find_charity_by_grant_info(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
+            if matched_ein:
+                self.db_ops.update_grant_ein(grant.grant_id, matched_ein)
+                matched_count += 1
+                print(f"Matched grant {grant.grant_id} to charity {matched_ein}")
+            else:
+                # Create stub charity
+                stub_ein = self._create_stub_charity_for_grant(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
+                if stub_ein:
+                    self.db_ops.update_grant_ein(grant.grant_id, stub_ein)
+                    print(f"Created stub charity {stub_ein} for grant {grant.grant_id}")
+
+            update_progress(1)
+
+        # Stop progress reporting
+        stop_progress_reporting()
 
         print(f"Grant matching complete: {matched_count} grants matched, {len(grants) - matched_count} stubs created")
         return matched_count

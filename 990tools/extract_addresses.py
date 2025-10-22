@@ -3,14 +3,13 @@ import glob
 import argparse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
 import queue
 from lxml import etree
 from io import BytesIO
 import sys
 import extract_utils as cu
 import re
-from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
+from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description
 
 logger = None
 verbose = False
@@ -272,8 +271,16 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
             total_skipped += 1
             return thread_local.result
     try:
+        # Start thread-safe progress reporting
+        progress_reporter = start_progress_reporting(
+            total=len(zip_index),
+            desc="Processing addresses from all XMLs",
+            unit="file",
+            disable=quiet
+        )
+
         if args.no_threads:
-            for xml_filename in tqdm(zip_index.keys(), desc="Processing addresses from all XMLs"):
+            for xml_filename in zip_index.keys():
                 result = process_address_row(xml_filename)
                 with zip_index_lock:
                     address_entries.extend(result['address_entries'])
@@ -293,6 +300,7 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
                             po_box_zip_index[po_box_zip] = set()
                         po_box_zip_index[po_box_zip].update(entries)
                 results_queue.put([result])
+                update_progress(1)
         else:
             with ThreadPoolExecutor(max_workers=worker_threads) as executor:
                 futures = []
@@ -305,34 +313,35 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
                         batch = []
                 if batch:
                     futures.append(executor.submit(lambda b: [process_address_row(f) for f in b], batch))
-                with tqdm(total=len(zip_index), desc="Processing addresses from all XMLs") as pbar:
-                    for future in as_completed(futures):
-                        results = future.result()
-                        with zip_index_lock:
-                            for result in results:
-                                address_entries.extend(result['address_entries'])
-                                debug_address_entries.extend(result['debug_address_entries'])
-                                po_box_entries.extend(result['po_box_entries'])
-                                invalid_ein_entries.extend(result['invalid_ein_entries'])
-                                ein_mismatch_set.update(result['ein_mismatch_set'])
-                                total_addresses += result['total_addresses']
-                                total_queue_puts += result['total_queue_puts']
-                                total_address_errors += result['total_address_errors']
-                                for zip_code, entries in result['zip_code_index'].items():
-                                    if zip_code not in zip_code_index:
-                                        zip_code_index[zip_code] = set()
-                                    zip_code_index[zip_code].update(entries)
-                                for po_box_zip, entries in result['po_box_zip_index'].items():
-                                    if po_box_zip not in po_box_zip_index:
-                                        po_box_zip_index[po_box_zip] = set()
-                                    po_box_zip_index[po_box_zip].update(entries)
-                        results_queue.put(results)
-                        pbar.update(min(batch_size, len(zip_index) - pbar.n))
+                for future in as_completed(futures):
+                    results = future.result()
+                    with zip_index_lock:
+                        for result in results:
+                            address_entries.extend(result['address_entries'])
+                            debug_address_entries.extend(result['debug_address_entries'])
+                            po_box_entries.extend(result['po_box_entries'])
+                            invalid_ein_entries.extend(result['invalid_ein_entries'])
+                            ein_mismatch_set.update(result['ein_mismatch_set'])
+                            total_addresses += result['total_addresses']
+                            total_queue_puts += result['total_queue_puts']
+                            total_address_errors += result['total_address_errors']
+                            for zip_code, entries in result['zip_code_index'].items():
+                                if zip_code not in zip_code_index:
+                                    zip_code_index[zip_code] = set()
+                                zip_code_index[zip_code].update(entries)
+                            for po_box_zip, entries in result['po_box_zip_index'].items():
+                                if po_box_zip not in po_box_zip_index:
+                                    po_box_zip_index[po_box_zip] = set()
+                                po_box_zip_index[po_box_zip].update(entries)
+                    results_queue.put(results)
+                    update_progress(min(batch_size, len(zip_index) - progress_reporter.pbar.n if progress_reporter.pbar else 0))
     except Exception as e:
         if not quiet:
             cu.log_error("Error in process_all_xml_addresses: {}", str(e), exc_info=True)
         raise
     finally:
+        # Stop progress reporting
+        stop_progress_reporting()
         for zip_file in zip_cache.values():
             zip_file.close()
 

@@ -12,11 +12,11 @@ import zipfile
 import threading
 from pathlib import Path
 from typing import List, Dict
-from tqdm import tqdm
 
 # ZipFile and XMLFile are imported from database_operations
 from database_operations import DatabaseOperations
 from models import ZipFile, XMLFile
+from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress
 
 
 class ZipProcessor:
@@ -49,28 +49,37 @@ class ZipProcessor:
 
         # Step 4: Use command line tools to get a listing of each zip file, and register the zip as ZipFile in the database,
         # and the contents as XMLFile
+        # Start thread-safe progress reporting
+        progress_reporter = start_progress_reporting(
+            total=len(zip_files),
+            desc="Processing ZIP files",
+            unit="zip"
+        )
+
         processed_zips = []
-        with tqdm(total=len(zip_files), desc="Processing ZIP files") as pbar:
-            for zip_path in zip_files:
-                try:
-                    # Check if ZIP file is already processed
-                    zip_filename = zip_path.name
-                    existing_zip = self.db_ops.execute_query(
-                        "SELECT status FROM ZipFiles WHERE filename = ?",
-                        (zip_filename,)
-                    ).fetchone()
+        for zip_path in zip_files:
+            try:
+                # Check if ZIP file is already processed
+                zip_filename = zip_path.name
+                existing_zip = self.db_ops.execute_query(
+                    "SELECT status FROM ZipFiles WHERE filename = ?",
+                    (zip_filename,)
+                ).fetchone()
 
-                    if existing_zip and existing_zip[0] == 'processed':
-                        print(f"Skipping already processed ZIP file: {zip_filename}")
-                        pbar.update(1)
-                        continue
+                if existing_zip and existing_zip[0] == 'processed':
+                    print(f"Skipping already processed ZIP file: {zip_filename}")
+                    update_progress(1)
+                    continue
 
-                    self._process_single_zip(zip_path)
-                    processed_zips.append(zip_path)
-                    pbar.update(1)
-                except Exception as e:
-                    print(f"Failed to process ZIP {zip_path}: {e}")
-                    pbar.update(1)
+                self._process_single_zip(zip_path)
+                processed_zips.append(zip_path)
+                update_progress(1)
+            except Exception as e:
+                print(f"Failed to process ZIP {zip_path}: {e}")
+                update_progress(1)
+
+        # Stop progress reporting
+        stop_progress_reporting()
 
         return processed_zips
 
