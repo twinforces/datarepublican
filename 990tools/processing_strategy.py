@@ -171,7 +171,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         for i, t in enumerate(producer_threads):
             t.join(timeout=300.0)  # Increased timeout to 5 minutes for large XML files
             if t.is_alive():
-                self.log_error(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
+                self.log_info(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
                 # Don't kill the thread, let it continue in background
             else:
                 self.log_info(f"Producer {i} done")

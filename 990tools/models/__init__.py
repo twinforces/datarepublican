@@ -14,6 +14,10 @@ from .contractor import Contractor
 from .political_contribution import PoliticalContribution
 from .zip_file import ZipFile
 from .xml_file import XMLFile
+from .contribution import Contribution
+from .geocoding import Geocoding
+from .backfill import Backfill
+from .pipeline_progress import PipelineProgress
 
 __all__ = [
     'Address',
@@ -23,5 +27,9 @@ __all__ = [
     'Contractor',
     'PoliticalContribution',
     'ZipFile',
-    'XMLFile'
+    'XMLFile',
+    'Contribution',
+    'Geocoding',
+    'Backfill',
+    'PipelineProgress'
 ]
