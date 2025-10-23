@@ -165,9 +165,8 @@ def parse_officer_comp_990ez(root, field, namespaces, xml_filename, context, xpa
                 total += value
                 
                 if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet:
-                    log_error("Parsed officer {} {} compensation: ${} for EIN {} in {}",
-                               first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename,
-                               ein=context.get('filer_ein', 'Unknown'))
+                    log_info(f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+                             ein=context.get('filer_ein', 'Unknown'))
         
         if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
             if not quiet:
@@ -189,8 +188,8 @@ def parse_grants_to_others_990ez(root, field, namespaces, xml_filename, context,
 
     if total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins:
         if not quiet:
-            log_error(f"Non-zero grants_to_others ${total} for EIN {context.get('filer_ein', 'Unknown')}, Name {context.get('filer_name', 'Unknown')}, TaxYear {context.get('tax_year', 'Unknown')}, XML {xml_filename}",
-                      ein=context.get('filer_ein', 'Unknown'))
+            log_warning(f"Non-zero grants_to_others ${total} for EIN {context.get('filer_ein', 'Unknown')}, Name {context.get('filer_name', 'Unknown')}, TaxYear {context.get('tax_year', 'Unknown')}, XML {xml_filename}",
+                        ein=context.get('filer_ein', 'Unknown'))
     elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins:
         return_data = parse_string_field(root, XPATHS_990EZ, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
         child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []

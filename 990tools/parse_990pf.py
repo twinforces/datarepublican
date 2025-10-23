@@ -142,9 +142,8 @@ def parse_officer_comp_990pf(root, field, namespaces, xml_filename, context, xpa
                 total += value
                 
                 if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet:
-                    log_error("Parsed officer {} {} compensation: ${} for EIN {} in {}",
-                               first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename,
-                               ein=context.get('filer_ein', 'Unknown'))
+                    log_info(f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+                             ein=context.get('filer_ein', 'Unknown'))
         
         if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
             if not quiet:
