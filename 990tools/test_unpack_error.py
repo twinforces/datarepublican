@@ -12,7 +12,7 @@ import sqlite3
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from lxml import etree as ET
+from lxml import etree as ET  # type: ignore
 
 # Add the current directory to the path so we can import our modules
 sys.path.insert(0, os.path.dirname(__file__))

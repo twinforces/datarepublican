@@ -420,7 +420,26 @@ class XMLProcessor:
     def _extract_contractors_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
         """Extract contractors from Form 990"""
         contractors = []
-        # TODO: Implement contractor extraction from Schedule L or other sections
+        # Extract contractors from Schedule L (Independent Contractors)
+        contractor_xpaths = [
+            ET.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
+            ET.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
+            ET.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+        ]
+
+        for xpath in contractor_xpaths:
+            try:
+                contractor_elements = xpath(root)
+                for elem in contractor_elements:
+                    contractor = self._parse_contractor_element(elem, filer_ein, tax_year)
+                    if contractor:
+                        contractors.append(contractor)
+            except:
+                continue
+
         return contractors
 
     def _extract_contractors_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
@@ -434,7 +453,22 @@ class XMLProcessor:
     def _extract_political_contributions_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
         """Extract political contributions from Form 990"""
         contributions = []
-        # TODO: Implement political contribution extraction
+        # Extract political contributions from Schedule C
+        contribution_xpaths = [
+            ET.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//IRS990ScheduleC/PoliticalCampaignActyGrp"),
+        ]
+
+        for xpath in contribution_xpaths:
+            try:
+                contribution_elements = xpath(root)
+                for elem in contribution_elements:
+                    contribution = self._parse_political_contribution_element(elem, filer_ein, tax_year)
+                    if contribution:
+                        contributions.append(contribution)
+            except:
+                continue
+
         return contributions
 
     def _extract_political_contributions_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
@@ -511,6 +545,96 @@ class XMLProcessor:
                 address_type="filer"
             )
             return address
+
+        return address_info
+
+    def _parse_political_contribution_element(self, elem, filer_ein: str, tax_year: int) -> Optional[PoliticalContribution]:
+        """Parse a single political contribution element from XML"""
+        try:
+            # Extract recipient name
+            name_xpaths = [
+                ET.XPath(".//irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath(".//irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath(".//RecipientNm"),
+                ET.XPath(".//RecipientName"),
+                ET.XPath("irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath("irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath("RecipientNm"),
+                ET.XPath("RecipientName"),
+            ]
+
+            recipient_name = None
+            for xpath in name_xpaths:
+                try:
+                    result = xpath(elem)
+                    if result and result[0].text:
+                        recipient_name = result[0].text.strip()
+                        break
+                except:
+                    continue
+
+            # Extract amount
+            amount_xpaths = [
+                ET.XPath(".//irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath(".//irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath(".//TotalDirectExpendAmt"),
+                ET.XPath(".//Amount"),
+                ET.XPath("irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath("irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath("TotalDirectExpendAmt"),
+                ET.XPath("Amount"),
+            ]
+
+            amount = 0.0
+            for xpath in amount_xpaths:
+                try:
+                    result = xpath(elem)
+                    if result and result[0].text:
+                        try:
+                            amount = float(result[0].text.strip().replace(',', ''))
+                            break
+                        except ValueError:
+                            continue
+                except:
+                    continue
+
+            # Extract EIN if available
+            ein_xpaths = [
+                ET.XPath(".//irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath(".//irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath(".//EIN"),
+                ET.XPath(".//RecipientEIN"),
+                ET.XPath("irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath("irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                ET.XPath("EIN"),
+                ET.XPath("RecipientEIN"),
+            ]
+
+            recipient_ein = None
+            for xpath in ein_xpaths:
+                try:
+                    result = xpath(elem)
+                    if result and result[0].text:
+                        raw_ein = result[0].text.strip()
+                        if raw_ein.isdigit():
+                            recipient_ein = f"{int(raw_ein):09d}"
+                            break
+                except:
+                    continue
+
+            if recipient_name and amount > 0:
+                contribution = PoliticalContribution(
+                    filer_ein=filer_ein,
+                    recipient_name=recipient_name,
+                    recipient_ein=recipient_ein,
+                    amount=amount,
+                    tax_year=tax_year
+                )
+                return contribution
+
+        except Exception as e:
+            if not self.quiet:
+                log_error(self.logger, f"Error parsing political contribution element: {e}")
 
         return None
 

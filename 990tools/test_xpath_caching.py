@@ -10,7 +10,7 @@ from io import BytesIO
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from xpath_utils import find_element
-from lxml import etree
+from lxml import etree  # type: ignore
 
 def test_xpath_caching():
     """Test XPath caching performance improvements"""

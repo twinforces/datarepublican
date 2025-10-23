@@ -1,4 +1,4 @@
-from lxml import etree
+from lxml import etree  # type: ignore
 from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
 quiet = False
 
@@ -72,7 +72,7 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
         except etree.XPathEvalError as e:
             xml_snippet = etree.tostring(root, encoding='unicode', method='xml')[:2000]
             if log_error and not quiet:
-                log_error("XPath error for %s: %s. XML snippet: %s", xpath, e, xml_snippet)
+                log_error(f"XPath error for {xpath}: {e}. XML snippet: {xml_snippet}")
             non_ns_xpath = xpath.replace('irs:', '').replace('{http://www.irs.gov/efile}', '')
             try:
                 elem = root.xpath(non_ns_xpath, namespaces=None)
@@ -86,7 +86,7 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
                     return elem[0]
             except etree.XPathEvalError as e:
                 if log_error and not quiet:
-                    log_error("Non-namespaced XPath error for %s: %s. XML snippet: %s", non_ns_xpath, e, xml_snippet)
+                    log_error(f"Non-namespaced XPath error for {non_ns_xpath}: {e}. XML snippet: {xml_snippet}")
 
         # Cache the None result to avoid re-evaluating
         xpath_cache[cache_key] = None

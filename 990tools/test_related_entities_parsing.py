@@ -5,7 +5,7 @@ test_related_entities.py - Test script to verify that Grant, Contractor, and Pol
 
 import sys
 import os
-from lxml import etree
+from lxml import etree  # type: ignore
 from io import BytesIO
 
 # Add the current directory to the path so we can import our modules

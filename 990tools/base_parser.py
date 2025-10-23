@@ -7,14 +7,14 @@ with common functionality and reduced code duplication.
 """
 
 import sys
-from lxml import etree
+from lxml import etree  # type: ignore
 from io import BytesIO
 import logging
 from nameparser import HumanName
 from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field
-from models import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
+from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from typing import Optional, List, Tuple, Dict, Any, Callable
-from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
+from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning, create_stub_log_error, create_stub_log_debug
 
 logger = None
 log_error = None
@@ -42,19 +42,9 @@ class BaseParser:
         quiet = is_quiet
         DEBUG_EINS = debug_eins if debug_eins is not None else set()
 
-    def stub_log_error(self, msg_format, *args, ein=None, exc_info=False):
-        """Fallback stub that uses proper logging with location info"""
-        global logger
-        if logger is None:
-            logger = get_logger(__name__)
-        proper_log_error(logger, msg_format.format(*args) if args else msg_format, ein=ein, exc_info=exc_info)
-
-    def stub_log_debug(self, msg_format, *args, ein=None, exc_info=False):
-        """Fallback stub that uses proper logging with location info"""
-        global logger
-        if logger is None:
-            logger = get_logger(__name__)
-        proper_log_debug(logger, msg_format.format(*args) if args else msg_format, ein=ein, exc_info=exc_info)
+    # Initialize stub functions using factory functions
+    stub_log_error = create_stub_log_error(logger)
+    stub_log_debug = create_stub_log_debug(logger)
 
     # Initialize stub functions if not set
     if log_error is None:
@@ -240,7 +230,7 @@ class BaseParser:
                                 zip_code = addr_elem.find("irs:ZIPCd", namespaces=NAMESPACES)
 
                                 if any([addr_line1, city, state, zip_code]):
-                                    recipient_address = DCAddress(
+                                    recipient_address = Address(
                                         ein=grant_ein or f"grant_{len(addresses)}",
                                         name=grant_name or "Unknown Grant Recipient",
                                         address_line1=addr_line1.text.strip() if addr_line1 is not None else None,
@@ -320,7 +310,7 @@ class BaseParser:
             # If there are contractors, create placeholder records
             # Note: Detailed contractor info is not available in the XML
             for i in range(contractor_count):
-                contractor = DCContractor(
+                contractor = Contractor(
                     filer_ein=context["filer_ein"],
                     name=f"Contractor {i+1}",
                     amount=50000,  # Minimum threshold amount
@@ -367,7 +357,7 @@ class BaseParser:
         """Get list of field parsers - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement get_field_parsers")
 
-    def parse_form(self, root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None) -> Tuple[Optional[DCCharity], List[DCOfficer], List[DCGrant], List[DCContractor], List[DCPoliticalContribution], Optional[DCAddress]]:
+    def parse_form(self, root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution], Optional[Address]]:
         """Main parsing method"""
         namespaces = {'irs': 'http://www.irs.gov/efile'}
         context = {
@@ -417,7 +407,7 @@ class BaseParser:
         data = self.set_form_specific_fields(data)
 
         # Create Charity dataclass
-        charity = DCCharity(
+        charity = Charity(
             ein=context["filer_ein"],
             tax_year=context["tax_year"],
             filer_name=context["filer_name"] or "Unknown",
@@ -454,7 +444,7 @@ class BaseParser:
         # Convert officer entries to Officer dataclasses
         officers = []
         for entry in officer_entries:
-            officer = DCOfficer(
+            officer = Officer(
                 first_name=entry["first_name"],
                 last_name=entry["last_name"],
                 compensation=entry["amount"],
@@ -470,11 +460,10 @@ class BaseParser:
 
         # Debug logging for address components
         if address and log_debug is not None and not quiet:
-            log_debug("DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', canonical='%s'",
-                      address.ein, address.address_line1, address.address_line2, address.city, address.state, address.zip_code, address.canonical_address,
+            log_debug(f"DEBUG: Address parsed for EIN {address.ein}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', canonical='{address.canonical_address}'",
                       ein=address.ein)
         elif log_debug is not None and not quiet:
-            log_debug("DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename, ein=context.get('filer_ein', 'Unknown'))
+            log_debug(f"DEBUG: No address parsed for EIN {context.get('filer_ein', 'Unknown')} in file {xml_filename}", ein=context.get('filer_ein', 'Unknown'))
 
         if log_debug is not None and not quiet:
             log_debug(f"TRACE: parse_{self.form_type.lower()}() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '{charity.ein}' in file {xml_filename}",

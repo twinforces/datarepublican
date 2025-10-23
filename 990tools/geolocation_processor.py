@@ -24,6 +24,7 @@ from models import Address
 from constants import VALID_STATES, STATE_NAME_TO_ABBREV, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX
 from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description
 from address_deduplication_processor import AddressDeduplicationProcessor
+from config import global_config
 
 # Set up logging
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,10 +39,9 @@ class GeolocationProcessor:
     BATCH_SIZE = 5000    # Addresses per batch (under census API limit)
     QUEUE_SIZE = 1000    # Size of work/result queues
 
-    def __init__(self, db_ops: DatabaseOperations, quiet: bool = False):
+    def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
-        self.quiet = quiet
-        self.address_dedup = AddressDeduplicationProcessor(db_ops, quiet)
+        self.address_dedup = AddressDeduplicationProcessor(db_ops)
 
     def _normalize_state(self, state: str) -> Optional[str]:
         """Normalize state to uppercase abbreviation, handling full names and case issues"""
@@ -52,12 +52,12 @@ class GeolocationProcessor:
         state_upper = state.upper().strip()
 
         # If it's already a valid abbreviation, return it
-        if state_upper in self.VALID_STATES:
+        if state_upper in VALID_STATES:
             return state_upper
 
         # If it's a full state name, map to abbreviation
-        if state_upper in self.STATE_NAME_TO_ABBREV:
-            return self.STATE_NAME_TO_ABBREV[state_upper]
+        if state_upper in STATE_NAME_TO_ABBREV:
+            return STATE_NAME_TO_ABBREV[state_upper]
 
         # Not recognized
         return None
@@ -125,12 +125,8 @@ class GeolocationProcessor:
         total_geolocated = 0
         batch_count = 0
 
-        # Start thread-safe progress reporting
-        progress_reporter = start_progress_reporting(
-            desc="Geocoding addresses",
-            unit="addr",
-            disable=self.quiet
-        )
+        if not self.quiet:
+            print("Starting address geocoding...")
 
         while True:
             batch_count += 1
@@ -157,7 +153,7 @@ class GeolocationProcessor:
             if not self.quiet:
                 log_info(logger, f"Batch {batch_count}: Geolocation complete, {batch_geolocated} addresses processed")
 
-            update_progress(batch_geolocated)  # Update by actual geolocated count
+            pass
 
         if not self.quiet:
             log_info(logger, f"All batches processed, total geolocated: {total_geolocated}")
@@ -190,10 +186,10 @@ class GeolocationProcessor:
         stop_progress_reporting()
 
         if not self.quiet:
-            log_info(logger, f"Geolocation complete: {total_geolocated} addresses geolocated")
+            print(f"Geolocation complete: {total_geolocated} addresses geolocated")
         return total_geolocated
 
-    def _geolocate_batch_multithreaded(self, batch: List[Address], work_queue: queue.Queue, result_queue: queue.Queue, batch_num: int) -> int:
+    def _geolocate_batch_multithreaded(self, batch: List[Dict[str, Any]], work_queue: queue.Queue, result_queue: queue.Queue, batch_num: int) -> int:
         """Geolocate a batch of addresses using multithreading"""
         if not self.quiet:
             log_info(logger, f"Batch {batch_num}: Processing {len(batch)} addresses with multithreading")
@@ -273,7 +269,7 @@ class GeolocationProcessor:
                 colocator = f"PO:{fallback_po_box}:{address.zip_code or ''}"
                 if not self.quiet:
                     log_info(logger, f"Skipping PO Box address {address.address_id}, setting colocator: {colocator}")
-                self.db_ops.update_address_po_box_and_colocator(address.address_id, fallback_po_box, colocator)
+                self.db_ops.update_address_po_box_and_colocator(str(address.address_id), fallback_po_box, colocator)
                 skipped_po_box += 1
                 continue
 
@@ -369,7 +365,7 @@ class GeolocationProcessor:
                     log_warning(logger, f"API returned no results for: {work_item['canonical_address']}")
                 # Failed geocoding - create geocoding record and return results
                 geocoding_id = self.db_ops.insert_geocoding_record(
-                    hash(work_item['canonical_address']), work_item['canonical_address'], status='failed'
+                    str(hash(work_item['canonical_address'])), work_item['canonical_address'], status='failed'
                 )
                 return [(address_id, geocoding_id) for address_id in work_item['address_ids']]
 
@@ -389,7 +385,7 @@ class GeolocationProcessor:
 
                 # Insert geocoding record
                 geocoding_id = self.db_ops.insert_geocoding_record(
-                    hash(work_item['canonical_address']), work_item['canonical_address'], lat, lon, 'success'
+                    str(hash(work_item['canonical_address'])), work_item['canonical_address'], lat, lon, 'success'
                 )
 
                 return [(address_id, geocoding_id) for address_id in work_item['address_ids']]
@@ -398,7 +394,7 @@ class GeolocationProcessor:
                     log_warning(logger, f"API returned invalid lat/lon for: {work_item['canonical_address']}")
                 # Failed - create geocoding record and return results
                 geocoding_id = self.db_ops.insert_geocoding_record(
-                    hash(work_item['canonical_address']), work_item['canonical_address'], status='failed'
+                    str(hash(work_item['canonical_address'])), work_item['canonical_address'], status='failed'
                 )
                 return [(address_id, geocoding_id) for address_id in work_item['address_ids']]
 
@@ -412,7 +408,7 @@ class GeolocationProcessor:
         """Consumer thread that processes results and updates database"""
         if not self.quiet:
             log_info(logger, "Geocoding consumer started")
-        total_geolocated = 0
+        total_geolocated: int = 0
         results_processed = 0
 
         while True:
@@ -447,7 +443,7 @@ class GeolocationProcessor:
         if not self.quiet:
             log_info(logger, f"Geocoding consumer stopped. Processed {results_processed} results, total geolocated: {total_geolocated}")
 
-    def _bulk_update_geocoding(self, updates: List[Tuple[int, str]]):
+    def _bulk_update_geocoding(self, updates: List[Tuple[str, str]]):
         """Bulk update geocoding results in database"""
         if not updates:
             return
@@ -480,7 +476,77 @@ class GeolocationProcessor:
                 self.db_ops.update_address_geocoding(address_id, geocoding_id, colocator)
 
                 # Propagate geocoding results to child addresses and related records
-                self.address_dedup.propagate_geocoding_results(str(address_id))
+                self.address_dedup.propagate_geocoding_results(address_id)
+
+    def _bulk_update_geocoding(self, updates: List[Tuple[str, str]]):
+        """Bulk update geocoding results in database"""
+        if not updates:
+            return
+
+        if not self.quiet:
+            log_debug(logger, f"Bulk updating {len(updates)} geocoding results")
+
+        # Group updates by geocoding_id for efficiency
+        geocoding_groups = {}
+        for address_id, geocoding_id in updates:
+            if geocoding_id not in geocoding_groups:
+                geocoding_groups[geocoding_id] = []
+            geocoding_groups[geocoding_id].append(address_id)
+
+        # Update each group
+        for geocoding_id, address_ids in geocoding_groups.items():
+            # Get colocator from geocoding record
+            geocoding_result = self.db_ops.execute_query(
+                "SELECT latitude, longitude FROM Geocoding WHERE geocoding_id = ?",
+                (geocoding_id,)
+            ).fetchone()
+
+            colocator = None
+            if geocoding_result and geocoding_result[0] and geocoding_result[1]:
+                lat, lon = geocoding_result[0], geocoding_result[1]
+                colocator = f"LL:{lat}:{lon}"
+
+            # Bulk update addresses
+            for address_id in address_ids:
+                self.db_ops.update_address_geocoding(address_id, geocoding_id, colocator)
+
+                # Propagate geocoding results to child addresses and related records
+                self.address_dedup.propagate_geocoding_results(address_id)
+
+    def _bulk_update_geocoding(self, updates: List[Tuple[str, str]]):
+        """Bulk update geocoding results in database"""
+        if not updates:
+            return
+
+        if not self.quiet:
+            log_debug(logger, f"Bulk updating {len(updates)} geocoding results")
+
+        # Group updates by geocoding_id for efficiency
+        geocoding_groups = {}
+        for address_id, geocoding_id in updates:
+            if geocoding_id not in geocoding_groups:
+                geocoding_groups[geocoding_id] = []
+            geocoding_groups[geocoding_id].append(address_id)
+
+        # Update each group
+        for geocoding_id, address_ids in geocoding_groups.items():
+            # Get colocator from geocoding record
+            geocoding_result = self.db_ops.execute_query(
+                "SELECT latitude, longitude FROM Geocoding WHERE geocoding_id = ?",
+                (geocoding_id,)
+            ).fetchone()
+
+            colocator = None
+            if geocoding_result and geocoding_result[0] and geocoding_result[1]:
+                lat, lon = geocoding_result[0], geocoding_result[1]
+                colocator = f"LL:{lat}:{lon}"
+
+            # Bulk update addresses
+            for address_id in address_ids:
+                self.db_ops.update_address_geocoding(address_id, geocoding_id, colocator)
+
+                # Propagate geocoding results to child addresses and related records
+                self.address_dedup.propagate_geocoding_results(address_id)
 
     # Keep the old single-threaded method for compatibility
     def _geolocate_batch(self, batch: List[Address]) -> int:

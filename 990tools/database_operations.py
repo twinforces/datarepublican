@@ -39,7 +39,7 @@ class DatabaseOperations:
         from uuid7 import generate_uuid_v7
         return generate_uuid_v7()
 
-    def __init__(self, db_path: str, log_sql: bool = False, read_only: bool = False, memory_limit: str = "4GB", threads: int = None, dbUI: bool = False):
+    def __init__(self, db_path: str, log_sql: bool = False, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False):
         """
         Initialize DuckDB connection
 
@@ -63,10 +63,10 @@ class DatabaseOperations:
     def _init_connection(self):
         """Initialize DuckDB connection and schema"""
         # Connect to DuckDB with performance optimizations
-        config = {
+        config: Dict[str, Any] = {
             'memory_limit': self.memory_limit
         }
-        if self.threads and self.threads != 'auto':
+        if self.threads is not None and self.threads != 'auto':
             config['threads'] = self.threads
         if self.read_only:
             config['read_only'] = True
@@ -117,7 +117,7 @@ class DatabaseOperations:
             print(f"Failed to initialize DuckDB database schema: {e}")
             raise
 
-    def execute_query(self, query: str, params: tuple = None) -> duckdb.DuckDBPyRelation:
+    def execute_query(self, query: str, params: Optional[tuple] = None) -> duckdb.DuckDBPyRelation:
         """Execute a query and return results"""
         if DatabaseOperations.log_sql:
             print(f"Executing: {query}")
@@ -129,8 +129,8 @@ class DatabaseOperations:
         else:
             return self.db_conn.execute(query)
 
-    def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: tuple = None,
-                        order_by: str = "", limit: int = None, offset: int = None) -> List[Any]:
+    def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: Optional[tuple] = None,
+                        order_by: str = "", limit: Optional[int] = None, offset: Optional[int] = None) -> List[Any]:
         """
         Generic method to select records and convert them to dataclass instances using reflection.
 
@@ -242,7 +242,7 @@ class DatabaseOperations:
         """, (zip_id, zip_file.filename, zip_file.file_path, zip_file.tax_year,
               zip_file.file_size, zip_file.checksum, zip_file.download_date.isoformat() if zip_file.download_date else None,
               zip_file.processed_date.isoformat() if zip_file.processed_date else None, zip_file.status))
-        zip_file.zip_id = zip_id
+        zip_file.zip_id = str(zip_id)
         self.commit()
         return zip_id
 
@@ -265,11 +265,13 @@ class DatabaseOperations:
         """, (xml_id, xml_file.zip_id, xml_file.filename, xml_file.internal_path,
               xml_file.ein, xml_file.tax_year, xml_file.form_type,
               xml_file.processed, xml_file.processing_version, xml_file.error_message))
-        xml_file.xml_id = xml_id
+        xml_file.xml_id = str(xml_id)
         self.commit()
         return xml_id
 
     def get_unprocessed_xml_files(self, processing_version: int, max_files: Optional[int] = None) -> List[XMLFile]:
+        if max_files is None:
+            max_files = None
         """Get unprocessed XML files"""
         where_clause = "processed = FALSE OR processing_version < ?"
         params = (processing_version,)
@@ -363,11 +365,11 @@ class DatabaseOperations:
         """, (address_id,)).fetchone()
 
         if verify_check:
-            address.address_id = address_id
+            address.address_id = str(address_id)
             self.commit()
             return address_id
         else:
-            return None
+            return None  # type: ignore
 
     def get_addresses_for_geocoding(self, limit: int = None, offset: int = 0) -> List[Address]:
         """Get addresses that need geocoding, with optional batching support"""
@@ -483,9 +485,9 @@ class DatabaseOperations:
         self.commit()
         return charity_id
 
-    def update_charity_percentiles(self, ein: str, tax_year: int, comp_ptile: float = None,
-                                    travel_ptile: float = None, conferences_ptile: float = None,
-                                    grants_ptile: float = None, foreign_ptile: float = None):
+    def update_charity_percentiles(self, ein: str, tax_year: int, comp_ptile: Optional[float] = None,
+                                    travel_ptile: Optional[float] = None, conferences_ptile: Optional[float] = None,
+                                    grants_ptile: Optional[float] = None, foreign_ptile: Optional[float] = None):
         """Update charity percentile rankings"""
         self.execute_query("""
             UPDATE Charities SET
@@ -532,7 +534,7 @@ class DatabaseOperations:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (grant_id, grant.filer_ein, grant.filer_name, grant.grant_ein, grant.grant_amt,
               grant.tax_year, grant.filer_colocator, grant.grantee_colocator))
-        grant.grant_id = grant_id
+        grant.grant_id = str(grant_id)
         self.commit()
         return grant_id
 
@@ -556,7 +558,7 @@ class DatabaseOperations:
             VALUES (?, ?, ?, ?, ?, ?)
         """, (officer_id, officer.charity_id, officer.first_name, officer.last_name,
               officer.compensation, officer.tax_year))
-        officer.officer_id = officer_id
+        officer.officer_id = str(officer_id)
         self.commit()
         return officer_id
 
@@ -570,7 +572,7 @@ class DatabaseOperations:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (contractor_id, contractor.filer_ein, contractor.name, contractor.amount, contractor.ein,
               contractor.address, contractor.zip_code, contractor.po_box, contractor.tax_year, contractor.colocator))
-        contractor.contractor_id = contractor_id
+        contractor.contractor_id = str(contractor_id)
         self.commit()
         return contractor_id
 
@@ -586,13 +588,13 @@ class DatabaseOperations:
         """, (political_id, contribution.filer_ein, contribution.recipient, contribution.amount,
               contribution.recipient_address, contribution.recipient_zip,
               contribution.recipient_po_box, contribution.tax_year, contribution.colocator))
-        contribution.political_id = political_id
+        contribution.political_id = str(political_id)
         self.commit()
         return political_id
 
     # Geocoding operations
     def insert_geocoding_record(self, address_hash: str, normalized_address: str,
-                                latitude: float = None, longitude: float = None,
+                                latitude: Optional[float] = None, longitude: Optional[float] = None,
                                 status: str = 'success') -> str:
         """Insert geocoding record. Returns UUID."""
         geocoding_id = self.generate_uuid_v7()
@@ -780,7 +782,7 @@ class DatabaseOperations:
         with open(report_filename, 'w') as f:
             f.write(report_content)
 
-        return report_filename
+        return report_filename  # type: ignore
 
     def get_latest_charities_for_export(self) -> List[Tuple]:
         """Get latest charities for export"""

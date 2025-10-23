@@ -37,17 +37,18 @@ class AddressMatcher:
         matched_count = 0
         for grant in grants:
             # Try to find matching charity
-            matched_ein = self._find_charity_by_grant_info(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
-            if matched_ein:
-                self.db_ops.update_grant_ein(grant.grant_id, matched_ein)
-                matched_count += 1
-                print(f"Matched grant {grant.grant_id} to charity {matched_ein}")
-            else:
-                # Create stub charity
-                stub_ein = self._create_stub_charity_for_grant(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
-                if stub_ein:
-                    self.db_ops.update_grant_ein(grant.grant_id, stub_ein)
-                    print(f"Created stub charity {stub_ein} for grant {grant.grant_id}")
+            if grant.grant_id is not None:
+                matched_ein = self._find_charity_by_grant_info(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
+                if matched_ein:
+                    self.db_ops.update_grant_ein(grant.grant_id, matched_ein)
+                    matched_count += 1
+                    print(f"Matched grant {grant.grant_id} to charity {matched_ein}")
+                else:
+                    # Create stub charity
+                    stub_ein = self._create_stub_charity_for_grant(grant.grant_id, grant.filer_ein, grant.grant_amt, grant.tax_year)
+                    if stub_ein:
+                        self.db_ops.update_grant_ein(grant.grant_id, stub_ein)
+                        print(f"Created stub charity {stub_ein} for grant {grant.grant_id}")
 
             update_progress(1)
 
@@ -57,14 +58,14 @@ class AddressMatcher:
         print(f"Grant matching complete: {matched_count} grants matched, {len(grants) - matched_count} stubs created")
         return matched_count
 
-    def _find_charity_by_grant_info(self, grant_id: int, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
+    def _find_charity_by_grant_info(self, grant_id: str, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
         """Find charity EIN by grant information"""
         # This is a simplified implementation
         # In practice, this would need access to grant recipient information
         # For now, return None to create stubs
         return None
 
-    def _create_stub_charity_for_grant(self, grant_id: int, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
+    def _create_stub_charity_for_grant(self, grant_id: str, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
         """Create a stub charity record for unmatched grants"""
         # Generate a pseudo-EIN for stub records
         stub_ein = f"STUB{hash(f'{filer_ein}_{grant_id}_{tax_year}') % 1000000000:09d}"

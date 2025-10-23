@@ -26,18 +26,18 @@ except ImportError:
 
 # Import logging utilities
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
+from config import global_config
 
 
 class IRSFetchProcessor:
     """Processor for downloading and recompressing IRS ZIP files"""
 
-    def __init__(self, zips_dir: str = "/Volumes/Data/irs_zips", quiet: bool = False):
+    def __init__(self, zips_dir: str = "/Volumes/Data/irs_zips"):
         self.zips_dir = zips_dir
-        self.quiet = quiet
 
         # Setup logging
         self.logger = get_logger("irsfetch")
-        if quiet:
+        if global_config.is_quiet():
             self.logger.setLevel(30)  # WARNING level
         else:
             self.logger.setLevel(20)  # INFO level
@@ -48,21 +48,21 @@ class IRSFetchProcessor:
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, ein, exc_info, *args)
+        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
-        if not self.quiet:
-            log_info(self.logger, msg, ein, *args)
+        if not global_config.is_quiet():
+            log_info(self.logger, msg, *args, ein=ein)
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
-        if not self.quiet:
-            log_debug(self.logger, msg, ein, *args)
+        if not global_config.is_quiet():
+            log_debug(self.logger, msg, *args, ein=ein)
 
     def log_warning(self, msg: str, *args, ein: Optional[str] = None):
         """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, ein, *args)
+        log_warning(self.logger, msg, *args, ein=ein)
 
     def fetch_irs_zips(self, start_year: int, end_year: int) -> bool:
         """Download and recompress IRS 990 ZIP files from IRS website"""
@@ -293,7 +293,7 @@ def main():
 
     args = parser.parse_args()
 
-    processor = IRSFetchProcessor(zips_dir=args.zips_dir, quiet=args.quiet)
+    processor = IRSFetchProcessor(zips_dir=args.zips_dir)
 
     try:
         success = processor.fetch_irs_zips(args.start_year, args.end_year)

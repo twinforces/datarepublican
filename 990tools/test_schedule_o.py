@@ -10,7 +10,7 @@ from io import BytesIO
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from parse_990 import parse_travel_990, parse_conferences_990
-from lxml import etree
+from lxml import etree  # type: ignore
 
 def test_schedule_o_parsing():
     """Test Schedule O parsing efficiency"""

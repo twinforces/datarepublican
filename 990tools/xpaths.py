@@ -6,7 +6,7 @@ This module consolidates XPath expressions for Forms 990, 990EZ, and 990PF
 into a single, unified configuration to reduce duplication and improve maintainability.
 """
 
-from lxml import etree
+from lxml import etree  # type: ignore
 
 # Common namespaces used across all forms
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}

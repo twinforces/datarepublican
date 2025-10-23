@@ -6,24 +6,24 @@ This module implements the Strategy pattern to organize different processing
 phases of the IRS 990 pipeline, making the main processor more maintainable.
 """
 
+import signal
+import sys
+import traceback
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple, Dict, Any
 import logging
 import time
 import threading
 import queue
-import signal
-import sys
-import traceback
 from pathlib import Path
-import sqlite3
 from io import BytesIO
 from lxml import etree as ET
+from lxml import etree
 from dataclasses import fields
 import zipfile
 
 from database_operations import DatabaseOperations
-from models import Charity as DCCharity, Officer as DCOfficer, Grant as DCGrant, Contractor as DCContractor, PoliticalContribution as DCPoliticalContribution, Address as DCAddress
+from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from parse_990 import parse_990
 from parse_990ez import parse_990ez
 from parse_990pf import parse_990pf
@@ -33,7 +33,8 @@ from geolocation_processor import GeolocationProcessor
 from address_matcher import AddressMatcher
 from constants import VALID_STATES
 from zip_processor import ZipProcessor
-from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress
+from logging_utils import log_info, log_error, log_debug, log_warning
+from config import global_config
 
 
 class ProcessingStrategy(ABC):
@@ -52,20 +53,20 @@ class ProcessingStrategy(ABC):
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
         if not self.quiet:
-            log_info(self.logger, msg, ein, *args)
+            log_info(self.logger, msg, *args, ein=ein)
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, ein, exc_info, *args)
+        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
         if not self.quiet:
-            log_debug(self.logger, msg, ein, *args)
+            log_debug(self.logger, msg, *args, ein=ein)
 
     def log_warning(self, msg: str, *args, ein: Optional[str] = None):
         """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, ein, *args)
+        log_warning(self.logger, msg, *args, ein=ein)
 
 
 class ParallelXMLProcessingStrategy(ProcessingStrategy):
@@ -77,7 +78,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     STALL_THRESHOLD = 30
 
     def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, workers: int = MAX_WORKERS, quiet: bool = False):
-        super().__init__(db_ops, logger, quiet)
+        super().__init__(db_ops, logger, global_config.is_quiet())
         self.workers = workers
 
     # Lock-free queue implementation for single-file processing
@@ -98,7 +99,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         # Set up signal handlers for graceful shutdown and thread debugging
         def interrupt_handler(signum, frame):
             self.log_error("Received interrupt signal, shutting down gracefully...")
-            stop_progress_reporting()
+            try:
+                from logging_utils import stop_progress_reporting
+                stop_progress_reporting()
+            except:
+                pass
             sys.exit(1)
 
         def dump_threads_handler(signum, frame):
@@ -139,13 +144,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         num_producers = min(self.workers, len(xml_files))
         self.log_info(f"Processing {len(xml_files)} files with {num_producers} producers")
 
-        # Start progress reporting immediately after we know the total
-        progress_reporter = start_progress_reporting(
-            total=len(xml_files),
-            desc="Processing XML files",
-            unit="file",
-            disable=self.quiet
-        )
+        # Set up progress bar for XML processing
+        from tqdm import tqdm
+        pbar = tqdm(total=len(xml_files), desc="Processing XML files", unit="file", disable=global_config.is_quiet())
 
         # Use thread-safe queues with backpressure
         xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
@@ -153,7 +154,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         # Start consumer thread (single writer to database)
         consumer_thread = threading.Thread(
             target=self._database_consumer,
-            args=(xml_queue, num_producers, self.db_ops.db_conn)
+            args=(xml_queue, num_producers, self.db_ops.db_conn, pbar)
         )
         consumer_thread.daemon = True
         consumer_thread.start()
@@ -179,16 +180,20 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         xml_queue.join()
         consumer_thread.join(timeout=30.0)
         if consumer_thread.is_alive():
-            self.log_error("Consumer timeout")
+            self.log_error("Consumer timeout - attempting graceful shutdown")
+            # Signal consumer to stop by putting a special shutdown message
+            try:
+                xml_queue.put(('shutdown',), block=False)
+                consumer_thread.join(timeout=10.0)
+                if consumer_thread.is_alive():
+                    self.log_error("Consumer still alive after shutdown signal - some data may be lost")
+            except:
+                self.log_error("Failed to signal consumer shutdown - some data may be lost")
 
-        # Stop progress reporting
-        stop_progress_reporting()
+        # Close progress bar
+        pbar.close()
 
-        # Get total processed from consumer thread
-        # Since we removed the progress queue, we need to track this differently
-        # For now, just return the number of files we started with
-        # The actual count will be tracked by the progress bar updates
-        self.log_info(f"Started processing {len(xml_files)} files")
+        self.log_info(f"XML processing complete: {len(xml_files)} files processed")
         return len(xml_files)
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
@@ -209,52 +214,60 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         xml_queue.put(None)  # Sentinel
         self.log_info(f"Producer {producer_id} done: {processed} files")
 
-    def _database_consumer(self, xml_queue, num_expected, conn):
+    def _database_consumer(self, xml_queue, num_expected, conn, pbar):
         """Consumer thread: writes results to database (single-threaded for DuckDB safety)"""
         batch_data = []
         total = 0
         signals = 0
         while signals < num_expected:
-            item = xml_queue.get(block=True)
-            if item is None:
-                signals += 1
+            try:
+                item = xml_queue.get(timeout=30.0)  # Add timeout to prevent hanging
+                if item is None:
+                    signals += 1
+                    xml_queue.task_done()
+                    continue
+                if isinstance(item, tuple) and item[0] == 'error':
+                    xml_id = item[1]
+                    msg = item[2] if len(item) > 2 else "Error"
+                    self.db_ops.execute_query(
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                        (msg, xml_id)
+                    )
+                    self.db_ops.commit()
+                    xml_queue.task_done()
+                    continue
+                if isinstance(item, tuple) and item[0] == 'shutdown':
+                    self.log_info("Consumer received shutdown signal")
+                    xml_queue.task_done()
+                    break
+                batch_data.append(item)
+                total += 1
                 xml_queue.task_done()
-                continue
-            if isinstance(item, tuple) and item[0] == 'error':
-                xml_id = item[1]
-                msg = item[2] if len(item) > 2 else "Error"
-                self.db_ops.execute_query(
-                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                    (msg, xml_id)
-                )
-                self.db_ops.commit()
-                xml_queue.task_done()
-                continue
-            batch_data.append(item)
-            total += 1
-            xml_queue.task_done()
-            if len(batch_data) >= self.BATCH_SIZE:
-                try:
-                    self._bulk_insert_batch(batch_data, conn)
-                    update_progress(len(batch_data))  # Update progress bar
-                    # Don't send progress updates to avoid blocking
-                except Exception as e:
-                    self.log_error(f"Batch error: {e}", exc_info=True)
-                batch_data = []
+                if len(batch_data) >= self.BATCH_SIZE:
+                    try:
+                        self._bulk_insert_batch(batch_data, conn)
+                        pbar.update(len(batch_data))  # Update progress bar after successful batch
+                        batch_data = []  # Clear batch after successful commit
+                    except Exception as e:
+                        self.log_error(f"Batch error: {e}", exc_info=True)
+                        # Don't clear batch_data on error - will retry in final batch
+            except Exception as e:
+                self.log_error(f"Consumer error: {e}", exc_info=True)
+                break
 
-        # Final batch
+        # Final batch - commit any remaining work
         if batch_data:
             try:
+                self.log_info(f"Committing final batch of {len(batch_data)} items")
                 self._bulk_insert_batch(batch_data, conn)
-                update_progress(len(batch_data))  # Update progress bar
-                # Don't send progress updates to avoid blocking
+                pbar.update(len(batch_data))  # Update progress bar for final batch
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
 
         self.log_info(f"Consumer done: {total} items, {signals} signals")
         return total
 
-    def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: List[str] = None) -> Tuple[str, Tuple]:
+    def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: Optional[List[str]] = None) -> Tuple[str, Tuple]:
         """Build INSERT statement and values tuple from dataclass using reflection"""
         if exclude_fields is None:
             exclude_fields = []
@@ -318,6 +331,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     officers.append(officer)
 
                 for grant in grant_list:
+                    # Ensure grantee_name is not None
+                    if grant.grantee_name is None:
+                        grant.grantee_name = "Unknown"
                     grants.append(grant)
 
                 for contractor in contractor_list:
@@ -339,6 +355,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 charity.colocator = 'notyet'
 
             charity_data = []
+            sql = None
             for charity in charities:
                 sql, values = self._build_insert_from_dataclass(charity, 'Charities', ['charity_id'])
                 charity_data.append(values)
@@ -347,8 +364,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 self.log_info(f"Bulk insert: STARTING charity insert for {len(charity_data)} records")
                 self.log_info(f"Bulk insert: DEBUG - charity SQL: {sql}")
                 self.log_info(f"Bulk insert: DEBUG - first charity values: {charity_data[0] if charity_data else 'None'}")
-                conn.executemany(sql, charity_data)
-                self.log_info(f"Bulk insert: FINISHED charity insert for {len(charity_data)} records")
+                if sql is not None:
+                    conn.executemany(sql, charity_data)
+                    self.log_info(f"Bulk insert: FINISHED charity insert for {len(charity_data)} records")
             except Exception as e:
                 self.log_error(f"Failed to insert charities: {e}", exc_info=True)
                 conn.rollback()
@@ -371,6 +389,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             # Bulk insert officers using reflection
             if officers:
                 officer_data = []
+                sql = None
                 for officer in officers:
                     batch_index = officer.charity_id - 1
                     if 0 <= batch_index < len(charity_ids):
@@ -379,58 +398,63 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         officer_data.append(values)
 
                 try:
-                    conn.executemany(sql, officer_data)
-                    self.log_debug(f"Inserted {len(officer_data)} officers")
+                    if sql is not None:
+                        conn.executemany(sql, officer_data)
+                        self.log_debug(f"Inserted {len(officer_data)} officers")
                 except Exception as e:
                     self.log_error(f"Failed to insert officers: {e}", exc_info=True)
 
             # Bulk insert grants using reflection
             if grants:
                 grant_data = []
+                sql = None
                 for grant in grants:
-                    # Ensure grantee_name is not None
-                    if grant.grantee_name is None:
-                        grant.grantee_name = "Unknown"
                     sql, values = self._build_insert_from_dataclass(grant, 'Grants', ['grant_id'])
                     grant_data.append(values)
 
                 try:
-                    conn.executemany(sql, grant_data)
-                    self.log_debug(f"Inserted {len(grant_data)} grants")
+                    if sql is not None:
+                        conn.executemany(sql, grant_data)
+                        self.log_debug(f"Inserted {len(grant_data)} grants")
                 except Exception as e:
                     self.log_error(f"Failed to insert grants: {e}", exc_info=True)
 
             # Bulk insert contractors using reflection
             if contractors:
                 contractor_data = []
+                sql = None
                 for contractor in contractors:
                     sql, values = self._build_insert_from_dataclass(contractor, 'Contractors', ['contractor_id'])
                     contractor_data.append(values)
 
                 try:
-                    conn.executemany(sql, contractor_data)
-                    self.log_debug(f"Inserted {len(contractor_data)} contractors")
+                    if sql is not None:
+                        conn.executemany(sql, contractor_data)
+                        self.log_debug(f"Inserted {len(contractor_data)} contractors")
                 except Exception as e:
                     self.log_error(f"Failed to insert contractors: {e}", exc_info=True)
 
             # Bulk insert political contributions using reflection
             if contributions:
                 contribution_data = []
+                sql = None
                 for contribution in contributions:
                     sql, values = self._build_insert_from_dataclass(contribution, 'PoliticalContributions', ['political_id'])
                     contribution_data.append(values)
 
                 try:
-                    conn.executemany(sql, contribution_data)
-                    self.log_debug(f"Inserted {len(contribution_data)} contributions")
+                    if sql is not None:
+                        conn.executemany(sql, contribution_data)
+                        self.log_debug(f"Inserted {len(contribution_data)} contributions")
                 except Exception as e:
                     self.log_error(f"Failed to insert contributions: {e}", exc_info=True)
 
             # Bulk insert addresses using reflection
             if addresses:
                 address_data = []
+                sql = None
                 for i, address in enumerate(addresses):
-                    # Compute colocator for DCAddress objects if not already set
+                    # Compute colocator for Address objects if not already set
                     if hasattr(address, 'colocator') and address.colocator is None:
                         if address.po_box and address.zip_code:
                             po_box_stripped = address.po_box.strip()
@@ -451,8 +475,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     address_data.append(values)
 
                 try:
-                    conn.executemany(sql, address_data)
-                    self.log_debug(f"Inserted {len(address_data)} addresses")
+                    if sql is not None:
+                        conn.executemany(sql, address_data)
+                        self.log_debug(f"Inserted {len(address_data)} addresses")
                 except Exception as e:
                     self.log_error(f"Failed to insert addresses: {e}", exc_info=True)
 
@@ -585,20 +610,23 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         return charity, officers, grants, contractors, contributions, address
 
-    def _extract_grants_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCGrant]:
+    def _extract_grants_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
         """Extract grants from Form 990"""
         grants = []
         xml_content = BytesIO(ET.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
         for grant_data in grants_data:
-            grant = DCGrant(
+            grant = Grant(
                 filer_ein=filer_ein,
                 filer_name="",
                 grant_ein=grant_data.get("grant_ein"),
                 grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year
+                tax_year=tax_year,
+                grantee_name=grant_data.get("grantee_name") or "Unknown"
             )
             grants.append(grant)
+        return grants
+
     def _extract_xml_from_zip(self, zip_path: str, internal_path: str) -> bytes:
         """Extract XML content from ZIP file using cached connection"""
         zip_key = str(zip_path)
@@ -615,78 +643,61 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         with zip_ref.open(internal_path) as f:
             return f.read()
 
-    def _extract_grants_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCGrant]:
-        """Extract grants from Form 990"""
-        grants = []
-        xml_content = BytesIO(ET.tostring(root))
-        grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
-        for grant_data in grants_data:
-            grant = DCGrant(
-                filer_ein=filer_ein,
-                filer_name="",
-                grant_ein=grant_data.get("grant_ein"),
-                grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year,
-                grantee_name=grant_data.get("grantee_name", "Unknown")
-            )
-            grants.append(grant)
-        return grants
-
-    def _extract_grants_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCGrant]:
+    def _extract_grants_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
         """Extract grants from Form 990EZ"""
         grants = []
         xml_content = BytesIO(ET.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990EZ")
         for grant_data in grants_data:
-            grant = DCGrant(
+            grant = Grant(
                 filer_ein=filer_ein,
                 filer_name="",
                 grant_ein=grant_data.get("grant_ein"),
                 grant_amt=grant_data.get("grant_amt", 0),
                 tax_year=tax_year,
-                grantee_name=grant_data.get("grantee_name", "Unknown")
+                grantee_name=grant_data.get("grantee_name") or "Unknown"
             )
             grants.append(grant)
         return grants
 
-    def _extract_grants_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCGrant]:
+    def _extract_grants_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
         """Extract grants from Form 990PF"""
         grants = []
         xml_content = BytesIO(ET.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990PF")
         for grant_data in grants_data:
-            grant = DCGrant(
+            grant = Grant(
                 filer_ein=filer_ein,
                 filer_name="",
                 grant_ein=grant_data.get("grant_ein"),
                 grant_amt=grant_data.get("grant_amt", 0),
                 tax_year=tax_year,
-                grantee_name=grant_data.get("grantee_name", "Unknown")
+                grantee_name=grant_data.get("grantee_name") or "Unknown"
             )
             grants.append(grant)
         return grants
 
-    def _extract_contractors_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCContractor]:
+    def _extract_contractors_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
         """Extract contractors from Form 990"""
         return []
 
-    def _extract_contractors_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCContractor]:
+    def _extract_contractors_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
         """Extract contractors from Form 990EZ"""
         return self._extract_contractors_990(root, filename, filer_ein, tax_year)
 
-    def _extract_contractors_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCContractor]:
+    def _extract_contractors_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
         """Extract contractors from Form 990PF"""
         return self._extract_contractors_990(root, filename, filer_ein, tax_year)
 
-    def _extract_political_contributions_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCPoliticalContribution]:
+    def _extract_political_contributions_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
         """Extract political contributions from Form 990"""
         return []
 
-    def _extract_political_contributions_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCPoliticalContribution]:
+    def _extract_political_contributions_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
         """Extract political contributions from Form 990EZ"""
         return self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
 
-    def _extract_political_contributions_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[DCPoliticalContribution]:
+    def _extract_political_contributions_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
         """Extract political contributions from Form 990PF"""
         return self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
 
@@ -698,7 +709,7 @@ class GeocodingBatchStrategy(ProcessingStrategy):
         super().__init__(db_ops, logger, quiet)
         self.log_warning("GeocodingBatchStrategy is deprecated. Use GeolocationProcessor instead.")
 
-    def execute(self, batch: List[DCAddress]) -> int:
+    def execute(self, batch: List[Address]) -> int:
         """Geolocate a batch of addresses - DEPRECATED"""
         self.log_warning("GeocodingBatchStrategy.execute() is deprecated. Use GeolocationProcessor.geolocate_addresses() instead.")
         processor = GeolocationProcessor(self.db_ops)
@@ -755,8 +766,9 @@ class StubCharityCreationStrategy(ProcessingStrategy):
                 name=name or "Unknown",
                 zip_code=zip_code,
                 po_box=po_box,
-                canonical_address=address or "",
-                address_type="grantee"
+                address_line1=address or "",
+                address_type="grantee",
+                colocator=None
             )
             self.db_ops.insert_address(addr)
 

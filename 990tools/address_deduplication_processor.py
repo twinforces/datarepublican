@@ -10,33 +10,33 @@ import logging
 from typing import Optional, List, Dict, Any
 from database_operations import DatabaseOperations
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
+from config import global_config
 
 
 class AddressDeduplicationProcessor:
     """Processor for deduplicating addresses and creating master-child relationships"""
 
-    def __init__(self, db_ops: DatabaseOperations, quiet: bool = False):
+    def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
-        self.quiet = quiet
         self.logger = get_logger("address_dedup")
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, ein, exc_info, *args)
+        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
-        if not self.quiet:
-            log_info(self.logger, msg, ein, *args)
+        if not global_config.is_quiet():
+            log_info(self.logger, msg, *args, ein=ein)
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
-        if not self.quiet:
-            log_debug(self.logger, msg, ein, *args)
+        if not global_config.is_quiet():
+            log_debug(self.logger, msg, *args, ein=ein)
 
     def log_warning(self, msg: str, *args, ein: Optional[str] = None):
         """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, ein, *args)
+        log_warning(self.logger, msg, *args, ein=ein)
 
     def deduplicate_addresses(self) -> int:
         """

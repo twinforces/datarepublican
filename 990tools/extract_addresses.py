@@ -4,7 +4,7 @@ import argparse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
-from lxml import etree
+from lxml import etree  # type: ignore
 from io import BytesIO
 import sys
 import extract_utils as cu
@@ -271,13 +271,8 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
             total_skipped += 1
             return thread_local.result
     try:
-        # Start thread-safe progress reporting
-        progress_reporter = start_progress_reporting(
-            total=len(zip_index),
-            desc="Processing addresses from all XMLs",
-            unit="file",
-            disable=quiet
-        )
+        if not quiet:
+            print(f"Processing {len(zip_index)} XML files for addresses...")
 
         if args.no_threads:
             for xml_filename in zip_index.keys():
@@ -300,7 +295,6 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
                             po_box_zip_index[po_box_zip] = set()
                         po_box_zip_index[po_box_zip].update(entries)
                 results_queue.put([result])
-                update_progress(1)
         else:
             with ThreadPoolExecutor(max_workers=worker_threads) as executor:
                 futures = []
@@ -334,14 +328,14 @@ def process_all_xml_addresses(worker_threads, zip_index, output_dir, sample_xml,
                                     po_box_zip_index[po_box_zip] = set()
                                 po_box_zip_index[po_box_zip].update(entries)
                     results_queue.put(results)
-                    update_progress(min(batch_size, len(zip_index) - progress_reporter.pbar.n if progress_reporter.pbar else 0))
+                    pass
     except Exception as e:
         if not quiet:
             cu.log_error("Error in process_all_xml_addresses: {}", str(e), exc_info=True)
         raise
     finally:
-        # Stop progress reporting
-        stop_progress_reporting()
+        if not quiet:
+            print(f"Address extraction complete: {len(address_entries)} addresses processed")
         for zip_file in zip_cache.values():
             zip_file.close()
 

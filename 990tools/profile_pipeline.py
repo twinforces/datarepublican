@@ -19,12 +19,8 @@ quiet = False
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("nine_nine_zero_processor", "990processor.py")
-processor_module = importlib.util.module_from_spec(spec)
-sys.modules["nine_nine_zero_processor"] = processor_module
-spec.loader.exec_module(processor_module)
-IRS990Processor = processor_module.IRS990Processor
+# Import the processor directly
+from irs990processor import IRS990Processor
 
 def profile_pipeline():
     """Profile the pipeline execution for exactly 120 seconds"""
@@ -54,14 +50,14 @@ def profile_pipeline():
 
     try:
         # Get unprocessed XML files
-        processor.db_cursor.execute("""
+        processor.db_conn.execute("""
             SELECT xml_id, zip_id, filename, internal_path
             FROM XmlFiles
             WHERE processed = FALSE OR processing_version < 1
             ORDER BY zip_id, filename
         """)
 
-        xml_files = processor.db_cursor.fetchall()
+        xml_files = processor.db_conn.fetchall()
         print(f"Found {len(xml_files)} unprocessed XML files")
 
         # Process files for exactly 120 seconds
@@ -74,8 +70,8 @@ def profile_pipeline():
             total_files_attempted += 1
 
             # Get ZIP file path
-            processor.db_cursor.execute("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,))
-            zip_path_result = processor.db_cursor.fetchone()
+            processor.db_conn.execute("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,))
+            zip_path_result = processor.db_conn.fetchone()
             if not zip_path_result:
                 error_count += 1
                 continue
@@ -88,7 +84,7 @@ def profile_pipeline():
                 if result:
                     processed_files += 1
                     # Mark as processed
-                    processor.db_cursor.execute("""
+                    processor.db_conn.execute("""
                         UPDATE XmlFiles SET processed = TRUE, processing_version = 1, error_message = ?
                         WHERE xml_id = ?
                     """, ("success", xml_id))

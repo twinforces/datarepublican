@@ -1,4 +1,4 @@
-from lxml import etree
+from lxml import etree  # type: ignore
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 

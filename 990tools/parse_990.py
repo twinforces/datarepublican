@@ -1,6 +1,6 @@
 # parse_990.py
 import sys
-from lxml import etree
+from lxml import etree  # type: ignore
 from io import BytesIO
 import logging
 import re
@@ -17,13 +17,14 @@ class Parser990(BaseParser):
     def __init__(self):
         super().__init__("990", XPATHS_990, NAMESPACES)
         self.verbose = False  # Add verbose attribute
+        self.quiet = False  # Add quiet attribute
 
     def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
         """Parse organization type for Form 990"""
         from parse_utils import parse_string_field
         elem = parse_string_field(root, self.XPATHS, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
         if elem is not None:
-            if self.verbose and not quiet:
+            if self.verbose and not self.quiet:
                 log_error("Found org_type element: tag={}, text={}, attrib={} for EIN {} in {}",
                            elem.tag, elem.text, elem.attrib, context.get('filer_ein', 'Unknown'), xml_filename,
                            ein=context.get('filer_ein', 'Unknown'))
@@ -41,23 +42,23 @@ class Parser990(BaseParser):
                 org_type = "4947(a)(1)"
             else:
                 org_type = "Unknown"
-                if not quiet:
+                if not self.quiet:
                     log_error("Unexpected org_type element tag {} for EIN {} in {}",
                                elem.tag, context.get('filer_ein', 'Unknown'), xml_filename,
                                ein=context.get('filer_ein', 'Unknown'))
         else:
-            if not quiet:
+            if not self.quiet:
                 log_error("Failed to parse org_type for EIN {} in {}",
                            context.get('filer_ein', 'Unknown'), xml_filename,
                            ein=context.get('filer_ein', 'Unknown'))
             return_data = parse_string_field(root, self.XPATHS, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
-            org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None else []
-            if not quiet:
+            org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
+            if not self.quiet:
                 log_error("Form type: {}, Available org_type tags: {} in {}",
                            context.get('form_type', 'Unknown'), org_tags, xml_filename,
                            ein=context.get('filer_ein', 'Unknown'))
             org_type = "Unknown"
-        if self.verbose and not quiet:
+        if self.verbose and not self.quiet:
             log_error("Parsed org_type {} for EIN {} in {}",
                        org_type, context.get('filer_ein', 'Unknown'), xml_filename,
                        ein=context.get('filer_ein', 'Unknown'))
@@ -101,7 +102,7 @@ class Parser990(BaseParser):
                         if match:
                             amount = int(parse_float_field(match.group(1)))
                             total += amount
-                            if self.verbose and not quiet:
+                            if self.verbose and not self.quiet:
                                 log_error("Parsed travel_amt ${} from Schedule O in {}",
                                            amount, xml_filename,
                                            ein=context.get('filer_ein', 'Unknown'))
@@ -113,9 +114,8 @@ class Parser990(BaseParser):
                                 try:
                                     amount = int(parse_float_field(alt_match.group(1)))
                                     total += amount
-                                    if self.verbose and not quiet:
-                                        log_error("Parsed travel_amt ${} (alt pattern) from Schedule O in {}",
-                                                   amount, xml_filename,
+                                    if self.verbose and not self.quiet:
+                                        log_error(f"Parsed travel_amt ${amount} (alt pattern) from Schedule O in {xml_filename}",
                                                    ein=context.get('filer_ein', 'Unknown'))
                                 except (ValueError, IndexError):
                                     # Skip logging travel parsing failures - handled downstream
@@ -149,7 +149,7 @@ class Parser990(BaseParser):
                         if match:
                             amount = int(parse_float_field(match.group(1)))
                             total += amount
-                            if self.verbose and not quiet:
+                            if self.verbose and not self.quiet:
                                 log_error("Parsed conferences_amt ${} from Schedule O in {}",
                                            amount, xml_filename,
                                            ein=context.get('filer_ein', 'Unknown'))
@@ -161,9 +161,8 @@ class Parser990(BaseParser):
                                 try:
                                     amount = int(parse_float_field(alt_match.group(1)))
                                     total += amount
-                                    if self.verbose and not quiet:
-                                        log_error("Parsed conferences_amt ${} (alt pattern) from Schedule O in {}",
-                                                   amount, xml_filename,
+                                    if self.verbose and not self.quiet:
+                                        log_error(f"Parsed conferences_amt ${amount} (alt pattern) from Schedule O in {xml_filename}",
                                                    ein=context.get('filer_ein', 'Unknown'))
                                 except (ValueError, IndexError):
                                     # Skip logging conference parsing failures - handled downstream

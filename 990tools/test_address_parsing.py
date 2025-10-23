@@ -9,7 +9,7 @@ using the sample XML files in ./test_xmls directory.
 import sys
 import os
 from pathlib import Path
-from lxml import etree
+from lxml import etree  # type: ignore
 from io import BytesIO
 import logging
 from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning

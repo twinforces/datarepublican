@@ -1,6 +1,6 @@
 # parse_utils.py
 import re
-from lxml import etree
+from lxml import etree  # type: ignore
 from nameparser import HumanName
 from io import BytesIO
 import logging
@@ -55,9 +55,9 @@ def parse_schedule(root, xpaths_dict, elements_key, sub_elements_key, value_key,
                     amount = int(parse_float_field(value_elem.text.strip()))
                     total += amount
                     if verbose:
-                        log_error("Parsed schedule amount ${} for field in {}", amount, xml_filename)
+                        log_error(f"Parsed schedule amount ${amount} for field in {xml_filename}")
                 except (ValueError, AttributeError):
-                    log_error("Invalid schedule value: {} in {}", value_elem.text, xml_filename)
+                    log_error(f"Invalid schedule value: {value_elem.text} in {xml_filename}")
     return total
 
 def clean_name(name):
