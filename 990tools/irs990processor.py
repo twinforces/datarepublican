@@ -731,8 +731,8 @@ class IRS990Processor:
         profiling_output = s.getvalue()
 
         # Save profiling data
-        profile_txt = f"pipeline_profile_{self.profile_seconds}s.txt"
-        profile_stats = f"pipeline_profile_{self.profile_seconds}s.stats"
+        profile_txt = f"pipeline_profile_{self.profile_seconds}s_{self.workers}workers.txt"
+        profile_stats = f"pipeline_profile_{self.profile_seconds}s_{self.workers}workers.stats"
 
         with open(profile_txt, "w") as f:
             f.write(f"=== IRS 990 Pipeline {self.profile_seconds}-Second Benchmark Report ===\n")

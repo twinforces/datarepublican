@@ -89,7 +89,7 @@ class BaseParser:
                     })
                     total += value
 
-                    if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet:
+                    if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet and logger is not None:
                         log_info(logger, f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
                                  ein=context.get('filer_ein', 'Unknown'))
 

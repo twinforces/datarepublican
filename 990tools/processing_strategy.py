@@ -21,6 +21,7 @@ from lxml import etree as ET
 from lxml import etree
 from dataclasses import fields
 import zipfile
+from threading import Lock
 
 from database_operations import DatabaseOperations
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
@@ -382,30 +383,59 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         # Process charities without deduplication (let database handle uniqueness constraints)
         addresses = []
         xml_ids = []  # Track xml_ids for error handling
-        for xml_id, charity, officer_list, grant_list, contractor_list, contribution_list, address in batch_data:
-            xml_ids.append(xml_id)
-            if charity:
-                charities.append(charity)
-                charity_id = len(charities)  # Temporary ID for batch processing
+        form_types = {}  # Track form_type per xml_id
+        for item in batch_data:
+            if len(item) == 7:  # Normal processing result
+                xml_id, charity, officer_list, grant_list, contractor_list, contribution_list, address = item
+                xml_ids.append(xml_id)
+                if charity:
+                    charities.append(charity)
+                    charity_id = len(charities)  # Temporary ID for batch processing
 
-                for officer in officer_list:
-                    officer.charity_id = charity_id
-                    officers.append(officer)
+                    for officer in officer_list:
+                        officer.charity_id = charity_id
+                        officers.append(officer)
 
-                for grant in grant_list:
-                    # Ensure grantee_name is not None
-                    if grant.grantee_name is None:
-                        grant.grantee_name = "Unknown"
-                    grants.append(grant)
+                    for grant in grant_list:
+                        # Ensure grantee_name is not None
+                        if grant.grantee_name is None:
+                            grant.grantee_name = "Unknown"
+                        grants.append(grant)
 
-                for contractor in contractor_list:
-                    contractors.append(contractor)
+                    for contractor in contractor_list:
+                        contractors.append(contractor)
 
-                for contribution in contribution_list:
-                    contributions.append(contribution)
+                    for contribution in contribution_list:
+                        contributions.append(contribution)
 
-                if address:
-                    addresses.append(address)
+                    if address:
+                        addresses.append(address)
+            elif len(item) == 8:  # Processing result with form_type
+                xml_id, charity, officer_list, grant_list, contractor_list, contribution_list, address, form_type = item
+                form_types[xml_id] = form_type
+                xml_ids.append(xml_id)
+                if charity:
+                    charities.append(charity)
+                    charity_id = len(charities)  # Temporary ID for batch processing
+
+                    for officer in officer_list:
+                        officer.charity_id = charity_id
+                        officers.append(officer)
+
+                    for grant in grant_list:
+                        # Ensure grantee_name is not None
+                        if grant.grantee_name is None:
+                            grant.grantee_name = "Unknown"
+                        grants.append(grant)
+
+                    for contractor in contractor_list:
+                        contractors.append(contractor)
+
+                    for contribution in contribution_list:
+                        contributions.append(contribution)
+
+                    if address:
+                        addresses.append(address)
 
         self.log_info(f"Bulk insert batch: Processing {len(charities)} charities, {len(officers)} officers, {len(grants)} grants, {len(contractors)} contractors, {len(contributions)} contributions, {len(addresses)} addresses")
 
@@ -560,9 +590,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             # Mark all XML files in this batch as processed successfully
             for xml_id in xml_ids:
                 try:
+                    form_type_value = form_types.get(xml_id, "Unknown")
                     self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2 WHERE xml_id=?",
-                        (xml_id,)
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, form_type=? WHERE xml_id=?",
+                        (form_type_value, xml_id)
                     )
                     self.db_ops.commit()
                 except Exception as mark_success_e:
@@ -626,7 +657,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
             if charity:
                 self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}, address={address is not None}")
-                return xml_id, charity, officers, grants, contractors, contributions, address
+                return xml_id, charity, officers, grants, contractors, contributions, address, form_type
             else:
                 self.log_error(f"Failed to extract charity data from {filename}")
                 return ('error', xml_id)
