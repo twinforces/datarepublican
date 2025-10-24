@@ -19,7 +19,7 @@ import argparse
 import sys
 import os
 
-def run_test(workers, files=1000):
+def run_test(workers, files=10000):
     """Run a processing test with given worker count and return time"""
     cmd = f'python irs990processor.py --quiet --start-step xml --stop-step xml --max-files {files} --workers {workers}'
     print(f'Testing with {workers} workers...')
@@ -31,13 +31,13 @@ def run_test(workers, files=1000):
     elapsed = end_time - start_time
 
     if result.returncode == 0:
-        print('.2f')
+        print(f'  Time: {elapsed:.2f} seconds')
         return elapsed
     else:
         print(f'  Failed: {result.stderr[:200]}...')
         return None
 
-def binary_search_workers(min_workers=2, max_workers=32, iterations=3, files=1000):
+def binary_search_workers(min_workers=2, max_workers=64, iterations=3, files=10000):
     """Perform binary search for optimal worker count"""
     best_workers = None
     best_time = float('inf')
@@ -73,7 +73,7 @@ def binary_search_workers(min_workers=2, max_workers=32, iterations=3, files=100
             iter_best_workers = min(times.keys(), key=lambda w: times[w])
             iter_best_time = times[iter_best_workers]
 
-            print('.2f')
+            print(f'  Best in iteration: {iter_best_workers} workers ({iter_best_time:.2f}s)')
 
             # Update overall best
             if iter_best_time < best_time:
@@ -90,15 +90,15 @@ def binary_search_workers(min_workers=2, max_workers=32, iterations=3, files=100
                 min_workers = max(min_workers, iter_best_workers - 2)
                 max_workers = min(max_workers, iter_best_workers + 2)
 
-    print('.2f')
+    print(f'Overall best: {best_workers} workers ({best_time:.2f}s)')
     return best_workers, best_time
 
 def main():
     parser = argparse.ArgumentParser(description='Find optimal worker thread count for IRS 990 processing')
     parser.add_argument('--min-workers', type=int, default=2, help='Minimum worker count to test')
-    parser.add_argument('--max-workers', type=int, default=32, help='Maximum worker count to test')
+    parser.add_argument('--max-workers', type=int, default=64, help='Maximum worker count to test')
     parser.add_argument('--iterations', type=int, default=3, help='Number of binary search iterations')
-    parser.add_argument('--files', type=int, default=1000, help='Number of files to process per test')
+    parser.add_argument('--files', type=int, default=10000, help='Number of files to process per test')
 
     args = parser.parse_args()
 
@@ -112,8 +112,8 @@ def main():
 
     print("\nOptimal configuration:")
     print(f"  Workers: {optimal_workers}")
-    print(".2f")
-    print(".1f")
+    print(f"  Time: {best_time:.2f} seconds")
+    print(f"  Throughput: {args.files / best_time:.1f} files/second")
 
 if __name__ == '__main__':
     main()

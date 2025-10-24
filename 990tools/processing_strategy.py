@@ -148,7 +148,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         from tqdm import tqdm
         progress_unit = "file" if global_config.progress == "files" else "B"
         progress_desc = "Processing XML files" if global_config.progress == "files" else "Processing XML bytes"
-        pbar = tqdm(total=len(xml_files), desc=progress_desc, unit=progress_unit, disable=global_config.is_quiet())
+        pbar = tqdm(total=len(xml_files), desc=progress_desc, unit=progress_unit)
 
         # Use thread-safe queues with backpressure
         xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
@@ -381,7 +381,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         # Process charities without deduplication (let database handle uniqueness constraints)
         addresses = []
-        for charity, officer_list, grant_list, contractor_list, contribution_list, address in batch_data:
+        xml_ids = []  # Track xml_ids for error handling
+        for xml_id, charity, officer_list, grant_list, contractor_list, contribution_list, address in batch_data:
+            xml_ids.append(xml_id)
             if charity:
                 charities.append(charity)
                 charity_id = len(charities)  # Temporary ID for batch processing
@@ -429,6 +431,16 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     self.log_info(f"Bulk insert: FINISHED charity insert for {len(charity_data)} records")
             except Exception as e:
                 self.log_error(f"Failed to insert charities: {e}", exc_info=True)
+                # Mark all XML files in this batch as having errors
+                for xml_id in xml_ids:
+                    try:
+                        self.db_ops.execute_query(
+                            "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                            (f"Batch insert failed: {str(e)}", xml_id)
+                        )
+                        self.db_ops.commit()
+                    except Exception as mark_error_e:
+                        self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
                 conn.rollback()
                 return
 
@@ -545,8 +557,28 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             self.log_info("Bulk insert: STARTING batch commit")
             conn.commit()
             self.log_info("Bulk insert: FINISHED batch commit successful")
+            # Mark all XML files in this batch as processed successfully
+            for xml_id in xml_ids:
+                try:
+                    self.db_ops.execute_query(
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2 WHERE xml_id=?",
+                        (xml_id,)
+                    )
+                    self.db_ops.commit()
+                except Exception as mark_success_e:
+                    self.log_error(f"Failed to mark xml_id {xml_id} as processed: {mark_success_e}")
         except Exception as e:
             self.log_error(f"Failed to commit batch: {e}", exc_info=True)
+            # Mark all XML files in this batch as having errors
+            for xml_id in xml_ids:
+                try:
+                    self.db_ops.execute_query(
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                        (f"Batch commit failed: {str(e)}", xml_id)
+                    )
+                    self.db_ops.commit()
+                except Exception as mark_error_e:
+                    self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
             try:
                 conn.rollback()
                 self.log_info("Bulk insert: Rollback completed")
@@ -594,7 +626,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
             if charity:
                 self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}, address={address is not None}")
-                return charity, officers, grants, contractors, contributions, address
+                return xml_id, charity, officers, grants, contractors, contributions, address
             else:
                 self.log_error(f"Failed to extract charity data from {filename}")
                 return ('error', xml_id)
