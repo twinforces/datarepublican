@@ -50,6 +50,10 @@ from export_processor import TSVExporter
 from address_matcher import AddressMatcher
 from address_deduplication_processor import AddressDeduplicationProcessor
 from irsfetch_processor import IRSFetchProcessor
+from address_deduplication_processor import AddressDeduplicationProcessor
+from officer_deduplication_processor import OfficerDeduplicationProcessor
+from photo_processor import PhotoProcessor
+from extract_processor import ExtractProcessor
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
 from config import global_config
 
@@ -86,7 +90,7 @@ class IRS990Processor:
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None):
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None, progress: str = "files", extract: Optional[List[str]] = None, extract_dest: Optional[str] = None):
         # Set global config from parameters (for backward compatibility)
         global_config.db_path = db_path if db_path != DEFAULT_DB_PATH else os.path.join(final_dir, "irs990.duckdb")
         global_config.final_dir = final_dir
@@ -101,6 +105,9 @@ class IRS990Processor:
         global_config.workers = workers
         global_config.dbUI = dbUI
         global_config.profile_seconds = profile_seconds
+        global_config.progress = progress
+        global_config.extract = extract
+        global_config.extract_dest = extract_dest
 
         # Determine database path
         if db_path == DEFAULT_DB_PATH:
@@ -136,8 +143,14 @@ class IRS990Processor:
         self.tsv_exporter = TSVExporter(self.db_ops, global_config.final_dir)
         # Initialize IRS fetch processor
         self.irs_fetch_processor = IRSFetchProcessor(global_config.zips_dir)
+        # Initialize photo processor
+        self.photo_processor = PhotoProcessor(self.db_ops)
+        # Initialize extract processor
+        self.extract_processor = ExtractProcessor(self.db_ops, global_config.zips_dir)
         # Initialize address deduplication processor
         self.address_dedup_processor = AddressDeduplicationProcessor(self.db_ops)
+        # Initialize officer deduplication processor
+        self.officer_dedup_processor = OfficerDeduplicationProcessor(self.db_ops)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -156,6 +169,9 @@ class IRS990Processor:
         self.dbUI = dbUI
         self.workers = workers
         self.profile_seconds = profile_seconds
+        self.progress = progress
+        self.extract = extract
+        self.extract_dest = extract_dest
 
     def _init_database(self):
         """Initialize DuckDB database with schema"""
@@ -756,6 +772,15 @@ class IRS990Processor:
         """Geolocate addresses using census API (step 7)"""
         return self.geolocation_processor.geolocate_addresses()
 
+    def process_officer_photos(self):
+        """Process officer photos using Google Knowledge Graph API (step 8)"""
+        self.log_info("Starting officer deduplication")
+        dedup_result = self.officer_dedup_processor.deduplicate_officers()
+        self.log_info(f"Officer deduplication complete. Processed {dedup_result} duplicates.")
+
+        self.log_info("Processing officer photos using Google Knowledge Graph API")
+        return self.photo_processor.process_officer_photos()
+
     def _geolocate_batch(self, batch: List[Tuple]) -> List[Tuple]:
         """Geolocate a batch of addresses"""
         # This method is now handled by geolocation_processor.py
@@ -796,6 +821,11 @@ class IRS990Processor:
         self.log_info("Exporting final TSV files")
         self.tsv_exporter.export_final_tsvs()
 
+    def extract_xml_files(self, eins: List[str], dest_dir: str):
+        """Extract XML files for specified EINs (utility function)"""
+        self.log_info(f"Extracting XML files for {len(eins)} EINs to {dest_dir}")
+        return self.extract_processor.extract_xml_files(eins, dest_dir)
+
 
 def main():
     """Command-line interface"""
@@ -818,17 +848,21 @@ def main():
                                            "match", "percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
     parser.add_argument("--start-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
-                                                 "match", "percentiles", "export"],
-                          help="Starting step for processing")
+                                                  "photos", "match", "percentiles", "export"],
+                           help="Starting step for processing")
     parser.add_argument("--stop-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
-                                                "match", "percentiles", "export"],
-                          help="Stopping step for processing")
+                                                 "photos", "match", "percentiles", "export"],
+                           help="Stopping step for processing")
+    parser.add_argument("--progress", choices=["files", "bytes"], default="files",
+                           help="Progress tracking type (default: files)")
+    parser.add_argument("--extract", nargs='+', help="List of EINs to extract XML files for")
+    parser.add_argument("--extract-dest", help="Destination directory for extracted XML files")
 
     args = parser.parse_args()
 
     # Define processing steps in order
     steps = ["irsfetch", "zip", "xml", "address", "geolocate",
-                                           "match", "percentiles", "export"]
+                                            "photos", "match", "percentiles", "export"]
 
     # Define step actions
     step_actions = {
@@ -837,6 +871,7 @@ def main():
         "xml": lambda: processor.process_xml_files(),
         "address": lambda: processor.deduplicate_addresses(),  # Deduplicate addresses and create master-child relationships
         "geolocate": lambda: processor.geolocate_addresses(),
+        "photos": lambda: processor.process_officer_photos(),
         "match": lambda: processor.match_grants_by_address(),
         "percentiles": lambda: processor.calculate_percentiles(),
         "export": lambda: processor.export_final_tsvs()
@@ -874,6 +909,13 @@ def main():
         dbUI=global_config.dbUI,
         profile_seconds=global_config.profile_seconds
     )
+
+    # Handle extract mode
+    if args.extract and args.extract_dest:
+        processor.log_info(f"Extracting XML files for EINs: {args.extract}")
+        result = processor.extract_xml_files(args.extract, args.extract_dest)
+        processor.log_info(f"Extraction complete. Extracted {result} files.")
+        sys.exit(0)
 
     # Handle profiling mode
     if args.profile:

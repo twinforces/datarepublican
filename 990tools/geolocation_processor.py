@@ -42,6 +42,7 @@ class GeolocationProcessor:
     def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
         self.address_dedup = AddressDeduplicationProcessor(db_ops)
+        self.quiet = global_config.is_quiet()
 
     def _normalize_state(self, state: str) -> Optional[str]:
         """Normalize state to uppercase abbreviation, handling full names and case issues"""

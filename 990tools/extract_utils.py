@@ -210,7 +210,7 @@ def build_zip_index(zip_dir, start_year, end_year):
         except Exception as e:
             if not quiet:
                 log_error(f"Error indexing ZIP {zip_path}: {str(e)}", exc_info=True)
-        update_progress(1)
+        update_progress(progress_reporter, 1)
     # Stop progress reporting
     stop_progress_reporting()
 

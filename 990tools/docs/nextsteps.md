@@ -1,0 +1,223 @@
+It's great that performance is so good now, because now we're going to have more stuff happen. 
+
+# Background
+So we're following the money, and the people spending the money don't want us to be able to follow it. 
+But there is this IRS thing, and people have employees, and the employees need to get paid, which means they get an EIN.
+For most grants, the IRS makes charities report what EIN they are sending the grant to. 
+* But not for 990pf filers.
+* Also, religious organizations and local governments are exempt from filing returns.
+However, everyone has to have a mailing address. 
+For a long time, I was working on address matching, but that's fussy, I had a bunch of heuristics, was kind of ok. zip_code + po box was dead on accurate. 
+But now, with your tax dollars at work, I can match an address to within 10m of each other, which is what the colocator does!
+Which means we can:
+* Accurately infer organizations who didn't file 990 forms!
+* Branch out into tracking 527 orgs, Political Action Committees.
+
+# To Do
+* First, we need to set the owner_id in Address for filers as a loose relationship. This will be a theme.
+* The geolocate step needs to be multithreaded, with up to 4 API queries feeding into a consumer thread that updates the address records with the colocator, and the Charity record with the colocator as well
+* Everything needs to have a colocator field for later matching. If a record of any type has an EIN, great, we'll use that. EIN:<ein>. Otherwise, if we have to match by address, it will generate an address record, and its owner_id will be set, and the address_record will set its address_type based on the owning dataclass.
+* Right now, the XML parsing is only creating Address and Officer records, it's not creating Grant, Contractor, or Contribution, or Political Contribution records so we need to add that. 
+* We should probably organize the parsing in the order they are in the XML, which is easy, since they're in alphabetical order, Common, ScheduleA-Z. 
+
+# Task
+* Multithread the geolocate step using the patterns you learned refactoring the XML processing. There are 11.5K Address records in the database for you to practice on, resist the temptation to use fake data, because the API fails on those. The real data is in /Volumes/Data/final/irs990.duckdb
+* Do all the items in the To-Do section, while remembering to be DRY, and follow best coding practices. 
+
+* refactor the code to be DRY, the parse_related entitites probably can go in the base parser rather then being diuplicated
+* Look at the files with grep to get an expected count of the related items, and a sense of the XML structure 
+* Build a test to make sure the items are getting created, which they aren't currently. 
+
+Colocator format:
+  LL:<lat>:<long>  latitude and longitude of the address, these start empty until we geolocate address.
+  EIN:<EIN> used for grants that provide an EIN so we don't need to geolocate an Address.
+  PO:<po_box>:<zipcode> used for addresses that are PO Boxes. No need to geolocate an address, it would be the post office anyways.
+  FA:<countrycode> used for foreign addresses. _
+  
+  Had to quit, because the process was stuck. 
+  
+  * In ./990tools you will find a ton of code. 
+  * We recently modified the logging in logging_utils.py to include the file name and serial number of the caller. Unfortuantely, there are still still files that aren't using those logging methods.
+  
+  # Task fix it. 
+  * make sure that all logging everywhere has access to the --quiet setting. Logging can drastically impede performance even if it is off, because the code will have to marshall the arguments even if the message won't go anywhere. To this end, every logging block has to check if not args.quiet: so if the quiet is set, there will be zero log impact.
+  * While doing that, make sure that logging is all funneled through the master log methods in logging_utils.py. _
+  
+  Hey dumb question. This code has been massively refactored from old scripts that did each step one at a time, and it is now all driven by irs990processor.py except for a couple of utility scripts and tests. Can you identify the dead scripts? I want to remove them via `git rm` so you don't have to look at them any more. Also, integrate download_irs_990_zips.py into irs990processor.py as a first step "down" in front of step "zips". Run recompress_irs_zips.py in as a step "recompress" after that. The script that finds the best --worker-threads setting is also a keeper: set_worker_threads.py. so is profile_pipeline.py, really any script that calls into irs990processor at a meta level is ok. Don't remove them, just build me a list to review. 
+    
+    Just realized having you block even log_error calls if --quiet was on was a boo boo, they only run if an error is encountered, which should be rare. So can you change the logic so error and exception logs will still function. 
+    
+Ok, I want you to start testing. That's pretty easy, just run the pipeline with `timeout 120 python irs990processor.py --verbose --max-files N` this will run it for a maximum of 2 minutes, and you can start N with 16, look for errors in the logs, fix them, try again, until the errors are gone then double N, and gradually increase the 120 second timeout as necessary. The first two steps should do nothing, all the zips are downloaded and recompressed already. Once you processe the first XML file you can add --start-step xmls to skip in the fuuture.  Just loop on your own, I'm going to be out.      
+
+Need to remember to add grants to same place together. 
+
+
+# Prompt for VSCode Grok Plugin: Refactor Producer-Consumer in XML Processor
+
+You are an expert Python refactoring assistant. Refactor the provided code for a parallel XML processing strategy using the producer-consumer pattern. The code processes IRS Form 990 XML files: producers parse XML files (CPU/I/O-bound), queue results, and a single consumer batches inserts into a DuckDB database (single-writer safe).
+
+## Original Code
+[PASTE THE FULL ORIGINAL CODE FROM processing_strategy.py HERE - the entire <DOCUMENT> content]
+
+## Key Requirements & Best Practices
+- **Use `queue.Queue`**: Replace `collections.deque` with `queue.Queue(maxsize=QUEUE_SIZE)` for thread-safety. Producers use `put(block=True)` for backpressure; consumer uses `get(block=True)` to block efficiently (no polling or busy-waiting).
+- **Signaling**: Each producer sends a `None` sentinel after finishing. Consumer counts `num_producers` sentinels to exit. Use `xml_queue.task_done()` after processing each item, and `xml_queue.join()` in main after producers finish to ensure full drain.
+- **Progress Tracking**: Use a small `progress_queue = queue.Queue(maxsize=10)` for consumer to signal batch sizes to main (positive for success, negative for errors). Main tallies `total_processed` from it post-join.
+- **Shutdown**: Wait for all producers via `thread.join(timeout=60)` (parse-heavy). Then `join()` queue and consumer (timeout=30).
+- **Error Handling**: In consumer, handle `('error', xml_id, msg)` by updating `XmlFiles` table and committing. Wrap batch inserts in try/except; signal errors via progress_queue.
+- **Logging**: Reduce verbosity—log per-10/50 files, not per-file. Use class attrs for constants (e.g., `STALL_THRESHOLD=30`).
+- **No Changes To**: Keep `_bulk_insert_batch`, `_process_single_xml`, parsing methods, dataclass reflection, dedup logic, and DB ops intact. Don't touch deprecated strategies.
+- **Efficiency**: Eliminate all polling loops, stall checks, and `time.sleep()`. Drop tqdm (use simple queue tally). Cap producers at `min(workers, len(files))`.
+- **Style**: PEP 8 clean, type hints where possible. Add docs to methods. No magic numbers—extract to attrs.
+
+## Example Refactored Structure (Use as Guide)
+Implement similar to this snippet in `ParallelXMLProcessingStrategy`:
+
+```python
+import queue
+import threading
+# ... other imports
+
+class ParallelXMLProcessingStrategy(ProcessingStrategy):
+    STALL_THRESHOLD = 30  # Example: Extract magics
+    # ... existing attrs
+
+    def execute(self, max_files: Optional[int] = None) -> int:
+        xml_files = self._get_xml_files_to_process()
+        if max_files:
+            xml_files = xml_files[:max_files]
+        if not xml_files:
+            return 0
+
+        num_producers = min(self.workers, len(xml_files))
+        self.log_info(f"Processing {len(xml_files)} files with {num_producers} producers")
+
+        xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
+        progress_queue = queue.Queue(maxsize=10)
+
+        consumer_thread = threading.Thread(
+            target=self._database_consumer,
+            args=(xml_queue, progress_queue, num_producers, self.db_ops.db_conn)
+        )
+        consumer_thread.daemon = True
+        consumer_thread.start()
+
+        producer_threads = []
+        for i in range(num_producers):
+            t = threading.Thread(target=self._xml_producer, args=(xml_files, xml_queue, i, num_producers))
+            t.daemon = True
+            producer_threads.append(t)
+            t.start()
+
+        # Wait for producers
+        for i, t in enumerate(producer_threads):
+            t.join(timeout=60.0)
+            if t.is_alive():
+                self.log_error(f"Producer {i} timeout")
+            else:
+                self.log_info(f"Producer {i} done")
+
+        # Drain queue and consumer
+        xml_queue.join()
+        consumer_thread.join(timeout=30.0)
+        if consumer_thread.is_alive():
+            self.log_error("Consumer timeout")
+
+        # Tally progress
+        total_processed = 0
+        try:
+            while True:
+                batch_size = progress_queue.get_nowait()
+                total_processed += abs(batch_size)
+                if batch_size < 0:
+                    self.log_error(f"Error in batch of {-batch_size}")
+        except queue.Empty:
+            pass
+
+        self.log_info(f"Complete: {total_processed} files")
+        return total_processed
+
+    def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
+        processed = 0
+        start = producer_id
+        for i in range(start, len(xml_files), num_producers):
+            xml_id, path, filename, internal = xml_files[i]
+            try:
+                result = self._process_single_xml(xml_id, path, filename, internal)
+                xml_queue.put(result, block=True)
+                processed += 1
+                if processed % 50 == 0:
+                    self.log_info(f"Producer {producer_id}: {processed} queued")
+            except Exception as e:
+                self.log_error(f"Producer {producer_id} error on {filename}: {e}", exc_info=True)
+                xml_queue.put(('error', xml_id, str(e)), block=True)
+        xml_queue.put(None)  # Sentinel
+        self.log_info(f"Producer {producer_id} done: {processed} files")
+
+    def _database_consumer(self, xml_queue, progress_queue, num_expected, conn):
+        batch_data = []
+        total = 0
+        signals = 0
+        while signals < num_expected:
+            item = xml_queue.get(block=True)
+            if item is None:
+                signals += 1
+                xml_queue.task_done()
+                continue
+            if isinstance(item, tuple) and item[0] == 'error':
+                xml_id = item[1]
+                msg = item[2] if len(item) > 2 else "Error"
+                self.db_ops.execute_query(
+                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                    (msg, xml_id)
+                )
+                self.db_ops.commit()
+                xml_queue.task_done()
+                continue
+            batch_data.append(item)
+            total += 1
+            xml_queue.task_done()
+            if len(batch_data) >= self.BATCH_SIZE:
+                try:
+                    self._bulk_insert_batch(batch_data, conn)
+                    progress_queue.put(len(batch_data))
+                except Exception as e:
+                    self.log_error(f"Batch error: {e}", exc_info=True)
+                    progress_queue.put(-len(batch_data))
+                batch_data = []
+
+        # Final batch
+        if batch_data:
+            try:
+                self._bulk_insert_batch(batch_data, conn)
+                progress_queue.put(len(batch_data))
+            except Exception as e:
+                self.log_error(f"Final batch error: {e}", exc_info=True)
+                progress_queue.put(-len(batch_data))
+
+        self.log_info(f"Consumer done: {total} items, {signals} signals")
+
+# ... Keep all other methods unchanged
+
+
+# Some Cleanup
+* Remove the dead imports of sqlite that are scattered about. duckdb is so much faster we're never going back, and its dead code.
+* We should have dataclass implementations for all database tables. We're missing at least one.
+* The aliasing of DC<type> for <type> is probably unnecessary and confusing and should be removed. Review, and remove if not needed. 
+* use of placeholders {} and %s in logging strings has been an anti-pattern and makes the code fragile and confusing. Replace them all with modern f strings. This is a tedious cleanup. 
+* These stub_log_* methods seem like an anti-pattern. They should either go in logging_utils.py to be DRY, or be eliminated entirely unless you can justify their purpose. Also, the log methods in logging_utils add the file and line number of the caller by using f_back on the frame, and if there are too many wrappers you get the reference to the wrapper not the caller. Maybe need to loop through the frames until you find a function without "log" in the name if these stubs and wrappers are still needed. 
+* Passing components of the command line arguments around is tedious, make an args global that can be quickly read instead. This will be especially useful when checking for quiet around logs.
+* make sure that pyright is happy with all the .py files needed for irs990processor.py when you're done, don't need to go beyond those.
+
+* ThreadSafeProgressReporter turned out to be an anti-pattern, we can always report progress safely from the consumer thread. Make it gone. 
+
+# Feature Creep
+* Processing time is proportional to the size of the XML file, which vary widely. We should collect the size when we're processing the zip file. 
+* have an --progress <type> option that determines whether the XML progress is in bytes or files. Default is files.
+* Use the Google Knowledge Map API to get URL for photos of all the officers. Docs here: https://developers.google.com/knowledge-graph/reference/rest add a new step "photos" to do this after geocode, and add the database column. Throttle the connections to 1/second, and cache the results in a .json file as you go. 
+* Have an option --extract that takes a list of EINs and extracts all of its XML files to a --extract-dest <dir> directory. We can use this to save test XMLs as needed or to pull out problem files. 
+
+* The progress bars seem to be broken again, though the ZIP Files one works, make sure that all the steps update the progress bar in the consumer thread. No thread safety issues with that, since there's only one consumer thread. 
+
+
+    

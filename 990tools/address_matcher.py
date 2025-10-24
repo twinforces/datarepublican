@@ -50,7 +50,7 @@ class AddressMatcher:
                         self.db_ops.update_grant_ein(grant.grant_id, stub_ein)
                         print(f"Created stub charity {stub_ein} for grant {grant.grant_id}")
 
-            update_progress(1)
+            update_progress(progress_reporter, 1)
 
         # Stop progress reporting
         stop_progress_reporting()

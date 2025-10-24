@@ -63,6 +63,34 @@ def parse_schedule(root, xpaths_dict, elements_key, sub_elements_key, value_key,
 def clean_name(name):
     return re.sub(r'[^a-zA-Z0-9\s]', '', name).strip().upper()
 
+# Precompiled regex patterns for fast name parsing
+CLEAN_NAME_PATTERN = re.compile(r'[^a-zA-Z0-9\s]')
+SPLIT_NAME_PATTERN = re.compile(r'\s+')
+
+def parse_name_fast(name):
+    """
+    Fast name parsing with fallback to HumanName for complex names.
+    Handles most IRS officer names (simple "First Last" format) with regex,
+    falls back to HumanName for complex names (>2 parts).
+    """
+    if not name:
+        return 'Unknown', 'Unknown'
+
+    cleaned = CLEAN_NAME_PATTERN.sub('', name).strip().upper()
+    parts = SPLIT_NAME_PATTERN.split(cleaned)
+
+    if len(parts) <= 2:
+        # Fast path: simple names
+        first = parts[0] if parts else 'Unknown'
+        last = parts[-1] if len(parts) > 1 else 'Unknown'
+        return first, last
+    else:
+        # Complex names: use HumanName for accuracy
+        hn = HumanName(cleaned)
+        first = hn.first or 'Unknown'
+        last = hn.last or 'Unknown'
+        return first, last
+
 def parse_float_field(text):
     """Parse a float from text, handling commas, dollar signs, and other formatting"""
     if not text:
@@ -94,20 +122,33 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                 name_elem = elem.xpath(GRANT_NAME_XPATHS[0].path, namespaces=NAMESPACES)
                 amount_elem = elem.xpath(GRANT_AMOUNT_XPATHS[0].path, namespaces=NAMESPACES)
                 grantee_name = (name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown")
-                is_foreign = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                if is_foreign:
-                    country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
-                    country_code = country_elem[0].text.strip() if country_elem else None
-                    from countryCodes import lookupCC
-                    country = lookupCC(country_code) if country_code else None
-                    if country:
-                        grant_ein = country["number"]
-                        grantee_name = country["name"]
-                    else:
-                        grant_ein = "999"
-                        grantee_name = "Foreign_" + (country_code or "Unknown")
-                else:
+
+                # Check for US address first (domestic grant)
+                us_address = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
+                if us_address:
+                    # Domestic grant
                     grant_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
+                    is_foreign = False
+                else:
+                    # Check for foreign address
+                    foreign_address = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
+                    if foreign_address:
+                        # Foreign grant
+                        country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
+                        country_code = country_elem[0].text.strip() if country_elem else None
+                        from countryCodes import lookupCC
+                        country = lookupCC(country_code) if country_code else None
+                        if country:
+                            grant_ein = country["number"]
+                            grantee_name = country["name"]
+                        else:
+                            grant_ein = "999"
+                            grantee_name = "Foreign_" + (country_code or "Unknown")
+                        is_foreign = True
+                    else:
+                        # No address found, assume domestic
+                        grant_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
+                        is_foreign = False
                 if grant_ein == "Unknown" and not is_foreign:
                     continue
                 if amount_elem and amount_elem[0].text:

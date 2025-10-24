@@ -16,14 +16,19 @@ class Officer:
 
     officer_id: Optional[int] = None
     charity_id: int = 0
+    master_id: Optional[str] = None
     first_name: str = ""
     last_name: str = ""
+    full_name: str = ""
     compensation: float = 0.0
     tax_year: int = 0
+    photo_url: Optional[str] = None
 
     @property
-    def full_name(self) -> str:
-        """Get full name of the officer"""
+    def display_name(self) -> str:
+        """Get display name of the officer (computed from first/last if full_name not set)"""
+        if self.full_name:
+            return self.full_name
         return f"{self.first_name} {self.last_name}".strip()
 
     def is_highly_compensated(self) -> bool:
@@ -35,8 +40,11 @@ class Officer:
         return {
             'officer_id': self.officer_id,
             'charity_id': self.charity_id,
+            'master_id': self.master_id,
             'first_name': self.first_name,
             'last_name': self.last_name,
+            'full_name': self.full_name,
             'compensation': self.compensation,
-            'tax_year': self.tax_year
+            'tax_year': self.tax_year,
+            'photo_url': self.photo_url
         }

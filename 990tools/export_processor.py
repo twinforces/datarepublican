@@ -25,6 +25,7 @@ class TSVExporter:
         self._export_grants_tsv()
         self._export_contractors_tsv()
         self._export_political_contributions_tsv()
+        self._export_officers_tsv()
 
     def _export_charities_tsv(self):
         """Export charities to TSV"""
@@ -142,3 +143,25 @@ class TSVExporter:
                 f.write('\t'.join(safe_row) + '\n')
 
         print(f"Exported {len(contributions)} political contributions to {output_path}")
+
+    def _export_officers_tsv(self):
+        """Export officers to TSV using DuckDB's efficient COPY command"""
+        output_path = Path(self.final_dir) / "officers_latest.tsv"
+
+        # Use DuckDB's efficient COPY command to export directly from database
+        copy_query = f"""
+            COPY (
+                SELECT
+                    charity_id,
+                    first_name,
+                    last_name,
+                    compensation,
+                    tax_year,
+                    photo_url
+                FROM Officers
+                ORDER BY charity_id, last_name, first_name
+            ) TO '{output_path}' (HEADER, DELIMITER '\t')
+        """
+
+        self.db_ops.execute_query(copy_query)
+        print(f"Exported officers to {output_path} using DuckDB COPY")

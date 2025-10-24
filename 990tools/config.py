@@ -39,6 +39,9 @@ class GlobalConfig:
         self.workers: int = 16
         self.dbUI: bool = False
         self.profile_seconds: Optional[int] = None
+        self.progress: str = "files"  # "files" or "bytes"
+        self.extract: Optional[List[str]] = None
+        self.extract_dest: Optional[str] = None
 
     @classmethod
     def get_instance(cls):
@@ -59,6 +62,9 @@ class GlobalConfig:
         self.workers = getattr(args, 'workers', self.workers)
         self.dbUI = getattr(args, 'dbUI', self.dbUI)
         self.profile_seconds = getattr(args, 'profile', self.profile_seconds)
+        self.progress = getattr(args, 'progress', self.progress)
+        self.extract = getattr(args, 'extract', self.extract)
+        self.extract_dest = getattr(args, 'extract_dest', self.extract_dest)
 
     def is_quiet(self) -> bool:
         """Check if quiet mode is enabled"""

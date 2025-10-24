@@ -211,6 +211,8 @@ CREATE TABLE XmlFiles (
     -- XML filename within ZIP
     internal_path VARCHAR NOT NULL,
     -- Path within ZIP archive
+    file_size BIGINT,
+    -- Size of XML file in bytes
     ein VARCHAR,
     -- EIN extracted from XML
     tax_year INTEGER,
@@ -274,10 +276,16 @@ CREATE TABLE Officers (
     officer_id UUID DEFAULT uuidv7() PRIMARY KEY,
     charity_id VARCHAR NOT NULL,
     -- Reference to Charities
+    master_id UUID,
+    -- Master officer ID for deduplication (NULL for master officers)
     first_name VARCHAR NOT NULL,
     last_name VARCHAR NOT NULL,
+    full_name VARCHAR,
+    -- Full name as it appears in the filing (for photo lookup)
     compensation DOUBLE NOT NULL,
     tax_year INTEGER NOT NULL,
+    photo_url VARCHAR,
+    -- URL to officer photo from Google Knowledge Graph API
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (charity_id) REFERENCES Charities(charity_id) -- DuckDB doesn't support CASCADE
 );
@@ -371,6 +379,9 @@ CREATE INDEX idx_pipeline_years ON PipelineProgress(start_year, end_year);
 -- Officers indexes
 CREATE INDEX idx_officers_charity_id ON Officers(charity_id);
 CREATE INDEX idx_officers_tax_year ON Officers(tax_year);
+CREATE INDEX idx_officers_master_id ON Officers(master_id);
+CREATE INDEX idx_officers_name ON Officers(last_name, first_name);
+CREATE INDEX idx_officers_full_name ON Officers(full_name);
 -- Contractors indexes
 CREATE INDEX idx_contractors_filer_ein ON Contractors(filer_ein);
 CREATE INDEX idx_contractors_tax_year ON Contractors(tax_year);

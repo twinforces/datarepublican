@@ -19,10 +19,10 @@ class Grant:
     grant_id: Optional[str] = field(default=None, init=False)
     filer_ein: str = ""
     filer_name: str = ""
+    grantee_name: str = ""
     grant_ein: Optional[str] = None
     grant_amt: float = 0.0
     tax_year: int = 0
-    grantee_name: Optional[str] = None
     colocator: Optional[str] = None
 
     def is_large_grant(self) -> bool:
@@ -62,9 +62,9 @@ class Grant:
             'grant_id': self.grant_id,
             'filer_ein': self.filer_ein,
             'filer_name': self.filer_name,
+            'grantee_name': self.grantee_name,
             'grant_ein': self.grant_ein,
             'grant_amt': self.grant_amt,
             'tax_year': self.tax_year,
-            'grantee_name': self.grantee_name,
             'colocator': self.colocator
         }

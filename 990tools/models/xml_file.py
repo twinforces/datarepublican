@@ -19,6 +19,7 @@ class XMLFile:
     zip_id: int = 0
     filename: str = ""
     internal_path: str = ""
+    file_size: Optional[int] = None
     ein: Optional[str] = None
     tax_year: Optional[int] = None
     form_type: Optional[str] = None
@@ -43,6 +44,7 @@ class XMLFile:
             'zip_id': self.zip_id,
             'filename': self.filename,
             'internal_path': self.internal_path,
+            'file_size': self.file_size,
             'ein': self.ein,
             'tax_year': self.tax_year,
             'form_type': self.form_type,

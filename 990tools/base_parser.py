@@ -11,7 +11,7 @@ from lxml import etree  # type: ignore
 from io import BytesIO
 import logging
 from nameparser import HumanName
-from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field
+from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field, parse_name_fast
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from typing import Optional, List, Tuple, Dict, Any, Callable
 from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning, create_stub_log_error, create_stub_log_debug
@@ -74,15 +74,14 @@ class BaseParser:
 
             if name_elem and value_elem:
                 cleaned_name = clean_name(name_elem)
-                name = HumanName(cleaned_name)
-                first_name = name.first or "Unknown"
-                last_name = name.last or "Unknown"
+                first_name, last_name = parse_name_fast(cleaned_name)
                 value = parse_int_field(elem, self.XPATHS, "officer_comp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
                 if value > 0:
                     officer_entries.append({
                         "first_name": first_name,
                         "last_name": last_name,
+                        "full_name": name_elem,  # Store original name for photo lookup
                         "amount": value,
                         "ein": context.get('filer_ein', 'Unknown'),
                         "charity_name": context.get('filer_name', 'Unknown'),
@@ -91,7 +90,7 @@ class BaseParser:
                     total += value
 
                     if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet:
-                        log_info(f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+                        log_info(logger, f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
                                  ein=context.get('filer_ein', 'Unknown'))
 
             if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
@@ -447,6 +446,7 @@ class BaseParser:
             officer = Officer(
                 first_name=entry["first_name"],
                 last_name=entry["last_name"],
+                full_name=entry["full_name"],
                 compensation=entry["amount"],
                 tax_year=tax_year
             )

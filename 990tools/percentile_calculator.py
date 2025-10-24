@@ -71,7 +71,7 @@ class PercentileCalculator:
             for tax_year, org_charities in years.items():
                 if len(org_charities) < 2:
                     processed_groups += 1
-                    update_progress(1)
+                    update_progress(progress_reporter, 1)
                     continue  # Need at least 2 for meaningful percentiles
 
                     # Extract values for each metric, filtering out NULL values and converting strings to floats
@@ -181,7 +181,7 @@ class PercentileCalculator:
                         )
 
                     processed_groups += 1
-                    update_progress(1)
+                    update_progress(progress_reporter, 1)
                     print(f"Calculated percentiles for {org_type} {tax_year}: {len(org_charities)} charities")
 
         # Stop progress reporting

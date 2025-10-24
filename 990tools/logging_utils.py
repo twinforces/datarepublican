@@ -40,6 +40,30 @@ def log_warning(logger: logging.Logger, msg: str, *args, ein: Optional[str] = No
     else:
         logger.warning(msg, *args, **kwargs)
 
+def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False):
+    """Start progress reporting with tqdm"""
+    try:
+        from tqdm import tqdm
+        return tqdm(total=total, desc=desc, unit=unit, disable=disable)
+    except ImportError:
+        # Fallback if tqdm not available
+        return None
+
+def stop_progress_reporting():
+    """Stop progress reporting"""
+    # This is a no-op for now, tqdm handles its own cleanup
+    pass
+
+def update_progress(pbar, n: int = 1):
+    """Update progress bar"""
+    if pbar:
+        pbar.update(n)
+
+def set_progress_description(pbar, desc: str):
+    """Set progress bar description"""
+    if pbar:
+        pbar.set_description(desc)
+
 def get_logger(name: str) -> logging.Logger:
     """Get a configured logger"""
     return logging.getLogger(name)

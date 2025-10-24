@@ -68,15 +68,15 @@ class ZipProcessor:
 
                 if existing_zip and existing_zip[0] == 'processed':
                     print(f"Skipping already processed ZIP file: {zip_filename}")
-                    update_progress(1)
+                    update_progress(progress_reporter, 1)
                     continue
 
                 self._process_single_zip(zip_path)
                 processed_zips.append(zip_path)
-                update_progress(1)
+                update_progress(progress_reporter, 1)
             except Exception as e:
                 print(f"Failed to process ZIP {zip_path}: {e}")
-                update_progress(1)
+                update_progress(progress_reporter, 1)
 
         # Stop progress reporting
         stop_progress_reporting()
@@ -112,10 +112,13 @@ class ZipProcessor:
         # Batch insert all XML files for this ZIP
         xml_file_objects = []
         for xml_filename in xml_files:
+            # Get file size from ZIP info
+            file_size = self._get_xml_file_size(zip_path, xml_filename)
             xml_file = XMLFile(
                 zip_id=zip_id,
                 filename=xml_filename,
-                internal_path=xml_filename
+                internal_path=xml_filename,
+                file_size=file_size
             )
             xml_file_objects.append(xml_file)
 
@@ -142,6 +145,25 @@ class ZipProcessor:
         # Get XML files from cached connection
         xml_files = [f for f in zip_ref.namelist() if f.endswith('.xml')]
         return xml_files
+
+    def _get_xml_file_size(self, zip_path: Path, xml_filename: str) -> int:
+        """Get the size of an XML file within the ZIP archive"""
+        zip_key = str(zip_path)
+
+        with self._zip_cache_lock:
+            if zip_key not in self._zip_cache:
+                # Open ZIP file and cache the connection
+                self._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
+
+            zip_ref = self._zip_cache[zip_key]
+
+        # Get file info from ZIP
+        try:
+            file_info = zip_ref.getinfo(xml_filename)
+            return file_info.file_size
+        except KeyError:
+            # File not found in ZIP
+            return 0
 
     @classmethod
     def cleanup_zip_cache(cls):

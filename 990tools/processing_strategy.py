@@ -146,7 +146,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         # Set up progress bar for XML processing
         from tqdm import tqdm
-        pbar = tqdm(total=len(xml_files), desc="Processing XML files", unit="file", disable=global_config.is_quiet())
+        progress_unit = "file" if global_config.progress == "files" else "B"
+        progress_desc = "Processing XML files" if global_config.progress == "files" else "Processing XML bytes"
+        pbar = tqdm(total=len(xml_files), desc=progress_desc, unit=progress_unit, disable=global_config.is_quiet())
 
         # Use thread-safe queues with backpressure
         xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
@@ -199,6 +201,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
         """Producer thread: parses XML and sends results to consumer"""
         processed = 0
+        total_bytes = 0
         start = producer_id
         for i in range(start, len(xml_files), num_producers):
             xml_id, path, filename, internal = xml_files[i]
@@ -206,8 +209,18 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 result = self._process_single_xml(xml_id, path, filename, internal)
                 xml_queue.put(result, block=True)
                 processed += 1
+
+                # Track progress based on config
+                if global_config.progress == "bytes":
+                    # Get file size from database
+                    size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
+                    size_row = size_result.fetchone()
+                    if size_row and size_row[0]:
+                        total_bytes += size_row[0]
+
                 if processed % 50 == 0:
-                    self.log_info(f"Producer {producer_id}: {processed} queued")
+                    progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
+                    self.log_info(f"Producer {producer_id}: {progress_info} queued")
             except Exception as e:
                 self.log_error(f"Producer {producer_id} error on {filename}: {e}", exc_info=True)
                 xml_queue.put(('error', xml_id, str(e)), block=True)
@@ -234,6 +247,15 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         (msg, xml_id)
                     )
                     self.db_ops.commit()
+                    # Update progress bar for error items
+                    if global_config.progress == "files":
+                        pbar.update(1)
+                    else:
+                        # For bytes mode, get file size and update progress
+                        size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
+                        size_row = size_result.fetchone()
+                        if size_row and size_row[0]:
+                            pbar.update(size_row[0])
                     xml_queue.task_done()
                     continue
                 if isinstance(item, tuple) and item[0] == 'shutdown':
@@ -246,7 +268,26 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 if len(batch_data) >= self.BATCH_SIZE:
                     try:
                         self._bulk_insert_batch(batch_data, conn)
-                        pbar.update(len(batch_data))  # Update progress bar after successful batch
+                        # Update progress bar based on config
+                        if global_config.progress == "files":
+                            pbar.update(len(batch_data))
+                        else:
+                            # Calculate total bytes for this batch
+                            batch_bytes = 0
+                            for item in batch_data:
+                                if isinstance(item, tuple) and len(item) >= 6:
+                                    # Extract xml_id from the tuple and get file size
+                                    xml_id = None
+                                    if hasattr(item[0], 'xml_id'):
+                                        xml_id = item[0].xml_id
+                                    elif isinstance(item[0], tuple) and len(item[0]) > 0:
+                                        xml_id = item[0][0] if isinstance(item[0][0], int) else None
+                                    if xml_id:
+                                        size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
+                                        size_row = size_result.fetchone()
+                                        if size_row and size_row[0]:
+                                            batch_bytes += size_row[0]
+                            pbar.update(batch_bytes)
                         batch_data = []  # Clear batch after successful commit
                     except Exception as e:
                         self.log_error(f"Batch error: {e}", exc_info=True)
@@ -260,7 +301,26 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             try:
                 self.log_info(f"Committing final batch of {len(batch_data)} items")
                 self._bulk_insert_batch(batch_data, conn)
-                pbar.update(len(batch_data))  # Update progress bar for final batch
+                # Update progress bar for final batch based on config
+                if global_config.progress == "files":
+                    pbar.update(len(batch_data))
+                else:
+                    # Calculate total bytes for final batch
+                    final_bytes = 0
+                    for item in batch_data:
+                        if isinstance(item, tuple) and len(item) >= 6:
+                            # Extract xml_id from the tuple and get file size
+                            xml_id = None
+                            if hasattr(item[0], 'xml_id'):
+                                xml_id = item[0].xml_id
+                            elif isinstance(item[0], tuple) and len(item[0]) > 0:
+                                xml_id = item[0][0] if isinstance(item[0][0], int) else None
+                            if xml_id:
+                                size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
+                                size_row = size_result.fetchone()
+                                if size_row and size_row[0]:
+                                    final_bytes += size_row[0]
+                    pbar.update(final_bytes)
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
 
