@@ -88,6 +88,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, workers: int = MAX_WORKERS, quiet: bool = False):
         super().__init__(db_ops, logger, global_config.is_quiet())
         self.workers = workers
+        # Set up SIGUSR1 handler for thread stack dumps
+        signal.signal(signal.SIGUSR1, self.dump_threads_handler)
 
     # Lock-free queue implementation for single-file processing
 
@@ -114,34 +116,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 pass
             sys.exit(1)
 
-        def dump_threads_handler(signum, frame):
-            """Signal handler: Dumps formatted stack traces for all live threads."""
-            try:
-                import os
-                # Get frame snapshots for all threads.
-                frames = sys._current_frames()
-
-                print(f"\n{'='*60}", file=sys.stderr)
-                print(f"Stack traces for {len(frames)} threads (PID: {os.getpid()})", file=sys.stderr)
-                print(f"Signal: {signum} at {time.ctime()}", file=sys.stderr)
-                print(f"{'='*60}\n", file=sys.stderr)
-
-                for thread_id, frame in frames.items():
-                    thread_name = threading.get_ident() == thread_id and "Main" or f"Thread-{thread_id}"
-                    print(f"\nThread: {thread_name} (ID: 0x{thread_id:x})", file=sys.stderr)
-
-                    # Extract and format the stack.
-                    stack_lines = traceback.format_stack(frame)
-                    print("".join(stack_lines), file=sys.stderr)
-
-                print(f"{'='*60}\n", file=sys.stderr)
-                sys.stderr.flush()  # Ensure output in signal context.
-            except Exception as e:
-                print(f"Error in thread dump handler: {e}", file=sys.stderr)
-                sys.stderr.flush()
-
         signal.signal(signal.SIGINT, interrupt_handler)
-        signal.signal(signal.SIGUSR1, dump_threads_handler)
 
         xml_files = self._get_xml_files_to_process()
         if max_files:
@@ -237,6 +212,32 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 xml_queue.put(('error', xml_id, error_msg, e), block=True)
         xml_queue.put(None)  # Sentinel
         self.log_info(f"Producer {producer_id} done: {processed} files")
+
+    def dump_threads_handler(self, signum, frame):
+        """Signal handler: Dumps formatted stack traces for all live threads."""
+        try:
+            import os
+            # Get frame snapshots for all threads.
+            frames = sys._current_frames()
+
+            print(f"\n{'='*60}", file=sys.stderr)
+            print(f"Stack traces for {len(frames)} threads (PID: {os.getpid()})", file=sys.stderr)
+            print(f"Signal: {signum} at {time.ctime()}", file=sys.stderr)
+            print(f"{'='*60}\n", file=sys.stderr)
+
+            for thread_id, frame in frames.items():
+                thread_name = threading.get_ident() == thread_id and "Main" or f"Thread-{thread_id}"
+                print(f"\nThread: {thread_name} (ID: 0x{thread_id:x})", file=sys.stderr)
+
+                # Extract and format the stack.
+                stack_lines = traceback.format_stack(frame)
+                print("".join(stack_lines), file=sys.stderr)
+
+            print(f"{'='*60}\n", file=sys.stderr)
+            sys.stderr.flush()  # Ensure output in signal context.
+        except Exception as e:
+            print(f"Error in thread dump handler: {e}", file=sys.stderr)
+            sys.stderr.flush()
 
     def _database_consumer(self, xml_queue, num_expected, conn, pbar):
         """Consumer thread: writes results to database (single-threaded for DuckDB safety)"""
