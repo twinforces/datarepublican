@@ -23,6 +23,7 @@ from dataclasses import fields
 import zipfile
 from threading import Lock
 from enum import Enum
+from uuid import UUID
 
 from database_operations import DatabaseOperations
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
@@ -33,7 +34,7 @@ from parse_utils import parse_grants
 from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF
 from geolocation_processor import GeolocationProcessor
 from address_matcher import AddressMatcher
-from constants import VALID_STATES
+from constants import VALID_STATES, CURRENT_PROCESSING_VERSION
 from zip_processor import ZipProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
@@ -49,6 +50,7 @@ class DatabaseOperationType(Enum):
     INSERT_ADDRESS = "insert_address"
     UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
     UPDATE_XML_FILE_ERROR = "update_xml_file_error"
+    XML_FILE_UPDATE = "xml_file_update"
 
 
 class DatabaseOperation:
@@ -206,15 +208,27 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         return len(xml_files)
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
-        """Producer thread: parses XML and sends operations list to consumer"""
+        """Producer thread: parses XML and sends DatabaseOperation objects to consumer"""
         processed = 0
         total_bytes = 0
         start = producer_id
         for i in range(start, len(xml_files), num_producers):
             xml_id, path, filename, internal, file_size = xml_files[i]
             try:
-                operations = self._process_single_xml(xml_id, path, filename, internal, file_size)
-                xml_queue.put(operations, block=True)
+                metadata, operations = self._process_single_xml(xml_id, path, filename, internal, file_size)
+
+                # Create XML_FILE_UPDATE operation with metadata
+                xml_update_operation = DatabaseOperation(
+                    DatabaseOperationType.XML_FILE_UPDATE,
+                    metadata,
+                    xml_id
+                )
+                operations.insert(0, xml_update_operation)  # Insert at beginning for proper ordering
+
+                # Send operations to queue
+                for operation in operations:
+                    xml_queue.put(operation, block=True)
+
                 processed += 1
 
                 # Track progress based on config
@@ -230,13 +244,22 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 error_msg = str(e)
                 if not error_msg or error_msg == "":
                     error_msg = f"Unknown error processing {filename}"
-                # Create error operation for failed processing
+                # Create error metadata for failed processing
+                error_metadata = {
+                    "file_size": file_size,
+                    "ein": None,
+                    "tax_year": None,
+                    "form_type": None,
+                    "error_message": error_msg,
+                    "processed": True
+                }
+                # Send error operation
                 error_operation = DatabaseOperation(
-                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
-                    {"error_message": error_msg},
+                    DatabaseOperationType.XML_FILE_UPDATE,
+                    error_metadata,
                     xml_id
                 )
-                xml_queue.put([error_operation], block=True)
+                xml_queue.put(error_operation, block=True)
         xml_queue.put(None)  # Sentinel
         self.log_info(f"Producer {producer_id} done: {processed} files")
 
@@ -283,14 +306,13 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     xml_queue.task_done()
                     break
 
-                # Handle list of operations from producer
-                if isinstance(item, list):
-                    batch_operations.extend(item)
-                    total += len(item)
-                else:
-                    # Legacy support for single operations (shouldn't happen with new code)
+                # Handle DatabaseOperation objects from producer
+                if isinstance(item, DatabaseOperation):
                     batch_operations.append(item)
                     total += 1
+                else:
+                    self.log_error(f"Unexpected queue item type: {type(item)}, item: {item}")
+                    continue
 
                 xml_queue.task_done()
 
@@ -396,8 +418,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         processed_xml_ids = set()
 
         try:
-            # 1. Handle XML file updates (errors and successes) first
-            self._process_xml_file_operations(operations_by_type, conn, processed_xml_ids)
+            # 1. Handle XML file updates first
+            self._process_xml_file_update_operations(operations_by_type, conn, processed_xml_ids)
 
             # 2. Insert charities
             charity_id_map = self._process_charity_operations(operations_by_type, conn)
@@ -428,55 +450,54 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     error_msg = self.format_error_with_traceback(e, "Batch processing failed")
                     self.log_debug(f"Marking XmlFile {xml_id} as batch error: {error_msg[:100]}...")
                     self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                        (error_msg, xml_id)
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=?, error_message=? WHERE xml_id=?",
+                        (CURRENT_PROCESSING_VERSION, error_msg, xml_id)
                     )
                     self.db_ops.commit()
                 except Exception as mark_error_e:
                     self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
             raise  # Re-raise to propagate the error
 
-    def _process_xml_file_operations(self, operations_by_type, conn, processed_xml_ids):
-        """Process XML file update operations (success/error)"""
-        # Handle error updates
-        if DatabaseOperationType.UPDATE_XML_FILE_ERROR.value in operations_by_type:
-            for operation in operations_by_type[DatabaseOperationType.UPDATE_XML_FILE_ERROR.value]:
-                data = operation.data
-                error_msg = data.get("error_message", "Unknown error")
-                form_type = data.get("form_type")
-                file_size = data.get("file_size")
-
-                try:
-                    if form_type == "990T":
-                        self.db_ops.execute_query(
-                            "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=?, form_type=?, file_size=? WHERE xml_id=?",
-                            (error_msg, form_type, file_size, operation.xml_id)
-                        )
-                    else:
-                        self.db_ops.execute_query(
-                            "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                            (error_msg, operation.xml_id)
-                        )
-                    processed_xml_ids.add(operation.xml_id)
-                except Exception as e:
-                    self.log_error(f"Failed to update XML file {operation.xml_id} with error: {e}")
-
-        # Handle success updates
-        if DatabaseOperationType.UPDATE_XML_FILE_SUCCESS.value in operations_by_type:
-            for operation in operations_by_type[DatabaseOperationType.UPDATE_XML_FILE_SUCCESS.value]:
-                data = operation.data
-                form_type = data.get("form_type", "Unknown")
-                ein = data.get("ein")
-                tax_year = data.get("tax_year")
-
-                try:
-                    self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, form_type=?, ein=?, tax_year=? WHERE xml_id=?",
-                        (form_type, ein, tax_year, operation.xml_id)
+    def _update_xml_file_with_metadata(self, xml_id, metadata, conn):
+        """Update XmlFiles table with metadata from processing"""
+        try:
+            if metadata["error_message"]:
+                # Error case
+                if metadata["form_type"] == "990T":
+                    conn.execute(
+                        "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, form_type=?, file_size=? WHERE xml_id=?",
+                        (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["form_type"], metadata["file_size"], xml_id)
                     )
-                    processed_xml_ids.add(operation.xml_id)
-                except Exception as e:
-                    self.log_error(f"Failed to update XML file {operation.xml_id} with success: {e}")
+                else:
+                    conn.execute(
+                        "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, file_size=? WHERE xml_id=?",
+                        (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["file_size"], xml_id)
+                    )
+            else:
+                # Success case
+                conn.execute(
+                    "UPDATE XmlFiles SET processed=?, processing_version=?, form_type=?, ein=?, tax_year=?, file_size=? WHERE xml_id=?",
+                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["form_type"], metadata["ein"], metadata["tax_year"], metadata["file_size"], xml_id)
+                )
+        except Exception as e:
+            self.log_error(f"Failed to update XML file {xml_id} with metadata: {e}")
+
+    def _process_xml_file_update_operations(self, operations_by_type, conn, processed_xml_ids):
+        """Process XML file update operations using metadata"""
+        if DatabaseOperationType.XML_FILE_UPDATE.value not in operations_by_type:
+            return
+
+        xml_updates = operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value]
+
+        for operation in xml_updates:
+            xml_id = operation.xml_id
+            metadata = operation.data
+
+            try:
+                self._update_xml_file_with_metadata(xml_id, metadata, conn)
+                processed_xml_ids.add(xml_id)
+            except Exception as e:
+                self.log_error(f"Failed to update XML file {xml_id} with metadata: {e}")
 
     def _process_charity_operations(self, operations_by_type, conn):
         """Process charity insert operations and return charity_id mapping"""
@@ -661,26 +682,25 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
 
     def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str, file_size: int = None):
-        """Process a single XML file and return a list of database operations"""
+        """Process a single XML file and return metadata and list of database operations"""
         operations = []
+        metadata = {
+            "file_size": file_size,
+            "ein": None,
+            "tax_year": None,
+            "form_type": None,
+            "error_message": None,
+            "processed": False
+        }
         try:
             self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
 
             # Read XML content directly from ZIP file using cached connection
             xml_content = self._extract_xml_from_zip(zip_path, internal_path)
 
-            # Update file_size in XmlFiles table if not already set
-            if file_size is None:
-                file_size = len(xml_content)
-                try:
-                    self.log_debug(f"Updating XmlFile {xml_id} with file_size={file_size}")
-                    self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET file_size=? WHERE xml_id=?",
-                        (file_size, xml_id)
-                    )
-                    self.db_ops.commit()
-                except Exception as size_error:
-                    self.log_error(f"Failed to update file_size for {xml_id}: {size_error}", exc_info=True)
+            # Set file_size in metadata if not already set
+            if metadata["file_size"] is None:
+                metadata["file_size"] = len(xml_content)
 
             self.log_debug(f"Retrieved XML content for {filename}, size: {len(xml_content)} bytes")
 
@@ -694,58 +714,36 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 raise ValueError("Malformed XML: unable to parse root element")
 
             # Extract basic metadata
-            form_type = self._extract_form_type(root)
-            tax_year = self._extract_tax_year(root)
-            filer_ein = self._extract_filer_ein(root)
+            metadata["form_type"] = self._extract_form_type(root)
+            metadata["tax_year"] = self._extract_tax_year(root)
+            metadata["ein"] = self._extract_filer_ein(root)
 
-            self.log_debug(f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
+            self.log_debug(f"Extracted metadata for {filename}: form_type={metadata['form_type']}, tax_year={metadata['tax_year']}, ein={metadata['ein']}")
 
-            if not filer_ein or filer_ein == "Unknown":
-                self.log_error(f"Skipping XML {filename}: invalid EIN {filer_ein}")
-                error_msg = f"Invalid EIN {filer_ein} for {filename}"
-                operations.append(DatabaseOperation(
-                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
-                    {"error_message": error_msg, "file_size": file_size},
-                    xml_id
-                ))
-                return operations
-
-            # Update XmlFiles with extracted metadata before processing
-            try:
-                self.log_debug(f"Updating XmlFile {xml_id} with extracted metadata: ein={filer_ein}, tax_year={tax_year}, form_type={form_type}")
-                self.db_ops.execute_query(
-                    "UPDATE XmlFiles SET ein=?, tax_year=?, form_type=? WHERE xml_id=?",
-                    (filer_ein, tax_year, form_type, xml_id)
-                )
-                self.db_ops.commit()
-            except Exception as update_error:
-                self.log_error(f"Failed to update XmlFile metadata for {xml_id}: {update_error}", exc_info=True)
+            if not metadata["ein"] or metadata["ein"] == "Unknown":
+                self.log_error(f"Skipping XML {filename}: invalid EIN {metadata['ein']}")
+                metadata["error_message"] = f"Invalid EIN {metadata['ein']} for {filename}"
+                metadata["processed"] = True
+                return metadata, operations
 
             # Extract data based on form type
-            if form_type == "990T":
+            if metadata["form_type"] == "990T":
                 # Form 990T is a tax return for unrelated business income, not a charity filing
                 self.log_info(f"Ignoring Form 990T file {filename} (tax return for unrelated business income)")
-                operations.append(DatabaseOperation(
-                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
-                    {"error_message": "skipped: 990T", "form_type": "990T", "file_size": file_size},
-                    xml_id
-                ))
-                return operations
-            elif form_type == "990":
-                charity, officers, grants, contractors, contributions, address = self._parse_990_data(root, filename, filer_ein, tax_year, form_type)
-            elif form_type == "990EZ":
-                charity, officers, grants, contractors, contributions, address = self._parse_990ez_data(root, filename, filer_ein, tax_year, form_type)
-            elif form_type == "990PF":
-                charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
+                metadata["error_message"] = "skipped: 990T"
+                metadata["processed"] = True
+                return metadata, operations
+            elif metadata["form_type"] == "990":
+                charity, officers, grants, contractors, contributions, address = self._parse_990_data(root, filename, metadata["ein"], metadata["tax_year"], metadata["form_type"])
+            elif metadata["form_type"] == "990EZ":
+                charity, officers, grants, contractors, contributions, address = self._parse_990ez_data(root, filename, metadata["ein"], metadata["tax_year"], metadata["form_type"])
+            elif metadata["form_type"] == "990PF":
+                charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, metadata["ein"], metadata["tax_year"], metadata["form_type"])
             else:
-                self.log_info(f"Unsupported form type {form_type} in {filename}")
-                error_msg = f"Unsupported form type {form_type} for {filename}"
-                operations.append(DatabaseOperation(
-                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
-                    {"error_message": error_msg},
-                    xml_id
-                ))
-                return operations
+                self.log_info(f"Unsupported form type {metadata['form_type']} in {filename}")
+                metadata["error_message"] = f"Unsupported form type {metadata['form_type']} for {filename}"
+                metadata["processed"] = True
+                return metadata, operations
 
             if charity:
                 self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}, address={address is not None}")
@@ -793,33 +791,21 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         xml_id
                     ))
 
-                # Success operation to mark XML file as processed
-                operations.append(DatabaseOperation(
-                    DatabaseOperationType.UPDATE_XML_FILE_SUCCESS,
-                    {"form_type": form_type, "ein": filer_ein, "tax_year": tax_year},
-                    xml_id
-                ))
+                metadata["processed"] = True
             else:
                 self.log_error(f"Failed to extract charity data from {filename}")
-                error_msg = f"No Charity object created for {filename}"
-                operations.append(DatabaseOperation(
-                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
-                    {"error_message": error_msg},
-                    xml_id
-                ))
+                metadata["error_message"] = f"No Charity object created for {filename}"
+                metadata["processed"] = True
 
         except Exception as e:
             self.log_error(f"Failed to process XML {filename}: {e}", exc_info=True)
             error_msg = str(e)
             if not error_msg or error_msg == "":
                 error_msg = f"Unknown error processing {filename}"
-            operations.append(DatabaseOperation(
-                DatabaseOperationType.UPDATE_XML_FILE_ERROR,
-                {"error_message": error_msg},
-                xml_id
-            ))
+            metadata["error_message"] = error_msg
+            metadata["processed"] = True
 
-        return operations
+        return metadata, operations
 
     def _extract_form_type(self, root) -> str:
         """Extract form type from XML"""
