@@ -1,15 +1,15 @@
 <%!
 # stats_template.mako - Template for database statistics reports
 %>
-# Database Statistics Report - ${step_name}
+${'#'} Database Statistics Report - ${step_name}
 
 Generated: ${timestamp}
 
-## Summary
+${'##'} Summary
 
 Total records across all tables: ${total_records}
 
-## Table Counts
+${'##'} Table Counts
 
 | Table | Count |
 |-------|-------|
@@ -17,44 +17,44 @@ Total records across all tables: ${total_records}
 | ${table_name} | ${count} |
 % endfor
 
-## XmlFiles Group Counts
+${'##'} XmlFiles Group Counts
 
-### Tax Year Distribution
+${'###'} Tax Year Distribution
 | Tax Year | Count |
 |----------|-------|
 % for tax_year, count in xml_group_counts['tax_year']:
 | ${tax_year} | ${count} |
 % endfor
 
-### Form Type Distribution
+${'###'} Form Type Distribution
 | Form Type | Count |
 |-----------|-------|
 % for form_type, count in xml_group_counts['form_type']:
 | ${form_type} | ${count} |
 % endfor
 
-### Processing Status Distribution
+${'###'} Processing Status Distribution
 | Processed | Count |
 |-----------|-------|
 % for processed, count in xml_group_counts['processed']:
 | ${processed} | ${count} |
 % endfor
 
-### Processing Version Distribution
+${'###'} Processing Version Distribution
 | Processing Version | Count |
 |-------------------|-------|
 % for version, count in xml_group_counts['processing_version']:
 | ${version} | ${count} |
 % endfor
 
-### Error Message Prefix Distribution (Top 10)
+${'###'} Error Message Prefix Distribution (Top 10)
 | Error Message Prefix | Count |
 |---------------------|-------|
 % for error_prefix, count in xml_group_counts['error_message_prefix'][:10]:
 | ${error_prefix} | ${count} |
 % endfor
 
-## XmlFiles File Size Histogram
+${'##'} XmlFiles File Size Histogram
 
 % if xml_histogram:
 | Bin Upper | Count | Pct | Bar |
@@ -66,10 +66,10 @@ Total records across all tables: ${total_records}
 No histogram data available (no file_size data or histogram function failed).
 % endif
 
-## Table Summaries
+${'##'} Table Summaries
 
 % for table_name, summary_data in table_summaries.items():
-### Summary ${table_name}
+${'###'} Summary ${table_name}
 
 | Column Name | Type | Min | Max | Approx Unique | Avg | Std | Q25 | Q50 | Q75 | Count | Null % |
 |-------------|------|-----|-----|--------------|-----|-----|-----|-----|-----|-------|--------|
@@ -79,30 +79,30 @@ No histogram data available (no file_size data or histogram function failed).
 
 % endfor
 
-## Charities Details
+${'##'} Charities Details
 
-#### Tax Year Distribution
+${'####'} Tax Year Distribution
 | Tax Year | Count |
 |----------|-------|
 % for tax_year, count in charities_analysis['tax_year_counts']:
 | ${tax_year} | ${count} |
 % endfor
 
-#### Organization Type Distribution
+${'####'} Organization Type Distribution
 | Org Type | Count |
 |----------|-------|
 % for org_type, count in charities_analysis['org_type_counts']:
 | ${org_type} | ${count} |
 % endfor
 
-#### Form Type Distribution
+${'####'} Form Type Distribution
 | Form Type | Count |
 |-----------|-------|
 % for form_type, count in charities_analysis['form_type_counts']:
 | ${form_type} | ${count} |
 % endfor
 
-### charities receipt_amt Histogram
+${'###'} charities receipt_amt Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'receipt_amt' in charities_analysis['histograms']:
@@ -113,7 +113,7 @@ No histogram data available (no file_size data or histogram function failed).
 No histogram data available.
 % endif
 
-### charities govt_amt Histogram
+${'###'} charities govt_amt Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'govt_amt' in charities_analysis['histograms']:
@@ -124,7 +124,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities contrib_amt Histogram
+${'###'} charities contrib_amt Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'contrib_amt' in charities_analysis['histograms']:
@@ -135,7 +135,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities total_exp Histogram
+${'###'} charities total_exp Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'total_exp' in charities_analysis['histograms']:
@@ -146,7 +146,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities prog_exp Histogram
+${'###'} charities prog_exp Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'prog_exp' in charities_analysis['histograms']:
@@ -157,7 +157,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities travel_amt Histogram
+${'###'} charities travel_amt Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'travel_amt' in charities_analysis['histograms']:
@@ -168,7 +168,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities conferences_amt Histogram
+${'###'} charities conferences_amt Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'conferences_amt' in charities_analysis['histograms']:
@@ -179,7 +179,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities officer_comp Histogram
+${'###'} charities officer_comp Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'officer_comp' in charities_analysis['histograms']:
@@ -190,7 +190,7 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### charities total_assets Histogram
+${'###'} charities total_assets Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % if 'total_assets' in charities_analysis['histograms']:
@@ -201,19 +201,19 @@ No histogram data available.
 No histogram data available.
 % endif
 
-### Officers Analysis
+${'###'} Officers Analysis
 
-#### Top 10 Last Names
+${'####'} Top 10 Last Names
 | Last Name | Count |
 |-----------|-------|
 % for last_name, count in officers_analysis['top_last_names']:
 | ${last_name} | ${count} |
 % endfor
 
-### Grants Analysis
+${'###'} Grants Analysis
 
 % if 'grant_amt_histogram' in grants_analysis:
-#### Grant Amount Histogram
+${'####'} Grant Amount Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % for bin in grants_analysis['grant_amt_histogram']:
@@ -223,10 +223,10 @@ No histogram data available.
 No grant amount histogram (min == max or no data).
 % endif
 
-### Contractors Analysis
+${'###'} Contractors Analysis
 
 % if 'amount_histogram' in contractors_analysis:
-#### Contractor Amount Histogram
+${'####'} Contractor Amount Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % for bin in contractors_analysis['amount_histogram']:
@@ -236,10 +236,10 @@ No grant amount histogram (min == max or no data).
 No contractor amount histogram (min == max or no data).
 % endif
 
-### Political Contributions Analysis
+${'###'} Political Contributions Analysis
 
 % if 'amount_histogram' in political_contributions_analysis:
-#### Political Contribution Amount Histogram
+${'####'} Political Contribution Amount Histogram
 | Bin Upper | Count | Pct | Bar |
 |-----------|-------|-----|-----|
 % for bin in political_contributions_analysis['amount_histogram']:
@@ -249,28 +249,28 @@ No contractor amount histogram (min == max or no data).
 No political contribution amount histogram (min == max or no data).
 % endif
 
-### Addresses Analysis
+${'###'} Addresses Analysis
 
-#### Top 10 States
+${'####'} Top 10 States
 | State | Count |
 |-------|-------|
 % for state, count in addresses_analysis['top_states']:
 | ${state} | ${count} |
 % endfor
 
-#### Top 10 ZIP Codes
+${'####'} Top 10 ZIP Codes
 | ZIP Code | Count |
 |----------|-------|
 % for zip_code, count in addresses_analysis['top_zip_codes']:
 | ${zip_code} | ${count} |
 % endfor
 
-## Processing Details
+${'##'} Processing Details
 
 - **Step**: ${step_name}
 - **Database**: ${db_path}
 - **Timestamp**: ${timestamp}
 
-## Notes
+${'##'} Notes
 
 ${notes}

@@ -294,6 +294,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         batch_operations = []
         total = 0
         signals = 0
+        processed_xml_count = 0  # Counter for processed XML files (each generates one XML_FILE_UPDATE)
         while signals < num_expected:
             try:
                 item = xml_queue.get(timeout=30.0)  # Add timeout to prevent hanging
@@ -318,16 +319,21 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
                 if len(batch_operations) >= self.BATCH_SIZE:
                     try:
+                        # Track progress before batch processing
+                        xml_ids_before = set(op.xml_id for op in batch_operations if op.xml_id)
+                        self.log_debug(f"Processing batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
+
                         self._bulk_insert_batch(batch_operations, conn)
-                        # Update progress bar based on config
-                        if global_config.progress == "files":
-                            # Count unique XML files processed in this batch
-                            xml_ids_in_batch = set(op.xml_id for op in batch_operations if op.xml_id)
-                            pbar.update(len(xml_ids_in_batch))
-                        else:
-                            # For bytes mode, we need to track file sizes differently now
-                            # This will be handled in the bulk_insert_batch method
-                            pbar.update(len(batch_operations))  # Temporary - will be fixed
+
+                        # Update progress bar based on XML file updates processed in this batch
+                        # Each XML_FILE_UPDATE operation corresponds to one processed XML file
+                        xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
+                        xml_count_in_batch = len(xml_files_updated)
+                        if xml_count_in_batch > 0:
+                            pbar.update(xml_count_in_batch)
+                            processed_xml_count += xml_count_in_batch
+                            self.log_debug(f"Updated progress for {xml_count_in_batch} XML files in batch")
+
                         batch_operations = []  # Clear batch after successful commit
                     except Exception as e:
                         self.log_error(f"Batch error: {e}", exc_info=True)
@@ -340,19 +346,31 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         if batch_operations:
             try:
                 self.log_info(f"Committing final batch of {len(batch_operations)} operations")
+                xml_ids_before = set(op.xml_id for op in batch_operations if op.xml_id)
+                self.log_debug(f"Processing final batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
+
                 self._bulk_insert_batch(batch_operations, conn)
-                # Update progress bar for final batch based on config
-                if global_config.progress == "files":
-                    xml_ids_in_batch = set(op.xml_id for op in batch_operations if op.xml_id)
-                    pbar.update(len(xml_ids_in_batch))
-                else:
-                    # For bytes mode, we need to track file sizes differently now
-                    pbar.update(len(batch_operations))  # Temporary - will be fixed
+
+                # Update progress bar for final batch
+                xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
+                xml_count_in_batch = len(xml_files_updated)
+                if xml_count_in_batch > 0:
+                    pbar.update(xml_count_in_batch)
+                    processed_xml_count += xml_count_in_batch
+                    self.log_debug(f"Updated progress for {xml_count_in_batch} final XML files")
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
 
-        self.log_info(f"Consumer done: {total} operations, {signals} signals")
+        self.log_info(f"Consumer done: {total} operations, {signals} signals, processed {processed_xml_count} XML files")
         return total
+
+    def _get_xml_files_updated_in_batch(self, batch_operations):
+        """Get set of XML IDs that were updated in this batch (XML_FILE_UPDATE operations)"""
+        xml_files_updated = set()
+        for op in batch_operations:
+            if op.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
+                xml_files_updated.add(op.xml_id)
+        return xml_files_updated
 
     def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: Optional[List[str]] = None) -> Tuple[str, Tuple]:
         """Build INSERT statement and values tuple from dataclass using reflection"""
