@@ -172,26 +172,69 @@ class StatsProcessor:
 
         return group_counts
 
-    def get_xml_files_histogram(self) -> List[Dict]:
-        """Get histogram data for XmlFiles.file_size using DuckDB histogram with 10 buckets"""
+    def get_quartile_bins(self, table: str, column: str) -> Tuple[List[float], float]:
+        """Calculate variable-width bin edges for histogram with 5 equal-width sub-bins per quartile"""
         try:
-            # Check if min != max before creating histogram
-            result = self.db_ops.execute_query("""
-                SELECT MIN(file_size) as min_val, MAX(file_size) as max_val
-                FROM XmlFiles
-                WHERE file_size IS NOT NULL
+            # Get quartiles and min/max
+            result = self.db_ops.execute_query(f"""
+                SELECT
+                    MIN({column}) as min_val,
+                    quantile_disc({column}, 0.25) as q1,
+                    quantile_disc({column}, 0.5) as q2,
+                    quantile_disc({column}, 0.75) as q3,
+                    MAX({column}) as max_val
+                FROM {table}
+                WHERE {column} IS NOT NULL
             """).fetchone()
-            if result and result[0] != result[1]:
-                # Create histogram with equi_width_bins and get total count
+
+            if result and len(result) >= 5:
+                min_val, q1, q2, q3, max_val = result
+                # Create 20 bins: 5 equal-width sub-bins within each quartile range
+                bins = []
+                ranges = [(min_val, q1), (q1, q2), (q2, q3), (q3, max_val)]
+                for start, end in ranges:
+                    if start < end:  # Avoid division by zero if start == end
+                        width = (end - start) / 5
+                        for i in range(5):
+                            bin_upper = start + (i + 1) * width
+                            bins.append(bin_upper)
+                # Remove duplicates to avoid empty bins
+                bins = list(dict.fromkeys(bins))
+                return bins, min_val
+        except Exception:
+            pass
+        return [], 0.0
+
+    def get_xml_files_histogram(self) -> List[Dict]:
+        """Get histogram data for XmlFiles.file_size using quartile-based bins"""
+        try:
+            bins, min_val = self.get_quartile_bins('XmlFiles', 'file_size')
+            if len(bins) >= 2:
+                # Create histogram with quartile bins and get total count
                 hist_result = self.db_ops.execute_query("""
-                    SELECT histogram(file_size, equi_width_bins(?, ?, 10, true)) as hist,
+                    SELECT histogram(file_size, ?) as hist,
                            (SELECT COUNT(*) FROM XmlFiles WHERE file_size IS NOT NULL) as total
                     FROM XmlFiles WHERE file_size IS NOT NULL
-                """, (result[0], result[1])).fetchone()
+                """, (bins,)).fetchone()
                 if hist_result and hist_result[0]:
                     hist_map = hist_result[0]
                     total = hist_result[1]
-                    return [{'bin_upper': k, 'count': v, 'pct': (v / total * 100) if total > 0 else 0} for k, v in hist_map.items()]
+                    # Create bin data with bin_lower, bin_upper, bin_width
+                    bin_data = []
+                    prev_upper = min_val
+                    for bin_upper in sorted(hist_map.keys()):
+                        count = hist_map[bin_upper]
+                        bin_lower = prev_upper
+                        bin_width = bin_upper - bin_lower
+                        bin_data.append({
+                            'bin_lower': bin_lower,
+                            'bin_upper': bin_upper,
+                            'bin_width': bin_width,
+                            'count': count,
+                            'pct': (count / total * 100) if total > 0 else 0
+                        })
+                        prev_upper = bin_upper
+                    return bin_data
             return []
         except Exception:
             # Fallback if histogram fails
@@ -239,23 +282,33 @@ class StatsProcessor:
         analysis['histograms'] = {}
 
         for col in double_columns:
-            # Check if min != max
-            result = self.db_ops.execute_query(f"""
-                SELECT MIN({col}) as min_val, MAX({col}) as max_val
-                FROM Charities
-                WHERE {col} IS NOT NULL
-            """).fetchone()
-            if result and result[0] != result[1]:
-                # Create histogram with equi_width_bins and get total count
+            bins, min_val = self.get_quartile_bins('Charities', col)
+            if len(bins) >= 2:
+                # Create histogram with quartile bins and get total count
                 hist_result = self.db_ops.execute_query(f"""
-                    SELECT histogram({col}, equi_width_bins(?, ?, 10, true)) as hist,
+                    SELECT histogram({col}, ?) as hist,
                            (SELECT COUNT(*) FROM Charities WHERE {col} IS NOT NULL) as total
                     FROM Charities WHERE {col} IS NOT NULL
-                """, (result[0], result[1])).fetchone()
+                """, (bins,)).fetchone()
                 if hist_result and hist_result[0]:
                     hist_map = hist_result[0]
                     total = hist_result[1]
-                    analysis['histograms'][col] = [{'bin_upper': k, 'count': v, 'pct': (v / total * 100) if total > 0 else 0} for k, v in hist_map.items()]
+                    # Create bin data with bin_lower, bin_upper, bin_width
+                    bin_data = []
+                    prev_upper = min_val
+                    for bin_upper in sorted(hist_map.keys()):
+                        count = hist_map[bin_upper]
+                        bin_lower = prev_upper
+                        bin_width = bin_upper - bin_lower
+                        bin_data.append({
+                            'bin_lower': bin_lower,
+                            'bin_upper': bin_upper,
+                            'bin_width': bin_width,
+                            'count': count,
+                            'pct': (count / total * 100) if total > 0 else 0
+                        })
+                        prev_upper = bin_upper
+                    analysis['histograms'][col] = bin_data
 
         return analysis
 
@@ -279,22 +332,33 @@ class StatsProcessor:
         """Get analysis for Grants table"""
         analysis = {}
 
-        # Grant amount histogram (only if min != max)
-        result = self.db_ops.execute_query("""
-            SELECT MIN(grant_amt) as min_val, MAX(grant_amt) as max_val
-            FROM Grants
-            WHERE grant_amt IS NOT NULL
-        """).fetchone()
-        if result and result[0] != result[1]:
+        # Grant amount histogram using quartile bins
+        bins, min_val = self.get_quartile_bins('Grants', 'grant_amt')
+        if len(bins) >= 2:
             hist_result = self.db_ops.execute_query("""
-                SELECT histogram(grant_amt, equi_width_bins(?, ?, 10, true)) as hist,
+                SELECT histogram(grant_amt, ?) as hist,
                        (SELECT COUNT(*) FROM Grants WHERE grant_amt IS NOT NULL) as total
                 FROM Grants WHERE grant_amt IS NOT NULL
-            """, (result[0], result[1])).fetchone()
+            """, (bins,)).fetchone()
             if hist_result and hist_result[0]:
                 hist_map = hist_result[0]
                 total = hist_result[1]
-                analysis['grant_amt_histogram'] = [{'bin_upper': k, 'count': v, 'pct': (v / total * 100) if total > 0 else 0} for k, v in hist_map.items()]
+                # Create bin data with bin_lower, bin_upper, bin_width
+                bin_data = []
+                prev_upper = min_val
+                for bin_upper in sorted(hist_map.keys()):
+                    count = hist_map[bin_upper]
+                    bin_lower = prev_upper
+                    bin_width = bin_upper - bin_lower
+                    bin_data.append({
+                        'bin_lower': bin_lower,
+                        'bin_upper': bin_upper,
+                        'bin_width': bin_width,
+                        'count': count,
+                        'pct': (count / total * 100) if total > 0 else 0
+                    })
+                    prev_upper = bin_upper
+                analysis['grant_amt_histogram'] = bin_data
 
         return analysis
 
@@ -302,22 +366,33 @@ class StatsProcessor:
         """Get analysis for Contractors table"""
         analysis = {}
 
-        # Amount histogram (only if min != max)
-        result = self.db_ops.execute_query("""
-            SELECT MIN(amount) as min_val, MAX(amount) as max_val
-            FROM Contractors
-            WHERE amount IS NOT NULL
-        """).fetchone()
-        if result and result[0] != result[1]:
+        # Amount histogram using quartile bins
+        bins, min_val = self.get_quartile_bins('Contractors', 'amount')
+        if len(bins) >= 2:
             hist_result = self.db_ops.execute_query("""
-                SELECT histogram(amount, equi_width_bins(?, ?, 10, true)) as hist,
+                SELECT histogram(amount, ?) as hist,
                        (SELECT COUNT(*) FROM Contractors WHERE amount IS NOT NULL) as total
                 FROM Contractors WHERE amount IS NOT NULL
-            """, (result[0], result[1])).fetchone()
+            """, (bins,)).fetchone()
             if hist_result and hist_result[0]:
                 hist_map = hist_result[0]
                 total = hist_result[1]
-                analysis['amount_histogram'] = [{'bin_upper': k, 'count': v, 'pct': (v / total * 100) if total > 0 else 0} for k, v in hist_map.items()]
+                # Create bin data with bin_lower, bin_upper, bin_width
+                bin_data = []
+                prev_upper = min_val
+                for bin_upper in sorted(hist_map.keys()):
+                    count = hist_map[bin_upper]
+                    bin_lower = prev_upper
+                    bin_width = bin_upper - bin_lower
+                    bin_data.append({
+                        'bin_lower': bin_lower,
+                        'bin_upper': bin_upper,
+                        'bin_width': bin_width,
+                        'count': count,
+                        'pct': (count / total * 100) if total > 0 else 0
+                    })
+                    prev_upper = bin_upper
+                analysis['amount_histogram'] = bin_data
 
         return analysis
 
@@ -325,22 +400,33 @@ class StatsProcessor:
         """Get analysis for PoliticalContributions table"""
         analysis = {}
 
-        # Amount histogram (only if min != max)
-        result = self.db_ops.execute_query("""
-            SELECT MIN(amount) as min_val, MAX(amount) as max_val
-            FROM PoliticalContributions
-            WHERE amount IS NOT NULL
-        """).fetchone()
-        if result and result[0] != result[1]:
+        # Amount histogram using quartile bins
+        bins, min_val = self.get_quartile_bins('PoliticalContributions', 'amount')
+        if len(bins) >= 2:
             hist_result = self.db_ops.execute_query("""
-                SELECT histogram(amount, equi_width_bins(?, ?, 10, true)) as hist,
+                SELECT histogram(amount, ?) as hist,
                        (SELECT COUNT(*) FROM PoliticalContributions WHERE amount IS NOT NULL) as total
                 FROM PoliticalContributions WHERE amount IS NOT NULL
-            """, (result[0], result[1])).fetchone()
+            """, (bins,)).fetchone()
             if hist_result and hist_result[0]:
                 hist_map = hist_result[0]
                 total = hist_result[1]
-                analysis['amount_histogram'] = [{'bin_upper': k, 'count': v, 'pct': (v / total * 100) if total > 0 else 0} for k, v in hist_map.items()]
+                # Create bin data with bin_lower, bin_upper, bin_width
+                bin_data = []
+                prev_upper = min_val
+                for bin_upper in sorted(hist_map.keys()):
+                    count = hist_map[bin_upper]
+                    bin_lower = prev_upper
+                    bin_width = bin_upper - bin_lower
+                    bin_data.append({
+                        'bin_lower': bin_lower,
+                        'bin_upper': bin_upper,
+                        'bin_width': bin_width,
+                        'count': count,
+                        'pct': (count / total * 100) if total > 0 else 0
+                    })
+                    prev_upper = bin_upper
+                analysis['amount_histogram'] = bin_data
 
         return analysis
 

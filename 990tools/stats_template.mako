@@ -57,10 +57,10 @@ ${'###'} Error Message Prefix Distribution (Top 10)
 ${'##'} XmlFiles File Size Histogram
 
 % if xml_histogram:
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % for bin in xml_histogram:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available (no file_size data or histogram function failed).
@@ -103,99 +103,99 @@ ${'####'} Form Type Distribution
 % endfor
 
 ${'###'} charities receipt_amt Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'receipt_amt' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['receipt_amt']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities govt_amt Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'govt_amt' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['govt_amt']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities contrib_amt Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'contrib_amt' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['contrib_amt']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities total_exp Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'total_exp' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['total_exp']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities prog_exp Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'prog_exp' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['prog_exp']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities travel_amt Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'travel_amt' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['travel_amt']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities conferences_amt Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'conferences_amt' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['conferences_amt']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities officer_comp Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'officer_comp' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['officer_comp']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
 % endif
 
 ${'###'} charities total_assets Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % if 'total_assets' in charities_analysis['histograms']:
 % for bin in charities_analysis['histograms']['total_assets']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No histogram data available.
@@ -214,10 +214,10 @@ ${'###'} Grants Analysis
 
 % if 'grant_amt_histogram' in grants_analysis:
 ${'####'} Grant Amount Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % for bin in grants_analysis['grant_amt_histogram']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No grant amount histogram (min == max or no data).
@@ -227,10 +227,10 @@ ${'###'} Contractors Analysis
 
 % if 'amount_histogram' in contractors_analysis:
 ${'####'} Contractor Amount Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % for bin in contractors_analysis['amount_histogram']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No contractor amount histogram (min == max or no data).
@@ -240,10 +240,10 @@ ${'###'} Political Contributions Analysis
 
 % if 'amount_histogram' in political_contributions_analysis:
 ${'####'} Political Contribution Amount Histogram
-| Bin Upper | Count | Pct | Bar |
-|-----------|-------|-----|-----|
+| Bin Width | Bin Lower | Bin Upper | Count | Pct | Bar |
+|-----------|-----------|-----------|-------|-----|-----|
 % for bin in political_contributions_analysis['amount_histogram']:
-| ${bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
+| ${"%.2f" % bin['bin_width']} | ${"%.2f" % bin['bin_lower']} | ${"%.2f" % bin['bin_upper']} | ${bin['count']} | ${"%.1f" % bin['pct']}% | ${"█" * int(bin['pct'] / 2)} |
 % endfor
 % else:
 No political contribution amount histogram (min == max or no data).

@@ -226,7 +226,11 @@ class BaseParser:
                                 addr_line1 = addr_elem.find("irs:AddressLine1Txt", namespaces=NAMESPACES)
                                 city = addr_elem.find("irs:CityNm", namespaces=NAMESPACES)
                                 state = addr_elem.find("irs:StateAbbreviationCd", namespaces=NAMESPACES)
-                                zip_code = addr_elem.find("irs:ZIPCd", namespaces=NAMESPACES)
+                                zip_code_raw = addr_elem.find("irs:ZIPCd", namespaces=NAMESPACES)
+
+                                # Split ZIP code into zip_code and zip4
+                                from parse_utils import split_zip_code
+                                zip_code, zip4 = split_zip_code(zip_code_raw.text.strip() if zip_code_raw is not None else None)
 
                                 if any([addr_line1, city, state, zip_code]):
                                     recipient_address = Address(
@@ -235,7 +239,8 @@ class BaseParser:
                                         address_line1=addr_line1.text.strip() if addr_line1 is not None else None,
                                         city=city.text.strip() if city is not None else None,
                                         state=state.text.strip() if state is not None else None,
-                                        zip_code=zip_code.text.strip() if zip_code is not None else None,
+                                        zip_code=zip_code,
+                                        zip4=zip4,
                                         address_type="grant",
                                         owner_id=grant.id if grant else None
                                     )
@@ -328,7 +333,11 @@ class BaseParser:
             address_line2 = parse_string_field(root, self.XPATHS, "address_line2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             city = parse_string_field(root, self.XPATHS, "city", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             state = parse_string_field(root, self.XPATHS, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-            zip_code = parse_string_field(root, self.XPATHS, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+            zip_code_raw = parse_string_field(root, self.XPATHS, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+
+            # Split ZIP code into zip_code and zip4
+            from parse_utils import split_zip_code
+            zip_code, zip4 = split_zip_code(zip_code_raw)
 
             # Check if we have at least some address components
             if any([address_line1, address_line2, city, state, zip_code]):
@@ -338,7 +347,8 @@ class BaseParser:
                     address_line2=address_line2,
                     city=city,
                     state=state,
-                    zip_code=zip_code
+                    zip_code=zip_code,
+                    zip4=zip4
                 )
             return None
         except Exception as e:

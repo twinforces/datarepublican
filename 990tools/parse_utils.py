@@ -224,6 +224,40 @@ def parse_contributions(xml_content, xml_filename, filer_ein, filer_name, tax_ye
         logging.error(f"Error parsing contributions from {xml_filename}: {e}")
     return contributions
 
+def split_zip_code(zip_code_str):
+    """
+    Split a ZIP code string into 5-digit zip_code and 4-digit zip4 components.
+
+    Args:
+        zip_code_str: String containing ZIP code (can be 5 or 9 digits)
+
+    Returns:
+        tuple: (zip_code, zip4) where zip_code is first 5 digits, zip4 is last 4 digits
+               Both can be None if input is invalid
+    """
+    if not zip_code_str:
+        return None, None
+
+    # Remove any non-digit characters
+    cleaned = re.sub(r'\D', '', str(zip_code_str))
+
+    if len(cleaned) == 5:
+        # Standard 5-digit ZIP
+        return cleaned, None
+    elif len(cleaned) == 9:
+        # 9-digit ZIP code
+        return cleaned[:5], cleaned[5:]
+    elif len(cleaned) == 10 and cleaned[5] == '0':
+        # Sometimes formatted as XXXXX-XXXX, handle the dash
+        return cleaned[:5], cleaned[6:] if len(cleaned) > 6 else None
+    else:
+        # Invalid format, return as-is for zip_code (first 5 digits if possible)
+        if len(cleaned) >= 5:
+            return cleaned[:5], cleaned[5:9] if len(cleaned) >= 9 else None
+        else:
+            return cleaned, None
+
+
 def validate_ein(ein):
     if not ein or not re.match(r'^\d{9}$', ein) or ein == "000000000":
         return False, "Invalid EIN format"

@@ -660,11 +660,8 @@ class DatabaseOperations:
     def optimize_database(self):
         """Run database optimization commands"""
         # Analyze tables for better query planning
-        self.execute_query("ANALYZE Charities")
-        self.execute_query("ANALYZE Grants")
-        self.execute_query("ANALYZE Addresses")
-        self.execute_query("ANALYZE Officers")
-        self.execute_query("ANALYZE Geocoding")
+        for table in ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]:
+        	self.execute_query(f"VACUUM ANALYZE {table}")
 
         # Checkpoint to ensure data is written
         self.db_conn.checkpoint()
