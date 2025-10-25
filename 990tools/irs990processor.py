@@ -90,7 +90,7 @@ class IRS990Processor:
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None, progress: str = "files", extract: Optional[List[str]] = None, extract_dest: Optional[str] = None):
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None, progress: str = "files", extract: Optional[List[str]] = None, extract_dest: Optional[str] = None, nostats: bool = False):
         # Set global config from parameters (for backward compatibility)
         global_config.db_path = db_path if db_path != DEFAULT_DB_PATH else os.path.join(final_dir, "irs990.duckdb")
         global_config.final_dir = final_dir
@@ -108,6 +108,7 @@ class IRS990Processor:
         global_config.progress = progress
         global_config.extract = extract
         global_config.extract_dest = extract_dest
+        global_config.nostats = nostats
 
         # Determine database path
         if db_path == DEFAULT_DB_PATH:
@@ -154,6 +155,9 @@ class IRS990Processor:
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
+        # Initialize stats processor
+        self.stats_processor = self.db_ops.get_stats_processor()
+
         # Initialize database
         self._init_database()
 
@@ -172,6 +176,7 @@ class IRS990Processor:
         self.progress = progress
         self.extract = extract
         self.extract_dest = extract_dest
+        self.nostats = nostats
 
     def _init_database(self):
         """Initialize DuckDB database with schema"""
@@ -857,6 +862,7 @@ def main():
                            help="Progress tracking type (default: files)")
     parser.add_argument("--extract", nargs='+', help="List of EINs to extract XML files for")
     parser.add_argument("--extract-dest", help="Destination directory for extracted XML files")
+    parser.add_argument("--nostats", action="store_true", help="Skip stats report generation after each step")
 
     args = parser.parse_args()
 
@@ -907,7 +913,8 @@ def main():
         log_sql=global_config.log_sql,
         workers=global_config.workers,
         dbUI=global_config.dbUI,
-        profile_seconds=global_config.profile_seconds
+        profile_seconds=global_config.profile_seconds,
+        nostats=global_config.nostats
     )
 
     # Handle extract mode
@@ -937,13 +944,18 @@ def main():
                 action()
             processor.log_info(f"Completed step: {step}")
 
-            # Generate stats report after each step
-            try:
-                report_file = processor.db_ops.generate_stats_report(f"after_{step}", f"Completed step: {step}")
-                processor.log_info(f"Stats report generated: {report_file}")
-            except Exception as e:
-                if not processor.quiet:
-                    log_warning(processor.logger, f"Failed to generate stats report for step {step}: {e}")
+            # Optimize database after each major processing step
+            processor.log_info(f"Optimizing database after {step}")
+            processor.db_ops.optimize_database()
+
+            # Generate stats report after each step (unless --nostats is specified)
+            if not global_config.nostats:
+                try:
+                    report_file = processor.stats_processor.generate_stats_report(f"after_{step}", f"Completed step: {step}")
+                    processor.log_info(f"Stats report generated: {report_file}")
+                except Exception as e:
+                    if not processor.quiet:
+                        log_warning(processor.logger, f"Failed to generate stats report for step {step}: {e}")
 
     except Exception as e:
         if not processor.quiet:

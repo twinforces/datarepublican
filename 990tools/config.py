@@ -42,6 +42,7 @@ class GlobalConfig:
         self.progress: str = "files"  # "files" or "bytes"
         self.extract: Optional[List[str]] = None
         self.extract_dest: Optional[str] = None
+        self.nostats: bool = False
 
     @classmethod
     def get_instance(cls):
@@ -65,6 +66,7 @@ class GlobalConfig:
         self.progress = getattr(args, 'progress', self.progress)
         self.extract = getattr(args, 'extract', self.extract)
         self.extract_dest = getattr(args, 'extract_dest', self.extract_dest)
+        self.nostats = getattr(args, 'nostats', self.nostats)
 
     def is_quiet(self) -> bool:
         """Check if quiet mode is enabled"""

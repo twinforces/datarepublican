@@ -266,10 +266,10 @@ class DatabaseOperations:
         """Insert XMLFile into database, handling duplicates. Returns UUID."""
         xml_id = self.generate_uuid_v7()
         self.execute_query("""
-            INSERT OR IGNORE INTO XmlFiles (xml_id, zip_id, filename, internal_path, ein, tax_year,
+            INSERT OR IGNORE INTO XmlFiles (xml_id, zip_id, filename, internal_path, file_size, ein, tax_year,
                                   form_type, processed, processing_version, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (xml_id, xml_file.zip_id, xml_file.filename, xml_file.internal_path,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (xml_id, xml_file.zip_id, xml_file.filename, xml_file.internal_path, xml_file.file_size,
               xml_file.ein, xml_file.tax_year, xml_file.form_type,
               xml_file.processed, xml_file.processing_version, xml_file.error_message))
         xml_file.xml_id = str(xml_id)
@@ -614,22 +614,31 @@ class DatabaseOperations:
 
     # Bulk operations
     def bulk_insert_xml_files(self, xml_files: List[XMLFile]):
-        """Bulk insert XML files using DuckDB's efficient bulk insert"""
-        xml_data = [(self.generate_uuid_v7(), xml.zip_id, xml.filename, xml.internal_path, xml.ein, xml.tax_year,
-                     xml.form_type, xml.processed, xml.processing_version, xml.error_message)
-                    for xml in xml_files]
+        """Bulk insert XML files using DuckDB's efficient bulk insert with VALUES clauses"""
+        if not xml_files:
+            return
 
-        # Use DuckDB's VALUES clause for bulk insert
-        placeholders = ', '.join(['(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'] * len(xml_data))
-        flat_data = [item for sublist in xml_data for item in sublist]
+        # Prepare data for bulk insert
+        values_list = []
+        params = []
 
-        query = f"""
-            INSERT INTO XmlFiles (xml_id, zip_id, filename, internal_path, ein, tax_year,
+        for xml in xml_files:
+            xml_id = self.generate_uuid_v7()
+            values_list.append("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            params.extend([
+                xml_id, xml.zip_id, xml.filename, xml.internal_path, xml.file_size,
+                xml.ein, xml.tax_year, xml.form_type, xml.processed,
+                xml.processing_version, xml.error_message
+            ])
+
+        # Build single bulk INSERT statement
+        sql = f"""
+            INSERT INTO XmlFiles (xml_id, zip_id, filename, internal_path, file_size, ein, tax_year,
                                  form_type, processed, processing_version, error_message)
-            VALUES {placeholders}
+            VALUES {', '.join(values_list)}
         """
 
-        self.execute_query(query, tuple(flat_data))
+        self.execute_query(sql, tuple(params))
         self.commit()
 
     def get_bulk_operations(self):
@@ -643,201 +652,10 @@ class DatabaseOperations:
         # DuckDB handles export operations through its own methods
         return self
 
-    # Analytics methods for DuckDB
-    def get_charity_summary_stats(self, tax_year: int = None) -> Dict[str, Any]:
-        """Get summary statistics for charities"""
-        where_clause = f"WHERE tax_year = {tax_year}" if tax_year else ""
-
-        query = f"""
-            SELECT
-                COUNT(*) as total_charities,
-                AVG(total_exp) as avg_expenses,
-                SUM(total_exp) as total_expenses,
-                AVG(officer_comp) as avg_officer_comp,
-                COUNT(CASE WHEN foreign_office = 'Y' THEN 1 END) as foreign_offices
-            FROM Charities
-            {where_clause}
-        """
-
-        result = self.execute_query(query).fetchone()
-        if result:
-            return {
-                'total_charities': result[0],
-                'avg_expenses': result[1],
-                'total_expenses': result[2],
-                'avg_officer_comp': result[3],
-                'foreign_offices': result[4]
-            }
-        return {}
-
-    def get_top_grant_recipients(self, limit: int = 10) -> List[Tuple]:
-        """Get top grant recipients by total amount"""
-        result = self.execute_query("""
-            SELECT grant_ein, SUM(grant_amt) as total_grants, COUNT(*) as grant_count
-            FROM Grants
-            WHERE grant_ein IS NOT NULL AND grant_ein != ''
-            GROUP BY grant_ein
-            ORDER BY total_grants DESC
-            LIMIT ?
-        """, (limit,))
-        return result.fetchall()
-
-    def get_geocoding_stats(self) -> Dict[str, int]:
-        """Get geocoding completion statistics"""
-        result = self.execute_query("""
-            SELECT
-                COUNT(*) as total_addresses,
-                COUNT(CASE WHEN geocoding_id IS NOT NULL THEN 1 END) as geocoded,
-                COUNT(CASE WHEN geocoding_id IS NULL THEN 1 END) as pending
-            FROM Addresses
-        """).fetchone()
-        if result:
-            return {
-                'total_addresses': result[0],
-                'geocoded': result[1],
-                'pending': result[2]
-            }
-        return {}
-
-    def get_performance_stats(self) -> Dict[str, Any]:
-        """Get database performance statistics"""
-        stats = {}
-
-        # Get table sizes
-        table_sizes = self.execute_query("""
-            SELECT table_name,
-                    estimated_size as size_bytes,
-                    ROUND(estimated_size / 1024.0 / 1024.0, 2) as size_mb
-            FROM duckdb_tables()
-            WHERE table_name IN ('Charities', 'Grants', 'Addresses', 'Officers', 'Geocoding')
-        """).fetchall()
-
-        stats['table_sizes'] = {row[0]: {'bytes': row[1], 'mb': row[2]} for row in table_sizes}
-
-        # Get basic stats
-        stats['memory_usage'] = self.memory_limit
-        stats['threads'] = self.threads or 'auto'
-
-        return stats
-
-    def get_table_counts(self) -> dict:
-        """Get row counts for all tables"""
-        tables = [
-            'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
-            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding'
-        ]
-
-        counts = {}
-        for table in tables:
-            try:
-                result = self.execute_query(f"SELECT COUNT(*) FROM {table}").fetchone()
-                counts[table] = result[0] if result else 0
-            except Exception:
-                counts[table] = 0  # Table might not exist yet
-
-        return counts
-
-    def get_table_summaries(self) -> dict:
-        """Get SUMMARIZE data for all tables"""
-        tables = [
-            'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
-            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding'
-        ]
-
-        summaries = {}
-        for table in tables:
-            try:
-                result = self.execute_query(f"SUMMARIZE {table}")
-                summaries[table] = result.fetchall()
-            except Exception:
-                summaries[table] = []  # Table might not exist yet or SUMMARIZE might fail
-
-        return summaries
-
-    def generate_stats_report(self, step_name: str, notes: str = "") -> str:
-        """Generate a statistics report for the current database state"""
-        from datetime import datetime
-        from mako.template import Template
-        import os
-
-        # Get table counts and summaries
-        table_counts = self.get_table_counts()
-        table_summaries = self.get_table_summaries()
-        total_records = sum(table_counts.values())
-
-        # Prepare template data
-        template_data = {
-            'step_name': step_name,
-            'timestamp': datetime.now().isoformat(),
-            'db_path': self.db_path,
-            'table_counts': table_counts,
-            'table_summaries': table_summaries,
-            'total_records': total_records,
-            'notes': notes or "No additional notes."
-        }
-
-        # Load and render template
-        template_path = os.path.join(os.path.dirname(__file__), 'stats_template.mako')
-        with open(template_path, 'r') as f:
-            template_content = f.read()
-
-        template = Template(template_content)
-        report_content = template.render(**template_data)
-
-        # Write report to file
-        report_filename = f"stats_{step_name}.md"
-        with open(report_filename, 'w') as f:
-            f.write(report_content)
-
-        return report_filename  # type: ignore
-
-    def get_latest_charities_for_export(self) -> List[Tuple]:
-        """Get latest charities for export"""
-        # Ensure LatestCharities table exists
-        self.create_latest_charities_table()
-
-        result = self.execute_query("""
-            SELECT tax_year, ein, filer_name, receipt_amt, govt_amt, contrib_amt,
-                   org_type, total_exp, prog_exp, travel_amt, conferences_amt,
-                   officer_comp, comp_pct, comp_ptile, travel_pct, travel_ptile,
-                   conferences_pct, conferences_ptile, grants_pct, grants_ptile,
-                   foreign_expenses_pct, foreign_expenses_ptile, grift_ratio,
-                   total_assets, form_type, denominator, foreign_office, foreign_expenses,
-                   grants_to_others, domestic_misrep_flag, xml_name
-            FROM LatestCharities
-            ORDER BY ein, tax_year
-        """)
-        return result.fetchall()
-
-    def get_grants_for_export(self) -> List[Tuple]:
-        """Get grants for export"""
-        result = self.execute_query("""
-            SELECT filer_ein, filer_name, grant_ein, grant_amt, tax_year,
-                   colocator, colocator
-            FROM Grants
-            ORDER BY filer_ein, tax_year
-        """)
-        return result.fetchall()
-
-    def get_contractors_for_export(self) -> List[Tuple]:
-        """Get contractors for export"""
-        result = self.execute_query("""
-            SELECT filer_ein, name, amount, ein, address, zip_code,
-                   po_box, tax_year, colocator
-            FROM Contractors
-            ORDER BY filer_ein, tax_year
-        """)
-        return result.fetchall()
-
-    def get_political_contributions_for_export(self) -> List[Tuple]:
-        """Get political contributions for export"""
-        result = self.execute_query("""
-            SELECT filer_ein, recipient, amount, recipient_address,
-                   recipient_zip, recipient_po_box, tax_year, colocator
-            FROM PoliticalContributions
-            ORDER BY filer_ein, tax_year
-        """)
-        return result.fetchall()
+    def get_stats_processor(self):
+        """Get stats processor instance"""
+        from stats_processor import StatsProcessor
+        return StatsProcessor(self)
 
     def optimize_database(self):
         """Run database optimization commands"""

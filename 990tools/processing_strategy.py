@@ -22,6 +22,7 @@ from lxml import etree
 from dataclasses import fields
 import zipfile
 from threading import Lock
+from enum import Enum
 
 from database_operations import DatabaseOperations
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
@@ -36,6 +37,29 @@ from constants import VALID_STATES
 from zip_processor import ZipProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
+
+
+class DatabaseOperationType(Enum):
+    """Enumeration of database operation types for flexible processing"""
+    INSERT_CHARITY = "insert_charity"
+    INSERT_OFFICER = "insert_officer"
+    INSERT_GRANT = "insert_grant"
+    INSERT_CONTRACTOR = "insert_contractor"
+    INSERT_POLITICAL_CONTRIBUTION = "insert_political_contribution"
+    INSERT_ADDRESS = "insert_address"
+    UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
+    UPDATE_XML_FILE_ERROR = "update_xml_file_error"
+
+
+class DatabaseOperation:
+    """Represents a single database operation with its data and dependencies"""
+
+    def __init__(self, operation_type: DatabaseOperationType, data: Any, xml_id: int = None,
+                 dependencies: Optional[List[str]] = None):
+        self.operation_type = operation_type
+        self.data = data
+        self.xml_id = xml_id
+        self.dependencies = dependencies or []  # List of operation types this depends on
 
 
 class ProcessingStrategy(ABC):
@@ -96,7 +120,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     def _get_xml_files_to_process(self) -> List[Tuple]:
         """Get list of XML files to process from database"""
         result = self.db_ops.execute_query("""
-            SELECT xf.xml_id, zf.file_path, xf.filename, xf.internal_path
+            SELECT xf.xml_id, zf.file_path, xf.filename, xf.internal_path, xf.file_size
             FROM XmlFiles xf
             JOIN ZipFiles zf ON xf.zip_id = zf.zip_id
             WHERE xf.processed = FALSE
@@ -182,24 +206,21 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         return len(xml_files)
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
-        """Producer thread: parses XML and sends results to consumer"""
+        """Producer thread: parses XML and sends operations list to consumer"""
         processed = 0
         total_bytes = 0
         start = producer_id
         for i in range(start, len(xml_files), num_producers):
-            xml_id, path, filename, internal = xml_files[i]
+            xml_id, path, filename, internal, file_size = xml_files[i]
             try:
-                result = self._process_single_xml(xml_id, path, filename, internal)
-                xml_queue.put(result, block=True)
+                operations = self._process_single_xml(xml_id, path, filename, internal, file_size)
+                xml_queue.put(operations, block=True)
                 processed += 1
 
                 # Track progress based on config
                 if global_config.progress == "bytes":
-                    # Get file size from database
-                    size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
-                    size_row = size_result.fetchone()
-                    if size_row and size_row[0]:
-                        total_bytes += size_row[0]
+                    if file_size:
+                        total_bytes += file_size
 
                 if processed % 50 == 0:
                     progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
@@ -209,7 +230,13 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 error_msg = str(e)
                 if not error_msg or error_msg == "":
                     error_msg = f"Unknown error processing {filename}"
-                xml_queue.put(('error', xml_id, error_msg, e), block=True)
+                # Create error operation for failed processing
+                error_operation = DatabaseOperation(
+                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
+                    {"error_message": error_msg},
+                    xml_id
+                )
+                xml_queue.put([error_operation], block=True)
         xml_queue.put(None)  # Sentinel
         self.log_info(f"Producer {producer_id} done: {processed} files")
 
@@ -240,8 +267,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             sys.stderr.flush()
 
     def _database_consumer(self, xml_queue, num_expected, conn, pbar):
-        """Consumer thread: writes results to database (single-threaded for DuckDB safety)"""
-        batch_data = []
+        """Consumer thread: writes operations to database (single-threaded for DuckDB safety)"""
+        batch_operations = []
         total = 0
         signals = 0
         while signals < num_expected:
@@ -251,121 +278,58 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     signals += 1
                     xml_queue.task_done()
                     continue
-                if isinstance(item, tuple) and item[0] == 'error':
-                    xml_id = item[1]
-                    msg = item[2] if len(item) > 2 else "Error"
-                    # Format error message with full stack trace if it's an exception
-                    if len(item) > 3 and isinstance(item[3], Exception):
-                        msg = self.format_error_with_traceback(item[3], msg)
-                    self.log_info(f"Storing error message for xml_id {xml_id}: {msg[:100]}...")
-                    try:
-                        self.log_debug(f"Storing error message for xml_id {xml_id}: {msg[:100]}...")
-                        # For 990T files, still update EIN, form_type, and file_size
-                        if msg == "skipped: 990T":
-                            # Get the metadata that was already extracted
-                            metadata_result = self.db_ops.execute_query(
-                                "SELECT ein, file_size FROM XmlFiles WHERE xml_id = ?",
-                                (xml_id,)
-                            )
-                            metadata_row = metadata_result.fetchone()
-                            if metadata_row:
-                                ein, file_size = metadata_row
-                                self.db_ops.execute_query(
-                                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=?, ein=?, form_type=?, file_size=? WHERE xml_id=?",
-                                    (msg, ein, "990T", file_size, xml_id)
-                                )
-                            else:
-                                self.db_ops.execute_query(
-                                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=?, form_type=? WHERE xml_id=?",
-                                    (msg, "990T", xml_id)
-                                )
-                        else:
-                            self.db_ops.execute_query(
-                                "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                                (msg, xml_id)
-                            )
-                        self.db_ops.commit()
-                        self.log_info(f"Successfully stored error message for xml_id {xml_id}")
-                    except Exception as db_error:
-                        self.log_error(f"Failed to store error message for xml_id {xml_id}: {db_error}", exc_info=True)
-                    # Update progress bar for error items
-                    if global_config.progress == "files":
-                        pbar.update(1)
-                    else:
-                        # For bytes mode, get file size and update progress
-                        size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
-                        size_row = size_result.fetchone()
-                        if size_row and size_row[0]:
-                            pbar.update(size_row[0])
-                    xml_queue.task_done()
-                    continue
                 if isinstance(item, tuple) and item[0] == 'shutdown':
                     self.log_info("Consumer received shutdown signal")
                     xml_queue.task_done()
                     break
-                batch_data.append(item)
-                total += 1
+
+                # Handle list of operations from producer
+                if isinstance(item, list):
+                    batch_operations.extend(item)
+                    total += len(item)
+                else:
+                    # Legacy support for single operations (shouldn't happen with new code)
+                    batch_operations.append(item)
+                    total += 1
+
                 xml_queue.task_done()
-                if len(batch_data) >= self.BATCH_SIZE:
+
+                if len(batch_operations) >= self.BATCH_SIZE:
                     try:
-                        self._bulk_insert_batch(batch_data, conn)
+                        self._bulk_insert_batch(batch_operations, conn)
                         # Update progress bar based on config
                         if global_config.progress == "files":
-                            pbar.update(len(batch_data))
+                            # Count unique XML files processed in this batch
+                            xml_ids_in_batch = set(op.xml_id for op in batch_operations if op.xml_id)
+                            pbar.update(len(xml_ids_in_batch))
                         else:
-                            # Calculate total bytes for this batch
-                            batch_bytes = 0
-                            for item in batch_data:
-                                if isinstance(item, tuple) and len(item) >= 6:
-                                    # Extract xml_id from the tuple and get file size
-                                    xml_id = None
-                                    if hasattr(item[0], 'xml_id'):
-                                        xml_id = item[0].xml_id
-                                    elif isinstance(item[0], tuple) and len(item[0]) > 0:
-                                        xml_id = item[0][0] if isinstance(item[0][0], int) else None
-                                    if xml_id:
-                                        size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
-                                        size_row = size_result.fetchone()
-                                        if size_row and size_row[0]:
-                                            batch_bytes += size_row[0]
-                            pbar.update(batch_bytes)
-                        batch_data = []  # Clear batch after successful commit
+                            # For bytes mode, we need to track file sizes differently now
+                            # This will be handled in the bulk_insert_batch method
+                            pbar.update(len(batch_operations))  # Temporary - will be fixed
+                        batch_operations = []  # Clear batch after successful commit
                     except Exception as e:
                         self.log_error(f"Batch error: {e}", exc_info=True)
-                        # Don't clear batch_data on error - will retry in final batch
+                        # Don't clear batch_operations on error - will retry in final batch
             except Exception as e:
                 self.log_error(f"Consumer error: {e}", exc_info=True)
                 break
 
         # Final batch - commit any remaining work
-        if batch_data:
+        if batch_operations:
             try:
-                self.log_info(f"Committing final batch of {len(batch_data)} items")
-                self._bulk_insert_batch(batch_data, conn)
+                self.log_info(f"Committing final batch of {len(batch_operations)} operations")
+                self._bulk_insert_batch(batch_operations, conn)
                 # Update progress bar for final batch based on config
                 if global_config.progress == "files":
-                    pbar.update(len(batch_data))
+                    xml_ids_in_batch = set(op.xml_id for op in batch_operations if op.xml_id)
+                    pbar.update(len(xml_ids_in_batch))
                 else:
-                    # Calculate total bytes for final batch
-                    final_bytes = 0
-                    for item in batch_data:
-                        if isinstance(item, tuple) and len(item) >= 6:
-                            # Extract xml_id from the tuple and get file size
-                            xml_id = None
-                            if hasattr(item[0], 'xml_id'):
-                                xml_id = item[0].xml_id
-                            elif isinstance(item[0], tuple) and len(item[0]) > 0:
-                                xml_id = item[0][0] if isinstance(item[0][0], int) else None
-                            if xml_id:
-                                size_result = self.db_ops.execute_query("SELECT file_size FROM XmlFiles WHERE xml_id = ?", (xml_id,))
-                                size_row = size_result.fetchone()
-                                if size_row and size_row[0]:
-                                    final_bytes += size_row[0]
-                    pbar.update(final_bytes)
+                    # For bytes mode, we need to track file sizes differently now
+                    pbar.update(len(batch_operations))  # Temporary - will be fixed
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
 
-        self.log_info(f"Consumer done: {total} items, {signals} signals")
+        self.log_info(f"Consumer done: {total} operations, {signals} signals")
         return total
 
     def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: Optional[List[str]] = None) -> Tuple[str, Tuple]:
@@ -395,8 +359,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         return sql, values
 
-    def _bulk_insert_batch(self, batch_data, conn=None):
-        """Bulk insert a batch of processed XML data"""
+    def _bulk_insert_batch(self, batch_operations, conn=None):
+        """Bulk insert a batch of database operations"""
         if conn is None:
             conn = self.db_ops.db_conn
 
@@ -409,137 +373,182 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             self.log_error(f"Database connection test FAILED: {e}")
             return
 
-        self.log_info(f"Bulk insert batch: STARTING with {len(batch_data)} items from queue")
-        self.log_info(f"Bulk insert batch: DEBUG - batch_data type: {type(batch_data)}, length: {len(batch_data)}")
-        if batch_data:
-            self.log_info(f"Bulk insert batch: DEBUG - first item type: {type(batch_data[0])}, length: {len(batch_data[0]) if hasattr(batch_data[0], '__len__') else 'N/A'}")
+        self.log_info(f"Bulk insert batch: STARTING with {len(batch_operations)} operations")
 
-        charities = []
-        officers = []
-        grants = []
-        contractors = []
-        contributions = []
+        # Group operations by type for efficient processing
+        operations_by_type = {}
+        xml_ids_in_batch = set()
 
-        # Process charities without deduplication (let database handle uniqueness constraints)
-        addresses = []
-        xml_ids = []  # Track xml_ids for error handling
-        form_types = {}  # Track form_type per xml_id
-        for item in batch_data:
-            if len(item) == 7:  # Normal processing result
-                xml_id, charity, officer_list, grant_list, contractor_list, contribution_list, address = item
-                xml_ids.append(xml_id)
-                if charity:
-                    charities.append(charity)
-                    charity_id = len(charities)  # Temporary ID for batch processing
+        for operation in batch_operations:
+            if not isinstance(operation, DatabaseOperation):
+                self.log_error(f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
+                continue
 
-                    for officer in officer_list:
-                        officer.charity_id = charity_id
-                        officers.append(officer)
+            xml_ids_in_batch.add(operation.xml_id)
+            op_type = operation.operation_type.value
+            if op_type not in operations_by_type:
+                operations_by_type[op_type] = []
+            operations_by_type[op_type].append(operation)
 
-                    for grant in grant_list:
-                        # Ensure grantee_name is not None
-                        if grant.grantee_name is None:
-                            grant.grantee_name = "Unknown"
-                        grants.append(grant)
+        self.log_info(f"Operations by type: { {k: len(v) for k, v in operations_by_type.items()} }")
 
-                    for contractor in contractor_list:
-                        contractors.append(contractor)
+        # Process operations in dependency order
+        processed_xml_ids = set()
 
-                    for contribution in contribution_list:
-                        contributions.append(contribution)
+        try:
+            # 1. Handle XML file updates (errors and successes) first
+            self._process_xml_file_operations(operations_by_type, conn, processed_xml_ids)
 
-                    if address:
-                        addresses.append(address)
-            elif len(item) == 8:  # Processing result with form_type
-                xml_id, charity, officer_list, grant_list, contractor_list, contribution_list, address, form_type = item
-                form_types[xml_id] = form_type
-                xml_ids.append(xml_id)
-                if charity:
-                    charities.append(charity)
-                    charity_id = len(charities)  # Temporary ID for batch processing
+            # 2. Insert charities
+            charity_id_map = self._process_charity_operations(operations_by_type, conn)
 
-                    for officer in officer_list:
-                        officer.charity_id = charity_id
-                        officers.append(officer)
+            # 3. Insert related data (officers, grants, etc.) using charity_id_map
+            self._process_related_operations(operations_by_type, conn, charity_id_map)
 
-                    for grant in grant_list:
-                        # Ensure grantee_name is not None
-                        if grant.grantee_name is None:
-                            grant.grantee_name = "Unknown"
-                        grants.append(grant)
+            # 4. Insert addresses
+            self._process_address_operations(operations_by_type, conn, charity_id_map)
 
-                    for contractor in contractor_list:
-                        contractors.append(contractor)
+            # Commit all changes
+            self.log_info("Bulk insert: STARTING batch commit")
+            conn.commit()
+            self.log_info("Bulk insert: FINISHED batch commit successful")
 
-                    for contribution in contribution_list:
-                        contributions.append(contribution)
-
-                    if address:
-                        addresses.append(address)
-
-        self.log_info(f"Bulk insert batch: Processing {len(charities)} charities, {len(officers)} officers, {len(grants)} grants, {len(contractors)} contractors, {len(contributions)} contributions, {len(addresses)} addresses")
-
-        # Bulk insert charities using reflection
-        if charities:
-            self.log_info(f"Bulk insert: Processing {len(charities)} charities")
-            # Set colocator to 'notyet' for new charities
-            for charity in charities:
-                charity.colocator = 'notyet'
-
-            charity_data = []
-            sql = None
-            for charity in charities:
-                sql, values = self._build_insert_from_dataclass(charity, 'Charities', ['charity_id'])
-                charity_data.append(values)
-
+        except Exception as e:
+            self.log_error(f"Failed to process batch: {e}", exc_info=True)
             try:
-                self.log_info(f"Bulk insert: STARTING charity insert for {len(charity_data)} records")
-                self.log_info(f"Bulk insert: DEBUG - charity SQL: {sql}")
-                self.log_info(f"Bulk insert: DEBUG - first charity values: {charity_data[0] if charity_data else 'None'}")
-                if sql is not None:
-                    conn.executemany(sql, charity_data)
-                    self.log_info(f"Bulk insert: FINISHED charity insert for {len(charity_data)} records")
-            except Exception as e:
-                self.log_error(f"Failed to insert charities: {e}", exc_info=True)
-                # Mark all XML files in this batch as having errors
-                for xml_id in xml_ids:
-                    try:
-                        error_msg = self.format_error_with_traceback(e, "Batch insert failed")
-                        self.log_debug(f"Marking XmlFile {xml_id} as batch insert error: {error_msg[:100]}...")
+                conn.rollback()
+                self.log_info("Bulk insert: Rollback completed")
+            except Exception as rollback_e:
+                self.log_error(f"Failed to rollback: {rollback_e}", exc_info=True)
+
+            # Mark unprocessed XML files as having errors
+            unprocessed_xml_ids = xml_ids_in_batch - processed_xml_ids
+            for xml_id in unprocessed_xml_ids:
+                try:
+                    error_msg = self.format_error_with_traceback(e, "Batch processing failed")
+                    self.log_debug(f"Marking XmlFile {xml_id} as batch error: {error_msg[:100]}...")
+                    self.db_ops.execute_query(
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                        (error_msg, xml_id)
+                    )
+                    self.db_ops.commit()
+                except Exception as mark_error_e:
+                    self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
+            raise  # Re-raise to propagate the error
+
+    def _process_xml_file_operations(self, operations_by_type, conn, processed_xml_ids):
+        """Process XML file update operations (success/error)"""
+        # Handle error updates
+        if DatabaseOperationType.UPDATE_XML_FILE_ERROR.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.UPDATE_XML_FILE_ERROR.value]:
+                data = operation.data
+                error_msg = data.get("error_message", "Unknown error")
+                form_type = data.get("form_type")
+                file_size = data.get("file_size")
+
+                try:
+                    if form_type == "990T":
+                        self.db_ops.execute_query(
+                            "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=?, form_type=?, file_size=? WHERE xml_id=?",
+                            (error_msg, form_type, file_size, operation.xml_id)
+                        )
+                    else:
                         self.db_ops.execute_query(
                             "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                            (error_msg, xml_id)
+                            (error_msg, operation.xml_id)
                         )
-                        self.db_ops.commit()
-                    except Exception as mark_error_e:
-                        self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
-                conn.rollback()
-                return
+                    processed_xml_ids.add(operation.xml_id)
+                except Exception as e:
+                    self.log_error(f"Failed to update XML file {operation.xml_id} with error: {e}")
 
-            # Get the charity IDs for related data
-            if charities:
+        # Handle success updates
+        if DatabaseOperationType.UPDATE_XML_FILE_SUCCESS.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.UPDATE_XML_FILE_SUCCESS.value]:
+                data = operation.data
+                form_type = data.get("form_type", "Unknown")
+                ein = data.get("ein")
+                tax_year = data.get("tax_year")
+
+                try:
+                    self.db_ops.execute_query(
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, form_type=?, ein=?, tax_year=? WHERE xml_id=?",
+                        (form_type, ein, tax_year, operation.xml_id)
+                    )
+                    processed_xml_ids.add(operation.xml_id)
+                except Exception as e:
+                    self.log_error(f"Failed to update XML file {operation.xml_id} with success: {e}")
+
+    def _process_charity_operations(self, operations_by_type, conn):
+        """Process charity insert operations and return charity_id mapping"""
+        charity_id_map = {}  # xml_id -> charity_id
+
+        if DatabaseOperationType.INSERT_CHARITY.value not in operations_by_type:
+            return charity_id_map
+
+        charities = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]]
+
+        if not charities:
+            return charity_id_map
+
+        self.log_info(f"Bulk insert: Processing {len(charities)} charities")
+
+        # Set colocator to 'notyet' for new charities
+        for charity in charities:
+            charity.colocator = 'notyet'
+
+        charity_data = []
+        sql = None
+        for charity in charities:
+            sql, values = self._build_insert_from_dataclass(charity, 'Charities', ['charity_id'])
+            charity_data.append(values)
+
+        try:
+            if sql is not None:
+                conn.executemany(sql, charity_data)
+                self.log_info(f"Bulk insert: Inserted {len(charity_data)} charities")
+
+                # Get the charity IDs for mapping
                 ein_list = [c.ein for c in charities]
                 tax_year_list = [c.tax_year for c in charities]
                 placeholders = ','.join('?' for _ in ein_list)
-                conn.execute(f"""
-                    SELECT charity_id FROM Charities
+                result = conn.execute(f"""
+                    SELECT charity_id, ein, tax_year FROM Charities
                     WHERE ein IN ({placeholders}) AND tax_year IN ({placeholders})
                     ORDER BY charity_id
                 """, ein_list + tax_year_list)
-                charity_ids = [row[0] for row in conn.fetchall()]
-            else:
-                charity_ids = []
 
-            # Bulk insert officers using reflection
+                # Map xml_id to charity_id using the operations list
+                charity_ops = operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]
+                for i, row in enumerate(result.fetchall()):
+                    if i < len(charity_ops):
+                        xml_id = charity_ops[i].xml_id
+                        charity_id_map[xml_id] = row[0]
+
+        except Exception as e:
+            self.log_error(f"Failed to insert charities: {e}", exc_info=True)
+            raise
+
+        return charity_id_map
+
+    def _process_related_operations(self, operations_by_type, conn, charity_id_map):
+        """Process related data operations (officers, grants, contractors, contributions)"""
+
+        # Process officers
+        if DatabaseOperationType.INSERT_OFFICER.value in operations_by_type:
+            officers = []
+            for operation in operations_by_type[DatabaseOperationType.INSERT_OFFICER.value]:
+                officer = operation.data
+                # Set charity_id from mapping
+                if operation.xml_id in charity_id_map:
+                    officer.charity_id = charity_id_map[operation.xml_id]
+                    officers.append(officer)
+
             if officers:
                 officer_data = []
                 sql = None
                 for officer in officers:
-                    batch_index = officer.charity_id - 1
-                    if 0 <= batch_index < len(charity_ids):
-                        officer.charity_id = charity_ids[batch_index]
-                        sql, values = self._build_insert_from_dataclass(officer, 'Officers', ['officer_id'])
-                        officer_data.append(values)
+                    sql, values = self._build_insert_from_dataclass(officer, 'Officers', ['officer_id'])
+                    officer_data.append(values)
 
                 try:
                     if sql is not None:
@@ -548,7 +557,16 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 except Exception as e:
                     self.log_error(f"Failed to insert officers: {e}", exc_info=True)
 
-            # Bulk insert grants using reflection
+        # Process grants
+        if DatabaseOperationType.INSERT_GRANT.value in operations_by_type:
+            grants = []
+            for operation in operations_by_type[DatabaseOperationType.INSERT_GRANT.value]:
+                grant = operation.data
+                # Ensure grantee_name is not None
+                if grant.grantee_name is None:
+                    grant.grantee_name = "Unknown"
+                grants.append(grant)
+
             if grants:
                 grant_data = []
                 sql = None
@@ -563,7 +581,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 except Exception as e:
                     self.log_error(f"Failed to insert grants: {e}", exc_info=True)
 
-            # Bulk insert contractors using reflection
+        # Process contractors
+        if DatabaseOperationType.INSERT_CONTRACTOR.value in operations_by_type:
+            contractors = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_CONTRACTOR.value]]
+
             if contractors:
                 contractor_data = []
                 sql = None
@@ -578,7 +599,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 except Exception as e:
                     self.log_error(f"Failed to insert contractors: {e}", exc_info=True)
 
-            # Bulk insert political contributions using reflection
+        # Process political contributions
+        if DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION.value in operations_by_type:
+            contributions = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION.value]]
+
             if contributions:
                 contribution_data = []
                 sql = None
@@ -593,105 +617,70 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 except Exception as e:
                     self.log_error(f"Failed to insert contributions: {e}", exc_info=True)
 
-            # Bulk insert addresses using reflection
-            if addresses:
-                address_data = []
-                sql = None
-                for i, address in enumerate(addresses):
-                    # Compute colocator for Address objects if not already set
-                    if hasattr(address, 'colocator') and address.colocator is None:
-                        if address.po_box and address.zip_code:
-                            po_box_stripped = address.po_box.strip()
-                            if po_box_stripped:
-                                address.colocator = f"PO:{po_box_stripped}:{address.zip_code}"
-                        elif address.state and address.state.upper() not in VALID_STATES:
-                            address.colocator = f"FA:{address.state}"
-                        else:
-                            address.colocator = None
+    def _process_address_operations(self, operations_by_type, conn, charity_id_map):
+        """Process address insert operations"""
 
-                    # Set owner_id for charity addresses (link to charity that owns this address)
-                    if hasattr(address, 'address_type') and address.address_type == 'charity':
-                        # Find the charity that owns this address by matching index in batch
-                        if i < len(charity_ids):
-                            address.owner_id = charity_ids[i]
+        if DatabaseOperationType.INSERT_ADDRESS.value not in operations_by_type:
+            return
 
-                    sql, values = self._build_insert_from_dataclass(address, 'Addresses', ['address_id'])
-                    address_data.append(values)
+        addresses = []
+        for operation in operations_by_type[DatabaseOperationType.INSERT_ADDRESS.value]:
+            address = operation.data
 
-                try:
-                    if sql is not None:
-                        conn.executemany(sql, address_data)
-                        self.log_debug(f"Inserted {len(address_data)} addresses")
-                except Exception as e:
-                    self.log_error(f"Failed to insert addresses: {e}", exc_info=True)
+            # Compute colocator for Address objects if not already set
+            if hasattr(address, 'colocator') and address.colocator is None:
+                if address.po_box and address.zip_code:
+                    po_box_stripped = address.po_box.strip()
+                    if po_box_stripped:
+                        address.colocator = f"PO:{po_box_stripped}:{address.zip_code}"
+                elif address.state and address.state.upper() not in VALID_STATES:
+                    address.colocator = f"FA:{address.state}"
+                else:
+                    address.colocator = None
 
-        try:
-            self.log_info("Bulk insert: STARTING batch commit")
-            conn.commit()
-            self.log_info("Bulk insert: FINISHED batch commit successful")
-            # Mark all XML files in this batch as processed successfully
-            for xml_id in xml_ids:
-                try:
-                    form_type_value = form_types.get(xml_id, "Unknown")
-                    # Get EIN and tax_year from the charity data if available
-                    ein_value = None
-                    tax_year_value = None
-                    if xml_id in xml_ids:
-                        # Find the corresponding charity in the batch
-                        for item in batch_data:
-                            if len(item) >= 8 and item[0] == xml_id and item[1] and hasattr(item[1], 'ein'):
-                                ein_value = item[1].ein
-                                tax_year_value = item[1].tax_year
-                                break
-                    self.log_debug(f"Updating XmlFile {xml_id}: form_type={form_type_value}, ein={ein_value}, tax_year={tax_year_value}")
-                    self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, form_type=?, ein=?, tax_year=? WHERE xml_id=?",
-                        (form_type_value, ein_value, tax_year_value, xml_id)
-                    )
-                    self.db_ops.commit()
-                except Exception as mark_success_e:
-                    self.log_error(f"Failed to mark xml_id {xml_id} as processed: {mark_success_e}")
-        except Exception as e:
-            self.log_error(f"Failed to commit batch: {e}", exc_info=True)
-            # Mark all XML files in this batch as having errors
-            for xml_id in xml_ids:
-                try:
-                    error_msg = self.format_error_with_traceback(e, "Batch commit failed")
-                    self.log_debug(f"Marking XmlFile {xml_id} as error: {error_msg[:100]}...")
-                    self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                        (error_msg, xml_id)
-                    )
-                    self.db_ops.commit()
-                except Exception as mark_error_e:
-                    self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
+            # Set owner_id for charity addresses (link to charity that owns this address)
+            if hasattr(address, 'address_type') and address.address_type == 'charity':
+                if operation.xml_id in charity_id_map:
+                    address.owner_id = charity_id_map[operation.xml_id]
+
+            addresses.append(address)
+
+        if addresses:
+            address_data = []
+            sql = None
+            for address in addresses:
+                sql, values = self._build_insert_from_dataclass(address, 'Addresses', ['address_id'])
+                address_data.append(values)
+
             try:
-                conn.rollback()
-                self.log_info("Bulk insert: Rollback completed")
-            except Exception as rollback_e:
-                self.log_error(f"Failed to rollback: {rollback_e}", exc_info=True)
-            raise  # Re-raise to propagate the error
+                if sql is not None:
+                    conn.executemany(sql, address_data)
+                    self.log_debug(f"Inserted {len(address_data)} addresses")
+            except Exception as e:
+                self.log_error(f"Failed to insert addresses: {e}", exc_info=True)
 
 
-    def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str):
-        """Process a single XML file"""
+    def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str, file_size: int = None):
+        """Process a single XML file and return a list of database operations"""
+        operations = []
         try:
             self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
 
             # Read XML content directly from ZIP file using cached connection
             xml_content = self._extract_xml_from_zip(zip_path, internal_path)
 
-            # Update file_size in XmlFiles table
-            try:
+            # Update file_size in XmlFiles table if not already set
+            if file_size is None:
                 file_size = len(xml_content)
-                self.log_debug(f"Updating XmlFile {xml_id} with file_size={file_size}")
-                self.db_ops.execute_query(
-                    "UPDATE XmlFiles SET file_size=? WHERE xml_id=?",
-                    (file_size, xml_id)
-                )
-                self.db_ops.commit()
-            except Exception as size_error:
-                self.log_error(f"Failed to update file_size for {xml_id}: {size_error}", exc_info=True)
+                try:
+                    self.log_debug(f"Updating XmlFile {xml_id} with file_size={file_size}")
+                    self.db_ops.execute_query(
+                        "UPDATE XmlFiles SET file_size=? WHERE xml_id=?",
+                        (file_size, xml_id)
+                    )
+                    self.db_ops.commit()
+                except Exception as size_error:
+                    self.log_error(f"Failed to update file_size for {xml_id}: {size_error}", exc_info=True)
 
             self.log_debug(f"Retrieved XML content for {filename}, size: {len(xml_content)} bytes")
 
@@ -714,7 +703,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             if not filer_ein or filer_ein == "Unknown":
                 self.log_error(f"Skipping XML {filename}: invalid EIN {filer_ein}")
                 error_msg = f"Invalid EIN {filer_ein} for {filename}"
-                return ('error', xml_id, error_msg)
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
+                    {"error_message": error_msg, "file_size": file_size},
+                    xml_id
+                ))
+                return operations
 
             # Update XmlFiles with extracted metadata before processing
             try:
@@ -731,7 +725,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             if form_type == "990T":
                 # Form 990T is a tax return for unrelated business income, not a charity filing
                 self.log_info(f"Ignoring Form 990T file {filename} (tax return for unrelated business income)")
-                return ('error', xml_id, "skipped: 990T")
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
+                    {"error_message": "skipped: 990T", "form_type": "990T", "file_size": file_size},
+                    xml_id
+                ))
+                return operations
             elif form_type == "990":
                 charity, officers, grants, contractors, contributions, address = self._parse_990_data(root, filename, filer_ein, tax_year, form_type)
             elif form_type == "990EZ":
@@ -741,22 +740,86 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             else:
                 self.log_info(f"Unsupported form type {form_type} in {filename}")
                 error_msg = f"Unsupported form type {form_type} for {filename}"
-                return ('error', xml_id, error_msg)
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
+                    {"error_message": error_msg},
+                    xml_id
+                ))
+                return operations
 
             if charity:
                 self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}, address={address is not None}")
-                return xml_id, charity, officers, grants, contractors, contributions, address, form_type
+
+                # Create operations for all extracted data
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.INSERT_CHARITY,
+                    charity,
+                    xml_id
+                ))
+
+                for officer in officers:
+                    operations.append(DatabaseOperation(
+                        DatabaseOperationType.INSERT_OFFICER,
+                        officer,
+                        xml_id,
+                        [DatabaseOperationType.INSERT_CHARITY]  # Depends on charity being inserted first
+                    ))
+
+                for grant in grants:
+                    operations.append(DatabaseOperation(
+                        DatabaseOperationType.INSERT_GRANT,
+                        grant,
+                        xml_id
+                    ))
+
+                for contractor in contractors:
+                    operations.append(DatabaseOperation(
+                        DatabaseOperationType.INSERT_CONTRACTOR,
+                        contractor,
+                        xml_id
+                    ))
+
+                for contribution in contributions:
+                    operations.append(DatabaseOperation(
+                        DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION,
+                        contribution,
+                        xml_id
+                    ))
+
+                if address:
+                    operations.append(DatabaseOperation(
+                        DatabaseOperationType.INSERT_ADDRESS,
+                        address,
+                        xml_id
+                    ))
+
+                # Success operation to mark XML file as processed
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.UPDATE_XML_FILE_SUCCESS,
+                    {"form_type": form_type, "ein": filer_ein, "tax_year": tax_year},
+                    xml_id
+                ))
             else:
                 self.log_error(f"Failed to extract charity data from {filename}")
                 error_msg = f"No Charity object created for {filename}"
-                return ('error', xml_id, error_msg)
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.UPDATE_XML_FILE_ERROR,
+                    {"error_message": error_msg},
+                    xml_id
+                ))
 
         except Exception as e:
             self.log_error(f"Failed to process XML {filename}: {e}", exc_info=True)
             error_msg = str(e)
             if not error_msg or error_msg == "":
                 error_msg = f"Unknown error processing {filename}"
-            return ('error', xml_id, error_msg, e)
+            operations.append(DatabaseOperation(
+                DatabaseOperationType.UPDATE_XML_FILE_ERROR,
+                {"error_message": error_msg},
+                xml_id
+            ))
+
+        return operations
 
     def _extract_form_type(self, root) -> str:
         """Extract form type from XML"""
