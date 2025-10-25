@@ -177,8 +177,15 @@ class DatabaseOperations:
         for row in rows:
             # Create dict from row data
             row_dict = dict(zip(field_names, row))
-            # Instantiate dataclass with only the fields that were selected
-            instance = dataclass_type(**row_dict)
+            # Filter out fields that have init=False since they can't be passed to __init__
+            init_fields = {f.name for f in fields(dataclass_type) if f.init}
+            filtered_dict = {k: v for k, v in row_dict.items() if k in init_fields}
+            # Instantiate dataclass with only the init fields
+            instance = dataclass_type(**filtered_dict)
+            # Set non-init fields manually
+            for k, v in row_dict.items():
+                if k not in init_fields:
+                    setattr(instance, k, v)
             instances.append(instance)
 
         return instances

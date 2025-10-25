@@ -60,6 +60,13 @@ class ProcessingStrategy(ABC):
         """Log error with optional EIN context - always shown even in quiet mode"""
         log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
 
+    def format_error_with_traceback(self, error: Exception, context: str = "") -> str:
+        """Format error message with full stack trace for better debugging"""
+        import traceback
+        error_msg = f"{context}: {str(error)}" if context else str(error)
+        stack_trace = ''.join(traceback.format_exception(type(error), error, error.__traceback__))
+        return f"{error_msg}\n\nStack Trace:\n{stack_trace}"
+
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
         if not self.quiet:
@@ -224,7 +231,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     self.log_info(f"Producer {producer_id}: {progress_info} queued")
             except Exception as e:
                 self.log_error(f"Producer {producer_id} error on {filename}: {e}", exc_info=True)
-                xml_queue.put(('error', xml_id, str(e)), block=True)
+                error_msg = str(e)
+                if not error_msg or error_msg == "":
+                    error_msg = f"Unknown error processing {filename}"
+                xml_queue.put(('error', xml_id, error_msg, e), block=True)
         xml_queue.put(None)  # Sentinel
         self.log_info(f"Producer {producer_id} done: {processed} files")
 
@@ -243,11 +253,40 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 if isinstance(item, tuple) and item[0] == 'error':
                     xml_id = item[1]
                     msg = item[2] if len(item) > 2 else "Error"
-                    self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                        (msg, xml_id)
-                    )
-                    self.db_ops.commit()
+                    # Format error message with full stack trace if it's an exception
+                    if len(item) > 3 and isinstance(item[3], Exception):
+                        msg = self.format_error_with_traceback(item[3], msg)
+                    self.log_info(f"Storing error message for xml_id {xml_id}: {msg[:100]}...")
+                    try:
+                        self.log_debug(f"Storing error message for xml_id {xml_id}: {msg[:100]}...")
+                        # For 990T files, still update EIN, form_type, and file_size
+                        if msg == "skipped: 990T":
+                            # Get the metadata that was already extracted
+                            metadata_result = self.db_ops.execute_query(
+                                "SELECT ein, file_size FROM XmlFiles WHERE xml_id = ?",
+                                (xml_id,)
+                            )
+                            metadata_row = metadata_result.fetchone()
+                            if metadata_row:
+                                ein, file_size = metadata_row
+                                self.db_ops.execute_query(
+                                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=?, ein=?, form_type=?, file_size=? WHERE xml_id=?",
+                                    (msg, ein, "990T", file_size, xml_id)
+                                )
+                            else:
+                                self.db_ops.execute_query(
+                                    "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=?, form_type=? WHERE xml_id=?",
+                                    (msg, "990T", xml_id)
+                                )
+                        else:
+                            self.db_ops.execute_query(
+                                "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
+                                (msg, xml_id)
+                            )
+                        self.db_ops.commit()
+                        self.log_info(f"Successfully stored error message for xml_id {xml_id}")
+                    except Exception as db_error:
+                        self.log_error(f"Failed to store error message for xml_id {xml_id}: {db_error}", exc_info=True)
                     # Update progress bar for error items
                     if global_config.progress == "files":
                         pbar.update(1)
@@ -464,9 +503,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 # Mark all XML files in this batch as having errors
                 for xml_id in xml_ids:
                     try:
+                        error_msg = self.format_error_with_traceback(e, "Batch insert failed")
+                        self.log_debug(f"Marking XmlFile {xml_id} as batch insert error: {error_msg[:100]}...")
                         self.db_ops.execute_query(
                             "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                            (f"Batch insert failed: {str(e)}", xml_id)
+                            (error_msg, xml_id)
                         )
                         self.db_ops.commit()
                     except Exception as mark_error_e:
@@ -591,9 +632,20 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             for xml_id in xml_ids:
                 try:
                     form_type_value = form_types.get(xml_id, "Unknown")
+                    # Get EIN and tax_year from the charity data if available
+                    ein_value = None
+                    tax_year_value = None
+                    if xml_id in xml_ids:
+                        # Find the corresponding charity in the batch
+                        for item in batch_data:
+                            if len(item) >= 8 and item[0] == xml_id and item[1] and hasattr(item[1], 'ein'):
+                                ein_value = item[1].ein
+                                tax_year_value = item[1].tax_year
+                                break
+                    self.log_debug(f"Updating XmlFile {xml_id}: form_type={form_type_value}, ein={ein_value}, tax_year={tax_year_value}")
                     self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, form_type=? WHERE xml_id=?",
-                        (form_type_value, xml_id)
+                        "UPDATE XmlFiles SET processed=TRUE, processing_version=2, form_type=?, ein=?, tax_year=? WHERE xml_id=?",
+                        (form_type_value, ein_value, tax_year_value, xml_id)
                     )
                     self.db_ops.commit()
                 except Exception as mark_success_e:
@@ -603,9 +655,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             # Mark all XML files in this batch as having errors
             for xml_id in xml_ids:
                 try:
+                    error_msg = self.format_error_with_traceback(e, "Batch commit failed")
+                    self.log_debug(f"Marking XmlFile {xml_id} as error: {error_msg[:100]}...")
                     self.db_ops.execute_query(
                         "UPDATE XmlFiles SET processed=TRUE, processing_version=2, error_message=? WHERE xml_id=?",
-                        (f"Batch commit failed: {str(e)}", xml_id)
+                        (error_msg, xml_id)
                     )
                     self.db_ops.commit()
                 except Exception as mark_error_e:
@@ -626,12 +680,28 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             # Read XML content directly from ZIP file using cached connection
             xml_content = self._extract_xml_from_zip(zip_path, internal_path)
 
+            # Update file_size in XmlFiles table
+            try:
+                file_size = len(xml_content)
+                self.log_debug(f"Updating XmlFile {xml_id} with file_size={file_size}")
+                self.db_ops.execute_query(
+                    "UPDATE XmlFiles SET file_size=? WHERE xml_id=?",
+                    (file_size, xml_id)
+                )
+                self.db_ops.commit()
+            except Exception as size_error:
+                self.log_error(f"Failed to update file_size for {xml_id}: {size_error}", exc_info=True)
+
             self.log_debug(f"Retrieved XML content for {filename}, size: {len(xml_content)} bytes")
 
             # Parse XML
             parser = ET.XMLParser(recover=True)
             tree = ET.parse(BytesIO(xml_content), parser)
             root = tree.getroot()
+
+            # Check for malformed XML
+            if root is None or len(root) == 0:
+                raise ValueError("Malformed XML: unable to parse root element")
 
             # Extract basic metadata
             form_type = self._extract_form_type(root)
@@ -642,10 +712,26 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
             if not filer_ein or filer_ein == "Unknown":
                 self.log_error(f"Skipping XML {filename}: invalid EIN {filer_ein}")
-                return ('error', xml_id)
+                error_msg = f"Invalid EIN {filer_ein} for {filename}"
+                return ('error', xml_id, error_msg)
+
+            # Update XmlFiles with extracted metadata before processing
+            try:
+                self.log_debug(f"Updating XmlFile {xml_id} with extracted metadata: ein={filer_ein}, tax_year={tax_year}, form_type={form_type}")
+                self.db_ops.execute_query(
+                    "UPDATE XmlFiles SET ein=?, tax_year=?, form_type=? WHERE xml_id=?",
+                    (filer_ein, tax_year, form_type, xml_id)
+                )
+                self.db_ops.commit()
+            except Exception as update_error:
+                self.log_error(f"Failed to update XmlFile metadata for {xml_id}: {update_error}", exc_info=True)
 
             # Extract data based on form type
-            if form_type == "990":
+            if form_type == "990T":
+                # Form 990T is a tax return for unrelated business income, not a charity filing
+                self.log_info(f"Ignoring Form 990T file {filename} (tax return for unrelated business income)")
+                return ('error', xml_id, "skipped: 990T")
+            elif form_type == "990":
                 charity, officers, grants, contractors, contributions, address = self._parse_990_data(root, filename, filer_ein, tax_year, form_type)
             elif form_type == "990EZ":
                 charity, officers, grants, contractors, contributions, address = self._parse_990ez_data(root, filename, filer_ein, tax_year, form_type)
@@ -653,18 +739,23 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
             else:
                 self.log_info(f"Unsupported form type {form_type} in {filename}")
-                return ('error', xml_id)
+                error_msg = f"Unsupported form type {form_type} for {filename}"
+                return ('error', xml_id, error_msg)
 
             if charity:
                 self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}, address={address is not None}")
                 return xml_id, charity, officers, grants, contractors, contributions, address, form_type
             else:
                 self.log_error(f"Failed to extract charity data from {filename}")
-                return ('error', xml_id)
+                error_msg = f"No Charity object created for {filename}"
+                return ('error', xml_id, error_msg)
 
         except Exception as e:
             self.log_error(f"Failed to process XML {filename}: {e}", exc_info=True)
-            return ('error', xml_id)
+            error_msg = str(e)
+            if not error_msg or error_msg == "":
+                error_msg = f"Unknown error processing {filename}"
+            return ('error', xml_id, error_msg, e)
 
     def _extract_form_type(self, root) -> str:
         """Extract form type from XML"""

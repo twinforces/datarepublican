@@ -118,7 +118,8 @@ class ZipProcessor:
                 zip_id=zip_id,
                 filename=xml_filename,
                 internal_path=xml_filename,
-                file_size=file_size
+                file_size=file_size,
+                tax_year=zip_year
             )
             xml_file_objects.append(xml_file)
 
