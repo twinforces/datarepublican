@@ -51,6 +51,7 @@ class DatabaseOperationType(Enum):
     UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
     UPDATE_XML_FILE_ERROR = "update_xml_file_error"
     XML_FILE_UPDATE = "xml_file_update"
+    OPTIMIZE_DATABASE = "optimize_database"
 
 
 class DatabaseOperation:
@@ -110,10 +111,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     QUEUE_SIZE = 1000
     BATCH_SIZE = 100
     STALL_THRESHOLD = 30
+    OPTIMIZE_INTERVAL = 500000  # Optimize database every 500,000 XML files processed
 
     def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, workers: int = MAX_WORKERS, quiet: bool = False):
         super().__init__(db_ops, logger, global_config.is_quiet())
         self.workers = workers
+        self.total_processed_xml = 0  # Counter for total processed XML files
         # Set up SIGUSR1 handler for thread stack dumps
         signal.signal(signal.SIGUSR1, self.dump_threads_handler)
 
@@ -296,6 +299,15 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         signals = 0
         processed_xml_count = 0  # Counter for processed XML files (each generates one XML_FILE_UPDATE)
         while signals < num_expected:
+            # Check if we need to trigger database optimization
+            if processed_xml_count > 0 and processed_xml_count % self.OPTIMIZE_INTERVAL == 0:
+                self.log_info(f"Processed {processed_xml_count} XML files, triggering database optimization")
+                try:
+                    # Create and execute OPTIMIZE_DATABASE operation
+                    optimize_op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, None)
+                    self._execute_optimize_operation(optimize_op, conn)
+                except Exception as e:
+                    self.log_error(f"Database optimization failed: {e}", exc_info=True)
             try:
                 item = xml_queue.get(timeout=30.0)  # Add timeout to prevent hanging
                 if item is None:
@@ -399,6 +411,20 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         return sql, values
 
+    def _execute_optimize_operation(self, operation, conn):
+        """Execute database optimization operation"""
+        if operation.operation_type != DatabaseOperationType.OPTIMIZE_DATABASE:
+            return
+
+        self.log_info("Starting database optimization...")
+        try:
+            # Call the optimize_database method from DatabaseOperations
+            self.db_ops.optimize_database()
+            self.log_info("Database optimization completed successfully")
+        except Exception as e:
+            self.log_error(f"Database optimization failed: {e}", exc_info=True)
+            raise
+
     def _bulk_insert_batch(self, batch_operations, conn=None):
         """Bulk insert a batch of database operations"""
         if conn is None:
@@ -436,6 +462,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         processed_xml_ids = set()
 
         try:
+            # Handle OPTIMIZE_DATABASE operations first
+            if DatabaseOperationType.OPTIMIZE_DATABASE.value in operations_by_type:
+                for operation in operations_by_type[DatabaseOperationType.OPTIMIZE_DATABASE.value]:
+                    self._execute_optimize_operation(operation, conn)
+
             # 1. Handle XML file updates first
             self._process_xml_file_update_operations(operations_by_type, conn, processed_xml_ids)
 
