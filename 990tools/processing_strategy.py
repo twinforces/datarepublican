@@ -133,9 +133,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         # Set up progress bar for XML processing
         from tqdm import tqdm
+        from logging_utils import start_progress_reporting
         progress_unit = "file" if global_config.progress == "files" else "B"
         progress_desc = "Processing XML files" if global_config.progress == "files" else "Processing XML bytes"
-        pbar = tqdm(total=len(xml_files), desc=progress_desc, unit=progress_unit)
+        pbar = start_progress_reporting(total=len(xml_files), desc=progress_desc, unit=progress_unit)
 
         # Use thread-safe queues with backpressure
         xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)

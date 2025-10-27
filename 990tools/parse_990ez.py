@@ -11,6 +11,7 @@ from models import Charity, Officer, Grant, Contractor, PoliticalContribution, A
 from typing import Optional, List, Tuple
 from logging_utils import log_error, log_debug, log_info, log_warning, get_logger, create_stub_log_error, create_stub_log_debug
 from functools import partial
+from config import global_config
 
 logger = None
 log_error = None
@@ -25,7 +26,7 @@ def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, 
     log_error = new_log_error
     log_debug = new_log_debug or new_log_error  # fallback to log_error if log_debug not provided
     verbose = is_verbose
-    quiet = is_quiet
+    quiet = global_config.is_quiet()  # Use global config instead of parameter
     DEBUG_EINS = debug_eins if debug_eins is not None else set()
 
 # Set default logger if None
@@ -329,10 +330,10 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
 
     if context["filer_ein"] == "680005486" and context["form_type"] != "990EZ":
         context["form_type"] = "990EZ"
-        if not quiet:
+        if not global_config.is_quiet():
             log_error(f"Forced form_type '990EZ' for EIN {context['filer_ein']} in {xml_filename}")
     if context["form_type"] != "990EZ":
-        if not quiet:
+        if not global_config.is_quiet():
             log_error(f"XML {xml_filename} is not a Form 990EZ (form_type: {context['form_type']}), skipping")
         return None, [], [], [], [], None
 
@@ -438,16 +439,16 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     address = parse_address_990ez(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
     # Debug logging for address components
-    if address and not quiet and log_debug is not None and logger is not None:
+    if address and not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', po_box='%s', canonical='%s'",
                   address.ein, address.address_line1, address.address_line2, address.city, address.state, address.zip_code, address.po_box, address.canonical_address)
-    elif not quiet and log_debug is not None and logger is not None:
+    elif not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename)
 
     # Parse grants, contractors, and political contributions
     grants, contractors, contributions = parse_related_entities_990ez(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
-    if not quiet and log_debug is not None and logger is not None:
+    if not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "TRACE: parse_990ez() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s", charity.ein, xml_filename)
     return charity, officers, grants, contractors, contributions, address
 
@@ -630,7 +631,7 @@ def main():
     p_log_debug = partial(log_debug, logger) if log_debug is not None else None
     p_log_info = partial(log_info, logger) if log_info is not None else None
     p_log_warning = partial(log_warning, logger) if log_warning is not None else None
-    set_logger(logger, p_log_error, p_log_debug, is_verbose=False, is_quiet=False, debug_eins=None)
+    set_logger(logger, p_log_error, p_log_debug, is_verbose=False, debug_eins=None)
 
     charity, officers, grants, contractors, contributions, address = parse_990ez(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
     if charity:

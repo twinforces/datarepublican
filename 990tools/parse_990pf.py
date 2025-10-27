@@ -9,6 +9,7 @@ from xpaths import XPATHS_990PF, NAMESPACES
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from typing import Optional, List, Tuple
 from logging_utils import get_logger, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_info, log_warning, create_stub_log_error, create_stub_log_debug
+from config import global_config
 
 logger = None
 log_error = None
@@ -25,7 +26,7 @@ def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, 
     log_debug = new_log_debug or new_log_error  # fallback to log_error if log_debug not provided
     log_info = new_log_error  # fallback to log_error if log_info not provided
     verbose = is_verbose
-    quiet = is_quiet
+    quiet = global_config.is_quiet()  # Use global config instead of parameter
     DEBUG_EINS = debug_eins if debug_eins is not None else set()
 
 # Set default logger if None
@@ -252,7 +253,7 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     }
 
     if context["form_type"] != "990PF":
-        if not quiet:
+        if not global_config.is_quiet():
             log_error(f"XML {xml_filename} is not a Form 990PF (form_type: {context['form_type']}), skipping",
                        ein=context['filer_ein'])
         return None, [], [], [], [], None
@@ -360,16 +361,16 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     address = parse_address_990pf(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
     # Debug logging for address components
-    if address and not quiet and log_debug is not None and logger is not None:
+    if address and not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', canonical='%s'",
                   address.ein, address.address_line1, address.address_line2, address.city, address.state, address.zip_code, address.canonical_address)
-    elif not quiet and log_debug is not None and logger is not None:
+    elif not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename)
 
     # Parse grants, contractors, and political contributions
     grants, contractors, contributions = parse_related_entities_990pf(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
-    if not quiet and log_debug is not None and logger is not None:
+    if not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "TRACE: parse_990pf() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s", charity.ein, xml_filename)
     return charity, officers, grants, contractors, contributions, address
 
