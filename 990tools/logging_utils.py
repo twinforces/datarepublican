@@ -73,11 +73,11 @@ def log_warning(logger: logging.Logger, msg: str, *args, ein: Optional[str] = No
     else:
         logger.warning(f"{debug_prefix}{msg}", *args, **kwargs)
 
-def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False):
+def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items"):
     """Start progress reporting with tqdm"""
     try:
         from tqdm import tqdm
-        return tqdm(total=total, desc=desc, unit=unit, disable=disable)
+        return tqdm(total=total, desc=desc, unit=unit)
     except ImportError:
         # Fallback if tqdm not available
         return None
