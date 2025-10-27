@@ -184,7 +184,7 @@ CREATE TABLE Geocoding (
 );
 -- ZipFiles table - ZIP file metadata
 CREATE TABLE ZipFiles (
-    zip_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    zip_id UUID PRIMARY KEY,
     filename VARCHAR NOT NULL UNIQUE,
     -- ZIP filename
     file_path VARCHAR NOT NULL,
@@ -204,7 +204,7 @@ CREATE TABLE ZipFiles (
 );
 -- XmlFiles table - XML file metadata within ZIPs
 CREATE TABLE XmlFiles (
-    xml_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    xml_id UUID PRIMARY KEY,
     zip_id UUID NOT NULL,
     -- Reference to ZIP file
     filename VARCHAR NOT NULL,

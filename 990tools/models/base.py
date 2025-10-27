@@ -57,6 +57,8 @@ class BaseModel(ABC):
         for field_name in all_fields:
             if (field_name.endswith('_id') or field_name == 'id') and field_name not in db_fields:
                 db_fields.append(field_name)
+        # Remove fields that are not database columns (like xml_files in ZipFile)
+        db_fields = [f for f in db_fields if not f.endswith('_files')]
         return db_fields
 
     @classmethod
@@ -67,6 +69,7 @@ class BaseModel(ABC):
 
     def set_id_if_needed(self):
         """Set the ID field if it exists and is not set"""
+        # For object tree relationships, we need to generate IDs client-side
         # Find the ID field (usually ends with '_id' or is just 'id')
         id_field = None
         for field_name in self.get_db_field_names():
@@ -77,4 +80,5 @@ class BaseModel(ABC):
         if id_field and hasattr(self, id_field):
             current_value = getattr(self, id_field)
             if current_value is None or current_value == "":
+                # Generate proper UUID v7 using our fixed implementation
                 setattr(self, id_field, self.generate_id())

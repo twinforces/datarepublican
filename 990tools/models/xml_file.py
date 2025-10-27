@@ -41,7 +41,11 @@ class XMLFile(BaseModel):
 
     def prep_for_insert(self):
         """Prepare the record for database insertion"""
-        #print(f"#### XMLFile prep_for_insert: zip_id={self.zip_id} (type: {type(self.zip_id)})")
+        # Ensure zip_id is a string, not None
+        if self.zip_id is None:
+            self.zip_id = ""
+        elif not isinstance(self.zip_id, str):
+            self.zip_id = str(self.zip_id)
         pass
 
     def to_dict(self) -> dict:

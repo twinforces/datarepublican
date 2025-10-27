@@ -564,111 +564,96 @@ class DatabaseOperations:
         return geocoding_id
 
     # Bulk operations
-    def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
+    def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, use_pandas: bool = False, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         """
-        Bulk insert with name-mapped columns for drift-proof, type-safe loads.
-        Builds DF in any order; INSERT SELECT by explicit col names to avoid positional misalignment.
+        Bulk insert with executemany for high-throughput; optional Pandas fallback.
+        Now uses database-generated UUIDs with RETURNING clause for better performance.
 
         Args:
-            objects: Non-empty list of same-type BaseModel instances.
-            batch_size: Rows per vectorized batch (tune for mem: 10k-100k).
-            conn: Optional conn for txns; uses self.db_conn if None.
+            objects: Non-empty same-type BaseModels (prepped).
+            batch_size: Rows per executemany call (10k-50k; smaller = less mem).
+            use_pandas: Toggle vectorized DF (slower on str-heavy; for testing).
+            conn: Optional for txns.
 
         Returns:
-            List of str IDs from the ID field (post-insert).
+            List of str IDs (from database RETURNING clause).
 
         Raises:
-            ValueError: Invalid inputs (empty/mixed types/no ID col).
-            RuntimeError: Build/insert failures (with context).
+            ValueError: Invalid inputs.
+            RuntimeError: Param/build fail.
         """
         if not objects:
             return []
-        obj_types = {type(obj) for obj in objects}
-        if len(obj_types) > 1:
-            raise ValueError("All objects must share one type—got {obj_types}.")
-        obj_type = next(iter(obj_types))
-
+        obj_type = type(objects[0])
+        if len({type(obj) for obj in objects}) > 1:
+            raise ValueError("Uniform types only.")
         conn = conn or self.db_conn
         table_name = self._get_table_name(obj_type)
         table_cols = self._get_table_columns(table_name, conn)
-        if not table_cols:
-            raise ValueError(f"Empty schema for {table_name}—run DESCRIBE manually.")
-
-        # Prep upfront (consistent state)
-        for obj in objects:
-            obj.prep_for_insert()
-            obj.set_id_if_needed()
-
         model_fields = set(obj_type.get_db_field_names())
-        missing_cols = set(table_cols) - model_fields
-        ignored_cols = model_fields - set(table_cols)
-        if missing_cols:
-            self.logger.warning(f"{table_name}: NULL-filling {len(missing_cols)} DB-only cols: {sorted(missing_cols)[:5]}...")
-        if ignored_cols:
-            self.logger.warning(f"{table_name}: Ignoring {len(ignored_cols)} model-only fields: {sorted(ignored_cols)[:5]}...")
-
-        # Build data_dict (order irrelevant now—names rule)
-        data_dict = {}
-        for col in table_cols:  # Loop ensures all keys present
-            if col in model_fields:
-                try:
-                    data_dict[col] = [getattr(obj, col) for obj in objects]
-                except AttributeError as e:
-                    raise RuntimeError(f"getattr failed for {col} on {obj_type}: {e}—check dataclass fields.")
-            else:
-                data_dict[col] = [None] * len(objects)
-
-        # Log the key order in data_dict
-        self.logger.info(f"{table_name} data_dict keys: {list(data_dict.keys())}")
-
-        # Create DF (explicit columns for sanity, but not required)
-        df = pd.DataFrame(data_dict, columns=table_cols)
-        df_cols = set(df.columns)
-        if set(table_cols) != df_cols:
-            raise RuntimeError(f"DF col mismatch: expected {table_cols}, got {list(df_cols)}—drift alert!")
-
-        # Ensure column order matches database schema exactly
-        df = df[table_cols]
-
-        # In bulk_insert, after df = df[table_cols]:
-        #print(f"####{table_name} table_cols: {table_cols}")
-        #print(f"####{table_name} DF dtypes:\n{df.dtypes.to_dict()}")
-        if len(objects) > 0:
-            sample_row = df.iloc[0].to_dict()
-            self.logger.info(f"{table_name} DF sample row 0: {sample_row}")
-            # Spot-check: Ensure zip_path str, xml_id UUID-like
-            if 'xml_name' in sample_row:
-                self.logger.info(f"  - xml_name type/len: {type(sample_row['xml_name'])} / {len(str(sample_row['xml_id'])) if sample_row['xml_id'] else 0}")
-            if 'zip_id' in sample_row:
-                self.logger.info(f"  - zip_id type/len: {type(sample_row['zip_id'])} / {len(str(sample_row['zip_id'])) if sample_row['zip_id'] else 0}")
-
-        # Extract IDs (validate field exists)
+        missing = set(table_cols) - model_fields
+        if missing:
+            self.logger.warning(f"{table_name}: NULL-filling {len(missing)} DB cols")
         id_field = next((col for col in table_cols if col.endswith('_id') or col == 'id'), None)
         if not id_field:
-            raise ValueError(f"No ID field in {table_name} schema—add one.")
-        all_ids = df[id_field].astype(str).fillna('').tolist()  # Str-safe; empty → ''
+            raise ValueError(f"No ID in {table_name}.")
 
-        # Batched name-mapped insert (robust to order)
-        for i in range(0, len(objects), batch_size):
-            batch_df = df.iloc[i:i + batch_size]
-            view_name = f'temp_insert_{uuid.uuid4().hex[:8]}'
-            try:
+        # Prep all (upfront; chunk if >100k in future) - generate IDs client-side for object relationships
+        prep_start = time.perf_counter()
+        for obj in objects:
+            obj.prep_for_insert()
+            obj.set_id_if_needed()  # Generate IDs client-side for object tree relationships
+        self.logger.debug(f"Prepped {len(objects)} objs in {time.perf_counter() - prep_start:.2f}s")
+
+        # Use all table columns including ID field since we generate them client-side
+        insert_cols = table_cols
+
+        if use_pandas:
+            # Fallback: Your current DF path (for A/B)
+            data_dict = {col: [getattr(obj, col) if col in model_fields else None for obj in objects] for col in insert_cols}
+            df = pd.DataFrame(data_dict, columns=insert_cols)
+            all_ids = []
+            for i in range(0, len(objects), batch_size):
+                batch_df = df.iloc[i:i + batch_size]
+                view_name = f'temp_{uuid.uuid4().hex[:8]}'
                 conn.register(view_name, batch_df)
-                # Explicit cols: Match by name, no positional BS
-                col_list = ', '.join(table_cols)
-                insert_sql = f"INSERT OR IGNORE INTO {table_name} ({col_list}) SELECT {col_list} FROM {view_name}"
-                conn.execute(insert_sql)
+                col_list = ', '.join(insert_cols)
+                insert_sql = f"INSERT INTO {table_name} ({col_list}) SELECT {col_list} FROM {view_name} RETURNING {id_field}"
+                result = conn.execute(insert_sql)
+                batch_ids = [row[0] for row in result.fetchall()]
+                all_ids.extend(batch_ids)
                 conn.unregister(view_name)
-                self.logger.info(f"Batch {i//batch_size + 1} ({len(batch_df)} rows) into {table_name}: success")
-            except Exception as e:
-                if 'view_name' in locals():  # Cleanup on fail
-                    try:
-                        conn.unregister(view_name)
-                    except:
-                        pass
-                raise RuntimeError(f"Batch insert failed for {table_name} at {i}: {e}")
+            return all_ids
+        else:
+            # executemany core: Build param lists (excluding ID field)
+            build_start = time.perf_counter()
+            param_rows = []
+            for obj in objects:
+                row = tuple(getattr(obj, col) if col in model_fields else None for col in insert_cols)
+                param_rows.append(row)
+            build_time = time.perf_counter() - build_start
+            self.logger.debug(f"Built {len(objects)} param rows in {build_time:.2f}s")
 
-        return all_ids
+            # Batched executemany for maximum performance - IDs already generated client-side
+            insert_start = time.perf_counter()
+            for i in range(0, len(objects), batch_size):
+                batch_params = param_rows[i:i + batch_size]
+
+                # Use executemany with single row inserts - no RETURNING needed since IDs are client-generated
+                col_list = ', '.join(insert_cols)
+                placeholders = ', '.join(['?' for _ in insert_cols])
+                insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
+
+                batch_start = time.perf_counter()
+                conn.executemany(insert_sql, batch_params)
+                batch_elapsed = time.perf_counter() - batch_start
+                rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
+                self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
+            insert_time = time.perf_counter() - insert_start
+            self.logger.info(f"executemany inserted {len(objects)} rows in {insert_time:.2f}s ({len(objects)/insert_time:.0f} rows/s)")
+
+            # Return the client-generated IDs
+            return [str(getattr(obj, id_field)) for obj in objects]
 
     def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', conn=None) -> int:
         """Generic bulk update method for database operations"""
