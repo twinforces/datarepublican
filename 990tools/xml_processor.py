@@ -12,7 +12,6 @@ import threading
 from io import BytesIO
 from typing import Optional, List, Tuple, Dict, Any
 from lxml import etree  # type: ignore
-from lxml import etree
 
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
@@ -426,23 +425,21 @@ class XMLProducer:
         contractors = []
         # Extract contractors from Schedule L (Independent Contractors)
         contractor_xpaths = [
-            etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
-            etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
-            etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+            XPATHS_990["contractor_elements"],
+            XPATHS_990EZ["contractor_elements"],
+            XPATHS_990PF["contractor_elements"],
         ]
 
-        for xpath in contractor_xpaths:
-            try:
-                contractor_elements = xpath(root)
-                for elem in contractor_elements:
-                    contractor = self._parse_contractor_element(elem, filer_ein, tax_year)
-                    if contractor:
-                        contractors.append(contractor)
-            except:
-                continue
+        for xpath_list in contractor_xpaths:
+            for xpath in xpath_list:
+                try:
+                    contractor_elements = xpath(root)
+                    for elem in contractor_elements:
+                        contractor = self._parse_contractor_element(elem, filer_ein, tax_year)
+                        if contractor:
+                            contractors.append(contractor)
+                except:
+                    continue
 
         return contractors
 
@@ -458,10 +455,7 @@ class XMLProducer:
         """Extract political contributions from Form 990"""
         contributions = []
         # Extract political contributions from Schedule C
-        contribution_xpaths = [
-            etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//IRS990ScheduleC/PoliticalCampaignActyGrp"),
-        ]
+        contribution_xpaths = SCHEDULE_C_XPATHS.get(form_type, [])
 
         for xpath in contribution_xpaths:
             try:
@@ -499,12 +493,7 @@ class XMLProducer:
 
         try:
             # Extract contractor name
-            name_xpaths = [
-                etree.XPath(".//irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                etree.XPath(".//BusinessName/BusinessNameLine1Txt"),
-                etree.XPath(".//irs:PersonNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                etree.XPath(".//PersonNm"),
-            ]
+            name_xpaths = COMMON_XPATHS["officer_name"]
 
             contractor_name = None
             for xpath in name_xpaths:
@@ -517,12 +506,7 @@ class XMLProducer:
                     continue
 
             # Extract compensation amount
-            amount_xpaths = [
-                etree.XPath(".//irs:CompensationAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                etree.XPath(".//CompensationAmt"),
-                etree.XPath(".//irs:TotalAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                etree.XPath(".//TotalAmt"),
-            ]
+            amount_xpaths = COMMON_XPATHS["officer_comp_value"]
 
             compensation = 0.0
             for xpath in amount_xpaths:
@@ -1259,14 +1243,7 @@ class XMLProcessor:
         """Extract contractors from Form 990"""
         contractors = []
         # Extract contractors from Schedule L (Independent Contractors)
-        contractor_xpaths = [
-            etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
-            etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
-            etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
-        ]
+        contractor_xpaths = XPATHS_990["contractor_elements"]
 
         for xpath in contractor_xpaths:
             try:
@@ -1292,10 +1269,7 @@ class XMLProcessor:
         """Extract political contributions from Form 990"""
         contributions = []
         # Extract political contributions from Schedule C
-        contribution_xpaths = [
-            etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            etree.XPath(".//IRS990ScheduleC/PoliticalCampaignActyGrp"),
-        ]
+        contribution_xpaths = SCHEDULE_C_XPATHS.get(form_type, [])
 
         for xpath in contribution_xpaths:
             try:

@@ -7,7 +7,7 @@ import csv
 import re
 import queue
 from logging.handlers import QueueHandler, QueueListener
-from lxml import etree  # type: ignore
+# etree import removed - use xpath_utils or xpaths.py for XPath operations
 import subprocess
 import signal
 import sys
@@ -23,39 +23,7 @@ from logging_utils import log_info, log_error, log_debug, log_warning, start_pro
 from models.address import Address
 
 
-NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
-ADDRESS_XPATHS = [
-    etree.XPath(".//irs:Filer/irs:USAddress/* | .//Filer/USAddress/*", namespaces=NAMESPACES),
-    etree.XPath(".//USAddress/*", namespaces=NAMESPACES),
-    etree.XPath(".//irs:Filer/irs:USAddress/irs:ZIPCd | .//Filer/USAddress/ZIPCd | .//ZIPCd", namespaces=NAMESPACES),
-]
-GRANT_XPATHS_990PF = [
-    etree.XPath(".//irs:IRS990PF/irs:SupplementaryInformationGrp/irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),
-    etree.XPath(".//irs:IRS990PF//irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),
-]
-GRANTEE_NAME_XPATHS = [
-    etree.XPath("./irs:RecipientBusinessName/irs:BusinessNameLine1Txt | .//*[local-name()='BusinessNameLine1Txt']", namespaces=NAMESPACES),
-    etree.XPath("./irs:RecipientName", namespaces=NAMESPACES),
-]
-FILER_EIN_XPATHS = [
-    etree.XPath(".//irs:Filer/irs:EIN", namespaces=NAMESPACES),
-    etree.XPath(".//Filer/EIN", namespaces=NAMESPACES),
-]
-FILER_NAME_XPATHS = [
-    etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt | .//Filer/BusinessName/BusinessNameLine1Txt", namespaces=NAMESPACES),
-    etree.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine2Txt | .//Filer/BusinessName/BusinessNameLine2Txt", namespaces=NAMESPACES),
-]
-AMOUNT_XPATHS = [
-    etree.XPath("./irs:Amt | .//*[local-name()='Amt']", namespaces=NAMESPACES),
-    etree.XPath("./irs:GrantOrContributionAmt | ./irs:ContributionAmt", namespaces=NAMESPACES),
-    etree.XPath(".//irs:TotalGrantOrContriPdDurYrAmt", namespaces=NAMESPACES),
-    etree.XPath(".//Amt", namespaces={}),
-]
-GRANTEE_ADDRESS_XPATHS = [
-    etree.XPath(".//irs:RecipientUSAddress/* | .//irs:RecipientForeignAddress/* | .//irs:RecipientForeignAddress/irs:CountryCd", namespaces=NAMESPACES),
-    etree.XPath(".//RecipientUSAddress/* | .//RecipientForeignAddress/* | .//RecipientForeignAddress/CountryCd", namespaces={}),
-    etree.XPath(".//*[local-name()='RecipientForeignAddress']/* | .//*[local-name()='CountryCd']", namespaces={}),
-]
+# XPath constants moved to xpaths.py - use from xpaths import COMMON_XPATHS, XPATHS_990, etc.
 ZIP_REGEX = re.compile(r'^\d{5}$')
 PO_BOX_REGEX = re.compile(r'P(?:\.?\s*O\.?\s*)?\bBOX\b\s*(\d+|[A-Z]\d*|[A-Z]+)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
@@ -301,13 +269,14 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         tree = etree.parse(BytesIO(xml_content), parser)
         root = tree.getroot()
         xml_ein = None
-        for xpath in FILER_EIN_XPATHS:
+        from xpaths import COMMON_XPATHS
+        for xpath in COMMON_XPATHS["filer_ein"]:
             elem = xpath(root)
             if elem and elem[0].text:
                 xml_ein = elem[0].text.strip()
                 break
         filer_name = None
-        for xpath in FILER_NAME_XPATHS:
+        for xpath in COMMON_XPATHS["filer_name"]:
             elem = xpath(root)
             if elem and elem[0].text:
                 filer_name = elem[0].text.strip()
@@ -391,7 +360,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         from xpaths import COMMON_XPATHS
 
         address_line1 = None
-        for xpath in COMMON_XPATHS["address_line1"]:
+        for xpath in COMMON_XPATHS["filer_address_line1"]:
             try:
                 result = xpath(root)
                 if result and result[0].text:
@@ -401,7 +370,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
                 continue
 
         address_line2 = None
-        for xpath in COMMON_XPATHS["address_line2"]:
+        for xpath in COMMON_XPATHS["filer_address_line2"]:
             try:
                 result = xpath(root)
                 if result and result[0].text:
@@ -411,7 +380,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
                 continue
 
         city = None
-        for xpath in COMMON_XPATHS["city"]:
+        for xpath in COMMON_XPATHS["filer_city"]:
             try:
                 result = xpath(root)
                 if result and result[0].text:
@@ -421,7 +390,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
                 continue
 
         state = None
-        for xpath in COMMON_XPATHS["state"]:
+        for xpath in COMMON_XPATHS["filer_state"]:
             try:
                 result = xpath(root)
                 if result and result[0].text:
@@ -431,7 +400,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
                 continue
 
         zip_code = None
-        for xpath in COMMON_XPATHS["zip_code"]:
+        for xpath in COMMON_XPATHS["filer_zip_code"]:
             try:
                 result = xpath(root)
                 if result and result[0].text:

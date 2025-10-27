@@ -1,7 +1,6 @@
 # parse_utils.py
 import re
 from lxml import etree as ET  # type: ignore
-from lxml import etree  # type: ignore
 from nameparser import HumanName
 from io import BytesIO
 import logging
@@ -266,12 +265,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
         log_debug(logger, "DEBUG: Starting address extraction for EIN %s in %s", filer_ein, filename)
 
     # Extract filer name for address
-    name_xpaths = [
-        ET.XPath(".//irs:ReturnHeader/irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-        ET.XPath(".//ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt"),
-        ET.XPath(".//irs:ReturnHeader/irs:Filer/irs:Name/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-        ET.XPath(".//ReturnHeader/Filer/Name/BusinessNameLine1Txt")
-    ]
+    name_xpaths = COMMON_XPATHS["filer_name_xpaths"]
 
     filer_name = "Unknown"
     for xpath in name_xpaths:
@@ -294,11 +288,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
 
     # Extract address components directly from XML using proper XPaths
     # Get individual address fields from ReturnHeader/Filer
-    address_line1_xpaths = [
-        ET.XPath(".//ReturnHeader/Filer/USAddress/AddressLine1Txt"),
-        ET.XPath(".//Filer/USAddress/AddressLine1Txt"),
-        ET.XPath(".//USAddress/AddressLine1Txt"),
-    ]
+    address_line1_xpaths = COMMON_XPATHS["filer_address_line1"]
 
     for xpath in address_line1_xpaths:
         try:
@@ -327,11 +317,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
                 log_debug(logger, "DEBUG: Error checking USAddress structure for EIN %s: %s", filer_ein, str(e))
 
     # Address line 2
-    address_line2_xpaths = [
-        ET.XPath(".//ReturnHeader/Filer/USAddress/AddressLine2Txt"),
-        ET.XPath(".//Filer/USAddress/AddressLine2Txt"),
-        ET.XPath(".//USAddress/AddressLine2Txt"),
-    ]
+    address_line2_xpaths = COMMON_XPATHS["filer_address_line2"]
 
     for xpath in address_line2_xpaths:
         try:
@@ -343,11 +329,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             continue
 
     # City
-    city_xpaths = [
-        ET.XPath(".//ReturnHeader/Filer/USAddress/CityNm"),
-        ET.XPath(".//Filer/USAddress/CityNm"),
-        ET.XPath(".//USAddress/CityNm"),
-    ]
+    city_xpaths = COMMON_XPATHS["filer_city"]
 
     for xpath in city_xpaths:
         try:
@@ -359,11 +341,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             continue
 
     # State
-    state_xpaths = [
-        ET.XPath(".//ReturnHeader/Filer/USAddress/StateAbbreviationCd"),
-        ET.XPath(".//Filer/USAddress/StateAbbreviationCd"),
-        ET.XPath(".//USAddress/StateAbbreviationCd"),
-    ]
+    state_xpaths = COMMON_XPATHS["filer_state"]
 
     for xpath in state_xpaths:
         try:
@@ -375,11 +353,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             continue
 
     # ZIP Code
-    zip_xpaths = [
-        ET.XPath(".//ReturnHeader/Filer/USAddress/ZIPCd"),
-        ET.XPath(".//Filer/USAddress/ZIPCd"),
-        ET.XPath(".//USAddress/ZIPCd"),
-    ]
+    zip_xpaths = COMMON_XPATHS["filer_zip_code"]
 
     for xpath in zip_xpaths:
         try:
@@ -415,16 +389,7 @@ def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, qu
 
     try:
         # Extract recipient name
-        name_xpaths = [
-            ET.XPath(".//irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//RecipientNm"),
-            ET.XPath(".//RecipientName"),
-            ET.XPath("irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath("irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath("RecipientNm"),
-            ET.XPath("RecipientName"),
-        ]
+        name_xpaths = COMMON_XPATHS["political_recipient_name"]
 
         recipient_name = None
         for xpath in name_xpaths:
@@ -437,16 +402,7 @@ def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, qu
                 continue
 
         # Extract amount
-        amount_xpaths = [
-            ET.XPath(".//irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//TotalDirectExpendAmt"),
-            ET.XPath(".//Amount"),
-            ET.XPath("irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath("irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath("TotalDirectExpendAmt"),
-            ET.XPath("Amount"),
-        ]
+        amount_xpaths = COMMON_XPATHS["political_amount"]
 
         amount = 0.0
         for xpath in amount_xpaths:
@@ -462,16 +418,7 @@ def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, qu
                 continue
 
         # Extract EIN if available
-        ein_xpaths = [
-            ET.XPath(".//irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//EIN"),
-            ET.XPath(".//RecipientEIN"),
-            ET.XPath("irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath("irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath("EIN"),
-            ET.XPath("RecipientEIN"),
-        ]
+        ein_xpaths = COMMON_XPATHS["political_ein"]
 
         recipient_ein = None
         for xpath in ein_xpaths:

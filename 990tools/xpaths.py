@@ -275,6 +275,14 @@ XPATHS_990 = {
     "total_assets": [
         etree.XPath(".//irs:IRS990/irs:TotalAssetsEOYAmt", namespaces=NAMESPACES),
     ],
+    "contractor_elements": [
+        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
+        etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
+        etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+    ],
 }
 
 # Grant-related XPath patterns
@@ -427,6 +435,14 @@ XPATHS_990EZ = {
     "total_assets": [
         etree.XPath(".//irs:IRS990EZ/irs:TotalAssetsEOYAmt", namespaces=NAMESPACES),
     ],
+    "contractor_elements": [
+        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
+        etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
+        etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+    ],
 }
 
 XPATHS_990PF = {
@@ -477,5 +493,13 @@ XPATHS_990PF = {
     ],
     "total_assets": [
         etree.XPath(".//irs:TotalAssetsEOYAmt", namespaces=NAMESPACES),
+    ],
+    "contractor_elements": [
+        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
+        etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
+        etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
     ],
 }

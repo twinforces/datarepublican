@@ -28,7 +28,7 @@ from typing import Optional, Tuple, List, Dict
 from datetime import datetime
 from queue import Queue
 from io import BytesIO
-from lxml import etree as ET  # type: ignore
+# etree import removed - use xpath_utils or xpaths.py for XPath operations
 
 try:
     import censusgeocode as cg
@@ -420,8 +420,9 @@ class IRS990Processor:
             self.log_debug(f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
 
             # Parse XML
-            parser = ET.XMLParser(recover=True)
-            tree = ET.parse(BytesIO(xml_content), parser)
+            from lxml import etree
+            parser = etree.XMLParser(recover=True)
+            tree = etree.parse(BytesIO(xml_content), parser)
             root = tree.getroot()
 
             # Extract basic metadata
@@ -537,7 +538,7 @@ class IRS990Processor:
         """Extract grants from Form 990"""
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(ET.tostring(root))
+        xml_content = BytesIO(etree.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
         for grant_data in grants_data:
             grant = Grant(
@@ -555,7 +556,7 @@ class IRS990Processor:
         # Similar to 990 but using EZ-specific parsing
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(ET.tostring(root))
+        xml_content = BytesIO(etree.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990EZ")
         for grant_data in grants_data:
             grant = Grant(
@@ -573,7 +574,7 @@ class IRS990Processor:
         # Similar to 990 but using PF-specific parsing
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(ET.tostring(root))
+        xml_content = BytesIO(etree.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990PF")
         for grant_data in grants_data:
             grant = Grant(
