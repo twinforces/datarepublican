@@ -1,6 +1,6 @@
 # parse_utils.py
 import re
-from lxml import etree as ET  # type: ignore
+from lxml import etree  # type: ignore
 from nameparser import HumanName
 from io import BytesIO
 import logging

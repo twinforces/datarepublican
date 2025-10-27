@@ -36,7 +36,7 @@ class PoliticalContribution(BaseModel):
                      zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this political contribution"""
         address = Address(
-            ein=None,  # Political contributions may not have EINs
+            ein="",  # Political contributions may not have EINs
             name=self.recipient,
             address_line1=address_line1,
             address_line2=address_line2,
@@ -45,7 +45,7 @@ class PoliticalContribution(BaseModel):
             zip_code=zip_code,
             zip4=zip4,
             address_type="politicalcontribution",
-            owner_id=self.political_id  # Use the integer ID for political contributions
+            owner_id=str(self.political_id) if self.political_id is not None else None  # Convert to string
         )
         return address
 

@@ -82,7 +82,7 @@ QUEUE_SIZE = 1000
 BATCH_SIZE = 100
 
 # Import XPath constants from xpaths.py
-from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF
+from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF, tostring
 
 
 class IRS990Processor:
@@ -538,7 +538,7 @@ class IRS990Processor:
         """Extract grants from Form 990"""
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(etree.tostring(root))
+        xml_content = BytesIO(tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
         for grant_data in grants_data:
             grant = Grant(
@@ -556,7 +556,7 @@ class IRS990Processor:
         # Similar to 990 but using EZ-specific parsing
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(etree.tostring(root))
+        xml_content = BytesIO(tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990EZ")
         for grant_data in grants_data:
             grant = Grant(
@@ -574,7 +574,7 @@ class IRS990Processor:
         # Similar to 990 but using PF-specific parsing
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(etree.tostring(root))
+        xml_content = BytesIO(tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990PF")
         for grant_data in grants_data:
             grant = Grant(

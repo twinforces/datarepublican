@@ -33,14 +33,14 @@ class Grant(BaseModel):
 
     def is_foreign_grant(self) -> bool:
         """Check if grant is to a foreign recipient"""
-        return self.grant_ein and (self.grant_ein.startswith('99') or self.grant_ein == '999')
+        return bool(self.grant_ein and (self.grant_ein.startswith('99') or self.grant_ein == '999'))
 
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                      zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this grant"""
         address = Address(
-            ein=self.grant_ein,
+            ein=self.grant_ein or "",
             name=self.grantee_name or "Unknown Grantee",
             address_line1=address_line1,
             address_line2=address_line2,

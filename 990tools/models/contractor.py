@@ -37,7 +37,7 @@ class Contractor(BaseModel):
                      zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this contractor"""
         address = Address(
-            ein=self.ein,
+            ein=self.ein or "",
             name=self.name,
             address_line1=address_line1,
             address_line2=address_line2,
@@ -46,7 +46,7 @@ class Contractor(BaseModel):
             zip_code=zip_code,
             zip4=zip4,
             address_type="contractor",
-            owner_id=self.contractor_id  # Use the integer ID for contractors
+            owner_id=str(self.contractor_id) if self.contractor_id is not None else None  # Convert to string
         )
         return address
 

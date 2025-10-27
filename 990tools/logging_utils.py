@@ -4,6 +4,9 @@ import logging
 import inspect
 import os
 from typing import Optional, Callable
+import sys
+from tqdm import tqdm
+from config import global_config
 
 def get_debug_info():
     """Get debug information about the caller's location, traversing up until not in 'log' or 'database' files"""
@@ -76,8 +79,11 @@ def log_warning(logger: logging.Logger, msg: str, *args, ein: Optional[str] = No
 def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items"):
     """Start progress reporting with tqdm"""
     try:
-        from tqdm import tqdm
-        return tqdm(total=total, desc=desc, unit=unit)
+          # Always show progress bar, even in quiet mode
+        # Force disable=False to ensure progress bar shows regardless of tty detection
+        # Use file=sys.stderr to ensure output goes to stderr even in non-TTY environments
+        pbar = tqdm(total=total, desc=desc, unit=unit, disable=False, file=sys.stderr)
+        return pbar
     except ImportError:
         # Fallback if tqdm not available
         return None

@@ -68,7 +68,7 @@ class Charity(BaseModel):
 
     def has_foreign_operations(self) -> bool:
         """Check if charity has foreign operations"""
-        return self.foreign_office or (self.foreign_expenses and self.foreign_expenses > 0)
+        return bool(self.foreign_office or (self.foreign_expenses and self.foreign_expenses > 0))
 
     def calculate_grift_ratio(self) -> float:
         """Calculate grift ratio (officer comp + travel + conferences) / total expenses"""
@@ -80,7 +80,7 @@ class Charity(BaseModel):
 
     def is_high_grift_risk(self) -> bool:
         """Check if charity has high grift risk indicators"""
-        return self.grift_ratio and self.grift_ratio > 10
+        return bool(self.grift_ratio and self.grift_ratio > 10)
 
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
@@ -106,10 +106,10 @@ class Charity(BaseModel):
         grant = Grant(
             filer_ein=self.ein,
             filer_name=self.filer_name or "Unknown",
-            grant_ein=grant_ein,
+            grant_ein=grant_ein or "",
             grant_amt=grant_amt,
             tax_year=self.tax_year,
-            grantee_name=grantee_name
+            grantee_name=grantee_name or ""
         )
         return grant
 

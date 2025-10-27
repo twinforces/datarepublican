@@ -24,6 +24,7 @@ from models.address import Address
 
 
 # XPath constants moved to xpaths.py - use from xpaths import COMMON_XPATHS, XPATHS_990, etc.
+from xpaths import tostring
 ZIP_REGEX = re.compile(r'^\d{5}$')
 PO_BOX_REGEX = re.compile(r'P(?:\.?\s*O\.?\s*)?\bBOX\b\s*(\d+|[A-Z]\d*|[A-Z]+)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
@@ -429,7 +430,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         colocator = address.colocator
         raw_components_str = ""
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
-        address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
+        address_snippet = tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
         if canonical_address:
             if not quiet:
                 log_error(f"parse_filer_address: SUCCESS - Created address entry for EIN {xml_ein}: canonical='{canonical_address}', city='{city}', state='{state}', zip='{zip_code}', zip4='{zip4}', po_box='{po_box}', colocator='{colocator}'")

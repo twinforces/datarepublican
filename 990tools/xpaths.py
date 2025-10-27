@@ -8,6 +8,9 @@ into a single, unified configuration to reduce duplication and improve maintaina
 
 from lxml import etree  # type: ignore
 
+# Export tostring for convenience
+tostring = etree.tostring
+
 # Common namespaces used across all forms
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 

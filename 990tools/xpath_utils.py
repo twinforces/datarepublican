@@ -1,4 +1,5 @@
 from lxml import etree  # type: ignore
+from xpaths import tostring
 from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
 quiet = False
 
