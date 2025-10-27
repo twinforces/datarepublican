@@ -28,6 +28,11 @@ def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, 
     quiet = is_quiet
     DEBUG_EINS = debug_eins if debug_eins is not None else set()
 
+# Set default logger if None
+if logger is None:
+    import logging
+    logger = logging.getLogger(__name__)
+
 # Initialize stub functions using factory functions
 stub_log_error = create_stub_log_error(logger)
 stub_log_debug = create_stub_log_debug(logger)
@@ -308,9 +313,10 @@ def parse_address_990ez(root, xml_filename, context, xpath_cache, charity=None, 
                 zip_code=zip_code
             )
         return None
+        return None
     except Exception as e:
-        if not quiet:
-            log_error(f"Failed to parse address for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}: {str(e)}")
+        if not quiet and log_error is not None:
+            log_error("Failed to parse address for EIN %s in %s: %s", context.get('filer_ein', 'Unknown'), xml_filename, str(e))
         return None
 
 def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None):
@@ -432,16 +438,17 @@ def parse_990ez(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     address = parse_address_990ez(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
     # Debug logging for address components
-    if address and not quiet and log_debug is not None:
-        log_debug(f"DEBUG: Address parsed for EIN {address.ein}: line1='{address.address_line1}', line2='{address.address_line2}', city='{address.city}', state='{address.state}', zip='{address.zip_code}', po_box='{address.po_box}', canonical='{address.canonical_address}'")
-    elif not quiet and log_debug is not None:
-        log_debug(f"DEBUG: No address parsed for EIN {context.get('filer_ein', 'Unknown')} in file {xml_filename}")
+    if address and not quiet and log_debug is not None and logger is not None:
+        log_debug(logger, "DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', po_box='%s', canonical='%s'",
+                  address.ein, address.address_line1, address.address_line2, address.city, address.state, address.zip_code, address.po_box, address.canonical_address)
+    elif not quiet and log_debug is not None and logger is not None:
+        log_debug(logger, "DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename)
 
     # Parse grants, contractors, and political contributions
     grants, contractors, contributions = parse_related_entities_990ez(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
-    if not quiet and log_debug is not None:
-        log_debug(f"TRACE: parse_990ez() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '{charity.ein}' in file {xml_filename}", ein=charity.ein)
+    if not quiet and log_debug is not None and logger is not None:
+        log_debug(logger, "TRACE: parse_990ez() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s", charity.ein, xml_filename)
     return charity, officers, grants, contractors, contributions, address
 
 def parse_related_entities_990ez(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
@@ -467,7 +474,7 @@ def parse_related_entities_990ez(root, xml_filename, context, xpath_cache, log_e
                 ein_result = ein_xpath(grant_elem)
                 if ein_result:
                     raw_ein = ein_result[0].text.strip()
-                    if raw_ein.isdigit():
+                    if raw_ein and raw_ein.isdigit():
                         grant_ein = f"{int(raw_ein):09d}"
                     break
             except:
@@ -507,7 +514,7 @@ def parse_related_entities_990ez(root, xml_filename, context, xpath_cache, log_e
                 grant_ein=grant_ein,
                 grant_amt=grant_amount,
                 tax_year=context["tax_year"],
-                grantee_name=grant_name
+                grantee_name=grant_name or "Unknown"
             )
             grants.append(grant)
 
@@ -619,10 +626,10 @@ def main():
 
     logger = get_logger(__name__)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    p_log_error = partial(log_error, logger)
-    p_log_debug = partial(log_debug, logger)
-    p_log_info = partial(log_info, logger)
-    p_log_warning = partial(log_warning, logger)
+    p_log_error = partial(log_error, logger) if log_error is not None else None
+    p_log_debug = partial(log_debug, logger) if log_debug is not None else None
+    p_log_info = partial(log_info, logger) if log_info is not None else None
+    p_log_warning = partial(log_warning, logger) if log_warning is not None else None
     set_logger(logger, p_log_error, p_log_debug, is_verbose=False, is_quiet=False, debug_eins=None)
 
     charity, officers, grants, contractors, contributions, address = parse_990ez(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)

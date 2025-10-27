@@ -710,7 +710,7 @@ class IRS990Processor:
 
                 except Exception as e:
                     error_count += 1
-                    if not self.quiet:
+                    if not global_config.is_quiet():
                         self.log_error(f"XML processing failed for {filename}: {e}")
 
         except Exception as e:

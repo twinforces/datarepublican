@@ -103,16 +103,16 @@ def get_logger(name: str) -> logging.Logger:
 
 def create_stub_log_error(logger: logging.Logger) -> Callable:
     """Factory function to create stub_log_error function"""
-    def stub_log_error(msg_format, *args, ein=None, exc_info=False):
+    def stub_log_error(logger_arg, msg, *args, ein=None, exc_info=False):
         """Fallback stub that uses proper logging with location info"""
-        effective_logger = get_logger(__name__) if logger is None else logger
-        log_error(effective_logger, msg_format.format(*args) if args else msg_format, ein=ein, exc_info=exc_info)
+        effective_logger = get_logger(__name__) if logger_arg is None else logger_arg
+        log_error(effective_logger, msg, *args, ein=ein, exc_info=exc_info)
     return stub_log_error
 
 def create_stub_log_debug(logger: logging.Logger) -> Callable:
     """Factory function to create stub_log_debug function"""
-    def stub_log_debug(msg_format, *args, ein=None, exc_info=False):
+    def stub_log_debug(logger_arg, msg, *args, ein=None, exc_info=False):
         """Fallback stub that uses proper logging with location info"""
-        effective_logger = get_logger(__name__) if logger is None else logger
-        log_debug(effective_logger, msg_format.format(*args) if args else msg_format, ein=ein, exc_info=exc_info)
+        effective_logger = get_logger(__name__) if logger_arg is None else logger_arg
+        log_debug(effective_logger, msg, *args, ein=ein, exc_info=exc_info)
     return stub_log_debug

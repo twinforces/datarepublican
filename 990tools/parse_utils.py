@@ -111,7 +111,7 @@ def parse_float_field(text):
 
     return 0.0
 
-def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, known_eins, form_type: str, backfill_entries=None, seen_backfill_keys=None) -> List[Dict[str, Any]]:
+def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, known_eins, form_type: str, backfill_entries=None, seen_backfill_keys=None, log_error=None) -> List[Dict[str, Any]]:
     grants = []
     try:
         parser = etree.XMLParser(recover=True)
@@ -143,13 +143,11 @@ def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str
                             # Create foreign address using factory method
                             foreign_addr = Address.create_foreign_address(
                                 country_code=country_code,
-                                ein=f"foreign_{country_code}",
-                                name=f"Foreign: {country_code}",
                                 address_type="grant"
                             )
                             # Use the EIN from the foreign address for grant processing
-                            grant_ein = foreign_addr.state  # This will be the country code
-                            grantee_name = foreign_addr.address_line1  # This will be "Foreign: {country_name}"
+                            grant_ein = foreign_addr.ein  # This will be the country number
+                            grantee_name = foreign_addr.name  # This will be the country name
                         else:
                             grant_ein = "999"
                             grantee_name = "Foreign_Unknown"
@@ -264,8 +262,8 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
     from models.address import Address
     from logging_utils import log_debug, log_info
 
-    if not quiet:
-        log_debug(logger, f"DEBUG: Starting address extraction for EIN {filer_ein} in {filename}")
+    if not quiet and logger is not None and log_debug is not None:
+        log_debug(logger, "DEBUG: Starting address extraction for EIN %s in %s", filer_ein, filename)
 
     # Extract filer name for address
     name_xpaths = [
@@ -281,8 +279,8 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             result = xpath(root)
             if result and result[0].text:
                 filer_name = result[0].text.strip()
-                if not quiet:
-                    log_debug(logger, f"DEBUG: Found filer name: '{filer_name}' for EIN {filer_ein}")
+                if not quiet and logger is not None and log_debug is not None:
+                    log_debug(logger, "DEBUG: Found filer name: '%s' for EIN %s", filer_name, filer_ein)
                 break
         except:
             continue
@@ -307,8 +305,8 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             result = xpath(root)
             if result and result[0].text:
                 address.address_line1 = result[0].text.strip()
-                if not quiet:
-                    log_debug(logger, f"DEBUG: Found address_line1: '{address.address_line1}' for EIN {filer_ein} using xpath {xpath.path}")
+                if not quiet and logger is not None and log_debug is not None:
+                    log_debug(logger, "DEBUG: Found address_line1: '%s' for EIN %s using xpath %s", address.address_line1, filer_ein, xpath.path)
                 break
         except:
             continue
@@ -318,14 +316,15 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
         # Try to find any USAddress elements and log their structure
         try:
             us_addresses = root.xpath(".//USAddress", namespaces={})
-            if us_addresses:
-                log_debug(logger, f"DEBUG: Found {len(us_addresses)} USAddress elements for EIN {filer_ein}")
+            if us_addresses and logger is not None and log_debug is not None:
+                log_debug(logger, "DEBUG: Found %d USAddress elements for EIN %s", len(us_addresses), filer_ein)
                 for i, addr_elem in enumerate(us_addresses[:1]):  # Just log first one
-                    log_debug(logger, f"DEBUG: USAddress {i} content: {ET.tostring(addr_elem, encoding='unicode')[:500]}...")
-            else:
-                log_debug(logger, f"DEBUG: No USAddress elements found for EIN {filer_ein}")
+                    log_debug(logger, "DEBUG: USAddress %d content: %s...", i, ET.tostring(addr_elem, encoding='unicode')[:500])
+            elif logger is not None and log_debug is not None:
+                log_debug(logger, "DEBUG: No USAddress elements found for EIN %s", filer_ein)
         except Exception as e:
-            log_debug(logger, f"DEBUG: Error checking USAddress structure for EIN {filer_ein}: {e}")
+            if logger is not None and log_debug is not None:
+                log_debug(logger, "DEBUG: Error checking USAddress structure for EIN %s: %s", filer_ein, str(e))
 
     # Address line 2
     address_line2_xpaths = [
@@ -391,21 +390,21 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
         except:
             continue
 
-    if not quiet:
-        log_debug(logger, f"DEBUG: About to call prep_for_insert for EIN {filer_ein}, address_line1='{address.address_line1}', city='{address.city}', state='{address.state}', zip='{address.zip_code}'")
+    if not quiet and logger is not None and log_debug is not None:
+        log_debug(logger, "DEBUG: About to call prep_for_insert for EIN %s, address_line1='%s', city='%s', state='%s', zip='%s'", filer_ein, address.address_line1, address.city, address.state, address.zip_code)
 
     address.prep_for_insert()
 
-    if not quiet:
-        log_debug(logger, f"DEBUG: After prep_for_insert for EIN {filer_ein}: canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+    if not quiet and logger is not None and log_debug is not None:
+        log_debug(logger, "DEBUG: After prep_for_insert for EIN %s: canonical_address='%s', po_box='%s', colocator='%s'", filer_ein, address.canonical_address, address.po_box, address.colocator)
 
     if address.canonical_address:
-        if not quiet:
-            log_info(logger, f"DEBUG: Created Address object - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+        if not quiet and logger is not None and log_info is not None:
+            log_info(logger, "DEBUG: Created Address object - canonical_address='%s', po_box='%s', colocator='%s'", address.canonical_address, address.po_box, address.colocator)
         return address
     else:
-        if not quiet:
-            log_info(logger, f"DEBUG: No canonical_address created - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+        if not quiet and logger is not None and log_info is not None:
+            log_info(logger, "DEBUG: No canonical_address created - canonical_address='%s', po_box='%s', colocator='%s'", address.canonical_address, address.po_box, address.colocator)
         return None
 
 
@@ -480,7 +479,7 @@ def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, qu
                 result = xpath(elem)
                 if result and result[0].text:
                     raw_ein = result[0].text.strip()
-                    if raw_ein.isdigit():
+                    if raw_ein and raw_ein.isdigit():
                         recipient_ein = f"{int(raw_ein):09d}"
                         break
             except:
@@ -496,7 +495,8 @@ def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, qu
             return contribution
 
     except Exception as e:
-        if not quiet:
-            log_error(logger, f"Error parsing political contribution element: {e}")
+        if not quiet and log_error is not None and logger is not None:
+            log_error(logger, "Error parsing political contribution element: %s", str(e))
+        return None
 
     return None
