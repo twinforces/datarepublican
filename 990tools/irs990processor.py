@@ -680,6 +680,12 @@ class IRS990Processor:
             xml_files = self._get_xml_files_to_process()
             self.log_info(f"Found {len(xml_files)} unprocessed XML files")
 
+            # Set up progress bar for profiling
+            from logging_utils import start_progress_reporting
+            progress_unit = "file" if global_config.progress == "files" else "B"
+            progress_desc = "Profiling XML files" if global_config.progress == "files" else "XML bytes"
+            pbar = start_progress_reporting(total=len(xml_files), desc=progress_desc, unit=progress_unit)
+
             # Process files for exactly target_duration seconds
             for xml_file_tuple in xml_files:
                 xml_id, zip_id, filename, internal_path = xml_file_tuple
@@ -706,6 +712,8 @@ class IRS990Processor:
                             WHERE xml_id = ?
                         """, (CURRENT_PROCESSING_VERSION, "success", xml_id))
                         self.db_conn.commit()
+                        # Update progress bar
+                        pbar.update(1)
                     else:
                         error_count += 1
 
@@ -724,6 +732,9 @@ class IRS990Processor:
 
         # Stop profiling
         profiler.disable()
+
+        # Close progress bar
+        pbar.close()
 
         # Calculate metrics
         processing_rate = processed_files / execution_time if execution_time > 0 else 0
