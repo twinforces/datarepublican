@@ -81,6 +81,7 @@ def profile_pipeline():
             try:
                 # Process single XML file
                 result = processor._process_single_xml(xml_id, zip_path, filename, internal_path)
+                # Note: This method expects zip_path as a file path string, not zip_id
                 if result:
                     processed_files += 1
                     # Mark as processed

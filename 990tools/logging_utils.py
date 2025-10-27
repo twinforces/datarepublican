@@ -1,44 +1,77 @@
 # logging_utils.py - Enhanced logging utilities
 
 import logging
+import inspect
+import os
 from typing import Optional, Callable
+
+def get_debug_info():
+    """Get debug information about the caller's location, traversing up until not in 'log' or 'database' files"""
+    frame = inspect.currentframe()
+    if frame is None:
+        return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
+
+    # Traverse up the stack until we're not in a file with 'log' or 'database' in the name
+    while frame:
+        filename = frame.f_code.co_filename
+        if 'log' not in filename.lower() and 'database' not in filename.lower():
+            break
+        frame = frame.f_back
+
+    if frame is None:
+        return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
+
+    filename = os.path.basename(frame.f_code.co_filename) if frame.f_code.co_filename != '<string>' else '<interactive>'
+    return {
+        'file': filename,
+        'line': frame.f_lineno,
+        'function': frame.f_code.co_name
+    }
 
 # Enhanced logging functions with progress reporting integration
 def log_info(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, **kwargs):
-    """Log info message with optional EIN context"""
+    """Log info message with optional EIN context and debug info"""
     if not logger.isEnabledFor(logging.INFO):
         return
+    debug_info = get_debug_info()
+    debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
     if ein:
-        logger.info(f"[EIN:{ein}] {msg}", *args, **kwargs)
+        logger.info(f"{debug_prefix}[EIN:{ein}] {msg}", *args, **kwargs)
     else:
-        logger.info(msg, *args, **kwargs)
+        logger.info(f"{debug_prefix}{msg}", *args, **kwargs)
 
 def log_error(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False, **kwargs):
-    """Log error message with optional EIN context - always shown even in quiet mode"""
+    """Log error message with optional EIN context and debug info - always shown even in quiet mode"""
     if not logger.isEnabledFor(logging.ERROR):
         return
+    debug_info = get_debug_info()
+    debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
     if ein:
-        logger.error(f"[EIN:{ein}] {msg}", *args, exc_info=exc_info, **kwargs)
+        logger.error(f"{debug_prefix}[EIN:{ein}] {msg}", *args, exc_info=exc_info, **kwargs)
     else:
-        logger.error(msg, *args, exc_info=exc_info, **kwargs)
+        logger.error(f"{debug_prefix}{msg}", *args, exc_info=exc_info, **kwargs)
 
 def log_debug(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, **kwargs) -> None:
-    """Log debug message with optional EIN context"""
+    """Log debug message with optional EIN context and debug info"""
     if not logger.isEnabledFor(logging.DEBUG):
         return
+    debug_info = get_debug_info()
+    debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
     if ein:
-        logger.debug(f"[EIN:{ein}] {msg}", *args, **kwargs)
+        logger.debug(f"{debug_prefix}[EIN:{ein}] {msg}", *args, **kwargs)
     else:
-        logger.debug(msg, *args, **kwargs)
+        logger.debug(f"{debug_prefix}{msg}", *args, **kwargs)
         
 def log_warning(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, **kwargs):
-    """Log warning message with optional EIN context - always shown even in quiet mode"""
+    """Log warning message with optional EIN context and debug info - always shown even in quiet mode"""
     if not logger.isEnabledFor(logging.WARNING):
         return
+    debug_info = get_debug_info()
+    debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
     if ein:
-        logger.warning(f"[EIN:{ein}] {msg}", *args, **kwargs)
+        logger.warning(f"{debug_prefix}[EIN:{ein}] {msg}", *args, **kwargs)
     else:
-        logger.warning(msg, *args, **kwargs)
+        logger.warning(f"{debug_prefix}{msg}", *args, **kwargs)
 
 def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False):
     """Start progress reporting with tqdm"""

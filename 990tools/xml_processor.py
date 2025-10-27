@@ -22,9 +22,10 @@ import parse_990ez
 import parse_990pf
 from logging_utils import log_info, log_error, log_debug, log_warning
 from typing import Optional, List, Tuple
+from config import global_config
 
 # Import XPath configurations from xpaths.py
-from xpaths import COMMON_XPATHS
+from xpaths import COMMON_XPATHS, XPATHS_990, XPATHS_990EZ, XPATHS_990PF
 
 
 class XMLProducer:
@@ -49,7 +50,7 @@ class XMLProducer:
         self.db_ops = db_ops
         self.processing_version = processing_version
         self.logger = logging.getLogger(__name__)
-        self.quiet = quiet
+        self.quiet = quiet or global_config.is_quiet()
 
     def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, List[DatabaseOperation]]:
         """
@@ -60,7 +61,7 @@ class XMLProducer:
 
         Args:
             xml_id: XML file ID
-            zip_id: ZIP file ID containing the XML
+            zip_id: ZIP file ID containing the XML (UUID string)
             filename: XML filename
             internal_path: Path within ZIP file
             file_size: Size of XML file in bytes
@@ -68,6 +69,10 @@ class XMLProducer:
         Returns:
             Tuple of (success: bool, operations: List[DatabaseOperation])
         """
+        # Validate that zip_id is a UUID string, not a file path
+        if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
+            raise ValueError(f"zip_id parameter contains file path instead of UUID: {zip_id}")
+
         success, operations = self._process_single_xml(xml_id, zip_id, filename, internal_path)
 
         # Add XML file update operation at the end
@@ -99,7 +104,7 @@ class XMLProducer:
 
         Args:
             xml_id: XML file ID
-            zip_id: ZIP file ID
+            zip_id: ZIP file ID (UUID string)
             filename: XML filename
             internal_path: Path within ZIP
 
@@ -111,13 +116,16 @@ class XMLProducer:
             if not self.quiet:
                 log_debug(self.logger, f"Processing XML {filename} (ID: {xml_id})")
 
-            # Get ZIP file path from database
-            zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,)).fetchone()
-            if not zip_result:
+            # Validate zip_id is not a file path
+            if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
+                raise ValueError(f"zip_id parameter contains file path instead of UUID: {zip_id}")
+
+            # Get ZIP file path from cache
+            zip_path = self.db_ops.get_zip_file_path(zip_id)
+            if not zip_path:
                 if not self.quiet:
                     log_error(self.logger, f"No ZIP file found for xml_id {xml_id}")
                 return False, operations
-            zip_path = zip_result[0]
 
             # Extract XML content from ZIP using cached connection
             xml_content = self._extract_xml_from_zip(zip_path, internal_path)
@@ -160,7 +168,7 @@ class XMLProducer:
                 charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
             else:
                 if not self.quiet:
-                    log_error(self.logger, f"Unsupported form type {form_type} in {filename}")
+                    log_info(self.logger, f"Unsupported form type {form_type} in {filename}")
                 return False, operations
 
             # Collect database operations instead of executing them
@@ -235,7 +243,7 @@ class XMLProducer:
     # XMLProducer methods (shared implementation)
     def _extract_form_type(self, root) -> str:
         """Extract form type from XML"""
-        for xpath in FORM_TYPE_XPATHS:
+        for xpath in COMMON_XPATHS["form_type"]:
             try:
                 result = xpath(root)
                 if result:
@@ -246,7 +254,7 @@ class XMLProducer:
 
     def _extract_tax_year(self, root) -> int:
         """Extract tax year from XML"""
-        for xpath in TAX_YEAR_XPATHS:
+        for xpath in COMMON_XPATHS["tax_year"]:
             try:
                 result = xpath(root)
                 if result:
@@ -259,7 +267,7 @@ class XMLProducer:
 
     def _extract_filer_ein(self, root) -> str:
         """Extract filer EIN from XML"""
-        for xpath in FILER_EIN_XPATHS:
+        for xpath in COMMON_XPATHS["filer_ein"]:
             try:
                 result = xpath(root)
                 if result:
@@ -590,7 +598,7 @@ class XMLConsumer:
     def __init__(self, db_ops: DatabaseOperations, quiet: bool = False):
         self.db_ops = db_ops
         self.logger = logging.getLogger(__name__)
-        self.quiet = quiet
+        self.quiet = quiet or global_config.is_quiet()
 
     def execute_operations_batch(self, operations: List[DatabaseOperation]) -> None:
         """
@@ -837,11 +845,11 @@ class XMLProcessor:
         self.db_ops = db_ops
         self.processing_version = processing_version
         self.logger = logging.getLogger(__name__)
-        self.quiet = quiet
+        self.quiet = quiet or global_config.is_quiet()
 
         # Create producer and consumer instances
-        self.producer = XMLProducer(db_ops, processing_version, quiet)
-        self.consumer = XMLConsumer(db_ops, quiet)
+        self.producer = XMLProducer(db_ops, processing_version, self.quiet)
+        self.consumer = XMLConsumer(db_ops, self.quiet)
 
     def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, List[DatabaseOperation]]:
         """
@@ -850,6 +858,10 @@ class XMLProcessor:
         This method is maintained for backward compatibility.
         New code should use XMLProducer and XMLConsumer classes directly.
         """
+        # Validate that zip_id is a UUID string, not a file path
+        if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
+            raise ValueError(f"zip_id parameter contains file path instead of UUID: {zip_id}")
+
         return self.producer.process_single_xml_for_operations(xml_id, zip_id, filename, internal_path, file_size)
 
 
@@ -874,13 +886,12 @@ class XMLProcessor:
             # Check if this XML file has already been processed by looking for existing charity data
             # We need to extract EIN and tax_year first to check
             try:
-                # Get ZIP file path from database
-                zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (xml_file.zip_id,)).fetchone()
-                if not zip_result:
+                # Get ZIP file path from cache
+                zip_path = self.db_ops.get_zip_file_path(xml_file.zip_id)
+                if not zip_path:
                     if not self.quiet:
                         log_error(self.logger, f"No ZIP file found for xml_id {xml_file.xml_id}")
                     continue
-                zip_path = zip_result[0]
 
                 # Extract XML content from ZIP using cached connection
                 xml_content = self._extract_xml_from_zip(zip_path, xml_file.internal_path)
@@ -965,13 +976,16 @@ class XMLProcessor:
             if not self.quiet:
                 log_debug(self.logger, f"Processing XML {filename} (ID: {xml_id})")
 
-            # Get ZIP file path from database
-            zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,)).fetchone()
-            if not zip_result:
+            # Validate zip_id is not a file path
+            if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
+                raise ValueError(f"zip_id parameter contains file path instead of UUID: {zip_id}")
+
+            # Get ZIP file path from cache
+            zip_path = self.db_ops.get_zip_file_path(zip_id)
+            if not zip_path:
                 if not self.quiet:
                     log_error(self.logger, f"No ZIP file found for xml_id {xml_id}")
                 return False, operations
-            zip_path = zip_result[0]
 
             # Extract XML content from ZIP using cached connection
             xml_content = self._extract_xml_from_zip(zip_path, internal_path)

@@ -136,7 +136,7 @@ class Charity(BaseModel):
 
     def prep_for_insert(self):
         """Prepare the record for database insertion"""
-        print(f"#### Charity prep_for_insert: xml_name={self.xml_name} (type: {type(self.xml_name)})")
+        #print(f"#### Charity prep_for_insert: xml_name={self.xml_name} (type: {type(self.xml_name)})")
         super().prep_for_insert()
         pass
 

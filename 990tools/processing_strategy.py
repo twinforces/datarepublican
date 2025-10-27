@@ -38,7 +38,7 @@ class ProcessingStrategy(ABC):
     def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
         self.db_ops = db_ops
         self.logger = logger
-        self.quiet = quiet
+        self.quiet = quiet or global_config.is_quiet()
 
     @abstractmethod
     def execute(self, *args, **kwargs) -> Any:
@@ -96,8 +96,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         self.shutdown_event = threading.Event()  # Event for clean shutdown signaling
 
         # Create producer and consumer instances with clear separation
-        self.producer = XMLProducer(db_ops, 1, quiet)  # Producer: collects operations
-        self.consumer = XMLConsumer(db_ops, quiet)     # Consumer: executes operations
+        self.producer = XMLProducer(db_ops, 1, self.quiet)  # Producer: collects operations
+        self.consumer = XMLConsumer(db_ops, self.quiet)     # Consumer: executes operations
 
         # Set up SIGUSR1 handler for thread stack dumps
         signal.signal(signal.SIGUSR1, self.dump_threads_handler)
@@ -207,19 +207,19 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
             xml_file = xml_files[i]
             xml_id = xml_file.xml_id
-            # Get the zip path from the database using zip_id
-            zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (xml_file.zip_id,)).fetchone()
-            if not zip_result:
+            zip_id = xml_file.zip_id
+            # Get the zip path from cache
+            path = self.db_ops.get_zip_file_path(zip_id)
+            if not path:
                 self.log_error(f"No ZIP file found for xml_id {xml_id}")
                 continue
-            path = zip_result[0]
             filename = xml_file.filename
             internal = xml_file.internal_path
             file_size = xml_file.file_size
             try:
                 self.log_debug(f"Producer {producer_id} processing XML {filename} (ID: {xml_id})")
                 # PRODUCER: Use XMLProducer to parse XML and collect operations (NO database writes)
-                success, operations = self.producer.process_single_xml_for_operations(xml_id, path, filename, internal, file_size)
+                success, operations = self.producer.process_single_xml_for_operations(xml_id, zip_id, filename, internal, file_size)
                 self.log_debug(f"Producer {producer_id} completed processing XML {filename}, got {len(operations)} operations")
 
                 # Send operations to queue

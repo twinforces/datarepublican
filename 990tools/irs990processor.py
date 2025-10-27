@@ -410,6 +410,10 @@ class IRS990Processor:
         try:
             self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
 
+            # Validate zip_path is actually a file path, not a UUID
+            if zip_path and isinstance(zip_path, str) and not ('/' in zip_path or '\\' in zip_path):
+                raise ValueError(f"zip_path parameter contains UUID instead of file path: {zip_path}")
+
             # Extract XML content from ZIP using cached connection
             xml_content = self._extract_xml_from_zip_cached(zip_path, internal_path)
 
@@ -684,14 +688,11 @@ class IRS990Processor:
 
                 total_files_attempted += 1
 
-                # Get ZIP file path
-                zip_result = self.db_conn.execute("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (zip_id,))
-                zip_path_result = zip_result.fetchone()
-                if not zip_path_result:
+                # Get ZIP file path from cache
+                zip_path = self.db_ops.get_zip_file_path(zip_id)
+                if not zip_path:
                     error_count += 1
                     continue
-
-                zip_path = zip_path_result[0]
 
                 try:
                     # Process single XML file

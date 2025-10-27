@@ -69,6 +69,10 @@ class DatabaseOperations:
     # Thread-local storage for database connections
     _local = threading.local()
 
+    # Static cache for zip_id -> file_path mapping - preloaded at startup
+    _zip_path_cache: Dict[str, str] = {}
+    _zip_cache_lock = threading.RLock()  # Reentrant lock for thread safety
+
     @staticmethod
     def generate_uuid_v7() -> str:
         """Generate a UUID v7 (time-ordered) - now delegates to uuid7 module"""
@@ -95,6 +99,7 @@ class DatabaseOperations:
         self.dbUI = dbUI
         self.logger = get_logger(__name__)
         self._init_connection()
+        self._preload_zip_file_cache()
 
     def _init_connection(self):
         """Initialize DuckDB connection and schema"""
@@ -149,6 +154,29 @@ class DatabaseOperations:
             except Exception as e:
                 print(f"Failed to start database UI: {e}")
                 print("Continuing without UI...")
+
+    def _preload_zip_file_cache(self):
+        """Preload all zip_id -> file_path mappings into the static cache at startup"""
+        with DatabaseOperations._zip_cache_lock:
+            if DatabaseOperations._zip_path_cache:
+                # Already preloaded
+                return
+
+            try:
+                self.logger.info("Preloading zip path cache...")
+                # Query all ZipFile records from database
+                zip_files = self.select_dataclass(ZipFile, order_by="zip_id")
+                self.logger.info(f"Loaded {len(zip_files)} ZipFile objects from database")
+
+                # Populate the cache with zip_id -> file_path mappings
+                for zip_file in zip_files:
+                    DatabaseOperations._zip_path_cache[zip_file.zip_id] = zip_file.file_path
+
+                self.logger.info(f"Zip path cache preloaded with {len(DatabaseOperations._zip_path_cache)} entries")
+
+            except Exception as e:
+                self.logger.error(f"Failed to preload zip path cache: {e}")
+                # Continue without cache - operations will fall back to database queries
 
     def _init_schema(self):
         """Initialize database schema if not already present"""
@@ -366,7 +394,12 @@ class DatabaseOperations:
     def insert_zip_file(self, zip_file: ZipFile) -> str:
         """Insert ZipFile into database using generic bulk_insert method"""
         ids = self.bulk_insert([zip_file])
-        return ids[0] if ids else ""
+        zip_id = ids[0] if ids else ""
+        # Update cache if insertion successful
+        if zip_id:
+            with DatabaseOperations._zip_cache_lock:
+                DatabaseOperations._zip_path_cache[zip_id] = zip_file.file_path
+        return zip_id
 
     def update_zip_status(self, zip_id: str, status: str):
         """Update ZIP file processing status"""
@@ -374,7 +407,33 @@ class DatabaseOperations:
             UPDATE ZipFiles SET status = ?, processed_date = ?
             WHERE zip_id = ?
         """, (status, datetime.now().isoformat(), zip_id))
+        # No need to update path cache for status changes
         self.commit()
+
+    def get_zip_file(self, zip_id: str) -> Optional[ZipFile]:
+        """Get ZipFile from database (no longer cached)"""
+        # Fallback to database query
+        zip_files = self.select_dataclass(ZipFile, where_clause="zip_id = ?", params=(zip_id,))
+        if zip_files:
+            return zip_files[0]
+        return None
+
+    def get_zip_file_path(self, zip_id: str) -> Optional[str]:
+        """Get ZIP file path from cache"""
+        with DatabaseOperations._zip_cache_lock:
+            # Try direct lookup first
+            if zip_id in DatabaseOperations._zip_path_cache:
+                return DatabaseOperations._zip_path_cache[zip_id]
+
+        # Fallback to database query if not in cache
+        zip_files = self.select_dataclass(ZipFile, where_clause="zip_id = ?", params=(zip_id,))
+        if zip_files:
+            zip_file = zip_files[0]
+            # Cache the result for future use
+            with DatabaseOperations._zip_cache_lock:
+                DatabaseOperations._zip_path_cache[zip_file.zip_id] = zip_file.file_path
+            return zip_file.file_path
+        return None
 
     # XMLFile operations
     def insert_xml_file(self, xml_file: XMLFile) -> str:
