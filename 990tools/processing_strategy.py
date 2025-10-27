@@ -17,52 +17,18 @@ import threading
 import queue
 from pathlib import Path
 from io import BytesIO
-from lxml import etree as ET
-from lxml import etree
+from lxml import etree as ET  # type: ignore
+from lxml import etree  # type: ignore
 from dataclasses import fields
 import zipfile
 from threading import Lock
 from enum import Enum
 from uuid import UUID
 
-from database_operations import DatabaseOperations
-from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
-from parse_990 import parse_990
-from parse_990ez import parse_990ez
-from parse_990pf import parse_990pf
-from parse_utils import parse_grants
-from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF
-from geolocation_processor import GeolocationProcessor
-from address_matcher import AddressMatcher
-from constants import VALID_STATES, CURRENT_PROCESSING_VERSION
-from zip_processor import ZipProcessor
+from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
-
-
-class DatabaseOperationType(Enum):
-    """Enumeration of database operation types for flexible processing"""
-    INSERT_CHARITY = "insert_charity"
-    INSERT_OFFICER = "insert_officer"
-    INSERT_GRANT = "insert_grant"
-    INSERT_CONTRACTOR = "insert_contractor"
-    INSERT_POLITICAL_CONTRIBUTION = "insert_political_contribution"
-    INSERT_ADDRESS = "insert_address"
-    UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
-    UPDATE_XML_FILE_ERROR = "update_xml_file_error"
-    XML_FILE_UPDATE = "xml_file_update"
-    OPTIMIZE_DATABASE = "optimize_database"
-
-
-class DatabaseOperation:
-    """Represents a single database operation with its data and dependencies"""
-
-    def __init__(self, operation_type: DatabaseOperationType, data: Any, xml_id: int = None,
-                 dependencies: Optional[List[str]] = None):
-        self.operation_type = operation_type
-        self.data = data
-        self.xml_id = xml_id
-        self.dependencies = dependencies or []  # List of operation types this depends on
+from models import Address
 
 
 class ProcessingStrategy(ABC):
@@ -117,38 +83,32 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         super().__init__(db_ops, logger, global_config.is_quiet())
         self.workers = workers
         self.total_processed_xml = 0  # Counter for total processed XML files
+        self.shutdown_event = threading.Event()  # Event for clean shutdown signaling
         # Set up SIGUSR1 handler for thread stack dumps
         signal.signal(signal.SIGUSR1, self.dump_threads_handler)
 
     # Lock-free queue implementation for single-file processing
 
-    def _get_xml_files_to_process(self) -> List[Tuple]:
-        """Get list of XML files to process from database"""
-        result = self.db_ops.execute_query("""
-            SELECT xf.xml_id, zf.file_path, xf.filename, xf.internal_path, xf.file_size
-            FROM XmlFiles xf
-            JOIN ZipFiles zf ON xf.zip_id = zf.zip_id
-            WHERE xf.processed = FALSE
-            ORDER BY xf.xml_id
-        """)
-        return result.fetchall()
+    # Removed _get_xml_files_to_process - now using XMLFile.get_xml_files_to_process()
 
     def execute(self, max_files: Optional[int] = None) -> int:
         """Process XML files using producer-consumer pattern with thread-safe queues"""
         # Set up signal handlers for graceful shutdown and thread debugging
         def interrupt_handler(signum, frame):
             self.log_error("Received interrupt signal, shutting down gracefully...")
+            self.shutdown_event.set()  # Signal threads to shutdown
             try:
                 from logging_utils import stop_progress_reporting
                 stop_progress_reporting()
             except:
                 pass
-            sys.exit(1)
 
         signal.signal(signal.SIGINT, interrupt_handler)
 
-        xml_files = self._get_xml_files_to_process()
-        if max_files:
+        # Use batch size as limit to get fresh batch each time
+        batch_limit = self.BATCH_SIZE if max_files is None else min(max_files, self.BATCH_SIZE)
+        xml_files = self.db_ops.get_xml_files_to_process(processing_version=1, max_files=max_files)
+        if max_files and len(xml_files) > max_files:
             xml_files = xml_files[:max_files]
         if not xml_files:
             return 0
@@ -182,43 +142,94 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             t.start()
 
         # Wait for producers to finish (parse-heavy operations)
+        self.log_info("Waiting for producer threads to complete...")
         for i, t in enumerate(producer_threads):
+            self.log_debug(f"Waiting for producer {i} to join...")
             t.join(timeout=300.0)  # Increased timeout to 5 minutes for large XML files
             if t.is_alive():
-                self.log_info(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
+                self.log_error(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
                 # Don't kill the thread, let it continue in background
             else:
                 self.log_info(f"Producer {i} done")
 
         # Drain queue and wait for consumer
+        self.log_info("Draining XML queue...")
         xml_queue.join()
+        self.log_info("XML queue drained, waiting for consumer thread...")
         consumer_thread.join(timeout=30.0)
         if consumer_thread.is_alive():
             self.log_error("Consumer timeout - attempting graceful shutdown")
-            # Signal consumer to stop by putting a special shutdown message
-            try:
-                xml_queue.put(('shutdown',), block=False)
-                consumer_thread.join(timeout=10.0)
-                if consumer_thread.is_alive():
-                    self.log_error("Consumer still alive after shutdown signal - some data may be lost")
-            except:
-                self.log_error("Failed to signal consumer shutdown - some data may be lost")
+            # Signal consumer to stop using shutdown event
+            self.shutdown_event.set()
+            self.log_info("Shutdown event set, waiting additional 10 seconds for consumer...")
+            consumer_thread.join(timeout=10.0)
+            if consumer_thread.is_alive():
+                self.log_error("Consumer still alive after shutdown signal - some data may be lost")
 
         # Close progress bar
         pbar.close()
 
         self.log_info(f"XML processing complete: {len(xml_files)} files processed")
+
+        # Clean up ZIP cache after all XML processing is complete
+        self.log_info("Starting ZIP cache cleanup...")
+        from xml_processor import XMLProcessor
+        XMLProcessor.cleanup_zip_cache()
+        self.log_info("ZIP cache cleanup complete")
+
         return len(xml_files)
 
-    def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers):
+    def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers) -> None:
         """Producer thread: parses XML and sends DatabaseOperation objects to consumer"""
         processed = 0
         total_bytes = 0
         start = producer_id
+        self.log_info(f"Producer {producer_id} starting: processing files {start} to {len(xml_files)-1} step {num_producers}")
         for i in range(start, len(xml_files), num_producers):
-            xml_id, path, filename, internal, file_size = xml_files[i]
+            if self.shutdown_event.is_set():
+                self.log_info(f"Producer {producer_id} received shutdown signal, stopping at file {i}")
+                break
+
+            xml_file = xml_files[i]
+            xml_id = xml_file.xml_id
+            # Get the zip path from the database using zip_id
+            zip_result = self.db_ops.execute_query("SELECT file_path FROM ZipFiles WHERE zip_id = ?", (xml_file.zip_id,)).fetchone()
+            if not zip_result:
+                self.log_error(f"No ZIP file found for xml_id {xml_id}")
+                continue
+            path = zip_result[0]
+            filename = xml_file.filename
+            internal = xml_file.internal_path
+            file_size = xml_file.file_size
             try:
-                metadata, operations = self._process_single_xml(xml_id, path, filename, internal, file_size)
+                self.log_debug(f"Producer {producer_id} processing XML {filename} (ID: {xml_id})")
+                # Use xml_processor to process the XML
+                from xml_processor import XMLProcessor
+                processor = XMLProcessor(self.db_ops)
+                result = processor._process_single_xml(xml_id, path, filename, internal)
+                if result:
+                    # Success - create metadata for successful processing
+                    metadata = {
+                        "file_size": file_size,
+                        "ein": None,  # Will be set by processor
+                        "tax_year": None,  # Will be set by processor
+                        "form_type": None,  # Will be set by processor
+                        "error_message": None,
+                        "processed": True
+                    }
+                    operations = []  # Operations are handled internally by XMLProcessor
+                else:
+                    # Failure - create error metadata
+                    metadata = {
+                        "file_size": file_size,
+                        "ein": None,
+                        "tax_year": None,
+                        "form_type": None,
+                        "error_message": "Processing failed",
+                        "processed": False
+                    }
+                    operations = []
+                self.log_debug(f"Producer {producer_id} completed processing XML {filename}, got {len(operations)} operations")
 
                 # Create XML_FILE_UPDATE operation with metadata
                 xml_update_operation = DatabaseOperation(
@@ -229,6 +240,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 operations.insert(0, xml_update_operation)  # Insert at beginning for proper ordering
 
                 # Send operations to queue
+                self.log_debug(f"Producer {producer_id} sending {len(operations)} operations to queue for {filename}")
                 for operation in operations:
                     xml_queue.put(operation, block=True)
 
@@ -264,7 +276,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 )
                 xml_queue.put(error_operation, block=True)
         xml_queue.put(None)  # Sentinel
-        self.log_info(f"Producer {producer_id} done: {processed} files")
+        self.log_info(f"Producer {producer_id} done: {processed} files processed")
 
     def dump_threads_handler(self, signum, frame):
         """Signal handler: Dumps formatted stack traces for all live threads."""
@@ -292,32 +304,33 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             print(f"Error in thread dump handler: {e}", file=sys.stderr)
             sys.stderr.flush()
 
-    def _database_consumer(self, xml_queue, num_expected, conn, pbar):
+    def _database_consumer(self, xml_queue, num_expected, conn, pbar) -> int:
         """Consumer thread: writes operations to database (single-threaded for DuckDB safety)"""
         batch_operations = []
         total = 0
         signals = 0
         processed_xml_count = 0  # Counter for processed XML files (each generates one XML_FILE_UPDATE)
-        while signals < num_expected:
+        self.log_info(f"Consumer starting: expecting {num_expected} sentinel signals")
+        while signals < num_expected and not self.shutdown_event.is_set():
             # Check if we need to trigger database optimization
             if processed_xml_count > 0 and processed_xml_count % self.OPTIMIZE_INTERVAL == 0:
                 self.log_info(f"Processed {processed_xml_count} XML files, triggering database optimization")
                 try:
                     # Create and execute OPTIMIZE_DATABASE operation
                     optimize_op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, None)
-                    self._execute_optimize_operation(optimize_op, conn)
+                    self.db_ops._execute_optimize_operation(optimize_op, conn)
                 except Exception as e:
                     self.log_error(f"Database optimization failed: {e}", exc_info=True)
             try:
-                item = xml_queue.get(timeout=30.0)  # Add timeout to prevent hanging
+                self.log_debug(f"Consumer waiting for queue item (signals: {signals}/{num_expected})")
+                # Use short timeout and check shutdown event to allow quick shutdown
+                item = xml_queue.get(timeout=1.0)  # Short timeout to check shutdown event frequently
+                self.log_debug(f"Consumer got item from queue: type={type(item)}, item={item}")
                 if item is None:
                     signals += 1
+                    self.log_info(f"Consumer received sentinel signal {signals}/{num_expected}")
                     xml_queue.task_done()
                     continue
-                if isinstance(item, tuple) and item[0] == 'shutdown':
-                    self.log_info("Consumer received shutdown signal")
-                    xml_queue.task_done()
-                    break
 
                 # Handle DatabaseOperation objects from producer
                 if isinstance(item, DatabaseOperation):
@@ -335,11 +348,13 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         xml_ids_before = set(op.xml_id for op in batch_operations if op.xml_id)
                         self.log_debug(f"Processing batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
-                        self._bulk_insert_batch(batch_operations, conn)
+                        self.log_info(f"Starting bulk insert batch of {len(batch_operations)} operations...")
+                        self.db_ops.bulk_process_operations_batch(batch_operations, conn)
+                        self.log_info("Bulk insert batch completed successfully")
 
                         # Update progress bar based on XML file updates processed in this batch
                         # Each XML_FILE_UPDATE operation corresponds to one processed XML file
-                        xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
+                        xml_files_updated = self.db_ops._get_xml_files_updated_in_batch(batch_operations)
                         xml_count_in_batch = len(xml_files_updated)
                         if xml_count_in_batch > 0:
                             pbar.update(xml_count_in_batch)
@@ -350,6 +365,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     except Exception as e:
                         self.log_error(f"Batch error: {e}", exc_info=True)
                         # Don't clear batch_operations on error - will retry in final batch
+            except queue.Empty:
+                # Timeout occurred, check if we should shutdown
+                if self.shutdown_event.is_set():
+                    self.log_info("Consumer received shutdown signal during queue wait")
+                    break
+                continue  # Continue the loop to check for more items
             except Exception as e:
                 self.log_error(f"Consumer error: {e}", exc_info=True)
                 break
@@ -357,14 +378,16 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         # Final batch - commit any remaining work
         if batch_operations:
             try:
-                self.log_info(f"Committing final batch of {len(batch_operations)} operations")
+                self.log_info(f"Committing final batch of {len(batch_operations)} operations ({len(batch_operations)} items)")
                 xml_ids_before = set(op.xml_id for op in batch_operations if op.xml_id)
                 self.log_debug(f"Processing final batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
-                self._bulk_insert_batch(batch_operations, conn)
+                self.log_info("Starting final bulk insert batch...")
+                self.db_ops.bulk_process_operations_batch(batch_operations, conn)
+                self.log_info("Final bulk insert batch completed successfully")
 
                 # Update progress bar for final batch
-                xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
+                xml_files_updated = self.db_ops._get_xml_files_updated_in_batch(batch_operations)
                 xml_count_in_batch = len(xml_files_updated)
                 if xml_count_in_batch > 0:
                     pbar.update(xml_count_in_batch)
@@ -376,713 +399,16 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         self.log_info(f"Consumer done: {total} operations, {signals} signals, processed {processed_xml_count} XML files")
         return total
 
-    def _get_xml_files_updated_in_batch(self, batch_operations):
-        """Get set of XML IDs that were updated in this batch (XML_FILE_UPDATE operations)"""
-        xml_files_updated = set()
-        for op in batch_operations:
-            if op.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
-                xml_files_updated.add(op.xml_id)
-        return xml_files_updated
+    # Removed _get_xml_files_updated_in_batch - moved to database_operations.py
 
-    def _build_insert_from_dataclass(self, obj, table_name: str, exclude_fields: Optional[List[str]] = None) -> Tuple[str, Tuple]:
-        """Build INSERT statement and values tuple from dataclass using reflection"""
-        if exclude_fields is None:
-            exclude_fields = []
+    # Removed _build_insert_from_dataclass - now using generic bulk_insert in database_operations.py
 
-        # Get all fields from the dataclass, excluding specified ones
-        field_names = [f.name for f in fields(obj) if f.name not in exclude_fields]
+    # Removed _execute_optimize_operation - now using database_operations method directly
 
-        # Build column list and placeholders
-        columns = ', '.join(field_names)
-        placeholders = ', '.join('?' for _ in field_names)
+    # Removed all bulk insert methods - now using database_operations.bulk_process_operations_batch
 
-        # Build values tuple
-        values = tuple(getattr(obj, field_name) for field_name in field_names)
 
-        # Debug logging: show fields and values being inserted
-        self.log_debug(f"INSERT {table_name}: fields={field_names}, values={values}")
+    # Removed _process_single_xml - moved to xml_processor.py
 
-        # Use INSERT OR IGNORE for reference/master tables to preserve first inserted record,
-        # INSERT OR REPLACE for detail/transaction tables to handle legitimate duplicates
-        if table_name in ('Charities', 'Addresses', 'XmlFiles', 'ZipFiles'):
-            sql = f"INSERT OR IGNORE INTO {table_name} ({columns}) VALUES ({placeholders})"
-        else:
-            sql = f"INSERT OR REPLACE INTO {table_name} ({columns}) VALUES ({placeholders})"
+    # Removed all XML processing methods - moved to xml_processor.py
 
-        return sql, values
-
-    def _execute_optimize_operation(self, operation, conn):
-        """Execute database optimization operation"""
-        if operation.operation_type != DatabaseOperationType.OPTIMIZE_DATABASE:
-            return
-
-        self.log_info("Starting database optimization...")
-        try:
-            # Call the optimize_database method from DatabaseOperations
-            self.db_ops.optimize_database()
-            self.log_info("Database optimization completed successfully")
-        except Exception as e:
-            self.log_error(f"Database optimization failed: {e}", exc_info=True)
-            raise
-
-    def _bulk_insert_batch(self, batch_operations, conn=None):
-        """Bulk insert a batch of database operations"""
-        if conn is None:
-            conn = self.db_ops.db_conn
-
-        # Check database connection state
-        try:
-            # Test connection with a simple query
-            test_result = conn.execute("SELECT 1").fetchone()
-            self.log_info(f"Database connection test: OK (result={test_result})")
-        except Exception as e:
-            self.log_error(f"Database connection test FAILED: {e}")
-            return
-
-        self.log_info(f"Bulk insert batch: STARTING with {len(batch_operations)} operations")
-
-        # Group operations by type for efficient processing
-        operations_by_type = {}
-        xml_ids_in_batch = set()
-
-        for operation in batch_operations:
-            if not isinstance(operation, DatabaseOperation):
-                self.log_error(f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
-                continue
-
-            xml_ids_in_batch.add(operation.xml_id)
-            op_type = operation.operation_type.value
-            if op_type not in operations_by_type:
-                operations_by_type[op_type] = []
-            operations_by_type[op_type].append(operation)
-
-        self.log_info(f"Operations by type: { {k: len(v) for k, v in operations_by_type.items()} }")
-
-        # Process operations in dependency order
-        processed_xml_ids = set()
-
-        try:
-            # Handle OPTIMIZE_DATABASE operations first
-            if DatabaseOperationType.OPTIMIZE_DATABASE.value in operations_by_type:
-                for operation in operations_by_type[DatabaseOperationType.OPTIMIZE_DATABASE.value]:
-                    self._execute_optimize_operation(operation, conn)
-
-            # 1. Handle XML file updates first
-            self._process_xml_file_update_operations(operations_by_type, conn, processed_xml_ids)
-
-            # 2. Insert charities
-            charity_id_map = self._process_charity_operations(operations_by_type, conn)
-
-            # 3. Insert related data (officers, grants, etc.) using charity_id_map
-            self._process_related_operations(operations_by_type, conn, charity_id_map)
-
-            # 4. Insert addresses
-            self._process_address_operations(operations_by_type, conn, charity_id_map)
-
-            # Commit all changes
-            self.log_info("Bulk insert: STARTING batch commit")
-            conn.commit()
-            self.log_info("Bulk insert: FINISHED batch commit successful")
-
-        except Exception as e:
-            self.log_error(f"Failed to process batch: {e}", exc_info=True)
-            try:
-                conn.rollback()
-                self.log_info("Bulk insert: Rollback completed")
-            except Exception as rollback_e:
-                self.log_error(f"Failed to rollback: {rollback_e}", exc_info=True)
-
-            # Mark unprocessed XML files as having errors
-            unprocessed_xml_ids = xml_ids_in_batch - processed_xml_ids
-            for xml_id in unprocessed_xml_ids:
-                try:
-                    error_msg = self.format_error_with_traceback(e, "Batch processing failed")
-                    self.log_debug(f"Marking XmlFile {xml_id} as batch error: {error_msg[:100]}...")
-                    self.db_ops.execute_query(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=?, error_message=? WHERE xml_id=?",
-                        (CURRENT_PROCESSING_VERSION, error_msg, xml_id)
-                    )
-                    self.db_ops.commit()
-                except Exception as mark_error_e:
-                    self.log_error(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
-            raise  # Re-raise to propagate the error
-
-    def _update_xml_file_with_metadata(self, xml_id, metadata, conn):
-        """Update XmlFiles table with metadata from processing"""
-        try:
-            if metadata["error_message"]:
-                # Error case
-                if metadata["form_type"] == "990T":
-                    conn.execute(
-                        "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, form_type=?, file_size=? WHERE xml_id=?",
-                        (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["form_type"], metadata["file_size"], xml_id)
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, file_size=? WHERE xml_id=?",
-                        (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["file_size"], xml_id)
-                    )
-            else:
-                # Success case
-                conn.execute(
-                    "UPDATE XmlFiles SET processed=?, processing_version=?, form_type=?, ein=?, tax_year=?, file_size=? WHERE xml_id=?",
-                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["form_type"], metadata["ein"], metadata["tax_year"], metadata["file_size"], xml_id)
-                )
-        except Exception as e:
-            self.log_error(f"Failed to update XML file {xml_id} with metadata: {e}")
-
-    def _process_xml_file_update_operations(self, operations_by_type, conn, processed_xml_ids):
-        """Process XML file update operations using metadata"""
-        if DatabaseOperationType.XML_FILE_UPDATE.value not in operations_by_type:
-            return
-
-        xml_updates = operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value]
-
-        for operation in xml_updates:
-            xml_id = operation.xml_id
-            metadata = operation.data
-
-            try:
-                self._update_xml_file_with_metadata(xml_id, metadata, conn)
-                processed_xml_ids.add(xml_id)
-            except Exception as e:
-                self.log_error(f"Failed to update XML file {xml_id} with metadata: {e}")
-
-    def _process_charity_operations(self, operations_by_type, conn):
-        """Process charity insert operations and return charity_id mapping"""
-        charity_id_map = {}  # xml_id -> charity_id
-
-        if DatabaseOperationType.INSERT_CHARITY.value not in operations_by_type:
-            return charity_id_map
-
-        charities = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]]
-
-        if not charities:
-            return charity_id_map
-
-        self.log_info(f"Bulk insert: Processing {len(charities)} charities")
-
-        # Set colocator to 'notyet' for new charities
-        for charity in charities:
-            charity.colocator = 'notyet'
-
-        charity_data = []
-        sql = None
-        for charity in charities:
-            sql, values = self._build_insert_from_dataclass(charity, 'Charities', ['charity_id'])
-            charity_data.append(values)
-
-        try:
-            if sql is not None:
-                conn.executemany(sql, charity_data)
-                self.log_info(f"Bulk insert: Inserted {len(charity_data)} charities")
-
-                # Get the charity IDs for mapping
-                ein_list = [c.ein for c in charities]
-                tax_year_list = [c.tax_year for c in charities]
-                placeholders = ','.join('?' for _ in ein_list)
-                result = conn.execute(f"""
-                    SELECT charity_id, ein, tax_year FROM Charities
-                    WHERE ein IN ({placeholders}) AND tax_year IN ({placeholders})
-                    ORDER BY charity_id
-                """, ein_list + tax_year_list)
-
-                # Map xml_id to charity_id using the operations list
-                charity_ops = operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]
-                for i, row in enumerate(result.fetchall()):
-                    if i < len(charity_ops):
-                        xml_id = charity_ops[i].xml_id
-                        charity_id_map[xml_id] = row[0]
-
-        except Exception as e:
-            self.log_error(f"Failed to insert charities: {e}", exc_info=True)
-            raise
-
-        return charity_id_map
-
-    def _process_related_operations(self, operations_by_type, conn, charity_id_map):
-        """Process related data operations (officers, grants, contractors, contributions)"""
-
-        # Process officers
-        if DatabaseOperationType.INSERT_OFFICER.value in operations_by_type:
-            officers = []
-            for operation in operations_by_type[DatabaseOperationType.INSERT_OFFICER.value]:
-                officer = operation.data
-                # Set charity_id from mapping
-                if operation.xml_id in charity_id_map:
-                    officer.charity_id = charity_id_map[operation.xml_id]
-                    officers.append(officer)
-
-            if officers:
-                officer_data = []
-                sql = None
-                for officer in officers:
-                    sql, values = self._build_insert_from_dataclass(officer, 'Officers', ['officer_id'])
-                    officer_data.append(values)
-
-                try:
-                    if sql is not None:
-                        conn.executemany(sql, officer_data)
-                        self.log_debug(f"Inserted {len(officer_data)} officers")
-                except Exception as e:
-                    self.log_error(f"Failed to insert officers: {e}", exc_info=True)
-
-        # Process grants
-        if DatabaseOperationType.INSERT_GRANT.value in operations_by_type:
-            grants = []
-            for operation in operations_by_type[DatabaseOperationType.INSERT_GRANT.value]:
-                grant = operation.data
-                # Ensure grantee_name is not None
-                if grant.grantee_name is None:
-                    grant.grantee_name = "Unknown"
-                grants.append(grant)
-
-            if grants:
-                grant_data = []
-                sql = None
-                for grant in grants:
-                    sql, values = self._build_insert_from_dataclass(grant, 'Grants', ['grant_id'])
-                    grant_data.append(values)
-
-                try:
-                    if sql is not None:
-                        conn.executemany(sql, grant_data)
-                        self.log_debug(f"Inserted {len(grant_data)} grants")
-                except Exception as e:
-                    self.log_error(f"Failed to insert grants: {e}", exc_info=True)
-
-        # Process contractors
-        if DatabaseOperationType.INSERT_CONTRACTOR.value in operations_by_type:
-            contractors = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_CONTRACTOR.value]]
-
-            if contractors:
-                contractor_data = []
-                sql = None
-                for contractor in contractors:
-                    sql, values = self._build_insert_from_dataclass(contractor, 'Contractors', ['contractor_id'])
-                    contractor_data.append(values)
-
-                try:
-                    if sql is not None:
-                        conn.executemany(sql, contractor_data)
-                        self.log_debug(f"Inserted {len(contractor_data)} contractors")
-                except Exception as e:
-                    self.log_error(f"Failed to insert contractors: {e}", exc_info=True)
-
-        # Process political contributions
-        if DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION.value in operations_by_type:
-            contributions = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION.value]]
-
-            if contributions:
-                contribution_data = []
-                sql = None
-                for contribution in contributions:
-                    sql, values = self._build_insert_from_dataclass(contribution, 'PoliticalContributions', ['political_id'])
-                    contribution_data.append(values)
-
-                try:
-                    if sql is not None:
-                        conn.executemany(sql, contribution_data)
-                        self.log_debug(f"Inserted {len(contribution_data)} contributions")
-                except Exception as e:
-                    self.log_error(f"Failed to insert contributions: {e}", exc_info=True)
-
-    def _process_address_operations(self, operations_by_type, conn, charity_id_map):
-        """Process address insert operations"""
-
-        if DatabaseOperationType.INSERT_ADDRESS.value not in operations_by_type:
-            return
-
-        addresses = []
-        for operation in operations_by_type[DatabaseOperationType.INSERT_ADDRESS.value]:
-            address = operation.data
-
-            # Compute colocator for Address objects if not already set
-            if hasattr(address, 'colocator') and address.colocator is None:
-                if address.po_box and address.zip_code:
-                    po_box_stripped = address.po_box.strip()
-                    if po_box_stripped:
-                        address.colocator = f"PO:{po_box_stripped}:{address.zip_code}"
-                elif address.state and address.state.upper() not in VALID_STATES:
-                    address.colocator = f"FA:{address.state}"
-                else:
-                    address.colocator = None
-
-            # Set owner_id for charity addresses (link to charity that owns this address)
-            if hasattr(address, 'address_type') and address.address_type == 'charity':
-                if operation.xml_id in charity_id_map:
-                    address.owner_id = charity_id_map[operation.xml_id]
-
-            addresses.append(address)
-
-        if addresses:
-            address_data = []
-            sql = None
-            for address in addresses:
-                sql, values = self._build_insert_from_dataclass(address, 'Addresses', ['address_id'])
-                address_data.append(values)
-
-            try:
-                if sql is not None:
-                    conn.executemany(sql, address_data)
-                    self.log_debug(f"Inserted {len(address_data)} addresses")
-            except Exception as e:
-                self.log_error(f"Failed to insert addresses: {e}", exc_info=True)
-
-
-    def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str, file_size: int = None):
-        """Process a single XML file and return metadata and list of database operations"""
-        operations = []
-        metadata = {
-            "file_size": file_size,
-            "ein": None,
-            "tax_year": None,
-            "form_type": None,
-            "error_message": None,
-            "processed": False
-        }
-        try:
-            self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
-
-            # Read XML content directly from ZIP file using cached connection
-            xml_content = self._extract_xml_from_zip(zip_path, internal_path)
-
-            # Set file_size in metadata if not already set
-            if metadata["file_size"] is None:
-                metadata["file_size"] = len(xml_content)
-
-            self.log_debug(f"Retrieved XML content for {filename}, size: {len(xml_content)} bytes")
-
-            # Parse XML
-            parser = ET.XMLParser(recover=True)
-            tree = ET.parse(BytesIO(xml_content), parser)
-            root = tree.getroot()
-
-            # Check for malformed XML
-            if root is None or len(root) == 0:
-                raise ValueError("Malformed XML: unable to parse root element")
-
-            # Extract basic metadata
-            metadata["form_type"] = self._extract_form_type(root)
-            metadata["tax_year"] = self._extract_tax_year(root)
-            metadata["ein"] = self._extract_filer_ein(root)
-
-            self.log_debug(f"Extracted metadata for {filename}: form_type={metadata['form_type']}, tax_year={metadata['tax_year']}, ein={metadata['ein']}")
-
-            if not metadata["ein"] or metadata["ein"] == "Unknown":
-                self.log_error(f"Skipping XML {filename}: invalid EIN {metadata['ein']}")
-                metadata["error_message"] = f"Invalid EIN {metadata['ein']} for {filename}"
-                metadata["processed"] = True
-                return metadata, operations
-
-            # Extract data based on form type
-            if metadata["form_type"] == "990T":
-                # Form 990T is a tax return for unrelated business income, not a charity filing
-                self.log_info(f"Ignoring Form 990T file {filename} (tax return for unrelated business income)")
-                metadata["error_message"] = "skipped: 990T"
-                metadata["processed"] = True
-                return metadata, operations
-            elif metadata["form_type"] == "990":
-                charity, officers, grants, contractors, contributions, address = self._parse_990_data(root, filename, metadata["ein"], metadata["tax_year"], metadata["form_type"])
-            elif metadata["form_type"] == "990EZ":
-                charity, officers, grants, contractors, contributions, address = self._parse_990ez_data(root, filename, metadata["ein"], metadata["tax_year"], metadata["form_type"])
-            elif metadata["form_type"] == "990PF":
-                charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, metadata["ein"], metadata["tax_year"], metadata["form_type"])
-            else:
-                self.log_info(f"Unsupported form type {metadata['form_type']} in {filename}")
-                metadata["error_message"] = f"Unsupported form type {metadata['form_type']} for {filename}"
-                metadata["processed"] = True
-                return metadata, operations
-
-            if charity:
-                self.log_debug(f"Successfully parsed {filename}: charity={charity.ein}, grants={len(grants)}, officers={len(officers)}, address={address is not None}")
-
-                # Create operations for all extracted data
-                operations.append(DatabaseOperation(
-                    DatabaseOperationType.INSERT_CHARITY,
-                    charity,
-                    xml_id
-                ))
-
-                for officer in officers:
-                    operations.append(DatabaseOperation(
-                        DatabaseOperationType.INSERT_OFFICER,
-                        officer,
-                        xml_id,
-                        [DatabaseOperationType.INSERT_CHARITY]  # Depends on charity being inserted first
-                    ))
-
-                for grant in grants:
-                    operations.append(DatabaseOperation(
-                        DatabaseOperationType.INSERT_GRANT,
-                        grant,
-                        xml_id
-                    ))
-
-                for contractor in contractors:
-                    operations.append(DatabaseOperation(
-                        DatabaseOperationType.INSERT_CONTRACTOR,
-                        contractor,
-                        xml_id
-                    ))
-
-                for contribution in contributions:
-                    operations.append(DatabaseOperation(
-                        DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION,
-                        contribution,
-                        xml_id
-                    ))
-
-                if address:
-                    operations.append(DatabaseOperation(
-                        DatabaseOperationType.INSERT_ADDRESS,
-                        address,
-                        xml_id
-                    ))
-
-                metadata["processed"] = True
-            else:
-                self.log_error(f"Failed to extract charity data from {filename}")
-                metadata["error_message"] = f"No Charity object created for {filename}"
-                metadata["processed"] = True
-
-        except Exception as e:
-            self.log_error(f"Failed to process XML {filename}: {e}", exc_info=True)
-            error_msg = str(e)
-            if not error_msg or error_msg == "":
-                error_msg = f"Unknown error processing {filename}"
-            metadata["error_message"] = error_msg
-            metadata["processed"] = True
-
-        return metadata, operations
-
-    def _extract_form_type(self, root) -> str:
-        """Extract form type from XML"""
-        for xpath in XPATHS_990["form_type"] + XPATHS_990EZ["form_type"] + XPATHS_990PF["form_type"]:
-            try:
-                result = xpath(root)
-                if result:
-                    return result[0].text
-            except:
-                continue
-        return "Unknown"
-
-    def _extract_tax_year(self, root) -> int:
-        """Extract tax year from XML"""
-        for xpath in XPATHS_990["tax_year"] + XPATHS_990EZ["tax_year"] + XPATHS_990PF["tax_year"]:
-            try:
-                result = xpath(root)
-                if result:
-                    year_str = result[0].text
-                    if year_str and year_str.isdigit():
-                        return int(year_str)
-            except:
-                continue
-        return 0
-
-    def _extract_filer_ein(self, root) -> str:
-        """Extract filer EIN from XML"""
-        for xpath in XPATHS_990["filer_ein"] + XPATHS_990EZ["filer_ein"] + XPATHS_990PF["filer_ein"]:
-            try:
-                result = xpath(root)
-                if result:
-                    raw_ein = result[0].text.strip()
-                    if raw_ein.isdigit():
-                        formatted_ein = f"{int(raw_ein):09d}"
-                        return formatted_ein
-                    else:
-                        return "Unknown"
-            except:
-                continue
-        return "Unknown"
-
-    def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str):
-        """Parse Form 990 data"""
-        charity, officers, grants, contractors, contributions, address = parse_990(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
-
-        if not charity:
-            return None, [], [], [], [], None
-
-        return charity, officers, grants, contractors, contributions, address
-
-    def _parse_990ez_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str):
-        """Parse Form 990EZ data"""
-        charity, officers, grants, contractors, contributions, address = parse_990ez(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
-
-        if not charity:
-            return None, [], [], [], [], None
-
-        return charity, officers, grants, contractors, contributions, address
-
-    def _parse_990pf_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str):
-        """Parse Form 990PF data"""
-        charity, officers, grants, contractors, contributions, address = parse_990pf(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
-
-        if not charity:
-            return None, [], [], [], [], None
-
-        return charity, officers, grants, contractors, contributions, address
-
-    def _extract_grants_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
-        """Extract grants from Form 990"""
-        grants = []
-        xml_content = BytesIO(ET.tostring(root))
-        grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
-        for grant_data in grants_data:
-            grant = Grant(
-                filer_ein=filer_ein,
-                filer_name="",
-                grant_ein=grant_data.get("grant_ein"),
-                grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year,
-                grantee_name=grant_data.get("grantee_name") or "Unknown"
-            )
-            grants.append(grant)
-        return grants
-
-    def _extract_xml_from_zip(self, zip_path: str, internal_path: str) -> bytes:
-        """Extract XML content from ZIP file using cached connection"""
-        zip_key = str(zip_path)
-
-        with ZipProcessor._zip_cache_lock:
-            if zip_key not in ZipProcessor._zip_cache:
-                # Open ZIP file and cache the connection
-                ZipProcessor._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
-                self.log_debug(f"Opened and cached ZIP connection for {zip_path}")
-
-            zip_ref = ZipProcessor._zip_cache[zip_key]
-
-        # Extract XML content from cached connection
-        with zip_ref.open(internal_path) as f:
-            return f.read()
-
-    def _extract_grants_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
-        """Extract grants from Form 990EZ"""
-        grants = []
-        xml_content = BytesIO(ET.tostring(root))
-        grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990EZ")
-        for grant_data in grants_data:
-            grant = Grant(
-                filer_ein=filer_ein,
-                filer_name="",
-                grant_ein=grant_data.get("grant_ein"),
-                grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year,
-                grantee_name=grant_data.get("grantee_name") or "Unknown"
-            )
-            grants.append(grant)
-        return grants
-
-    def _extract_grants_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
-        """Extract grants from Form 990PF"""
-        grants = []
-        xml_content = BytesIO(ET.tostring(root))
-        grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990PF")
-        for grant_data in grants_data:
-            grant = Grant(
-                filer_ein=filer_ein,
-                filer_name="",
-                grant_ein=grant_data.get("grant_ein"),
-                grant_amt=grant_data.get("grant_amt", 0),
-                tax_year=tax_year,
-                grantee_name=grant_data.get("grantee_name") or "Unknown"
-            )
-            grants.append(grant)
-        return grants
-
-    def _extract_contractors_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
-        """Extract contractors from Form 990"""
-        return []
-
-    def _extract_contractors_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
-        """Extract contractors from Form 990EZ"""
-        return self._extract_contractors_990(root, filename, filer_ein, tax_year)
-
-    def _extract_contractors_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Contractor]:
-        """Extract contractors from Form 990PF"""
-        return self._extract_contractors_990(root, filename, filer_ein, tax_year)
-
-    def _extract_political_contributions_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
-        """Extract political contributions from Form 990"""
-        return []
-
-    def _extract_political_contributions_990ez(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
-        """Extract political contributions from Form 990EZ"""
-        return self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
-
-    def _extract_political_contributions_990pf(self, root, filename: str, filer_ein: str, tax_year: int) -> List[PoliticalContribution]:
-        """Extract political contributions from Form 990PF"""
-        return self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
-
-
-class GeocodingBatchStrategy(ProcessingStrategy):
-    """Strategy for batch geocoding addresses - DEPRECATED: Use GeolocationProcessor instead"""
-
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
-        super().__init__(db_ops, logger, quiet)
-        self.log_warning("GeocodingBatchStrategy is deprecated. Use GeolocationProcessor instead.")
-
-    def execute(self, batch: List[Address]) -> int:
-        """Geolocate a batch of addresses - DEPRECATED"""
-        self.log_warning("GeocodingBatchStrategy.execute() is deprecated. Use GeolocationProcessor.geolocate_addresses() instead.")
-        processor = GeolocationProcessor(self.db_ops)
-        return processor._geolocate_batch(batch)
-
-
-class AddressMatchingStrategy(ProcessingStrategy):
-    """Strategy for matching grants by address/colocator - DEPRECATED: Use AddressMatcher instead"""
-
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
-        super().__init__(db_ops, logger, quiet)
-        self.log_warning("AddressMatchingStrategy is deprecated. Use AddressMatcher instead.")
-
-    def execute(self) -> int:
-        """Match grants with unknown EINs by address/colocator - DEPRECATED"""
-        self.log_warning("AddressMatchingStrategy.execute() is deprecated. Use AddressMatcher.match_grants_by_address() instead.")
-        matcher = AddressMatcher(self.db_ops)
-        return matcher.match_grants_by_address()
-
-
-class StubCharityCreationStrategy(ProcessingStrategy):
-    """Strategy for creating stub charities for unmatched grants - DEPRECATED: Use AddressMatcher instead"""
-
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
-        super().__init__(db_ops, logger, quiet)
-        self.log_warning("StubCharityCreationStrategy is deprecated. Use AddressMatcher instead.")
-
-    def execute(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
-        """Create a stub charity record for unmatched grants - DEPRECATED"""
-        self.log_warning("StubCharityCreationStrategy.execute() is deprecated. Use AddressMatcher._create_stub_charity_for_grant() instead.")
-        # Generate a pseudo-EIN for stub records
-        stub_ein = f"STUB{hash(name + (address or '') + str(tax_year)) % 1000000000:09d}"
-
-        # Check if stub already exists
-        result = self.db_ops.execute_query("SELECT 1 FROM Charities WHERE ein = ?", (stub_ein,))
-        if result.fetchone():
-            return stub_ein
-
-        # Create stub charity
-        from models import Charity as DBCharity
-        charity = DBCharity(
-            ein=stub_ein,
-            tax_year=tax_year,
-            filer_name=name or "Unknown",
-            xml_name=f"stub_{stub_ein}_{tax_year}"
-        )
-        charity_id = self.db_ops.insert_charity(charity)
-
-        # Create address record if we have address info
-        if address or zip_code:
-            from models import Address as DBAddress
-            addr = DBAddress(
-                ein=stub_ein,
-                name=name or "Unknown",
-                zip_code=zip_code,
-                po_box=po_box,
-                address_line1=address or "",
-                address_type="grantee",
-                colocator=None
-            )
-            self.db_ops.insert_address(addr)
-
-        return stub_ein

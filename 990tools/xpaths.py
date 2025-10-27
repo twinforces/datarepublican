@@ -61,6 +61,36 @@ COMMON_XPATHS = {
         etree.XPath(".//irs:Filer/irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES),
         etree.XPath(".//Filer/USAddress/ZIPCd", namespaces=NAMESPACES),
     ],
+    "recipient_address_line1": [
+        etree.XPath(".//irs:RecipientUSAddress/irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientUSAddress/AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientForeignAddress/irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientForeignAddress/AddressLine1Txt", namespaces=NAMESPACES),
+    ],
+    "recipient_address_line2": [
+        etree.XPath(".//irs:RecipientUSAddress/irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientUSAddress/AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientForeignAddress/irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientForeignAddress/AddressLine2Txt", namespaces=NAMESPACES),
+    ],
+    "recipient_city": [
+        etree.XPath(".//irs:RecipientUSAddress/irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientUSAddress/CityNm", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientForeignAddress/irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientForeignAddress/CityNm", namespaces=NAMESPACES),
+    ],
+    "recipient_state": [
+        etree.XPath(".//irs:RecipientUSAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientUSAddress/StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientForeignAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientForeignAddress/StateAbbreviationCd", namespaces=NAMESPACES),
+    ],
+    "recipient_zip_code": [
+        etree.XPath(".//irs:RecipientUSAddress/irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientUSAddress/ZIPCd", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientForeignAddress/irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientForeignAddress/ZIPCd", namespaces=NAMESPACES),
+    ],
     # Common officer compensation patterns
     "officer_comp_value": [
         etree.XPath("irs:ReportableCompFromOrgAmt", namespaces=NAMESPACES),
@@ -85,6 +115,69 @@ COMMON_XPATHS = {
         etree.XPath(".//irs:ExplanationTxt", namespaces=NAMESPACES),
         etree.XPath(".//irs:SupplementalInformationDetail/irs:ExplanationTxt", namespaces=NAMESPACES),
         etree.XPath(".//irs:Form990ScheduleO/irs:Explanation", namespaces=NAMESPACES),
+    ],
+    # Filer address components
+    "filer_address_line1": [
+        etree.XPath(".//ReturnHeader/Filer/USAddress/AddressLine1Txt"),
+        etree.XPath(".//Filer/USAddress/AddressLine1Txt"),
+        etree.XPath(".//USAddress/AddressLine1Txt"),
+    ],
+    "filer_address_line2": [
+        etree.XPath(".//ReturnHeader/Filer/USAddress/AddressLine2Txt"),
+        etree.XPath(".//Filer/USAddress/AddressLine2Txt"),
+        etree.XPath(".//USAddress/AddressLine2Txt"),
+    ],
+    "filer_city": [
+        etree.XPath(".//ReturnHeader/Filer/USAddress/CityNm"),
+        etree.XPath(".//Filer/USAddress/CityNm"),
+        etree.XPath(".//USAddress/CityNm"),
+    ],
+    "filer_state": [
+        etree.XPath(".//ReturnHeader/Filer/USAddress/StateAbbreviationCd"),
+        etree.XPath(".//Filer/USAddress/StateAbbreviationCd"),
+        etree.XPath(".//USAddress/StateAbbreviationCd"),
+    ],
+    "filer_zip_code": [
+        etree.XPath(".//ReturnHeader/Filer/USAddress/ZIPCd"),
+        etree.XPath(".//Filer/USAddress/ZIPCd"),
+        etree.XPath(".//USAddress/ZIPCd"),
+    ],
+    "filer_name_xpaths": [
+        etree.XPath(".//irs:ReturnHeader/irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt"),
+        etree.XPath(".//irs:ReturnHeader/irs:Filer/irs:Name/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath(".//ReturnHeader/Filer/Name/BusinessNameLine1Txt")
+    ],
+    # Political contribution components
+    "political_recipient_name": [
+        etree.XPath(".//irs:RecipientNm", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientName", namespaces=NAMESPACES),
+        etree.XPath(".//RecipientNm"),
+        etree.XPath(".//RecipientName"),
+        etree.XPath("irs:RecipientNm", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientName", namespaces=NAMESPACES),
+        etree.XPath("RecipientNm"),
+        etree.XPath("RecipientName"),
+    ],
+    "political_amount": [
+        etree.XPath(".//irs:TotalDirectExpendAmt", namespaces=NAMESPACES),
+        etree.XPath(".//irs:Amount", namespaces=NAMESPACES),
+        etree.XPath(".//TotalDirectExpendAmt"),
+        etree.XPath(".//Amount"),
+        etree.XPath("irs:TotalDirectExpendAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:Amount", namespaces=NAMESPACES),
+        etree.XPath("TotalDirectExpendAmt"),
+        etree.XPath("Amount"),
+    ],
+    "political_ein": [
+        etree.XPath(".//irs:EIN", namespaces=NAMESPACES),
+        etree.XPath(".//irs:RecipientEIN", namespaces=NAMESPACES),
+        etree.XPath(".//EIN"),
+        etree.XPath(".//RecipientEIN"),
+        etree.XPath("irs:EIN", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
+        etree.XPath("EIN"),
+        etree.XPath("RecipientEIN"),
     ],
 }
 

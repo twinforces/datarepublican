@@ -18,18 +18,10 @@ import threading
 from collections import defaultdict
 import hashlib
 from io import BytesIO
-from dataclasses import dataclass
+from typing import Tuple, Optional, List, Dict
 from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress
+from models.address import Address
 
-@dataclass
-class AddressInfo:
-    canonical_address: str
-    address_line1: str
-    address_line2: str
-    city: str
-    state: str
-    po_box: str
-    zip_code: str
 
 NAMESPACES = {'irs': 'http://www.irs.gov/efile'}
 ADDRESS_XPATHS = [
@@ -65,7 +57,7 @@ GRANTEE_ADDRESS_XPATHS = [
     etree.XPath(".//*[local-name()='RecipientForeignAddress']/* | .//*[local-name()='CountryCd']", namespaces={}),
 ]
 ZIP_REGEX = re.compile(r'^\d{5}$')
-PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
+PO_BOX_REGEX = re.compile(r'P(?:\.?\s*O\.?\s*)?\bBOX\b\s*(\d+|[A-Z]\d*|[A-Z]+)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'\b[-\w\d]+\b')
 STOP_WORDS = {'AND', 'THE', 'OF', 'FOR', 'IN', 'TO', 'A', 'AN'}
 USPS_FIXES = {
@@ -75,12 +67,12 @@ USPS_FIXES = {
     'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Sq': 'Square'
 }
 VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
-ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'address_line1', 'address_line2', 'city', 'state', 'canonical_address', 'zip_code', 'po_box']
+ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'address_line1', 'address_line2', 'city', 'state', 'canonical_address', 'zip_code', 'zip4', 'po_box', 'colocator']
 GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grantee_name', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
 DEBUG_ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'raw_zip', 'zip_code', 'status', 'reason']
 DEBUG_GRANT_COLUMNS = ['filer_ein', 'grant_ein', 'filer_name', 'grantee_name', 'xml_filename', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
 INVALID_EIN_COLUMNS = ['tsv_ein', 'xml_ein', 'filer_name', 'xml_filename', 'reason']
-PO_BOX_COLUMNS = ['po_box', 'zip_code', 'ein', 'org_name']
+PO_BOX_COLUMNS = ['po_box', 'zip_code', 'zip4', 'ein', 'org_name', 'colocator']
 CSV_QUOTE_FIELDS = {
     'addresses': ['filer_name', 'canonical_address'],
     'grants': ['filer_name', 'grant_ein'],
@@ -286,138 +278,8 @@ def read_tsv_files(tsv_file, start_year, end_year, expected_columns=None):
         log_error(f"Read {len(rows)} rows from {tsv_file}")
     return rows
 
-def canonicalize_address(address_components, output_dir):
-    if not address_components:
-        if not quiet:
-            log_error("canonicalize_address: No address components provided")
-        return AddressInfo("", None, None, None, None, None, "")
-    if not quiet:
-        log_error(f"canonicalize_address: Processing {len(address_components)} address components")
-        for i, elem in enumerate(address_components):
-            log_error(f"  Component {i}: tag={elem.tag}, text='{elem.text}'")
-    # Check for required components
-    has_city = any(elem.tag.endswith('CityNm') and elem.text for elem in address_components)
-    has_state = any(elem.tag.endswith('StateAbbreviationCd') and elem.text for elem in address_components)
-    has_zip = any(elem.tag.endswith('ZIPCd') and elem.text for elem in address_components)
-    has_address_line = any(elem.tag.endswith('AddressLine1Txt') and elem.text for elem in address_components)
-    if not quiet:
-        log_error(f"canonicalize_address: Has city={has_city}, state={has_state}, zip={has_zip}, address_line={has_address_line}")
-    address_line = ""
-    address_line2 = ""
-    address_line3 = ""
-    city = ""
-    state = ""
-    zip_code = None
-    po_box = None
-    STREET_FIXES = {
-        'St': 'Street', 'Saint': 'Street', 'Ave': 'Avenue', 'Av': 'Avenue',
-        'Blvd': 'Boulevard', 'Dr': 'Drive', 'Ln': 'Lane', 'Rd': 'Road',
-        'Cir': 'Circle', 'Ct': 'Court', 'Pl': 'Place', 'Ter': 'Terrace',
-        'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Sq': 'Square',
-        'Cres': 'Crescent', 'Plz': 'Plaza', 'Xing': 'Crossing', 'Way': 'Way',
-        'Aly': 'Alley', 'Loop': 'Loop', 'Rdg': 'Ridge', 'Trl': 'Trail'
-    }
-    UNIT_FIXES = {
-        'Ste': 'Suite', 'Apt': 'Apartment', 'Unit': 'Unit', 'Bldg': 'Building',
-        'Fl': 'Floor', 'Rm': 'Room', 'Dept': 'Department', 'Ofc': 'Office',
-        'SPC': 'Space', 'LOT': 'Lot', 'TRLR': 'Trailer', 'BSMT': 'Basement'
-    }
-    for elem in address_components:
-        if elem.tag.endswith('AddressLine1Txt') and elem.text:
-            parts = [p.strip() for p in elem.text.split(',') if p.strip()]
-            address_line = parts[0] if parts else ""
-            if len(parts) > 1:
-                address_line2 = parts[1]
-            if len(parts) > 2:
-                address_line3 = parts[2]
-            match = PO_BOX_REGEX.search(address_line)
-            if match:
-                po_box_str = match.group(1)
-                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                if number_match:
-                    po_box = number_match.group(0)
-                else:
-                    log_error("Failed to extract PO box number from: {} in address: {}", po_box_str, address_line)
-        elif elem.tag.endswith('AddressLine2Txt') and elem.text:
-            address_line2 = elem.text.strip()
-        elif elem.tag.endswith('AddressLine3Txt') and elem.text:
-            address_line3 = elem.text.strip()
-        elif elem.tag.endswith('CityNm') and elem.text:
-            city = elem.text.strip()
-        elif elem.tag.endswith('StateAbbreviationCd') and elem.text:
-            state = elem.text.strip()
-        elif elem.tag.endswith('ZIPCd') and elem.text:
-            zip_code = elem.text.strip()
-    def expand_street(line):
-        if not line:
-            return line
-        words = line.split()
-        if not words:
-            return line
-        if words[-1] in STREET_FIXES:
-            words[-1] = STREET_FIXES[words[-1]]
-        return " ".join(words)
-    def expand_unit(line):
-        if not line:
-            return line
-        words = line.split()
-        if len(words) < 2:
-            return line
-        if words[-2] in UNIT_FIXES:
-            words[-2] = UNIT_FIXES[words[-2]]
-        return " ".join(words)
-    address_line = expand_street(address_line)
-    address_line2 = expand_unit(address_line2)
-    address_line3 = expand_unit(address_line3)
 
-    # Build street address from lines
-    street_parts = [comp for comp in [address_line, address_line2, address_line3] if comp]
-    street = " ".join(street_parts) if street_parts else None
-
-    address_parts = [comp for comp in [street, city, state, zip_code] if comp]
-    if not address_parts:
-        if not quiet:
-            log_error(f"canonicalize_address: No valid address components after processing: street='{street}', city='{city}', state='{state}', zip_code='{zip_code}'")
-        return AddressInfo("", None, None, None, None, None, "")
-    canonical = " ".join(address_parts).title()
-    if not quiet:
-        log_error(f"canonicalize_address: Initial canonical='{canonical}', state='{state}', zip_code='{zip_code}', po_box='{po_box}'")
-    if not has_city or not has_state or not has_zip:
-        if not quiet:
-            log_error(f"canonicalize_address: WARNING - Missing required components: city={has_city}, state={has_state}, zip={has_zip}")
-    if state and state.upper() not in VALID_STATES:
-        if not quiet:
-            log_error(f"canonicalize_address: Invalid state '{state}' in address: {canonical}; resetting state")
-        state = None
-        canonical = " ".join(comp for comp in [street, city, zip_code] if comp).title()
-        if not quiet:
-            log_error(f"canonicalize_address: After state reset, canonical='{canonical}'")
-    if zip_code:
-        match = re.match(r'^\s*(\d{5})(?:-(\d{4}))?\s*$', zip_code)
-        if match:
-            zip_code = match.group(1)
-            if not quiet:
-                log_error(f"canonicalize_address: ZIP cleaned to '{zip_code}'")
-        else:
-            zip_code_digits = re.sub(r'\D', '', zip_code)
-            if len(zip_code_digits) >= 5:
-                zip_code = zip_code_digits[:5]
-                if not quiet:
-                    log_error(f"canonicalize_address: ZIP extracted to '{zip_code}'")
-            else:
-                zip_code = None
-                if not quiet:
-                    log_error("canonicalize_address: ZIP invalid, set to None")
-    if po_box and 'po box' not in canonical.lower():
-        canonical = f"PO Box {po_box} {canonical}"
-        if not quiet:
-            log_error(f"canonicalize_address: Added PO Box, final canonical='{canonical}'")
-    if not quiet:
-        log_error(f"canonicalize_address: Returning AddressInfo(canonical='{canonical}', address_line1='{address_line}', city='{city}', state='{state}', po_box='{po_box}', zip_code='{zip_code}')")
-        log_error(f"DEBUG: PO Box detection - po_box='{po_box}', canonical contains 'PO BOX'={('PO BOX' in canonical.upper() if canonical else False)}")
-    return AddressInfo(canonical, address_line, address_line2, city, state, po_box, zip_code)
-
-def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, sample_xml, parse_type="filer", skip_address_errors=False):
+def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_dir: str, sample_xml, parse_type: str = "filer", skip_address_errors: bool = False) -> Tuple[bool, Optional[str]]:
     global thread_local
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
@@ -525,38 +387,83 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
         if not quiet:
             log_error(f"parse_filer_address: Found {len(us_addresses)} USAddress elements in XML {xml_filename}")
 
-        address_components = []
-        xpaths = ADDRESS_XPATHS
-        if not quiet:
-            log_error(f"parse_filer_address: Extracting address components for XML {xml_filename}")
-        for xpath in xpaths:
-            elements = xpath(root)
-            if not quiet:
-                log_error(f"parse_filer_address: XPath '{xpath.path}' found {len(elements)} elements")
-            for elem in elements:
-                if elem.text:
-                    if not quiet:
-                        log_error(f"parse_filer_address: Adding component: tag={elem.tag}, text='{elem.text.strip()}'")
-                    address_components.append(elem)
-        if not quiet:
-            log_error(f"parse_filer_address: Total address components: {len(address_components)}")
-        if len(address_components) == 0:
-            if not quiet:
-                log_error(f"parse_filer_address: WARNING - No address components found for XML {xml_filename}")
-        address_info = canonicalize_address(address_components, output_dir)
-        canonical_address = address_info.canonical_address
-        address_line1 = address_info.address_line1
-        address_line2 = address_info.address_line2
-        city = address_info.city
-        state = address_info.state
-        po_box = address_info.po_box
-        zip_code = address_info.zip_code
-        raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
+        # Extract address components using XPaths from xpaths.py
+        from xpaths import COMMON_XPATHS
+
+        address_line1 = None
+        for xpath in COMMON_XPATHS["address_line1"]:
+            try:
+                result = xpath(root)
+                if result and result[0].text:
+                    address_line1 = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        address_line2 = None
+        for xpath in COMMON_XPATHS["address_line2"]:
+            try:
+                result = xpath(root)
+                if result and result[0].text:
+                    address_line2 = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        city = None
+        for xpath in COMMON_XPATHS["city"]:
+            try:
+                result = xpath(root)
+                if result and result[0].text:
+                    city = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        state = None
+        for xpath in COMMON_XPATHS["state"]:
+            try:
+                result = xpath(root)
+                if result and result[0].text:
+                    state = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        zip_code = None
+        for xpath in COMMON_XPATHS["zip_code"]:
+            try:
+                result = xpath(root)
+                if result and result[0].text:
+                    zip_code = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        address = Address(
+            ein=xml_ein,
+            name=filer_name,
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            zip_code=zip_code
+        )
+        canonical_address = address.canonical_address
+        address_line1 = address.address_line1
+        address_line2 = address.address_line2
+        city = address.city
+        state = address.state
+        po_box = address.po_box
+        zip_code = address.zip_code
+        zip4 = address.zip4
+        colocator = address.colocator
+        raw_components_str = ""
         us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
         address_snippet = etree.tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
         if canonical_address:
             if not quiet:
-                log_error(f"parse_filer_address: SUCCESS - Created address entry for EIN {xml_ein}: canonical='{canonical_address}', city='{city}', state='{state}', zip='{zip_code}', po_box='{po_box}'")
+                log_error(f"parse_filer_address: SUCCESS - Created address entry for EIN {xml_ein}: canonical='{canonical_address}', city='{city}', state='{state}', zip='{zip_code}', zip4='{zip4}', po_box='{po_box}', colocator='{colocator}'")
             result['address_entries'].append({
                 'filer_ein': xml_ein,
                 'filer_name': filer_name,
@@ -565,15 +472,19 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 'city': city,
                 'state': state,
                 'canonical_address': canonical_address,
+                'zip_code': zip_code,
+                'zip4': zip4,
                 'po_box': po_box,
-                'zip_code': zip_code
+                'colocator': colocator
             })
             if po_box and zip_code and ZIP_REGEX.match(zip_code):
                 result['po_box_entries'].append({
                     'po_box': po_box,
                     'zip_code': zip_code,
+                    'zip4': zip4,
                     'ein': xml_ein,
-                    'org_name': filer_name
+                    'org_name': filer_name,
+                    'colocator': colocator
                 })
                 po_box_key = (po_box, zip_code)
                 if po_box_key not in result['po_box_zip_index']:
@@ -598,7 +509,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
                 'raw_zip': '',
                 'zip_code': '',
                 'status': 'error',
-                'reason': f"Invalid address; components={address_components}; snippet={address_snippet}"
+                'reason': f"Invalid address; snippet={address_snippet}"
             })
             if sample_xml:
                 os.makedirs(sample_xml, exist_ok=True)
@@ -626,7 +537,7 @@ def parse_filer_address(xml_content, xml_filename, row, zip_index, output_dir, s
         })
         return False, None
 
-def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipient_name, output_dir):
+def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str, recipient_name: str, output_dir: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
     if not hasattr(thread_local, 'result'):
         thread_local.result = {
             'address_entries': [],
@@ -639,21 +550,79 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
         }
     result = thread_local.result
     try:
-        address_components = []
-        for xpath in GRANTEE_ADDRESS_XPATHS:
-            elements = xpath(grant_element)
-            for elem in elements:
-                if elem.text:
-                    address_components.append(elem)
-        address_info = canonicalize_address(address_components, output_dir)
-        canonical_address = address_info.canonical_address
-        address_line1 = address_info.address_line1
-        address_line2 = address_info.address_line2
-        city = address_info.city
-        state = address_info.state
-        po_box = address_info.po_box
-        zip_code = address_info.zip_code
-        raw_components_str = ";".join(elem.text.strip() for elem in address_components if elem.text)
+        # Extract address components using XPaths from xpaths.py
+        from xpaths import COMMON_XPATHS
+
+        address_line1 = None
+        for xpath in COMMON_XPATHS["recipient_address_line1"]:
+            try:
+                result = xpath(grant_element)
+                if result and result[0].text:
+                    address_line1 = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        address_line2 = None
+        for xpath in COMMON_XPATHS["recipient_address_line2"]:
+            try:
+                result = xpath(grant_element)
+                if result and result[0].text:
+                    address_line2 = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        city = None
+        for xpath in COMMON_XPATHS["recipient_city"]:
+            try:
+                result = xpath(grant_element)
+                if result and result[0].text:
+                    city = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        state = None
+        for xpath in COMMON_XPATHS["recipient_state"]:
+            try:
+                result = xpath(grant_element)
+                if result and result[0].text:
+                    state = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        zip_code = None
+        for xpath in COMMON_XPATHS["recipient_zip_code"]:
+            try:
+                result = xpath(grant_element)
+                if result and result[0].text:
+                    zip_code = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        address = Address(
+            ein=recipient_ein or 'Unknown',
+            name=recipient_name or 'Unknown',
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            zip_code=zip_code
+        )
+        address.prep_for_insert()
+        canonical_address = address.canonical_address
+        address_line1 = address.address_line1
+        address_line2 = address.address_line2
+        city = address.city
+        state = address.state
+        po_box = address.po_box
+        zip_code = address.zip_code
+        zip4 = address.zip4
+        colocator = address.colocator
+        raw_components_str = ""
         address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]
         if not canonical_address:
             result['total_address_errors'] += 1
@@ -666,10 +635,10 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
                 'raw_zip': '',
                 'zip_code': '',
                 'status': 'error',
-                'reason': f"Invalid recipient address; components={address_components}; snippet={address_snippet}"
+                'reason': f"Invalid recipient address; snippet={address_snippet}"
             })
-            return "", None, None
-        return canonical_address, address_line1, address_line2, city, state, po_box, zip_code
+            return "", None, None, None, None, None, None, None, None
+        return canonical_address, address_line1, address_line2, city, state, po_box, zip_code, zip4, colocator
     except Exception as e:
         if not quiet:
             log_error(f"Error parsing recipient address in XML {xml_filename}: {str(e)}", exc_info=True)
@@ -687,7 +656,7 @@ def parse_recipient_address(grant_element, xml_filename, recipient_ein, recipien
         })
         return "", None, None
     
-def write_tsv(file_path, entries, columns, quote_key, sort_keys=None):
+def write_tsv(file_path: str, entries, columns, quote_key, sort_keys=None) -> None:
     if sort_keys:
         entries = deduplicate_sorted_dicts(entries, sort_keys)
     if not quiet:
@@ -700,7 +669,7 @@ def write_tsv(file_path, entries, columns, quote_key, sort_keys=None):
     if not quiet:
         log_error(f"Wrote {len(entries)} rows to {file_path}")
 
-def deduplicate_sorted_dicts(entries, key_order):
+def deduplicate_sorted_dicts(entries, key_order) -> List[Dict]:
     seen = set()
     deduped = []
     for entry in entries:
@@ -710,7 +679,7 @@ def deduplicate_sorted_dicts(entries, key_order):
             deduped.append(entry)
     return sorted(deduped, key=lambda x: tuple(str(x.get(k, '')).lower() for k in key_order))
 
-def load_address_cache(cache_dir, start_year, end_year, zip_dir):
+def load_address_cache(cache_dir: str, start_year: int, end_year: int, zip_dir: str) -> Tuple[bool, Optional[Tuple]]:
     cache_valid = False
     cached_data = None
     checksum_file = os.path.join(cache_dir, f'zip_checksums_{start_year}_{end_year}.json')
@@ -733,7 +702,7 @@ def load_address_cache(cache_dir, start_year, end_year, zip_dir):
                 log_error("Error loading address cache: {}", str(e), exc_info=True)
     return cache_valid, cached_data
 
-def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index):
+def save_address_cache(cache_dir: str, start_year: int, end_year: int, address_entries, debug_address_entries, po_box_entries, zip_code_index, po_box_zip_index) -> None:
     try:
         print("Saving address cache...")
         os.makedirs(cache_dir, exist_ok=True)
@@ -745,7 +714,7 @@ def save_address_cache(cache_dir, start_year, end_year, address_entries, debug_a
         if not quiet:
             log_error("Error saving address cache: {}", str(e), exc_info=True)
 
-def normalize_file_path(arg_value, default_filename, base_dir=None):
+def normalize_file_path(arg_value, default_filename: str, base_dir=None) -> str:
     """Normalize a file path argument, appending default_filename to a directory or using the file path as-is."""
     if not arg_value:
         return os.path.join(base_dir or ".", default_filename)

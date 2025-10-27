@@ -16,11 +16,13 @@ This allows downstream database joins by location.
 
 from dataclasses import dataclass, field
 from typing import Optional
-from constants import VALID_STATES, PO_BOX_REGEX
+from constants import VALID_STATES, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX, STREET_FIXES, UNIT_FIXES
+from countryCodes import lookupCC
+from .base import BaseModel
 
 
 @dataclass
-class Address:
+class Address(BaseModel):
     """Represents a physical address with geocoding information"""
 
     address_id: Optional[int] = None
@@ -33,29 +35,16 @@ class Address:
     zip_code: Optional[str] = None  # First 5 digits
     zip4: Optional[str] = None  # Last 4 digits
     po_box: Optional[str] = None
+    canonical_address: Optional[str] = None  # Standardized address for geocoding
     address_type: str = "filer"  # filer, grant_recipient, etc.
     owner_id: Optional[str] = None  # Loose relationship to owning entity (EIN or UUID)
     geocoding_id: Optional[int] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     colocator: Optional[str] = None
+    created_at: Optional[str] = None
+    master_id: Optional[str] = None
 
-    @property
-    def canonical_address(self) -> Optional[str]:
-        """Generate canonical address string for geocoding"""
-        if not self.address_line1 or not self.city or not self.state:
-            return None
-
-        parts = [self.address_line1]
-        if self.address_line2:
-            parts.append(self.address_line2)
-        parts.extend([self.city, self.state])
-        if self.zip_code:
-            parts.append(self.zip_code[:5])  # First 5 digits only
-            if self.zip4:
-                parts[-1] += f"-{self.zip4}"
-
-        return ", ".join(parts)
 
     @property
     def po_box_number(self) -> Optional[str]:
@@ -77,15 +66,123 @@ class Address:
         """Check if state is valid"""
         return self.state in VALID_STATES if self.state else False
 
-    def is_po_box(self) -> bool:
-        """Check if this is a PO Box address"""
-        return self.po_box_number is not None or (self.address_line1 and "PO BOX" in self.address_line1.upper())
+    def is_po_box(self) -> Optional[str]:
+        """Return PO Box number if this is a PO Box address, None otherwise"""
+        if self.po_box:
+            return self.po_box
+        if self.address_line1 and "PO BOX" in self.address_line1.upper():
+            match = PO_BOX_REGEX.search(self.address_line1.upper())
+            if match:
+                po_box_str = match.group(1)
+                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                if number_match:
+                    return number_match.group(0)
+        return None
+
+    def canonicalize_address(self):
+        """Canonicalize the address by expanding abbreviations and setting canonical_address as a comma-separated list"""
+        # Check if this is a foreign address (FA colocator) and return early if so
+        if self.colocator and self.colocator.startswith('FA:'):
+            return
+
+        # Build parts with parts.append each piece directly from self, and then use a list comprehension to filter out the None
+        parts = [self.address_line1, self.address_line2, self.city, self.state, self.zip_code]
+        parts = [p for p in parts if p is not None]
+
+        # Expand abbreviations in place
+        if self.address_line1:
+            words = self.address_line1.split()
+            if words and words[-1] in STREET_FIXES:
+                words[-1] = STREET_FIXES[words[-1]]
+                self.address_line1 = " ".join(words)
+
+        if self.address_line2:
+            words = self.address_line2.split()
+            if len(words) >= 2 and words[-2] in UNIT_FIXES:
+                words[-2] = UNIT_FIXES[words[-2]]
+                self.address_line2 = " ".join(words)
+
+        # Detect PO Box
+        if self.address_line1:
+            match = PO_BOX_REGEX.search(self.address_line1.upper())
+            if match:
+                po_box_str = match.group(1)
+                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                if number_match:
+                    self.po_box = number_match.group(0)
+
+        # Validate state
+        if self.state and self.state.upper() not in VALID_STATES:
+            self.state = None
+
+        # Split ZIP code
+        if self.zip_code:
+            from parse_utils import split_zip_code
+            self.zip_code, self.zip4 = split_zip_code(self.zip_code)
+
+        # Set colocator for PO Boxes
+        if self.po_box:
+            self.colocator = f"PO:{self.po_box}:{self.zip_code}"
+
+        # Build canonical address with comma-separated components
+        canonical_parts = []
+        if self.po_box:
+            canonical_parts.append(f"PO Box {self.po_box}")
+        if self.address_line1:
+            canonical_parts.append(self.address_line1)
+        if self.address_line2:
+            canonical_parts.append(self.address_line2)
+        if self.city:
+            canonical_parts.append(self.city)
+        if self.state:
+            canonical_parts.append(self.state)
+        if self.zip_code:
+            canonical_parts.append(self.zip_code)
+
+        if canonical_parts:
+            self.canonical_address = ", ".join(canonical_parts).title()
+        else:
+            self.canonical_address = ""
+
+    @classmethod
+    def create_foreign_address(cls, country_code: str, address_type: str = "filer", owner_id: Optional[str] = None) -> 'Address':
+        """Factory method to create an Address record for foreign addresses"""
+        country_info = lookupCC(country_code)
+        if country_info:
+            country_name = country_info['name']
+            # Use the country number as the EIN for foreign addresses
+            ein = country_info['number']
+            name = country_name
+        else:
+            country_name = f"Unknown Country ({country_code})"
+            ein = "999"
+            name = country_name
+
+        address = cls(
+            ein=ein,
+            name=name,
+            address_line1=f"Foreign: {country_name}",
+            state=country_code,
+            colocator=f"FA:{country_code}",
+            address_type=address_type,
+            owner_id=owner_id
+        )
+        return address
+
+    def prep_for_insert(self):
+        """Prepare address for database insertion by canonicalizing, detecting PO Boxes, and setting colocators"""
+        # Call superclass first
+        super().prep_for_insert()
+        # Then do address-specific logic
+        self.canonicalize_address()
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {
             'address_id': self.address_id,
             'ein': self.ein,
+            'owner_id': self.owner_id,
+            'master_id': self.master_id,
             'name': self.name,
             'address_line1': self.address_line1,
             'address_line2': self.address_line2,
@@ -94,10 +191,11 @@ class Address:
             'zip_code': self.zip_code,
             'zip4': self.zip4,
             'po_box': self.po_box,
+            'canonical_address': self.canonical_address,
             'address_type': self.address_type,
-            'owner_id': self.owner_id,
             'geocoding_id': self.geocoding_id,
             'latitude': self.latitude,
             'longitude': self.longitude,
-            'colocator': self.colocator
+            'colocator': self.colocator,
+            'created_at': self.created_at
         }

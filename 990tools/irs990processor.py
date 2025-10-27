@@ -439,7 +439,7 @@ class IRS990Processor:
             elif form_type == "990PF":
                 charity, officers, grants, contractors, contributions = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
             else:
-                self.log_error(f"Unsupported form type {form_type} in {filename}")
+                self.log_info(f"Unsupported form type {form_type} in {filename}")
                 return ('error', xml_id)
 
             if charity:

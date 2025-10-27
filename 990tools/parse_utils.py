@@ -1,5 +1,6 @@
 # parse_utils.py
 import re
+from lxml import etree as ET  # type: ignore
 from lxml import etree  # type: ignore
 from nameparser import HumanName
 from io import BytesIO
@@ -8,8 +9,10 @@ from xpaths import NAMESPACES, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN
 from xpaths_990ez import XPATHS_990EZ
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
 from xpath_utils import find_element
-from extract_utils import canonicalize_address
 from constants import MONEY_PATTERN, FLOAT_PATTERN
+from typing import Optional, List, Dict, Any
+from models.address import Address
+from models.political_contribution import PoliticalContribution
 
 def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False):
     elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)
@@ -108,7 +111,7 @@ def parse_float_field(text):
 
     return 0.0
 
-def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, known_eins, form_type, backfill_entries=None, seen_backfill_keys=None):
+def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, known_eins, form_type: str, backfill_entries=None, seen_backfill_keys=None) -> List[Dict[str, Any]]:
     grants = []
     try:
         parser = etree.XMLParser(recover=True)
@@ -133,17 +136,23 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                     # Check for foreign address
                     foreign_address = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
                     if foreign_address:
-                        # Foreign grant
+                        # Foreign grant - use Address factory method
                         country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
                         country_code = country_elem[0].text.strip() if country_elem else None
-                        from countryCodes import lookupCC
-                        country = lookupCC(country_code) if country_code else None
-                        if country:
-                            grant_ein = country["number"]
-                            grantee_name = country["name"]
+                        if country_code:
+                            # Create foreign address using factory method
+                            foreign_addr = Address.create_foreign_address(
+                                country_code=country_code,
+                                ein=f"foreign_{country_code}",
+                                name=f"Foreign: {country_code}",
+                                address_type="grant"
+                            )
+                            # Use the EIN from the foreign address for grant processing
+                            grant_ein = foreign_addr.state  # This will be the country code
+                            grantee_name = foreign_addr.address_line1  # This will be "Foreign: {country_name}"
                         else:
                             grant_ein = "999"
-                            grantee_name = "Foreign_" + (country_code or "Unknown")
+                            grantee_name = "Foreign_Unknown"
                         is_foreign = True
                     else:
                         # No address found, assume domestic
@@ -162,35 +171,13 @@ def parse_grants(xml_content, xml_filename, filer_ein, filer_name, tax_year, kno
                                 'grant_amt': grant_amt,
                                 'tax_year': tax_year
                             })
-                            if backfill_entries is not None and grant_ein not in known_eins and grant_ein.isdigit() and grant_ein != "999" and not is_foreign:
-                                is_valid, reason = validate_ein(grant_ein)
-                                if is_valid:
-                                    address_components = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                                    address_info = canonicalize_address([comp for comp in address_components if comp.text], None)
-                                    canonical_address = address_info.canonical_address
-                                    street = address_info.address_line1
-                                    city = address_info.city
-                                    state = address_info.state
-                                    po_box = address_info.po_box
-                                    zip_code = address_info.zip_code
-                                    if canonical_address or po_box or zip_code:
-                                        backfill_key = (grant_ein, grantee_name, zip_code)
-                                        if backfill_key not in seen_backfill_keys:
-                                            seen_backfill_keys.add(backfill_key)
-                                            backfill_entries.append({
-                                                'grant_ein': grant_ein,
-                                                'name': grantee_name,
-                                                'canonical_address': canonical_address,
-                                                'po_box': po_box,
-                                                'zip_code': zip_code
-                                            })
                     except (ValueError, TypeError):
                         pass
     except Exception as e:
         logging.error(f"Error parsing grants from {xml_filename}: {e}")
     return grants
 
-def parse_contributions(xml_content, xml_filename, filer_ein, filer_name, tax_year, form_type):
+def parse_contributions(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, form_type: str) -> List[Dict[str, Any]]:
     contributions = []
     try:
         parser = etree.XMLParser(recover=True)
@@ -270,3 +257,246 @@ def validate_ein(ein):
     if prefix not in valid_prefixes:
         return False, f"Invalid EIN prefix {prefix}"
     return True, ""
+
+
+def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, logger=None) -> Optional[Address]:
+    """Extract address from XML - moved from xml_processor.py"""
+    from models.address import Address
+    from logging_utils import log_debug, log_info
+
+    if not quiet:
+        log_debug(logger, f"DEBUG: Starting address extraction for EIN {filer_ein} in {filename}")
+
+    # Extract filer name for address
+    name_xpaths = [
+        ET.XPath(".//irs:ReturnHeader/irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+        ET.XPath(".//ReturnHeader/Filer/BusinessName/BusinessNameLine1Txt"),
+        ET.XPath(".//irs:ReturnHeader/irs:Filer/irs:Name/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+        ET.XPath(".//ReturnHeader/Filer/Name/BusinessNameLine1Txt")
+    ]
+
+    filer_name = "Unknown"
+    for xpath in name_xpaths:
+        try:
+            result = xpath(root)
+            if result and result[0].text:
+                filer_name = result[0].text.strip()
+                if not quiet:
+                    log_debug(logger, f"DEBUG: Found filer name: '{filer_name}' for EIN {filer_ein}")
+                break
+        except:
+            continue
+
+    # Create Address object with basic fields and call prep_for_insert
+    address = Address(
+        ein=filer_ein,
+        name=filer_name,
+        address_type="filer"
+    )
+
+    # Extract address components directly from XML using proper XPaths
+    # Get individual address fields from ReturnHeader/Filer
+    address_line1_xpaths = [
+        ET.XPath(".//ReturnHeader/Filer/USAddress/AddressLine1Txt"),
+        ET.XPath(".//Filer/USAddress/AddressLine1Txt"),
+        ET.XPath(".//USAddress/AddressLine1Txt"),
+    ]
+
+    for xpath in address_line1_xpaths:
+        try:
+            result = xpath(root)
+            if result and result[0].text:
+                address.address_line1 = result[0].text.strip()
+                if not quiet:
+                    log_debug(logger, f"DEBUG: Found address_line1: '{address.address_line1}' for EIN {filer_ein} using xpath {xpath.path}")
+                break
+        except:
+            continue
+
+    # Debug: if no address_line1 found, log the XML structure around address
+    if not address.address_line1 and not quiet:
+        # Try to find any USAddress elements and log their structure
+        try:
+            us_addresses = root.xpath(".//USAddress", namespaces={})
+            if us_addresses:
+                log_debug(logger, f"DEBUG: Found {len(us_addresses)} USAddress elements for EIN {filer_ein}")
+                for i, addr_elem in enumerate(us_addresses[:1]):  # Just log first one
+                    log_debug(logger, f"DEBUG: USAddress {i} content: {ET.tostring(addr_elem, encoding='unicode')[:500]}...")
+            else:
+                log_debug(logger, f"DEBUG: No USAddress elements found for EIN {filer_ein}")
+        except Exception as e:
+            log_debug(logger, f"DEBUG: Error checking USAddress structure for EIN {filer_ein}: {e}")
+
+    # Address line 2
+    address_line2_xpaths = [
+        ET.XPath(".//ReturnHeader/Filer/USAddress/AddressLine2Txt"),
+        ET.XPath(".//Filer/USAddress/AddressLine2Txt"),
+        ET.XPath(".//USAddress/AddressLine2Txt"),
+    ]
+
+    for xpath in address_line2_xpaths:
+        try:
+            result = xpath(root)
+            if result and result[0].text:
+                address.address_line2 = result[0].text.strip()
+                break
+        except:
+            continue
+
+    # City
+    city_xpaths = [
+        ET.XPath(".//ReturnHeader/Filer/USAddress/CityNm"),
+        ET.XPath(".//Filer/USAddress/CityNm"),
+        ET.XPath(".//USAddress/CityNm"),
+    ]
+
+    for xpath in city_xpaths:
+        try:
+            result = xpath(root)
+            if result and result[0].text:
+                address.city = result[0].text.strip()
+                break
+        except:
+            continue
+
+    # State
+    state_xpaths = [
+        ET.XPath(".//ReturnHeader/Filer/USAddress/StateAbbreviationCd"),
+        ET.XPath(".//Filer/USAddress/StateAbbreviationCd"),
+        ET.XPath(".//USAddress/StateAbbreviationCd"),
+    ]
+
+    for xpath in state_xpaths:
+        try:
+            result = xpath(root)
+            if result and result[0].text:
+                address.state = result[0].text.strip()
+                break
+        except:
+            continue
+
+    # ZIP Code
+    zip_xpaths = [
+        ET.XPath(".//ReturnHeader/Filer/USAddress/ZIPCd"),
+        ET.XPath(".//Filer/USAddress/ZIPCd"),
+        ET.XPath(".//USAddress/ZIPCd"),
+    ]
+
+    for xpath in zip_xpaths:
+        try:
+            result = xpath(root)
+            if result and result[0].text:
+                address.zip_code = result[0].text.strip()
+                break
+        except:
+            continue
+
+    if not quiet:
+        log_debug(logger, f"DEBUG: About to call prep_for_insert for EIN {filer_ein}, address_line1='{address.address_line1}', city='{address.city}', state='{address.state}', zip='{address.zip_code}'")
+
+    address.prep_for_insert()
+
+    if not quiet:
+        log_debug(logger, f"DEBUG: After prep_for_insert for EIN {filer_ein}: canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+
+    if address.canonical_address:
+        if not quiet:
+            log_info(logger, f"DEBUG: Created Address object - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+        return address
+    else:
+        if not quiet:
+            log_info(logger, f"DEBUG: No canonical_address created - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+        return None
+
+
+def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, quiet: bool = False, logger=None) -> Optional[PoliticalContribution]:
+    """Parse a single political contribution element from XML - moved from xml_processor.py"""
+    from models.political_contribution import PoliticalContribution
+    from logging_utils import log_error
+
+    try:
+        # Extract recipient name
+        name_xpaths = [
+            ET.XPath(".//irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//RecipientNm"),
+            ET.XPath(".//RecipientName"),
+            ET.XPath("irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath("irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath("RecipientNm"),
+            ET.XPath("RecipientName"),
+        ]
+
+        recipient_name = None
+        for xpath in name_xpaths:
+            try:
+                result = xpath(elem)
+                if result and result[0].text:
+                    recipient_name = result[0].text.strip()
+                    break
+            except:
+                continue
+
+        # Extract amount
+        amount_xpaths = [
+            ET.XPath(".//irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//TotalDirectExpendAmt"),
+            ET.XPath(".//Amount"),
+            ET.XPath("irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath("irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath("TotalDirectExpendAmt"),
+            ET.XPath("Amount"),
+        ]
+
+        amount = 0.0
+        for xpath in amount_xpaths:
+            try:
+                result = xpath(elem)
+                if result and result[0].text:
+                    try:
+                        amount = float(result[0].text.strip().replace(',', ''))
+                        break
+                    except ValueError:
+                        continue
+            except:
+                continue
+
+        # Extract EIN if available
+        ein_xpaths = [
+            ET.XPath(".//irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath(".//EIN"),
+            ET.XPath(".//RecipientEIN"),
+            ET.XPath("irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath("irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            ET.XPath("EIN"),
+            ET.XPath("RecipientEIN"),
+        ]
+
+        recipient_ein = None
+        for xpath in ein_xpaths:
+            try:
+                result = xpath(elem)
+                if result and result[0].text:
+                    raw_ein = result[0].text.strip()
+                    if raw_ein.isdigit():
+                        recipient_ein = f"{int(raw_ein):09d}"
+                        break
+            except:
+                continue
+
+        if recipient_name and amount > 0:
+            contribution = PoliticalContribution(
+                filer_ein=filer_ein,
+                recipient=recipient_name,
+                amount=amount,
+                tax_year=tax_year
+            )
+            return contribution
+
+    except Exception as e:
+        if not quiet:
+            log_error(logger, f"Error parsing political contribution element: {e}")
+
+    return None

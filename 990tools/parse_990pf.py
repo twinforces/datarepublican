@@ -1,6 +1,6 @@
 # parse_990pf.py
 import sys
-from lxml import etree
+from lxml import etree  # type: ignore
 from io import BytesIO
 import logging
 from nameparser import HumanName
@@ -13,19 +13,21 @@ from logging_utils import get_logger, log_error as proper_log_error, log_debug a
 logger = None
 log_error = None
 log_debug = None
+log_info = None
 verbose = False
 quiet = False
 from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES
 
 def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None, is_quiet=False):
-    global logger, log_error, log_debug, verbose, quiet, DEBUG_EINS
+    global logger, log_error, log_debug, log_info, verbose, quiet, DEBUG_EINS
     logger = new_logger
     log_error = new_log_error
     log_debug = new_log_debug or new_log_error  # fallback to log_error if log_debug not provided
+    log_info = new_log_error  # fallback to log_error if log_info not provided
     verbose = is_verbose
     quiet = is_quiet
     DEBUG_EINS = debug_eins if debug_eins is not None else set()
-    
+
 # Initialize stub functions using factory functions
 stub_log_error = create_stub_log_error(logger)
 stub_log_debug = create_stub_log_debug(logger)
@@ -35,6 +37,9 @@ if log_error is None:
 
 if log_debug is None:
     log_debug = stub_log_debug
+
+if log_info is None:
+    log_info = stub_log_error  # fallback to stub_log_error
 
 def parse_org_type_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     elem = parse_string_field(root, XPATHS_990PF, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)

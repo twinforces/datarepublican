@@ -8,41 +8,48 @@ extracting data into dataclasses and storing in the database.
 
 import zipfile
 import logging
+import threading
 from io import BytesIO
 from typing import Optional, List, Tuple, Dict, Any
-from lxml import etree as ET
+from lxml import etree as ET  # type: ignore
 
 from database_operations import DatabaseOperations
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
-from parse_utils import parse_grants
+from parse_utils import parse_grants, extract_address, parse_political_contribution_element
 import parse_990
 import parse_990ez
 import parse_990pf
 from logging_utils import log_info, log_error, log_debug, log_warning
+from typing import Optional, List, Tuple
 
 # Precompile XPaths used in parse_xml_file
 FORM_TYPE_XPATHS = [
-    ET.XPath(".//irs:ReturnHeader/irs:ReturnTypeCd", namespaces={'irs': 'http://www.irs.gov/efile'}),
-    ET.XPath(".//ReturnHeader/ReturnTypeCd")
+    etree.XPath(".//irs:ReturnHeader/irs:ReturnTypeCd", namespaces={'irs': 'http://www.irs.gov/efile'}),
+    etree.XPath(".//ReturnHeader/ReturnTypeCd")
 ]
 TAX_YEAR_XPATHS = [
-    ET.XPath(".//irs:ReturnHeader/irs:TaxYr", namespaces={'irs': 'http://www.irs.gov/efile'}),
-    ET.XPath(".//ReturnHeader/TaxYr")
+    etree.XPath(".//irs:ReturnHeader/irs:TaxYr", namespaces={'irs': 'http://www.irs.gov/efile'}),
+    etree.XPath(".//ReturnHeader/TaxYr")
 ]
 FILER_EIN_XPATHS = [
-    ET.XPath(".//irs:Filer/irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-    ET.XPath(".//Filer/EIN")
+    etree.XPath(".//irs:Filer/irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
+    etree.XPath(".//Filer/EIN")
 ]
 
 
 class XMLProcessor:
     """Handles XML file parsing and processing"""
 
+    # Class-level cache for ZIP file connections to avoid reopening
+    _zip_cache: Dict[str, zipfile.ZipFile] = {}
+    _zip_cache_lock = threading.Lock()
+
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1, quiet: bool = False):
         self.db_ops = db_ops
         self.processing_version = processing_version
         self.logger = logging.getLogger(__name__)
         self.quiet = quiet
+
 
     def process_xml_files(self, max_files: Optional[int] = None) -> int:
         """Parse XML files and extract data to dataclasses (step 5)"""
@@ -73,14 +80,12 @@ class XMLProcessor:
                     continue
                 zip_path = zip_result[0]
 
-                # Extract XML content from ZIP
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    with zip_ref.open(xml_file.internal_path) as xml_file_handle:
-                        xml_content = xml_file_handle.read()
+                # Extract XML content from ZIP using cached connection
+                xml_content = self._extract_xml_from_zip(zip_path, xml_file.internal_path)
 
                 # Parse XML to get EIN and tax_year
-                parser = ET.XMLParser(recover=True)
-                tree = ET.parse(BytesIO(xml_content), parser)
+                parser = etree.XMLParser(recover=True)
+                tree = etree.parse(BytesIO(xml_content), parser)
                 root = tree.getroot()
 
                 form_type = self._extract_form_type(root)
@@ -151,17 +156,15 @@ class XMLProcessor:
                 return False
             zip_path = zip_result[0]
 
-            # Extract XML content from ZIP
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                with zip_ref.open(internal_path) as xml_file:
-                    xml_content = xml_file.read()
+            # Extract XML content from ZIP using cached connection
+            xml_content = self._extract_xml_from_zip(zip_path, internal_path)
 
             if not self.quiet:
                 log_debug(self.logger, f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
 
             # Parse XML
-            parser = ET.XMLParser(recover=True)
-            tree = ET.parse(BytesIO(xml_content), parser)
+            parser = etree.XMLParser(recover=True)
+            tree = etree.parse(BytesIO(xml_content), parser)
             root = tree.getroot()
 
             # Extract basic metadata
@@ -183,11 +186,11 @@ class XMLProcessor:
 
             # Extract data based on form type
             if form_type == "990":
-                charity, officers, grants, contractors, contributions = self._parse_990_data(root, filename, filer_ein, tax_year, form_type)
+                charity, officers, grants, contractors, contributions, address = self._parse_990_data(root, filename, filer_ein, tax_year, form_type)
             elif form_type == "990EZ":
-                charity, officers, grants, contractors, contributions = self._parse_990ez_data(root, filename, filer_ein, tax_year, form_type)
+                charity, officers, grants, contractors, contributions, address = self._parse_990ez_data(root, filename, filer_ein, tax_year, form_type)
             elif form_type == "990PF":
-                charity, officers, grants, contractors, contributions = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
+                charity, officers, grants, contractors, contributions, address = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
             else:
                 if not self.quiet:
                     log_error(self.logger, f"Unsupported form type {form_type} in {filename}")
@@ -203,12 +206,15 @@ class XMLProcessor:
                     log_debug(self.logger, f"Charity inserted with charity_id: {charity_id}")
 
                 # Extract and store address
-                address = self._extract_address(root, filename, filer_ein)
                 if address:
                     if not self.quiet:
                         log_debug(self.logger, f"Inserting address for EIN {filer_ein}")
                         log_info(self.logger, f"DEBUG: Address to insert: ein={address.ein}, canonical='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
+                        log_info(self.logger, f"DEBUG: Address fields - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
                     self.db_ops.insert_address(address)
+                else:
+                    if not self.quiet:
+                        log_info(self.logger, f"DEBUG: No address extracted for EIN {filer_ein} - address is None")
 
                 # Insert related data
                 for officer in officers:
@@ -286,89 +292,63 @@ class XMLProcessor:
             log_warning(self.logger, "TRACE: No EIN found in XML, returning 'Unknown'")
         return "Unknown"
 
-    def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
+    def _parse_990_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution], Optional[Address]]:
         """Parse Form 990 data"""
-        xpath_cache: Dict = {}
-
         if not self.quiet:
             log_info(self.logger, f"TRACE: _parse_990_data() called with EIN: '{filer_ein}' for file {filename}")
 
-        # Extract charity data using existing parsing functions
-        row, officer_entries = parse_990.parse_990(root, filename, xpath_cache, filer_ein, tax_year, form_type, log_error=self.logger.error)
+        # Extract charity data using existing parsing functions - now returns model instances
+        charity, officers, grants, contractors, contributions, address = parse_990.parse_990(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.logger.error)
 
-        if not row:
+        if not charity:
             if not self.quiet:
                 log_warning(self.logger, f"TRACE: parse_990() returned None for EIN: '{filer_ein}' in file {filename}")
-            return None, [], [], [], []
-        else:
-            if not self.quiet:
-                log_info(self.logger, f"TRACE: parse_990() returned row with EIN: '{row[1]}' for file {filename}")
+            return None, [], [], [], [], None
 
-        # Convert row to Charity dataclass
         if not self.quiet:
-            log_info(self.logger, f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
-        charity = Charity(
-            ein=row[1],  # filer_ein
-            tax_year=row[0],  # tax_year
-            filer_name=row[2],  # filer_name
-            business_name_line1=row[3],  # business_name_line1
-            business_name_line2=row[4],  # business_name_line2
-            receipt_amt=row[5],  # receipt
-            govt_amt=row[6],  # govt_grants
-            contrib_amt=row[7],  # contributions
-            org_type=row[8],  # org_type
-            total_exp=row[9],  # total_exp
-            prog_exp=row[10],  # prog_exp
-            travel_amt=row[11],  # travel
-            conferences_amt=row[12],  # conferences
-            officer_comp=row[13],  # officer_comp
-            comp_pct=row[14],  # comp_pct
-            comp_ptile=row[15],  # comp_ptile
-            travel_pct=row[16],  # travel_pct
-            travel_ptile=row[17],  # travel_ptile
-            conferences_pct=row[18],  # conferences_pct
-            conferences_ptile=row[19],  # conferences_ptile
-            grants_pct=row[20],  # grants_pct
-            grants_ptile=row[21],  # grants_ptile
-            foreign_expenses_pct=row[22],  # foreign_expenses_pct
-            foreign_expenses_ptile=row[23],  # foreign_expenses_ptile
-            grift_ratio=row[24],  # grift_ratio
-            total_assets=row[25],  # total_assets
-            form_type=row[26],  # form_type
-            denominator=row[27],  # denominator
-            foreign_office=row[28],  # foreign_office
-            foreign_expenses=row[29],  # foreign_expenses
-            grants_to_others=row[30],  # grants_to_others
-            domestic_misrep_flag=row[31],  # domestic_misrep_flag
-            xml_name=row[32]  # xml_name
-        )
-        if not self.quiet:
-            log_info(self.logger, f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
-            log_info(self.logger, f"TRACE: Created Charity dataclass with EIN: '{charity.ein}' from row[1] for file {filename}")
+            log_info(self.logger, f"TRACE: parse_990() returned Charity with EIN: '{charity.ein}' for file {filename}")
 
-        # Convert officer entries
-        officers = []
-        for entry in officer_entries:
-            officer = Officer(
-                first_name=entry["first_name"],
-                last_name=entry["last_name"],
-                compensation=entry["amount"],
-                tax_year=tax_year
-            )
-            officers.append(officer)
-
-        # Extract grants, contractors, and political contributions
+        # Extract grants, contractors, and political contributions (override the empty lists from parse_990)
         grants = self._extract_grants_990(root, filename, filer_ein, tax_year)
         contractors = self._extract_contractors_990(root, filename, filer_ein, tax_year)
         contributions = self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
 
-        return charity, officers, grants, contractors, contributions
+        return charity, officers, grants, contractors, contributions, address
+
+    def _extract_xml_from_zip(self, zip_path: str, internal_path: str) -> bytes:
+        """Extract XML content from ZIP using cached connection"""
+        zip_key = str(zip_path)
+
+        with self._zip_cache_lock:
+            if zip_key not in self._zip_cache:
+                # Open ZIP file and cache the connection
+                self._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
+                if not self.quiet:
+                    print(f"Opened and cached ZIP connection for {zip_path}")
+
+            zip_ref = self._zip_cache[zip_key]
+
+        # Extract XML content from cached connection
+        with zip_ref.open(internal_path) as xml_file:
+            return xml_file.read()
+
+    @classmethod
+    def cleanup_zip_cache(cls):
+        """Clean up cached ZIP connections"""
+        with cls._zip_cache_lock:
+            for zip_ref in cls._zip_cache.values():
+                try:
+                    zip_ref.close()
+                except:
+                    pass  # Ignore errors during cleanup
+            cls._zip_cache.clear()
+            print("Cleaned up XML processor ZIP file cache")
 
     def _extract_grants_990(self, root, filename: str, filer_ein: str, tax_year: int) -> List[Grant]:
         """Extract grants from Form 990"""
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(ET.tostring(root))
+        xml_content = BytesIO(etree.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990")
         for grant_data in grants_data:
             grant = Grant(
@@ -386,7 +366,7 @@ class XMLProcessor:
         # Similar to 990 but using EZ-specific parsing
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(ET.tostring(root))
+        xml_content = BytesIO(etree.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990EZ")
         for grant_data in grants_data:
             grant = Grant(
@@ -404,7 +384,7 @@ class XMLProcessor:
         # Similar to 990 but using PF-specific parsing
         grants = []
         # Use existing parsing logic from parse_utils
-        xml_content = BytesIO(ET.tostring(root))
+        xml_content = BytesIO(etree.tostring(root))
         grants_data = parse_grants(xml_content, filename, filer_ein, "", tax_year, set(), "990PF")
         for grant_data in grants_data:
             grant = Grant(
@@ -422,12 +402,12 @@ class XMLProcessor:
         contractors = []
         # Extract contractors from Schedule L (Independent Contractors)
         contractor_xpaths = [
-            ET.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
-            ET.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
-            ET.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+            etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
+            etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
+            etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
         ]
 
         for xpath in contractor_xpaths:
@@ -455,8 +435,8 @@ class XMLProcessor:
         contributions = []
         # Extract political contributions from Schedule C
         contribution_xpaths = [
-            ET.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//IRS990ScheduleC/PoliticalCampaignActyGrp"),
+            etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces={'irs': 'http://www.irs.gov/efile'}),
+            etree.XPath(".//IRS990ScheduleC/PoliticalCampaignActyGrp"),
         ]
 
         for xpath in contribution_xpaths:
@@ -480,252 +460,99 @@ class XMLProcessor:
         return self._extract_political_contributions_990(root, filename, filer_ein, tax_year)
 
     def _extract_address(self, root, filename: str, filer_ein: str) -> Optional[Address]:
-        """Extract address from XML"""
-        from extract_utils import canonicalize_address
-
-        # Try to find US address elements
-        address_xpaths = [
-            ET.XPath(".//irs:Filer/irs:USAddress/*", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//Filer/USAddress/*"),
-            ET.XPath(".//USAddress/*")
-        ]
-
-        address_components = []
-        for xpath in address_xpaths:
-            try:
-                elements = xpath(root)
-                if elements:
-                    address_components.extend(elements)
-                    break
-            except:
-                continue
-
-        if not address_components:
-            if not self.quiet:
-                log_debug(self.logger, f"No address components found in {filename}")
-            return None
-
-        # Extract filer name for address
-        name_xpaths = [
-            ET.XPath(".//irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//Filer/BusinessName/BusinessNameLine1Txt"),
-            ET.XPath(".//irs:Filer/irs:Name/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-            ET.XPath(".//Filer/Name/BusinessNameLine1Txt")
-        ]
-
-        filer_name = "Unknown"
-        for xpath in name_xpaths:
-            try:
-                result = xpath(root)
-                if result and result[0].text:
-                    filer_name = result[0].text.strip()
-                    break
-            except:
-                continue
-
-        # Canonicalize address
-        address_info = canonicalize_address(address_components, ".")
-        canonical_address = address_info.canonical_address
-        street = address_info.address_line1
-        city = address_info.city
-        state = address_info.state
-        po_box = address_info.po_box
-        zip_code = address_info.zip_code
-
-        if canonical_address:
-            address = Address(
-                ein=filer_ein,
-                name=filer_name,
-                address_line1=street,
-                city=city,
-                state=state,
-                zip_code=zip_code,
-                po_box=po_box,
-                canonical_address=canonical_address,
-                address_type="filer"
-            )
-            return address
-
-        return address_info
+        """Extract address from XML - moved to parse_utils.py"""
+        from parse_utils import extract_address
+        return extract_address(root, filename, filer_ein, self.quiet, self.logger)
 
     def _parse_political_contribution_element(self, elem, filer_ein: str, tax_year: int) -> Optional[PoliticalContribution]:
-        """Parse a single political contribution element from XML"""
+        """Parse a single political contribution element from XML - moved to parse_utils.py"""
+        from parse_utils import parse_political_contribution_element
+        return parse_political_contribution_element(elem, filer_ein, tax_year, self.quiet, self.logger)
+    def _parse_contractor_element(self, elem, filer_ein: str, tax_year: int) -> Optional[Contractor]:
+        """Parse a single contractor element from XML"""
+        from models.contractor import Contractor
+
         try:
-            # Extract recipient name
+            # Extract contractor name
             name_xpaths = [
-                ET.XPath(".//irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath(".//irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath(".//RecipientNm"),
-                ET.XPath(".//RecipientName"),
-                ET.XPath("irs:RecipientNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath("irs:RecipientName", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath("RecipientNm"),
-                ET.XPath("RecipientName"),
+                etree.XPath(".//irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                etree.XPath(".//BusinessName/BusinessNameLine1Txt"),
+                etree.XPath(".//irs:PersonNm", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                etree.XPath(".//PersonNm"),
             ]
 
-            recipient_name = None
+            contractor_name = None
             for xpath in name_xpaths:
                 try:
                     result = xpath(elem)
                     if result and result[0].text:
-                        recipient_name = result[0].text.strip()
+                        contractor_name = result[0].text.strip()
                         break
                 except:
                     continue
 
-            # Extract amount
+            # Extract compensation amount
             amount_xpaths = [
-                ET.XPath(".//irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath(".//irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath(".//TotalDirectExpendAmt"),
-                ET.XPath(".//Amount"),
-                ET.XPath("irs:TotalDirectExpendAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath("irs:Amount", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath("TotalDirectExpendAmt"),
-                ET.XPath("Amount"),
+                etree.XPath(".//irs:CompensationAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                etree.XPath(".//CompensationAmt"),
+                etree.XPath(".//irs:TotalAmt", namespaces={'irs': 'http://www.irs.gov/efile'}),
+                etree.XPath(".//TotalAmt"),
             ]
 
-            amount = 0.0
+            compensation = 0.0
             for xpath in amount_xpaths:
                 try:
                     result = xpath(elem)
                     if result and result[0].text:
                         try:
-                            amount = float(result[0].text.strip().replace(',', ''))
+                            compensation = float(result[0].text.strip().replace(',', ''))
                             break
                         except ValueError:
                             continue
                 except:
                     continue
 
-            # Extract EIN if available
-            ein_xpaths = [
-                ET.XPath(".//irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath(".//irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath(".//EIN"),
-                ET.XPath(".//RecipientEIN"),
-                ET.XPath("irs:EIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath("irs:RecipientEIN", namespaces={'irs': 'http://www.irs.gov/efile'}),
-                ET.XPath("EIN"),
-                ET.XPath("RecipientEIN"),
-            ]
-
-            recipient_ein = None
-            for xpath in ein_xpaths:
-                try:
-                    result = xpath(elem)
-                    if result and result[0].text:
-                        raw_ein = result[0].text.strip()
-                        if raw_ein.isdigit():
-                            recipient_ein = f"{int(raw_ein):09d}"
-                            break
-                except:
-                    continue
-
-            if recipient_name and amount > 0:
-                contribution = PoliticalContribution(
+            if contractor_name and compensation > 0:
+                contractor = Contractor(
                     filer_ein=filer_ein,
-                    recipient_name=recipient_name,
-                    recipient_ein=recipient_ein,
-                    amount=amount,
+                    name=contractor_name,
+                    amount=compensation,
                     tax_year=tax_year
                 )
-                return contribution
+                return contractor
 
         except Exception as e:
             if not self.quiet:
-                log_error(self.logger, f"Error parsing political contribution element: {e}")
+                log_error(self.logger, f"Error parsing contractor element: {e}")
 
         return None
 
-    def _parse_990ez_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
+    def _parse_990ez_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution], Optional[Address]]:
         """Parse Form 990EZ data"""
-        xpath_cache: Dict = {}
+        # Extract charity data using existing parsing functions - now returns model instances
+        charity, officers, grants, contractors, contributions, address = parse_990ez.parse_990ez(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.logger.error)
 
-        # Extract charity data using existing parsing functions
-        row, officer_entries = parse_990ez.parse_990ez(root, filename, xpath_cache, filer_ein, tax_year, form_type, log_error=self.logger.error)
+        if not charity:
+            return None, [], [], [], [], None
 
-        if not row:
-            return None, [], [], [], []
+        # Extract grants, contractors, and political contributions (override the empty lists from parse_990ez)
+        grants = self._extract_grants_990ez(root, filename, filer_ein, tax_year)
+        contractors = self._extract_contractors_990ez(root, filename, filer_ein, tax_year)
+        contributions = self._extract_political_contributions_990ez(root, filename, filer_ein, tax_year)
 
-        # Convert row to Charity dataclass (similar to 990)
-        if not self.quiet:
-            log_info(self.logger, f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
-        charity = Charity(
-            ein=row[1], tax_year=row[0], filer_name=row[2], business_name_line1=row[3],
-            business_name_line2=row[4], receipt_amt=row[5], govt_amt=row[6],
-            contrib_amt=row[7], org_type=row[8], total_exp=row[9], prog_exp=row[10],
-            travel_amt=row[11], conferences_amt=row[12], officer_comp=row[13],
-            comp_pct=row[14], comp_ptile=row[15], travel_pct=row[16],
-            travel_ptile=row[17], conferences_pct=row[18], conferences_ptile=row[19],
-            grants_pct=row[20], grants_ptile=row[21], foreign_expenses_pct=row[22],
-            foreign_expenses_ptile=row[23], grift_ratio=row[24], total_assets=row[25],
-            form_type=row[26], denominator=row[27], foreign_office=row[28],
-            foreign_expenses=row[29], grants_to_others=row[30], domestic_misrep_flag=row[31],
-            xml_name=row[32]
-        )
-        if not self.quiet:
-            log_info(self.logger, f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
+        return charity, officers, grants, contractors, contributions, address
 
-        # Convert officer entries
-        officers = []
-        for entry in officer_entries:
-            officer = Officer(
-                first_name=entry["first_name"],
-                last_name=entry["last_name"],
-                compensation=entry["amount"],
-                tax_year=tax_year
-            )
-            officers.append(officer)
-
-        # Extract grants, contractors, and political contributions
-        grants: List[Grant] = self._extract_grants_990ez(root, filename, filer_ein, tax_year)
-        contractors: List[Contractor] = self._extract_contractors_990ez(root, filename, filer_ein, tax_year)
-        contributions: List[PoliticalContribution] = self._extract_political_contributions_990ez(root, filename, filer_ein, tax_year)
-
-        return charity, officers, grants, contractors, contributions
-
-    def _parse_990pf_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution]]:
+    def _parse_990pf_data(self, root, filename: str, filer_ein: str, tax_year: int, form_type: str) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution], Optional[Address]]:
         """Parse Form 990PF data"""
-        xpath_cache: Dict = {}
+        # Extract charity data using existing parsing functions - now returns model instances
+        charity, officers, grants, contractors, contributions, address = parse_990pf.parse_990pf(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.logger.error)
 
-        # Extract charity data using existing parsing functions
-        row, officer_entries = parse_990pf.parse_990pf(root, filename, xpath_cache, filer_ein, tax_year, form_type, log_error=self.logger.error)
+        if not charity:
+            return None, [], [], [], [], None
 
-        if not row:
-            return None, [], [], [], []
-
-        # Convert row to Charity dataclass (similar to 990)
-        self.logger.info(f"DEBUG: Creating Charity object with row data: ein={row[1]}, business_name_line1={row[3]}")
-        charity = Charity(
-            ein=row[1], tax_year=row[0], filer_name=row[2], business_name_line1=row[3],
-            business_name_line2=row[4], receipt_amt=row[5], govt_amt=row[6],
-            contrib_amt=row[7], org_type=row[8], total_exp=row[9], prog_exp=row[10],
-            travel_amt=row[11], conferences_amt=row[12], officer_comp=row[13],
-            comp_pct=row[14], comp_ptile=row[15], travel_pct=row[16],
-            travel_ptile=row[17], conferences_pct=row[18], conferences_ptile=row[19],
-            grants_pct=row[20], grants_ptile=row[21], foreign_expenses_pct=row[22],
-            foreign_expenses_ptile=row[23], grift_ratio=row[24], total_assets=row[25],
-            form_type=row[26], denominator=row[27], foreign_office=row[28],
-            foreign_expenses=row[29], grants_to_others=row[30], domestic_misrep_flag=row[31],
-            xml_name=row[32]
-        )
-        self.logger.info(f"DEBUG: Charity object created successfully: ein={charity.ein}, business_name_line1={charity.business_name_line1}")
-
-        # Convert officer entries
-        officers = []
-        for entry in officer_entries:
-            officer = Officer(
-                first_name=entry["first_name"],
-                last_name=entry["last_name"],
-                compensation=entry["amount"],
-                tax_year=tax_year
-            )
-            officers.append(officer)
-
-        # Extract grants, contractors, and political contributions
+        # Extract grants, contractors, and political contributions (override the empty lists from parse_990pf)
         grants = self._extract_grants_990pf(root, filename, filer_ein, tax_year)
         contractors = self._extract_contractors_990pf(root, filename, filer_ein, tax_year)
         contributions = self._extract_political_contributions_990pf(root, filename, filer_ein, tax_year)
 
-        return charity, officers, grants, contractors, contributions
+        return charity, officers, grants, contractors, contributions, address

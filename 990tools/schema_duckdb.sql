@@ -127,10 +127,10 @@ CREATE TABLE Addresses (
     address_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein VARCHAR NOT NULL,
     -- EIN this address belongs to
-    owner_id UUID NOT NULL,
-    -- Owner ID for loose foreign key relationships
+    owner_id VARCHAR,
+    -- Owner ID for loose foreign key relationships (NULL for standalone addresses)
     master_id UUID,
-    -- Master address ID for deduplication (NULL for master addresses)
+    -- Master address ID for deduplication (NULL for root addresses of the tree)
     name VARCHAR NOT NULL,
     -- Organization name
     address_line1 VARCHAR,

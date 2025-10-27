@@ -97,6 +97,21 @@ DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 # Geocoding constants
 GEOCODING_BATCH_SIZE = 5000
 
+# Address abbreviation expansions
+STREET_FIXES = {
+    'St': 'Street', 'Saint': 'Street', 'Ave': 'Avenue', 'Av': 'Avenue',
+    'Blvd': 'Boulevard', 'Dr': 'Drive', 'Ln': 'Lane', 'Rd': 'Road',
+    'Cir': 'Circle', 'Ct': 'Court', 'Pl': 'Place', 'Ter': 'Terrace',
+    'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Sq': 'Square',
+    'Cres': 'Crescent', 'Plz': 'Plaza', 'Xing': 'Crossing', 'Way': 'Way',
+    'Aly': 'Alley', 'Loop': 'Loop', 'Rdg': 'Ridge', 'Trl': 'Trail'
+}
+UNIT_FIXES = {
+    'Ste': 'Suite', 'Apt': 'Apartment', 'Unit': 'Unit', 'Bldg': 'Building',
+    'Fl': 'Floor', 'Rm': 'Room', 'Dept': 'Department', 'Ofc': 'Office',
+    'SPC': 'Space', 'LOT': 'Lot', 'TRLR': 'Trailer', 'BSMT': 'Basement'
+}
+
 # Keywords for parsing Schedule O expenses
 TRAVEL_KEYWORDS = [
     "TRAVEL", "BANK", "MEAL", "MEALS", "ENTERTAINMENT", "OFFICE", "TECHNICAL", "INTERNET",

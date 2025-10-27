@@ -9,9 +9,8 @@ Includes ZIP file connection caching for improved performance.
 
 import os
 import zipfile
-import threading
 from pathlib import Path
-from typing import List, Dict
+from typing import List
 
 # ZipFile and XMLFile are imported from database_operations
 from database_operations import DatabaseOperations
@@ -22,9 +21,6 @@ from logging_utils import start_progress_reporting, stop_progress_reporting, upd
 class ZipProcessor:
     """Handles ZIP file processing operations"""
 
-    # Class-level cache for ZIP file connections to avoid reopening
-    _zip_cache: Dict[str, zipfile.ZipFile] = {}
-    _zip_cache_lock = threading.Lock()
 
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
         self.db_ops = db_ops
@@ -105,74 +101,50 @@ class ZipProcessor:
         zip_id = self.db_ops.insert_zip_file(zip_file)
         print(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
 
-        # Extract XML file listing using cached ZIP connection
-        xml_files = self._get_xml_files_from_zip(zip_path)
-        print(f"Found {len(xml_files)} XML files using cached ZIP connection")
+        # Extract XML file listing and sizes in one pass
+        xml_sizes = self._get_all_xml_sizes(zip_path)
+        xml_files = list(xml_sizes.keys())
+        print(f"Found {len(xml_files)} XML files")
 
         # Batch insert all XML files for this ZIP
         xml_file_objects = []
         for xml_filename in xml_files:
-            # Get file size from ZIP info
-            file_size = self._get_xml_file_size(zip_path, xml_filename)
             xml_file = XMLFile(
                 zip_id=zip_id,
                 filename=xml_filename,
                 internal_path=xml_filename,
-                file_size=file_size
+                file_size=xml_sizes[xml_filename]
             )
             xml_file_objects.append(xml_file)
 
         # Bulk insert XML files
         if xml_file_objects:
-            self.db_ops.bulk_insert_xml_files(xml_file_objects)
+            ids = self.db_ops.bulk_insert(xml_file_objects)
             print(f"Bulk inserted {len(xml_file_objects)} XML files for ZIP {zip_filename}")
 
         # Update ZIP status
         self.db_ops.update_zip_status(zip_id, 'processed')
 
     def _get_xml_files_from_zip(self, zip_path: Path) -> List[str]:
-        """Get XML files from ZIP using cached connection"""
-        zip_key = str(zip_path)
-
-        with self._zip_cache_lock:
-            if zip_key not in self._zip_cache:
-                # Open ZIP file and cache the connection
-                self._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
-                print(f"Opened and cached ZIP connection for {zip_path.name}")
-
-            zip_ref = self._zip_cache[zip_key]
-
-        # Get XML files from cached connection
-        xml_files = [f for f in zip_ref.namelist() if f.endswith('.xml')]
+        """Get XML files from ZIP"""
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Get XML files from ZIP
+            xml_files = [f for f in zip_ref.namelist() if f.endswith('.xml')]
         return xml_files
 
-    def _get_xml_file_size(self, zip_path: Path, xml_filename: str) -> int:
-        """Get the size of an XML file within the ZIP archive"""
-        zip_key = str(zip_path)
-
-        with self._zip_cache_lock:
-            if zip_key not in self._zip_cache:
-                # Open ZIP file and cache the connection
-                self._zip_cache[zip_key] = zipfile.ZipFile(zip_path, 'r')
-
-            zip_ref = self._zip_cache[zip_key]
-
-        # Get file info from ZIP
+    def _get_all_xml_sizes(self, zip_path: Path) -> dict:
+        """Get all XML file sizes from ZIP in one pass, handling corrupt files gracefully"""
         try:
-            file_info = zip_ref.getinfo(xml_filename)
-            return file_info.file_size
-        except KeyError:
-            # File not found in ZIP
-            return 0
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                xml_sizes = {}
+                for info in zip_ref.filelist:
+                    if info.filename.endswith('.xml'):
+                        xml_sizes[info.filename] = info.file_size
+                return xml_sizes
+        except zipfile.BadZipFile as e:
+            print(f"Corrupt ZIP file {zip_path}: {e}")
+            return {}
+        except Exception as e:
+            print(f"Error reading ZIP file {zip_path}: {e}")
+            return {}
 
-    @classmethod
-    def cleanup_zip_cache(cls):
-        """Clean up cached ZIP connections"""
-        with cls._zip_cache_lock:
-            for zip_ref in cls._zip_cache.values():
-                try:
-                    zip_ref.close()
-                except:
-                    pass  # Ignore errors during cleanup
-            cls._zip_cache.clear()
-            print("Cleaned up ZIP file cache")

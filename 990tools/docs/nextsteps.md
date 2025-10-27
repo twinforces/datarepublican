@@ -219,5 +219,82 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
 * The progress bars seem to be broken again, though the ZIP Files one works, make sure that all the steps update the progress bar in the consumer thread. No thread safety issues with that, since there's only one consumer thread. 
 
+* irs990processor.py has drifted away of its ideal of being mostly a shell, consider moving code out into other files, especially the stats can go into a stats_processor.py file. 
+* code to get total size to process near line 198 of processing_strategy.py should just ask for sum(file_size), not get a list and add them up manually python side. 
+* Similarly, line 296 in the same file, file_size should be kept around to avoid a database fetch. Ditto for line 360
+* optimize_database looks cool, should probably be run after every step completes. 
 
-    
+*  missing a logger? Isn't that a global? ```2025-10-25 14:51:11,901 - ERROR - Failed to process XML 202041299349102209_public.xml: 'NoneType' object has no attribute 'isEnabledFor'
+Traceback (most recent call last):
+  File "/Users/pierce/Development/datarepublican/990tools/irs990processor.py", line 440, in _process_single_xml
+    charity, officers, grants, contractors, contributions = self._parse_990pf_data(root, filename, filer_ein, tax_year, form_type)
+                                                            ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pierce/Development/datarepublican/990tools/irs990processor.py", line 628, in _parse_990pf_data
+    charity, officers, grants, contractors, contributions, address = parse_990pf(root, filename, {}, filer_ein, tax_year, form_type, log_error=self.log_error)
+                                                                     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pierce/Development/datarepublican/990tools/parse_990pf.py", line 269, in parse_990pf
+    total, entries = func(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+                     ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pierce/Development/datarepublican/990tools/parse_990pf.py", line 125, in parse_officer_comp_990pf
+    log_info(logger, f"Parsed officer {first_name} {last_name} compensation: ${value} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             ein=context.get('filer_ein', 'Unknown'))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pierce/Development/datarepublican/990tools/logging_utils.py", line 9, in log_info
+    if not logger.isEnabledFor(logging.INFO):
+           ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'isEnabledFor'``` 
+* Make sure we're setting the error message on the XMLFile, so we know what happened, supposed to be either the stack trace or a special case 'skipped: 990T', That means updating the 'error' Database Operation to take the message as a param and then passing the message.    
+
+
+* new warning about consumer thread not being shutdown cleanly after XML processing. 
+
+# We're debugging why the various fields in Address aren't getting saved, which led to finding some deeper problems. 
+* Address.py needs a factory method to build an Address record for foreign addresses, they should store "Foreign: {country}" in line1 of the address, (country has to be looked up via the countryCode.py module) and the countryCode in the state field, and FA:countryCode in the colocator field. That should be used by the parse_* code when it finds an <ForeignAddress> tag. 
+* the whole idea of passing around lists of address components is broken, and you were supposed to purge it. So line 653:659 are disturbing, the parameters to bulk_insert_addresses should be List[Address]. Also, what happened to our generic bulk insert method that used inspection to get a list of fields? Finally, there are a bunch of single inserts in database_operations.py, some of that is redundant. Bulk insert will work just as well for 1 as it will for 1000.
+* All class specific code for prepping a record for insert needs to go in the classes prep_for_insert, all bulk inserts should be generic and just call prep_for_insert on their object (make an abstract superclass for all the model classes if need be) and all bulk_inserts should take a list of the objects they're going to insert.
+* In general, database_operations should leverage the OOP concepts and defer all class specific stuff to the model classes. 
+
+Follow up: 
+* What is the purpose of the PO_BOX_COLOCATOR_REGEX? If it isn't used, delete it as dead code. Plus you have it in 2 places. 
+* bulk_insert should ask the class the necessary field names via a static method, which can calculate it lazily once not every insert. 
+* Instead of Any, make an abstract superclass so you know that prep_for_insert always exists, have the superclass implementation make sure the id is generated. I suspect if you do that, you'll find you can just call bulk_insert everywhere, no need to be class specific. Since we're using UUIDs everywhere, that makes both the producer and consumer simple, the producer can simply push all the classes it builds onto a list, the consumer can then sort the list by class type, and call bulk insert on each subset. 
+* extract_utils.py is building an Address by passing in a list of address_components, don't do that, just make a full constructor call. 
+* the Foreign address factory doesn't look right. Should take the country code; look up everything. The ein has to be looked up from the country code module because they're fake. Use the country_name in the fanme field, can match address line1, i.e. Foreign: {country_name}
+
+
+database_operations.py:
+	* import inspect on line 150 should be top of file. 
+	* line 161 should be a log info
+	* bulk_insert not as elegant as the old insert_from_dataclass method
+	* line 574-620 can all be refactored, I don't think per class bulk-inserts are necessary given that everything is a subclass of ./990tools/models/base.py now. 
+	* There needs to be a bulk update operation, we don't need to do a type specific update, its a pretty simple SQL format string: take table name, id, [fields], [values]
+	* not sure why _process_charity_operations is necessary given all the generic methods we have now. 
+	* _update_xml_file_with_metadata is a perfect example of a case where a generic update method would be just fine and could work in bulk. 
+extract_utils.py:
+	* I think line 393-426 need to be rewritten to pull each piece of the address out of the address tag with its own XPath, not pulled out en-massse and stacked. Too risky to missassign; you've gone from structured data to a blob.
+	* Shouldn't need to call address.prep_for_instert() here, I think that's a hack for logging, or a debugging flail. 
+	* similar problem with lines 519-544, you pull structured data into a pile, then try to reverse engineer it. Keep it structured. 
+parse_utils.py:
+	* Lines 174-189 are the right way to do it, this should be a common function that given an XML element, returns an Address object. 
+	* I'm not sure what the backfill stuff in lines 200 are about, we're doing the backfill later on as its own step.
+processing strategy.py:
+	* import on line 174 needs to be at top of file. 
+	* lines 382-452 are all deprecated, can be removed. 
+	
+xml_processor.py:
+	* line 47:62 look sketchy, whatever caused this method to exist should die.
+	* _extract_address lines 502:636, where do I begin? First, it should be in one of the parse or extract_utils. 2nd, it makes the address too early, gather everything a piece at a time and then call the constructor. 3rd, the prep_for_insert() is a hail mary from debugging, the generic smart insert stuff we're doing now should call that for us. 
+
+models/address.py:
+	* lines 84-96 should be in constants.py not here, and import at the top of the file. 
+	* nothing in canonicalize_address can throw an exception, the try/except has never fired and never will. 
+	* canonicalize_address is super messy. 
+		* If you're going to expand an abbrevation, expand it in place.
+		* build parts with parts.append each piece directly from self, and then use a list comprehension to filter out the None: parts= [self.address_line1, self.address_line2...self.zip4] then parts =[p for p in parts if p!= None]
+		* canonicalize_address needs to check to see if it has an FA: colocator and if it does, to return without changing the object.   
+models/xml_file.py:
+	* get_xml_files_to_process needs to take a limit param so it doesn't fetch all 2.8M rows to do a batch of 1000. 
+	
+models/*.py:
+	* everything needs to call the prep_for_insert in BaseModel. 

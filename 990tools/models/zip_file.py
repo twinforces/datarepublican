@@ -9,10 +9,11 @@ ZIP files represent compressed archives containing IRS 990 XML filings.
 from dataclasses import dataclass, field
 from typing import Optional, List
 from datetime import datetime
+from .base import BaseModel
 
 
 @dataclass
-class ZipFile:
+class ZipFile(BaseModel):
     """Represents a ZIP file containing IRS 990 XML filings"""
 
     zip_id: Optional[int] = None
@@ -25,6 +26,7 @@ class ZipFile:
     processed_date: Optional[datetime] = None
     status: str = "downloaded"
     xml_files: List['XMLFile'] = field(default_factory=list)
+    created_at: Optional[str] = None
 
     def is_processed_successfully(self) -> bool:
         """Check if ZIP file was processed without errors"""
@@ -48,6 +50,11 @@ class ZipFile:
         # self.xml_count = xml_count  # Not in schema
         # self.error_message = error_message  # Not in schema
 
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        super().prep_for_insert()
+        pass
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {
@@ -59,5 +66,6 @@ class ZipFile:
             'checksum': self.checksum,
             'download_date': self.download_date.isoformat() if self.download_date else None,
             'processed_date': self.processed_date.isoformat() if self.processed_date else None,
-            'status': self.status
+            'status': self.status,
+            'created_at': self.created_at
         }

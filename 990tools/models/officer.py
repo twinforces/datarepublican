@@ -8,10 +8,11 @@ Officers represent key personnel of charities with compensation information.
 
 from dataclasses import dataclass
 from typing import Optional
+from .base import BaseModel
 
 
 @dataclass
-class Officer:
+class Officer(BaseModel):
     """Represents a charity officer with compensation information"""
 
     officer_id: Optional[int] = None
@@ -23,6 +24,7 @@ class Officer:
     compensation: float = 0.0
     tax_year: int = 0
     photo_url: Optional[str] = None
+    created_at: Optional[str] = None
 
     @property
     def display_name(self) -> str:
@@ -35,6 +37,11 @@ class Officer:
         """Check if officer compensation exceeds $200,000"""
         return self.compensation > 200000.0
 
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        super().prep_for_insert()
+        pass
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {
@@ -46,5 +53,6 @@ class Officer:
             'full_name': self.full_name,
             'compensation': self.compensation,
             'tax_year': self.tax_year,
-            'photo_url': self.photo_url
+            'photo_url': self.photo_url,
+            'created_at': self.created_at
         }

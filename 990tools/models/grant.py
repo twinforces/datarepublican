@@ -9,11 +9,12 @@ Grants represent charitable contributions made by filers to other organizations.
 from dataclasses import dataclass, field
 from typing import Optional
 from uuid7 import generate_uuid_v7
-from models.address import Address
+from .base import BaseModel
+from .address import Address
 
 
 @dataclass
-class Grant:
+class Grant(BaseModel):
     """Represents a charitable grant from one organization to another"""
 
     grant_id: Optional[str] = field(default=None, init=False)
@@ -24,6 +25,7 @@ class Grant:
     grant_amt: float = 0.0
     tax_year: int = 0
     colocator: Optional[str] = None
+    created_at: Optional[str] = None
 
     def is_large_grant(self) -> bool:
         """Check if grant amount exceeds $100,000"""
@@ -34,7 +36,8 @@ class Grant:
         return self.grant_ein and (self.grant_ein.startswith('99') or self.grant_ein == '999')
 
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
-                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Address:
+                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
+                     zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this grant"""
         address = Address(
             ein=self.grant_ein,
@@ -44,10 +47,16 @@ class Grant:
             city=city,
             state=state,
             zip_code=zip_code,
+            zip4=zip4,
             address_type="grant",
             owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
         )
         return address
+
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        super().prep_for_insert()
+        pass
 
     @property
     def id(self) -> str:
@@ -66,5 +75,6 @@ class Grant:
             'grant_ein': self.grant_ein,
             'grant_amt': self.grant_amt,
             'tax_year': self.tax_year,
-            'colocator': self.colocator
+            'colocator': self.colocator,
+            'created_at': self.created_at
         }

@@ -8,11 +8,12 @@ Contractors represent independent contractors paid by charities.
 
 from dataclasses import dataclass
 from typing import Optional
-from models.address import Address
+from .base import BaseModel
+from .address import Address
 
 
 @dataclass
-class Contractor:
+class Contractor(BaseModel):
     """Represents an independent contractor paid by a charity"""
 
     contractor_id: Optional[int] = None
@@ -25,13 +26,15 @@ class Contractor:
     po_box: Optional[str] = None
     tax_year: int = 0
     colocator: Optional[str] = None
+    created_at: Optional[str] = None
 
     def is_highly_compensated(self) -> bool:
         """Check if contractor compensation exceeds $100,000"""
         return self.amount > 100000.0
 
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
-                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Address:
+                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
+                     zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this contractor"""
         address = Address(
             ein=self.ein,
@@ -41,10 +44,16 @@ class Contractor:
             city=city,
             state=state,
             zip_code=zip_code,
+            zip4=zip4,
             address_type="contractor",
             owner_id=self.contractor_id  # Use the integer ID for contractors
         )
         return address
+
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        super().prep_for_insert()
+        pass
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
@@ -58,5 +67,6 @@ class Contractor:
             'zip_code': self.zip_code,
             'po_box': self.po_box,
             'tax_year': self.tax_year,
-            'colocator': self.colocator
+            'colocator': self.colocator,
+            'created_at': self.created_at
         }

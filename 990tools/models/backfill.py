@@ -31,6 +31,11 @@ class Backfill:
         """Check if this is a PO Box address"""
         return self.po_box is not None
 
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        super().prep_for_insert()
+        pass
+
     @property
     def id(self) -> str:
         """Get the primary key, creating it if necessary"""

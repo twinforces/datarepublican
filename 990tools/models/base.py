@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""
+models/base.py - Base model class for all IRS 990 data models
+
+This module provides an abstract base class for all model classes,
+ensuring consistent ID generation and prep_for_insert functionality.
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, fields
+from typing import List, Optional, Dict
+from functools import lru_cache
+import duckdb
+
+
+class BaseModel(ABC):
+    """Abstract base class for all IRS 990 data models"""
+
+    # Static cache for table columns to avoid repeated DESCRIBE calls
+    _table_columns_cache: Dict[str, List[str]] = {}
+    """Abstract base class for all IRS 990 data models"""
+
+    def prep_for_insert(self):
+        """Prepare the record for database insertion - base implementation"""
+        # Set ID if needed
+        self.set_id_if_needed()
+        pass
+
+    @classmethod
+    def _get_table_columns(cls, table_name: str, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
+        """Get ordered column names from DESCRIBE (DB schema order)."""
+        if table_name in cls._table_columns_cache:
+            return cls._table_columns_cache[table_name]
+
+        if conn is None:
+            raise ValueError("Connection required for first-time column fetch")
+
+        try:
+            result = conn.execute(f"DESCRIBE {table_name}")
+            columns = [row[0] for row in result.fetchall()]
+            cls._table_columns_cache[table_name] = columns
+            return columns
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch columns for {table_name}: {e}")
+
+    @classmethod
+    @lru_cache(maxsize=None)
+    def get_db_field_names(cls) -> List[str]:
+        """Get the field names that should be inserted into the database (cached)"""
+        # Get all dataclass fields
+        all_fields = [f.name for f in fields(cls)]
+        # Filter to only init fields (exclude computed properties)
+        init_fields = {f.name for f in fields(cls) if f.init}
+        # Include ID fields explicitly since they may not be init fields but are needed for the database
+        db_fields = [f for f in all_fields if f in init_fields]
+        # Add ID fields that end with '_id' or are 'id' if not already included
+        for field_name in all_fields:
+            if (field_name.endswith('_id') or field_name == 'id') and field_name not in db_fields:
+                db_fields.append(field_name)
+        return db_fields
+
+    @classmethod
+    def generate_id(cls) -> str:
+        """Generate a UUID v7 for this model instance"""
+        from uuid7 import generate_uuid_v7
+        return str(generate_uuid_v7())
+
+    def set_id_if_needed(self):
+        """Set the ID field if it exists and is not set"""
+        # Find the ID field (usually ends with '_id' or is just 'id')
+        id_field = None
+        for field_name in self.get_db_field_names():
+            if field_name.endswith('_id') or field_name == 'id':
+                id_field = field_name
+                break
+
+        if id_field and hasattr(self, id_field):
+            current_value = getattr(self, id_field)
+            if current_value is None or current_value == "":
+                setattr(self, id_field, self.generate_id())

@@ -40,6 +40,11 @@ class Geocoding:
         """Increment the attempt count"""
         self.attempt_count += 1
 
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        super().prep_for_insert()
+        pass
+
     @property
     def id(self) -> str:
         """Get the primary key, creating it if necessary"""

@@ -7,16 +7,17 @@ XML files represent individual IRS 990 filings extracted from ZIP archives.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List, Tuple
 from datetime import datetime
+from .base import BaseModel
 
 
 @dataclass
-class XMLFile:
+class XMLFile(BaseModel):
     """Represents an individual IRS 990 XML filing"""
 
-    xml_id: Optional[int] = None
-    zip_id: int = 0
+    xml_id: Optional[str] = None
+    zip_id: str = ""
     filename: str = ""
     internal_path: str = ""
     file_size: Optional[int] = None
@@ -26,6 +27,7 @@ class XMLFile:
     processed: bool = False
     processing_version: int = 0
     error_message: Optional[str] = None
+    created_at: Optional[str] = None
 
     def is_processed_successfully(self) -> bool:
         """Check if XML file was processed without errors"""
@@ -36,6 +38,11 @@ class XMLFile:
         self.processed = True
         self.processed_at = datetime.now()
         self.error_message = error_message
+
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        #print(f"#### XMLFile prep_for_insert: zip_id={self.zip_id} (type: {type(self.zip_id)})")
+        pass
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
@@ -50,5 +57,34 @@ class XMLFile:
             'form_type': self.form_type,
             'processed': self.processed,
             'processing_version': self.processing_version,
-            'error_message': self.error_message
+            'error_message': self.error_message,
+            'created_at': self.created_at
         }
+
+    @classmethod
+    def get_xml_files_to_process(cls, db_ops) -> List[Tuple]:
+        """Get list of XML files to process from database"""
+        query = """
+            SELECT xf.xml_id, zf.file_path, xf.filename, xf.internal_path, xf.file_size
+            FROM XmlFiles xf
+            JOIN ZipFiles zf ON xf.zip_id = zf.zip_id
+            WHERE xf.processed = FALSE
+            ORDER BY xf.xml_id
+        """
+        result = db_ops.execute_query(query)
+        return result.fetchall()
+
+    @classmethod
+    def get_xml_files_to_process(cls, db_ops, limit: Optional[int] = None) -> List[Tuple]:
+        """Get list of XML files to process from database"""
+        query = """
+            SELECT xf.xml_id, zf.file_path, xf.filename, xf.internal_path, xf.file_size
+            FROM XmlFiles xf
+            JOIN ZipFiles zf ON xf.zip_id = zf.zip_id
+            WHERE xf.processed = FALSE
+            ORDER BY xf.xml_id
+        """
+        if limit is not None:
+            query += f" LIMIT {limit}"
+        result = db_ops.execute_query(query)
+        return result.fetchall()

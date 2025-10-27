@@ -26,6 +26,10 @@ class Contribution:
         """Check if contribution amount exceeds $10,000"""
         return self.amount > 10000
 
+    def prep_for_insert(self):
+        """Prepare the record for database insertion"""
+        pass
+
     @property
     def id(self) -> str:
         """Get the primary key, creating it if necessary"""
