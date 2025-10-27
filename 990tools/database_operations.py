@@ -20,6 +20,7 @@ import time
 import random
 import sys
 import os
+import threading
 from enum import Enum
 from functools import lru_cache
 
@@ -44,13 +45,14 @@ class DatabaseOperationType(Enum):
     UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
     UPDATE_XML_FILE_ERROR = "update_xml_file_error"
     XML_FILE_UPDATE = "xml_file_update"
+    UPDATE_XML_EIN = "update_xml_ein"
     OPTIMIZE_DATABASE = "optimize_database"
 
 
 class DatabaseOperation:
     """Represents a single database operation with its data and dependencies"""
 
-    def __init__(self, operation_type: DatabaseOperationType, data: Any, xml_id: int = None,
+    def __init__(self, operation_type: DatabaseOperationType, data: Any, xml_id: Optional[str] = None,
                  dependencies: Optional[List[str]] = None):
         self.operation_type = operation_type
         self.data = data
@@ -63,6 +65,9 @@ class DatabaseOperations:
 
     # Class variable for SQL logging - can be set via constructor
     log_sql: bool = False
+
+    # Thread-local storage for database connections
+    _local = threading.local()
 
     @staticmethod
     def generate_uuid_v7() -> str:
@@ -88,7 +93,6 @@ class DatabaseOperations:
         self.memory_limit = memory_limit
         self.threads = threads
         self.dbUI = dbUI
-        self.db_conn: duckdb.DuckDBPyConnection
         self.logger = get_logger(__name__)
         self._init_connection()
 
@@ -103,6 +107,10 @@ class DatabaseOperations:
         if self.read_only:
             config['read_only'] = True
 
+        # Store connection parameters for thread-local connections
+        self._connection_config = config
+
+        # Create main connection for single-threaded operations
         self.db_conn = duckdb.connect(self.db_path, config=config)
 
         # Set additional performance settings
@@ -166,7 +174,7 @@ class DatabaseOperations:
     def execute_query(self, query: str, params: Optional[tuple] = None, conn=None) -> duckdb.DuckDBPyRelation:
         """Execute a query and return results"""
         if conn is None:
-            conn = self.db_conn
+            conn = self._get_thread_local_connection()
 
         if DatabaseOperations.log_sql:
             import inspect
@@ -188,6 +196,31 @@ class DatabaseOperations:
             return conn.execute(query, params)
         else:
             return conn.execute(query)
+
+    def _get_thread_local_connection(self) -> duckdb.DuckDBPyConnection:
+        """Get or create a thread-local database connection"""
+        if not hasattr(DatabaseOperations._local, 'db_conn'):
+            # Create a new connection for this thread
+            DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=self._connection_config)
+            # Apply the same settings as the main connection
+            DatabaseOperations._local.db_conn.execute("SET enable_progress_bar = false")
+            DatabaseOperations._local.db_conn.execute("SET enable_object_cache = true")
+            DatabaseOperations._local.db_conn.execute("SET max_temp_directory_size = '10GB'")
+            try:
+                DatabaseOperations._local.db_conn.execute("SET insert_select_parallelism = true")
+            except Exception:
+                pass
+            try:
+                DatabaseOperations._local.db_conn.execute("PRAGMA temp_store = 'memory'")
+            except Exception:
+                pass
+            try:
+                DatabaseOperations._local.db_conn.execute("SET checkpoint_threshold = '1000MB'")
+            except Exception:
+                pass
+            DatabaseOperations._local.db_conn.execute("SET preserve_insertion_order = false")
+
+        return DatabaseOperations._local.db_conn
 
     def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: Optional[tuple] = None,
                         order_by: str = "", limit: Optional[int] = None, offset: Optional[int] = None,
@@ -320,6 +353,10 @@ class DatabaseOperations:
         """Explicitly close the database connection"""
         if hasattr(self, 'db_conn') and self.db_conn:
             self.db_conn.close()
+        # Close thread-local connections
+        if hasattr(DatabaseOperations._local, 'db_conn'):
+            DatabaseOperations._local.db_conn.close()
+            delattr(DatabaseOperations._local, 'db_conn')
 
     def __del__(self):
         """Cleanup database connection on object destruction"""
@@ -376,6 +413,16 @@ class DatabaseOperations:
         """Update XML file with EIN after parsing"""
         self.execute_query("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
         self.commit()
+
+    def execute_update_xml_ein_operation(self, operation: DatabaseOperation, conn=None):
+        """Execute UPDATE_XML_EIN operation"""
+        if conn is None:
+            conn = self.db_conn
+        xml_id = operation.xml_id
+        data = operation.data
+        ein = data.get("ein")
+        if ein:
+            conn.execute("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
 
     # Address operations
     def insert_address(self, address: Address) -> str:
@@ -587,6 +634,19 @@ class DatabaseOperations:
         obj_type = type(objects[0])
         if len({type(obj) for obj in objects}) > 1:
             raise ValueError("Uniform types only.")
+
+        # DEBUG: Log the actual values being passed for zip_id fields
+        if obj_type.__name__ == 'ZipFile':
+            self.logger.info(f"DEBUG: bulk_insert called with {len(objects)} ZipFile objects")
+            for i, obj in enumerate(objects):
+                zip_id_val = getattr(obj, 'zip_id', 'MISSING')
+                file_path_val = getattr(obj, 'file_path', 'MISSING')
+                filename_val = getattr(obj, 'filename', 'MISSING')
+                self.logger.info(f"DEBUG: ZipFile[{i}]: zip_id='{zip_id_val}', file_path='{file_path_val}', filename='{filename_val}'")
+                # Check if zip_id looks like a file path
+                if zip_id_val and isinstance(zip_id_val, str) and ('/' in zip_id_val or '\\' in zip_id_val):
+                    self.logger.warning(f"DEBUG: ZipFile[{i}]: zip_id appears to contain file path: '{zip_id_val}'")
+
         conn = conn or self.db_conn
         table_name = self._get_table_name(obj_type)
         table_cols = self._get_table_columns(table_name, conn)
@@ -745,6 +805,11 @@ class DatabaseOperations:
             if DatabaseOperationType.OPTIMIZE_DATABASE.value in operations_by_type:
                 for operation in operations_by_type[DatabaseOperationType.OPTIMIZE_DATABASE.value]:
                     self._execute_optimize_operation(operation, conn)
+
+            # Handle UPDATE_XML_EIN operations
+            if DatabaseOperationType.UPDATE_XML_EIN.value in operations_by_type:
+                for operation in operations_by_type[DatabaseOperationType.UPDATE_XML_EIN.value]:
+                    self.execute_update_xml_ein_operation(operation, conn)
 
             # 1. Handle XML file updates first
             print("Processing XML file update operations...")

@@ -17,7 +17,7 @@ class XMLFile(BaseModel):
     """Represents an individual IRS 990 XML filing"""
 
     xml_id: Optional[str] = None
-    zip_id: str = ""
+    zip_id: Optional[str] = None
     filename: str = ""
     internal_path: str = ""
     file_size: Optional[int] = None

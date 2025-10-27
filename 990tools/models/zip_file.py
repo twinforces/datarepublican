@@ -16,7 +16,7 @@ from .base import BaseModel
 class ZipFile(BaseModel):
     """Represents a ZIP file containing IRS 990 XML filings"""
 
-    zip_id: Optional[int] = None
+    zip_id: Optional[str] = None
     filename: str = ""
     file_path: str = ""
     tax_year: int = 0

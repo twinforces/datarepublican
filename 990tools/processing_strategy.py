@@ -29,6 +29,7 @@ from database_operations import DatabaseOperations, DatabaseOperation, DatabaseO
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from models import Address
+from xml_processor import XMLProducer, XMLConsumer
 
 
 class ProcessingStrategy(ABC):
@@ -71,7 +72,16 @@ class ProcessingStrategy(ABC):
 
 
 class ParallelXMLProcessingStrategy(ProcessingStrategy):
-    """Strategy for parallel XML file processing using producer-consumer pattern"""
+    """
+    Strategy for parallel XML file processing using producer-consumer pattern.
+
+    PRODUCER-CONSUMER PATTERN WARNING:
+    This class coordinates producers and consumers. Producers parse XML and collect operations.
+    Consumers execute database operations. Never mix these responsibilities!
+
+    - Producers (XMLProducer): Parse XML, collect DatabaseOperation objects, NO database writes
+    - Consumers (XMLConsumer): Execute DatabaseOperation objects, handle all database writes
+    """
 
     MAX_WORKERS = 16
     QUEUE_SIZE = 1000
@@ -84,6 +94,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         self.workers = workers
         self.total_processed_xml = 0  # Counter for total processed XML files
         self.shutdown_event = threading.Event()  # Event for clean shutdown signaling
+
+        # Create producer and consumer instances with clear separation
+        self.producer = XMLProducer(db_ops, 1, quiet)  # Producer: collects operations
+        self.consumer = XMLConsumer(db_ops, quiet)     # Consumer: executes operations
+
         # Set up SIGUSR1 handler for thread stack dumps
         signal.signal(signal.SIGUSR1, self.dump_threads_handler)
 
@@ -203,41 +218,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             file_size = xml_file.file_size
             try:
                 self.log_debug(f"Producer {producer_id} processing XML {filename} (ID: {xml_id})")
-                # Use xml_processor to process the XML
-                from xml_processor import XMLProcessor
-                processor = XMLProcessor(self.db_ops)
-                result = processor._process_single_xml(xml_id, path, filename, internal)
-                if result:
-                    # Success - create metadata for successful processing
-                    metadata = {
-                        "file_size": file_size,
-                        "ein": None,  # Will be set by processor
-                        "tax_year": None,  # Will be set by processor
-                        "form_type": None,  # Will be set by processor
-                        "error_message": None,
-                        "processed": True
-                    }
-                    operations = []  # Operations are handled internally by XMLProcessor
-                else:
-                    # Failure - create error metadata
-                    metadata = {
-                        "file_size": file_size,
-                        "ein": None,
-                        "tax_year": None,
-                        "form_type": None,
-                        "error_message": "Processing failed",
-                        "processed": False
-                    }
-                    operations = []
+                # PRODUCER: Use XMLProducer to parse XML and collect operations (NO database writes)
+                success, operations = self.producer.process_single_xml_for_operations(xml_id, path, filename, internal, file_size)
                 self.log_debug(f"Producer {producer_id} completed processing XML {filename}, got {len(operations)} operations")
-
-                # Create XML_FILE_UPDATE operation with metadata
-                xml_update_operation = DatabaseOperation(
-                    DatabaseOperationType.XML_FILE_UPDATE,
-                    metadata,
-                    xml_id
-                )
-                operations.insert(0, xml_update_operation)  # Insert at beginning for proper ordering
 
                 # Send operations to queue
                 self.log_debug(f"Producer {producer_id} sending {len(operations)} operations to queue for {filename}")
@@ -305,7 +288,14 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             sys.stderr.flush()
 
     def _database_consumer(self, xml_queue, num_expected, conn, pbar) -> int:
-        """Consumer thread: writes operations to database (single-threaded for DuckDB safety)"""
+        """
+        CONSUMER thread: executes database operations (single-threaded for DuckDB safety).
+
+        PRODUCER-CONSUMER PATTERN: This is the CONSUMER.
+        - Receives DatabaseOperation objects from producers via queue
+        - Executes all database operations safely in single-threaded context
+        - Producers never touch the database - only collect operations
+        """
         batch_operations = []
         total = 0
         signals = 0
@@ -318,7 +308,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 try:
                     # Create and execute OPTIMIZE_DATABASE operation
                     optimize_op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, None)
-                    self.db_ops._execute_optimize_operation(optimize_op, conn)
+                    self.consumer._execute_optimize_operation(optimize_op)
                 except Exception as e:
                     self.log_error(f"Database optimization failed: {e}", exc_info=True)
             try:
@@ -349,12 +339,13 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         self.log_debug(f"Processing batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
                         self.log_info(f"Starting bulk insert batch of {len(batch_operations)} operations...")
-                        self.db_ops.bulk_process_operations_batch(batch_operations, conn)
+                        # CONSUMER: Execute operations using XMLConsumer
+                        self.consumer.execute_operations_batch(batch_operations)
                         self.log_info("Bulk insert batch completed successfully")
 
                         # Update progress bar based on XML file updates processed in this batch
                         # Each XML_FILE_UPDATE operation corresponds to one processed XML file
-                        xml_files_updated = self.db_ops._get_xml_files_updated_in_batch(batch_operations)
+                        xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
                         xml_count_in_batch = len(xml_files_updated)
                         if xml_count_in_batch > 0:
                             pbar.update(xml_count_in_batch)
@@ -383,11 +374,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 self.log_debug(f"Processing final batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
                 self.log_info("Starting final bulk insert batch...")
-                self.db_ops.bulk_process_operations_batch(batch_operations, conn)
+                # CONSUMER: Execute final operations using XMLConsumer
+                self.consumer.execute_operations_batch(batch_operations)
                 self.log_info("Final bulk insert batch completed successfully")
 
                 # Update progress bar for final batch
-                xml_files_updated = self.db_ops._get_xml_files_updated_in_batch(batch_operations)
+                xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
                 xml_count_in_batch = len(xml_files_updated)
                 if xml_count_in_batch > 0:
                     pbar.update(xml_count_in_batch)
@@ -399,16 +391,11 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         self.log_info(f"Consumer done: {total} operations, {signals} signals, processed {processed_xml_count} XML files")
         return total
 
-    # Removed _get_xml_files_updated_in_batch - moved to database_operations.py
-
-    # Removed _build_insert_from_dataclass - now using generic bulk_insert in database_operations.py
-
-    # Removed _execute_optimize_operation - now using database_operations method directly
-
-    # Removed all bulk insert methods - now using database_operations.bulk_process_operations_batch
-
-
-    # Removed _process_single_xml - moved to xml_processor.py
-
-    # Removed all XML processing methods - moved to xml_processor.py
+    def _get_xml_files_updated_in_batch(self, batch_operations):
+        """Get set of XML IDs that were updated in this batch (XML_FILE_UPDATE operations)"""
+        xml_files_updated = set()
+        for op in batch_operations:
+            if op.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
+                xml_files_updated.add(op.xml_id)
+        return xml_files_updated
 

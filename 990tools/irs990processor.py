@@ -405,7 +405,7 @@ class IRS990Processor:
 
 
 
-    def _process_single_xml(self, xml_id: int, zip_path: str, filename: str, internal_path: str):
+    def _process_single_xml(self, xml_id: str, zip_path: str, filename: str, internal_path: str):
         """Process a single XML file"""
         try:
             self.log_debug(f"Processing XML {filename} (ID: {xml_id})")
@@ -501,7 +501,7 @@ class IRS990Processor:
         log_warning(self.logger, "TRACE: No EIN found in XML, returning 'Unknown'")
         return "Unknown"
 
-    def _mark_xml_error(self, xml_id: int, error_msg: str):
+    def _mark_xml_error(self, xml_id: str, error_msg: str):
         """Mark XML file as having an error"""
         self.db_ops.execute_query("""
             UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
@@ -509,7 +509,7 @@ class IRS990Processor:
         """, (CURRENT_PROCESSING_VERSION, error_msg, xml_id))
         self.db_ops.commit()
 
-    def _mark_xml_processed(self, xml_id: int):
+    def _mark_xml_processed(self, xml_id: str):
         """Mark XML file as processed"""
         self.db_ops.execute_query("""
             UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
