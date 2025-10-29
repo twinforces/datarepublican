@@ -120,74 +120,100 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         signal.signal(signal.SIGINT, interrupt_handler)
 
-        # Use batch size as limit to get fresh batch each time
-        batch_limit = self.BATCH_SIZE if max_files is None else min(max_files, self.BATCH_SIZE)
         from constants import CURRENT_PROCESSING_VERSION
-        xml_files = self.db_ops.get_xml_files_to_process(processing_version=CURRENT_PROCESSING_VERSION, max_files=batch_limit)
-        if max_files and len(xml_files) > max_files:
-            xml_files = xml_files[:max_files]
-        if not xml_files:
-            return 0
 
-        num_producers = min(self.workers, len(xml_files))
-        self.log_info(f"Processing {len(xml_files)} files with {num_producers} producers")
+        # Get total count of files to process for progress bar
+        if max_files is None:
+            # Count total unprocessed files for unlimited mode
+            total_files_query = """
+                SELECT COUNT(*) FROM XmlFiles
+                WHERE processed = FALSE OR processing_version < ?
+            """
+            result = self.db_ops.execute_query(total_files_query, (CURRENT_PROCESSING_VERSION,))
+            total_files = result.fetchone()[0] if result else 0
+        else:
+            total_files = max_files
 
         # Set up progress bar for XML processing
         from tqdm import tqdm
         from logging_utils import start_progress_reporting
         progress_unit = "file" if global_config.progress == "files" else "B"
         progress_desc = "Processing XML files" if global_config.progress == "files" else "XML bytes"
-        pbar = start_progress_reporting(total=len(xml_files), desc=progress_desc, unit=progress_unit)
+        pbar = start_progress_reporting(total=total_files, desc=progress_desc, unit=progress_unit)
 
-        # Use thread-safe queues with backpressure
-        xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
+        total_processed = 0
 
-        # Start consumer thread (single writer to database)
-        consumer_thread = threading.Thread(
-            target=self._database_consumer,
-            args=(xml_queue, num_producers, self.db_ops.db_conn, pbar)
-        )
-        consumer_thread.daemon = True
-        consumer_thread.start()
+        # Process batches until we reach max_files or run out of files
+        while True:
+            # Calculate how many files we can still process in this batch
+            remaining_files = None if max_files is None else max_files - total_processed
+            batch_limit = self.BATCH_SIZE if remaining_files is None else min(remaining_files, self.BATCH_SIZE)
 
-        # Start producer threads
-        producer_threads = []
-        for i in range(num_producers):
-            t = threading.Thread(target=self._xml_producer, args=(xml_files, xml_queue, i, num_producers))
-            t.daemon = True
-            producer_threads.append(t)
-            t.start()
+            # Get next batch of files to process
+            xml_files = self.db_ops.get_xml_files_to_process(processing_version=CURRENT_PROCESSING_VERSION, max_files=batch_limit)
+            if not xml_files:
+                break  # No more files to process
 
-        # Wait for producers to finish (parse-heavy operations)
-        self.log_info("Waiting for producer threads to complete...")
-        for i, t in enumerate(producer_threads):
-            self.log_debug(f"Waiting for producer {i} to join...")
-            t.join(timeout=300.0)  # Increased timeout to 5 minutes for large XML files
-            if t.is_alive():
-                self.log_error(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
-                # Don't kill the thread, let it continue in background
-            else:
-                self.log_info(f"Producer {i} done")
+            batch_size = len(xml_files)
+            num_producers = min(self.workers, batch_size)
+            self.log_info(f"Processing batch of {batch_size} files with {num_producers} producers (total processed so far: {total_processed})")
 
-        # Drain queue and wait for consumer
-        self.log_info("Draining XML queue...")
-        xml_queue.join()
-        self.log_info("XML queue drained, waiting for consumer thread...")
-        consumer_thread.join(timeout=30.0)
-        if consumer_thread.is_alive():
-            self.log_error("Consumer timeout - attempting graceful shutdown")
-            # Signal consumer to stop using shutdown event
-            self.shutdown_event.set()
-            self.log_info("Shutdown event set, waiting additional 10 seconds for consumer...")
-            consumer_thread.join(timeout=10.0)
+            # Use thread-safe queues with backpressure
+            xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
+
+            # Start consumer thread (single writer to database)
+            consumer_thread = threading.Thread(
+                target=self._database_consumer,
+                args=(xml_queue, num_producers, self.db_ops.db_conn, pbar)
+            )
+            consumer_thread.daemon = True
+            consumer_thread.start()
+
+            # Start producer threads
+            producer_threads = []
+            for i in range(num_producers):
+                t = threading.Thread(target=self._xml_producer, args=(xml_files, xml_queue, i, num_producers))
+                t.daemon = True
+                producer_threads.append(t)
+                t.start()
+
+            # Wait for producers to finish (parse-heavy operations)
+            self.log_info("Waiting for producer threads to complete...")
+            for i, t in enumerate(producer_threads):
+                self.log_debug(f"Waiting for producer {i} to join...")
+                t.join(timeout=300.0)  # Increased timeout to 5 minutes for large XML files
+                if t.is_alive():
+                    self.log_error(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
+                    # Don't kill the thread, let it continue in background
+                else:
+                    self.log_info(f"Producer {i} done")
+
+            # Drain queue and wait for consumer
+            self.log_info("Draining XML queue...")
+            xml_queue.join()
+            self.log_info("XML queue drained, waiting for consumer thread...")
+            consumer_thread.join(timeout=30.0)
             if consumer_thread.is_alive():
-                self.log_error("Consumer still alive after shutdown signal - some data may be lost")
+                self.log_error("Consumer timeout - attempting graceful shutdown")
+                # Signal consumer to stop using shutdown event
+                self.shutdown_event.set()
+                self.log_info("Shutdown event set, waiting additional 10 seconds for consumer...")
+                consumer_thread.join(timeout=10.0)
+                if consumer_thread.is_alive():
+                    self.log_error("Consumer still alive after shutdown signal - some data may be lost")
+
+            # Update total processed count
+            total_processed += batch_size
+
+            # Check if we've reached the max_files limit
+            if max_files and total_processed >= max_files:
+                break
 
         # Close progress bar
         if pbar:
             pbar.close()
 
-        self.log_info(f"XML processing complete: {len(xml_files)} files processed")
+        self.log_info(f"XML processing complete: {total_processed} files processed")
 
         # Clean up ZIP cache after all XML processing is complete
         self.log_info("Starting ZIP cache cleanup...")
@@ -197,7 +223,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         except Exception:
             self.log_warning("ZIP cache cleanup not available")
 
-        return len(xml_files)
+        return total_processed
 
     def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers) -> None:
         """Producer thread: parses XML and sends DatabaseOperation objects to consumer"""

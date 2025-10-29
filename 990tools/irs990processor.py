@@ -23,6 +23,8 @@ import logging
 import cProfile
 import pstats
 import io
+import signal
+import faulthandler
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from datetime import datetime
@@ -129,6 +131,9 @@ class IRS990Processor:
         else:
             self.logger.setLevel(logging.WARNING)
 
+        # Log that signal handler is active (USR1 handler is set up in processing_strategy.py)
+        self.logger.info("USR1 signal handler available for stack trace dumps (via processing_strategy.py)")
+
         # Initialize components
         self.db_ops = DatabaseOperations(self.db_path, dbUI=global_config.dbUI)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
@@ -182,6 +187,32 @@ class IRS990Processor:
             self.db_path = os.path.join(self.final_dir, self.db_path)
         # Use the existing connection from DatabaseOperations
         self.db_conn = self.db_ops.db_conn
+
+    def _dump_stack_traces(self, signum, frame):
+        """Dump stack traces of all threads when USR1 signal is received"""
+        import traceback
+        import sys
+
+        print("\n=== STACK TRACE DUMP (USR1 signal received) ===", file=sys.stderr)
+        print(f"Timestamp: {datetime.now().isoformat()}", file=sys.stderr)
+
+        # Get all threads
+        threads = threading.enumerate()
+
+        for i, thread in enumerate(threads):
+            print(f"\n--- Thread {i+1}: {thread.name} (ident: {thread.ident}) ---", file=sys.stderr)
+            if thread.is_alive():
+                # Get the stack trace for this thread
+                try:
+                    frame = sys._current_frames()[thread.ident]
+                    traceback.print_stack(frame, file=sys.stderr)
+                except KeyError:
+                    print("  (Thread frame not available)", file=sys.stderr)
+            else:
+                print("  (Thread is not alive)", file=sys.stderr)
+
+        print("\n=== END STACK TRACE DUMP ===", file=sys.stderr)
+        sys.stderr.flush()
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context - always shown even in quiet mode"""
@@ -475,6 +506,9 @@ class IRS990Processor:
 
 def main():
     """Command-line interface"""
+    # Enable faulthandler for better stack traces on crashes
+    faulthandler.enable()
+
     parser = argparse.ArgumentParser(description="IRS 990 Data Processor")
     parser.add_argument("--start-year", type=int, default=2017, help="Start year for processing (default: 2017)")
     parser.add_argument("--end-year", type=int, default=2030, help="End year for processing (default: 2030)")

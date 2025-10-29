@@ -15,9 +15,10 @@ def get_debug_info():
         return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
 
     # Traverse up the stack until we're not in a file with 'log' or 'database' in the name
+    words = ['log', 'database', 'base']
     while frame:
         filename = frame.f_code.co_filename
-        if 'log' not in filename.lower() and 'database' not in filename.lower():
+        if not any(word in filename.lower() for word in words):           
             break
         frame = frame.f_back
 

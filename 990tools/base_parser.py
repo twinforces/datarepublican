@@ -144,8 +144,14 @@ class BaseParser:
 
     def parse_foreign_office(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
         """Parse foreign office indicator"""
-        elem = parse_string_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-        return elem.strip().upper() == 'X' if elem is not None else False
+        try:
+            elem = parse_string_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+            return elem.strip().upper() == 'X' if elem is not None else False
+        except Exception as e:
+            # 990PF forms don't have a 'foreign_office' field, so catch the exception and set to False
+            if not quiet and log_debug is not None and logger is not None:
+                log_debug(logger, f"DEBUG: foreign_office field not found for {self.form_type} form, setting to False: {str(e)}", ein=context.get('filer_ein', 'Unknown'))
+            return False
 
     def parse_filer_name(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
         """Parse filer name"""
