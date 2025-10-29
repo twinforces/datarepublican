@@ -509,14 +509,14 @@ class StatsProcessor:
         child_addresses = result[0] if result else 0
         analysis['child_addresses'] = child_addresses
 
-        # Master addresses (those without master_id, representing unique canonical addresses)
+        # Master addresses (those without master_id that have at least one child)
         result = self.db_ops.execute_query("""
-            SELECT COUNT(*) as master_addresses
+            SELECT COUNT(DISTINCT master_id) as master_addresses_with_children
             FROM Addresses
-            WHERE master_id IS NULL AND canonical_address IS NOT NULL AND canonical_address != ''
+            WHERE master_id IS NOT NULL
         """).fetchone()
-        master_addresses = result[0] if result else 0
-        analysis['master_addresses'] = master_addresses
+        master_addresses_with_children = result[0] if result else 0
+        analysis['master_addresses'] = master_addresses_with_children
 
         # Still need to be done (canonical addresses that have duplicates but haven't been deduplicated)
         # This is the count of canonical addresses where there are multiple addresses with the same canonical_address
@@ -534,6 +534,14 @@ class StatsProcessor:
         """).fetchone()
         still_need_done = result[0] if result else 0
         analysis['still_need_deduplication'] = still_need_done
+
+        # Let's also add some validation metrics
+        # Total addresses that have been processed (have canonical_address)
+        analysis['total_addresses_processed'] = total_canonical
+
+        # Addresses that are still unique (no duplicates to deduplicate)
+        unique_addresses = distinct_canonical - still_need_done
+        analysis['unique_addresses_no_duplicates'] = unique_addresses
 
         return analysis
 

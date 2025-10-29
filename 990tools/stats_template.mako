@@ -272,8 +272,9 @@ ${'###'} Address Deduplication Progress
 | Total addresses with canonical_address | ${addresses_deduplication_analysis['total_canonical_addresses']} |
 | Distinct canonical addresses | ${addresses_deduplication_analysis['distinct_canonical_addresses']} |
 | Child addresses (deduplicated) | ${addresses_deduplication_analysis['child_addresses']} |
-| Master addresses (unique) | ${addresses_deduplication_analysis['master_addresses']} |
+| Master addresses (with children) | ${addresses_deduplication_analysis['master_addresses']} |
 | Still need deduplication | ${addresses_deduplication_analysis['still_need_deduplication']} |
+| Unique addresses (no duplicates) | ${addresses_deduplication_analysis['unique_addresses_no_duplicates']} |
 
 ${'###'} Address Colocator Analysis
 

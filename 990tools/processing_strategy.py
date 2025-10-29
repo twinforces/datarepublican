@@ -499,12 +499,10 @@ class AddressDeduplicationStrategy(ProcessingStrategy):
                         AND canonical_address != ''
                     GROUP BY canonical_address
                     HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 0
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
                 """
                 result = self.db_ops.execute_query(f"SELECT COUNT(*) FROM ({count_query})")
                 total_operations = result.fetchone()[0] if result else 0
-                # Cap at reasonable limit for progress bar
-                total_operations = min(total_operations, 100000)
 
             progress_desc = "Deduplicating addresses"
             pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="addrs")
