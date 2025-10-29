@@ -7,7 +7,7 @@ Charities represent the main IRS 990 filers and their financial information.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 from uuid7 import generate_uuid_v7
 from .base import BaseModel
 from .address import Address
@@ -61,6 +61,11 @@ class Charity(BaseModel):
     grift: Optional[float] = None
     travel_ptile_value: Optional[float] = None
     updated_at: Optional[str] = None
+
+    def __post_init__(self):
+        """Validate EIN after initialization"""
+        if self.ein is None or not self.ein or self.ein == "Unknown":
+            raise ValueError(f"Invalid EIN '{self.ein}' for Charity creation")
 
     def is_501c3(self) -> bool:
         """Check if this is a 501(c)(3) organization"""
@@ -133,6 +138,8 @@ class Charity(BaseModel):
             tax_year=self.tax_year
         )
         return contribution
+
+    # get_db_field_names is now inherited from BaseModel and uses dataclass fields
 
     def prep_for_insert(self):
         """Prepare the record for database insertion"""

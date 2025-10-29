@@ -42,6 +42,18 @@ class Officer(BaseModel):
         super().prep_for_insert()
         pass
 
+    @classmethod
+    def create_for_charity(cls, charity, first_name: str, last_name: str, full_name: str, compensation: float, tax_year: int) -> 'Officer':
+        """Factory method to create an Officer for a specific charity"""
+        return cls(
+            charity_id=charity.charity_id,
+            first_name=first_name,
+            last_name=last_name,
+            full_name=full_name,
+            compensation=compensation,
+            tax_year=tax_year
+        )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {

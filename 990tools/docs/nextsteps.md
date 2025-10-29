@@ -293,8 +293,50 @@ models/address.py:
 		* If you're going to expand an abbrevation, expand it in place.
 		* build parts with parts.append each piece directly from self, and then use a list comprehension to filter out the None: parts= [self.address_line1, self.address_line2...self.zip4] then parts =[p for p in parts if p!= None]
 		* canonicalize_address needs to check to see if it has an FA: colocator and if it does, to return without changing the object.   
+		
 models/xml_file.py:
 	* get_xml_files_to_process needs to take a limit param so it doesn't fetch all 2.8M rows to do a batch of 1000. 
 	
 models/*.py:
 	* everything needs to call the prep_for_insert in BaseModel. 
+	
+	
+	
+codereview pass 2:
+  extract_utils.py:
+  	* xpaths in lines-389-440 need to be in one of the xpaths* files. DRY
+  	* same thing with liens 562-618, only one place for xpaths, and that's in xpaths*.py
+  models/*.py:
+  	* don't see the call to the super class prep_for_insert in anything. 
+  models/xml_file.py:
+  	* get_xml_files_to_process needs to talke a limit param, which needs to be in the SQL, and where that gets called, that needs to be integrated with the batching so it doesn't try to fetch all 2.8M xml ids with a fresh database. This is in processing_strategy.py/def execute at line 110, look through the git history to see the old version of this code. 
+  	
+codereview pass 3:
+  xml_processor.py: 
+  _extract_address at line 487-631:
+  	1. Shouldn't be in here, it should be in a parse* file, with the XPATHs in a xpaths* file. 
+  	2. Also _parse_political_contribution_element from line 633:721, same problem this whould be in parse* with the XPATHS in xpaths*. 
+  	3. With no limit passed in from line 110 of processing_strategy.py this will still fetch all 2.8M rows, you have to analyze the batching code in the execute method starting on line 96 of processing_strategy.py. Hint: If you set the limit to the size of the batch, since each batch marks the XML files as being processed, you will get a fresh batch of files.  
+  	
+# Making the Producer/Consumer model work for us. 
+Because only one thread at a time can write to duckdb all of the paralell processing code is split up into a set of Producer threads that pull an XML off the master queue, unzip it parse it, then produce a pile of objects as defined in ./990tools/models. 
+The extract and parse utilities then dutifly pass those objects back up through the code tree as tuples. 
+This is not the way. It is very tedious to pack everything up in a tuple, then unpack it. Then have the top of the Producer chain queue it for the consumer. We were recently working on adding new types of data to be parsed from the XML files, and we made some progress on that front so we're extracting them as we've confirmed via logs, but they're being dropped on the floor. So we're going to architect our way out of this bug as follows. 
+* We will build a class that collects all the objects we wish to eventually pass to the consumer called PendingDatabaseContext. 
+	* This has one key method addObjectToDatabase(BaseModel). When that method is called, it will extract the object type name from the object, and add it to lists maintained in a dictionary by object name. Charity objects being a top level object will be stored specially so that any bit of code can say getCharity() to get the charity object. 
+	* It has another key method: updateObject(type, id,dictionary). This collects object updates, it will cause the consumer to perform an UPDATE (type) where (type)_id = (id) that takes the keys from the dictionary for the set clause. 
+	* This context object will be passed down to each function in the parse tree there is no need to return it, because each level of the parse tree merely adds to the context object. 
+	* When all the parsing is done, before returning, the Producer thread can pull the objects out of the context object by type (doing Charity objects first since they own all the others), Addresses generally last because they are generally "owned" by upstream objects. 
+	* This will work because we are using UUID7 primary keys, so we pre-wire all the relationships so we're really just dumping entire object trees into the database. 
+* While you're refactoring, keep this in mind:
+	* It is imperative that XmlFile.error be updated with any failure, so the main routine in the XmlProducer has to catch any exception, and when one occurs, it catches it, extracts the stack trace and error, and updates XmlFile.error with that information. 
+	* Add a method "log_it" to the context object that will give a summary of the contents of the object, specifically a count of updates, and inserts by type. 
+	
+When this work, which will be extensive, is complete, we will be able to produce and save objects to the database at will, and while tedious, this will be less tedious than all the mucking about with logging each stage in the pipeline to see where things are getting dropped. 
+
+## Important info:
+* all the code is in ./990tools no need to search all of ./ 
+* the real database is in /Volumes/Data/final/irs990.duckdb 
+* Once you process and save an XML file to the point of creating a Charity object, you cannot at this time processed it again to save. This is intentional, we're solving the reprocessing step later. 
+* There are some sample XML files in ./990tools/test_xmls. If you want more, you can search against the real database to find ideally a collection by form_type and org type, and use unzip against the zip files in /Volumes/Data/irs_zips, and extract them to test_xmls with appropriate names, generally (form_type)_(ein)_(tax_year).xml. Note that the files in ./990tools/test_xmls with "FAIL" in the name are hacked versions of CHAI.xml in that same folder but broken in various ways. 
+* You can run the XML portion of the pipeline yourself with --start-step xml --stop-step xml --max-files N that will parse and save N XML files. --verbose will give you the most logs, but you will want to redirect to a file and grep the results in that case, --log-sql is also useful to make sure the SQL is being generated correctly. 

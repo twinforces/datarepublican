@@ -21,7 +21,7 @@ from config import global_config
 class PhotoProcessor:
     """Handles officer photo processing using Google Knowledge Graph API"""
 
-    def __init__(self, db_ops, cache_dir: str = None):
+    def __init__(self, db_ops, cache_dir: Optional[str] = None):
         self.db_ops = db_ops
         self.cache_dir = cache_dir or os.path.join(global_config.final_dir, "photo_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -30,7 +30,6 @@ class PhotoProcessor:
         self.api_key = os.getenv('GOOGLE_KNOWLEDGE_GRAPH_API_KEY')
         if not self.api_key:
             log_warning(self.logger, "GOOGLE_KNOWLEDGE_GRAPH_API_KEY environment variable not set")
-        self.quiet = global_config.is_quiet()
 
         # Rate limiting: 1 request per second
         self.last_request_time = 0

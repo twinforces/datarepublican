@@ -47,10 +47,18 @@ class BaseModel(ABC):
     @lru_cache(maxsize=None)
     def get_db_field_names(cls) -> List[str]:
         """Get the field names that should be inserted into the database (cached)"""
-        # For dataclass fields, we need to get them from a concrete subclass
-        # This method should be overridden in concrete classes or use a different approach
-        # For now, return an empty list as a fallback
-        return []
+        # Use dataclass fields to get field names
+        field_names = []
+        try:
+            # Check if this is actually a dataclass before calling fields()
+            if hasattr(cls, '__dataclass_fields__'):
+                # Use the class itself as the argument to fields()
+                for field in fields(cls):
+                    field_names.append(field.name)
+        except (TypeError, AttributeError):
+            # Handle case where cls is not a dataclass or instantiation fails
+            pass
+        return field_names
 
     @classmethod
     def generate_id(cls) -> str:

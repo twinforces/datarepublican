@@ -7,148 +7,191 @@ from nameparser import HumanName
 from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field, parse_name_fast
 from xpaths import XPATHS_990PF, NAMESPACES
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 from logging_utils import get_logger, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_info, log_warning, create_stub_log_error, create_stub_log_debug
 from config import global_config
+from base_parser import BaseParser
 
 logger = None
 log_error = None
 log_debug = None
 log_info = None
 verbose = False
-quiet = False
+quiet = global_config.is_quiet()
 from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES
 
-def set_logger(new_logger, new_log_error, new_log_debug=None, is_verbose=False, debug_eins=None, is_quiet=False):
-    global logger, log_error, log_debug, log_info, verbose, quiet, DEBUG_EINS
-    logger = new_logger
-    log_error = new_log_error
-    log_debug = new_log_debug or new_log_error  # fallback to log_error if log_debug not provided
-    log_info = new_log_error  # fallback to log_error if log_info not provided
-    verbose = is_verbose
-    quiet = global_config.is_quiet()  # Use global config instead of parameter
-    DEBUG_EINS = debug_eins if debug_eins is not None else set()
+class Parser990PF(BaseParser):
+    """Parser for IRS Form 990PF"""
 
-# Set default logger if None
-if logger is None:
-    import logging
-    logger = logging.getLogger(__name__)
+    def __init__(self):
+        super().__init__("990PF", XPATHS_990PF, NAMESPACES)
+        self.verbose = False  # Add verbose attribute
 
-# Initialize stub functions using factory functions
-stub_log_error = create_stub_log_error(logger)
-stub_log_debug = create_stub_log_debug(logger)
+    def get_field_parsers(self):
+        """Get field parsers for Form 990PF"""
+        return [
+            ("receipt", self.parse_receipt),
+            ("total_exp", self.parse_total_exp),
+            ("prog_exp", self.parse_prog_exp),
+            ("officer_comp", self.parse_officer_comp),
+            ("grants_to_others", self.parse_grants_to_others),
+            ("total_assets", self.parse_total_assets),
+            ("travel", self.parse_travel),
+            ("conferences", self.parse_conferences),
+            ("org_type", self.parse_org_type),
+            ("foreign_office", self.parse_foreign_office)
+        ]
 
-if log_error is None:
-    log_error = stub_log_error
+    def set_form_specific_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Set form-specific fields for 990PF"""
+        # PF forms don't have govt_grants or contributions
+        data["govt_grants"] = None
+        data["contributions"] = None
+        data["foreign_expenses"] = None
+        data["foreign_expenses_pct"] = None
+        data["foreign_expenses_ptile"] = None
+        data["foreign_office"] = False
+        data["domestic_misrep_flag"] = False
+        return data
 
-if log_debug is None:
-    log_debug = stub_log_debug
+    def parse_travel(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+        """Parse travel expenses - 990PF doesn't have TravelGrp"""
+        return 0
+    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+        """Parse grants to others for Form 990PF"""
+        total = 0
+        # Parse grants from Supplementary Information
+        grant_elements = []
+        for xpath in XPATHS_990PF["grant_elements"]:
+            result = xpath(root)
+            grant_elements.extend(result)
 
-if log_info is None:
-    log_info = stub_log_error  # fallback to stub_log_error
+        for entry in grant_elements:
+            # Parse grant amount
+            amt_elem = entry.find("irs:Amt", namespaces=NAMESPACES)
+            grant_amount = 0
+            if amt_elem is not None and amt_elem.text:
+                try:
+                    grant_amount = int(float(amt_elem.text.replace(',', '')))
+                except (ValueError, AttributeError):
+                    pass
 
-def parse_org_type_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-    elem = parse_string_field(root, XPATHS_990PF, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
-    if elem is not None:
-        if verbose and not quiet:
-            log_error(f"Found org_type element: tag={elem.tag}, text={elem.text}, attrib={elem.attrib} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
-                       ein=context.get('filer_ein', 'Unknown'))
-        if elem.tag.endswith(tuple(ORG_TYPE_SUFFIXES)):
-            if elem.tag.endswith(("Organization501c3ExemptPFInd", "Organization501c3TaxablePFInd")):
-                org_type = "501(c)(3)"
-            elif "4947a1" in elem.tag:
-                org_type = "4947(a)(1)"
-            else:
-                org_type = "Unknown"
-                log_error(f"Unexpected org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}, defaulting to Unknown",
+            if grant_amount > 0:
+                total += grant_amount
+
+        debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "650869895"}
+        if (total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins) and not quiet and log_debug is not None and logger is not None:
+            log_debug(logger, "Non-zero grants_to_others $%s for EIN %s, Name %s, TaxYear %s, XML %s",
+                      total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename)
+        elif total == 0 and context.get('filer_ein', 'Unknown') in debug_eins and not quiet and log_debug is not None and logger is not None:
+            return_data = parse_string_field(root, XPATHS_990PF, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
+            child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
+            log_debug(logger, "Zero grants_to_others for EIN %s, Name %s, File %s. ReturnData children: %s",
+                      context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), xml_filename, child_tags)
+        return total
+
+    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+        elem = parse_string_field(root, XPATHS_990PF, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
+        if elem is not None:
+            if self.verbose and not quiet:
+                log_error(f"Found org_type element: tag={elem.tag}, text={elem.text}, attrib={elem.attrib} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
                            ein=context.get('filer_ein', 'Unknown'))
-        elif elem.tag.endswith("Organization4947a1TrtdPFInd"):
-            # Handle 4947(a)(1) trust organizations
-            org_type = "4947(a)(1)"
-            if verbose and not quiet:
-                log_error(f"Found org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename} (handled as 4947(a)(1))",
-                           ein=context.get('filer_ein', 'Unknown'))
-        elif elem.tag.endswith("Organization501c3TaxablePFInd"):
-            # Handle taxable private foundations
-            org_type = "501(c)(3)"
-            if verbose and not quiet:
-                log_error(f"Found org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename} (handled as 501(c)(3) taxable PF)",
-                           ein=context.get('filer_ein', 'Unknown'))
-        elif elem.tag.endswith("Organization501c3ExemptPFInd"):
-            # Handle the case where the tag doesn't end with the expected suffixes but is still valid
-            org_type = "501(c)(3)"
-            if verbose and not quiet:
-                log_error(f"Found org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename} (handled as 501(c)(3))",
-                           ein=context.get('filer_ein', 'Unknown'))
-        else:
-            org_type = "Unknown"
-            if not quiet:
-                if not quiet:
+            if elem.tag.endswith(tuple(ORG_TYPE_SUFFIXES)):
+                if elem.tag.endswith(("Organization501c3ExemptPFInd", "Organization501c3TaxablePFInd")):
+                    org_type = "501(c)(3)"
+                elif "4947a1" in elem.tag:
+                    org_type = "4947(a)(1)"
+                else:
+                    org_type = "Unknown"
                     log_error(f"Unexpected org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}, defaulting to Unknown",
                                ein=context.get('filer_ein', 'Unknown'))
-    else:
-        if not quiet:
-            log_error(f"Failed to parse org_type for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+            elif elem.tag.endswith("Organization4947a1TrtdPFInd"):
+                # Handle 4947(a)(1) trust organizations
+                org_type = "4947(a)(1)"
+                if self.verbose and not quiet:
+                    log_error(f"Found org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename} (handled as 4947(a)(1))",
+                               ein=context.get('filer_ein', 'Unknown'))
+            elif elem.tag.endswith("Organization501c3TaxablePFInd"):
+                # Handle taxable private foundations
+                org_type = "501(c)(3)"
+                if self.verbose and not quiet:
+                    log_error(f"Found org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename} (handled as 501(c)(3) taxable PF)",
+                               ein=context.get('filer_ein', 'Unknown'))
+            elif elem.tag.endswith("Organization501c3ExemptPFInd"):
+                # Handle the case where the tag doesn't end with the expected suffixes but is still valid
+                org_type = "501(c)(3)"
+                if self.verbose and not quiet:
+                    log_error(f"Found org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename} (handled as 501(c)(3))",
+                               ein=context.get('filer_ein', 'Unknown'))
+            else:
+                org_type = "Unknown"
+                if not quiet:
+                    if not quiet:
+                        log_error(f"Unexpected org_type tag {elem.tag} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}, defaulting to Unknown",
+                                   ein=context.get('filer_ein', 'Unknown'))
+        else:
+            if not quiet:
+                log_error(f"Failed to parse org_type for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
+                           ein=context.get('filer_ein', 'Unknown'))
+            return_data = parse_string_field(root, XPATHS_990PF, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
+            org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
+            if not quiet:
+                log_error(f"Form type: {context.get('form_type', 'Unknown')}, Available org_type tags: {org_tags} in {xml_filename}",
+                           ein=context.get('filer_ein', 'Unknown'))
+            org_type = "Unknown"
+        if self.verbose and not quiet:
+            log_error(f"Parsed org_type {org_type} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
                        ein=context.get('filer_ein', 'Unknown'))
-        return_data = parse_string_field(root, XPATHS_990PF, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None, return_element=True)
-        org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
-        if not quiet:
-            log_error(f"Form type: {context.get('form_type', 'Unknown')}, Available org_type tags: {org_tags} in {xml_filename}",
-                       ein=context.get('filer_ein', 'Unknown'))
-        org_type = "Unknown"
-    if verbose and not quiet:
-        log_error(f"Parsed org_type {org_type} for EIN {context.get('filer_ein', 'Unknown')} in {xml_filename}",
-                   ein=context.get('filer_ein', 'Unknown'))
-    return org_type
+        return org_type
 
 def parse_officer_comp_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     form_type = context.get('form_type', 'Unknown')
     total = 0
     officer_entries = []
-    
+
     elements = []
     for xpath in XPATHS_990PF["officer_comp_elements"]:
         result = xpath(root)
         elements.extend(result)
-    
+
     for elem in elements:
+        # Parse officer name from PersonNm element
         name_elem = parse_string_field(elem, XPATHS_990PF, "officer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-        value_elem = parse_string_field(elem, XPATHS_990PF, "officer_comp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-        
-        if name_elem and value_elem:
+        # Parse compensation amount
+        value = parse_int_field(elem, XPATHS_990PF, "officer_comp", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+
+        if name_elem and value > 0:
             cleaned_name = clean_name(name_elem)
             first_name, last_name = parse_name_fast(cleaned_name)
-            value = parse_int_field(elem, XPATHS_990PF, "officer_comp_value", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
-            if value > 0:
-                officer_entries.append({
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "full_name": name_elem,  # Store original name for photo lookup
-                    "amount": value,
-                    "ein": context.get('filer_ein', 'Unknown'),
-                    "charity_name": context.get('filer_name', 'Unknown'),
-                    "tax_year": context.get('tax_year', 'Unknown')
-                })
-                total += value
-                
-                if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet and log_info is not None and logger is not None:
-                    log_info(logger, "Parsed officer %s %s compensation: $%s for EIN %s in %s",
-                              first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename)
-        
-        if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
-            if not quiet:
-                log_error(f"Suspicious officer_comp ${total} exceeds total_exp ${context.get('total_exp', 0)} in {xml_filename}",
-                           ein=context.get('filer_ein', 'Unknown'))
-            total = 0
-            officer_entries = []
-            
+            officer_entries.append({
+                "first_name": first_name,
+                "last_name": last_name,
+                "full_name": name_elem,  # Store original name for photo lookup
+                "amount": value,
+                "ein": context.get('filer_ein', 'Unknown'),
+                "charity_name": context.get('filer_name', 'Unknown'),
+                "tax_year": context.get('tax_year', 'Unknown')
+            })
+            total += value
+
+            if (verbose or context.get('filer_ein', 'Unknown') in DEBUG_EINS) and not quiet and log_info is not None and logger is not None:
+                log_info(logger, "Parsed officer %s %s compensation: $%s for EIN %s in %s",
+                         first_name, last_name, value, context.get('filer_ein', 'Unknown'), xml_filename)
+
+    if total > context.get("total_exp", 0) and context.get("total_exp", 0) > 0:
+        if not quiet:
+            log_error(f"Suspicious officer_comp ${total} exceeds total_exp ${context.get('total_exp', 0)} in {xml_filename}",
+                      ein=context.get('filer_ein', 'Unknown'))
+        total = 0
+        officer_entries = []
+
     return total, officer_entries
 
 def parse_grants_to_others_990pf(root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
     total = parse_int_field(root, XPATHS_990PF, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
     
-    debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "680005486", "650869895"}
+    debug_eins = {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "650869895"}
     if (total > 5_000_000 or context.get('filer_ein', 'Unknown') in debug_eins) and not quiet and log_debug is not None and logger is not None:
         log_debug(logger, "Non-zero grants_to_others $%s for EIN %s, Name %s, TaxYear %s, XML %s",
                   total, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), xml_filename)
@@ -238,13 +281,30 @@ def parse_address_990pf(root, xml_filename, context, xpath_cache, charity=None, 
                 zip_code=zip_code
             )
         return None
-        return None
     except Exception as e:
         if not quiet and log_error is not None:
             log_error("Failed to parse address for EIN %s in %s: %s", context.get('filer_ein', 'Unknown'), xml_filename, str(e), ein=context.get('filer_ein', 'Unknown'))
         return None
 
-def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution], Optional[Address]]:
+def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None, context=None):
+    """Parse Form 990PF - now uses context instead of returning tuples"""
+    from pending_database_context import PendingDatabaseContext
+
+    if not isinstance(context, PendingDatabaseContext):
+        raise ValueError("context must be a PendingDatabaseContext instance")
+
+    # Validate EIN before parsing
+    if not filer_ein or filer_ein == "Unknown":
+        raise ValueError(f"Invalid EIN '{filer_ein}' for Form 990PF parsing in file {xml_filename}")
+
+    # Parse and add to context
+    parse_990pf_legacy(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=xpath_match_stats, context=context)
+
+def parse_990pf_legacy(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type, log_error=log_error, xpath_match_stats=None, context=None) -> Tuple[Optional[Charity], List[Officer], List[Grant], List[Contractor], List[PoliticalContribution], Optional[Address], List[Address]]:
+    """Parse Form 990PF and add objects to context"""
+    from pending_database_context import PendingDatabaseContext
+    if context is not None and not isinstance(context, PendingDatabaseContext):
+        raise ValueError("context parameter must be a PendingDatabaseContext instance")
     namespaces = {'irs': 'http://www.irs.gov/efile'}
     context = {
         'filer_ein': filer_ein,
@@ -252,11 +312,15 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
         'form_type': form_type
     }
 
+    # Validate EIN before proceeding
+    if not context["filer_ein"] or context["filer_ein"] == "Unknown":
+        raise ValueError(f"Invalid EIN '{context['filer_ein']}' for Form 990PF parsing in file {xml_filename}")
+
     if context["form_type"] != "990PF":
         if not global_config.is_quiet():
             log_error(f"XML {xml_filename} is not a Form 990PF (form_type: {context['form_type']}), skipping",
-                       ein=context['filer_ein'])
-        return None, [], [], [], [], None
+                         ein=context['filer_ein'])
+        return None, [], [], [], [], None, []
 
     context["filer_name"] = parse_filer_name_990pf(root, "filer_name", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
     context["business_name_line1"] = parse_string_field(root, XPATHS_990PF, "business_name_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
@@ -271,7 +335,11 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
         ("total_assets", parse_total_assets_990pf),
         ("travel", parse_travel_990pf),
         ("conferences", parse_conferences_990pf),
-        ("org_type", parse_org_type_990pf)
+        ("org_type", Parser990PF().parse_org_type),
+        ("govt_grants", lambda root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None: None),  # PF forms don't have government grants
+        ("contributions", lambda root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None: None),  # PF forms don't have contributions
+        ("foreign_expenses", lambda root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None: None),  # Will be implemented later if needed
+        ("foreign_office", lambda root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None: False),  # PF forms typically don't have foreign offices
     ]
     data = {}
     officer_entries = []
@@ -301,10 +369,10 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     data["grants_ptile"] = None
     data["foreign_expenses_ptile"] = None
     data["foreign_expenses_pct"] = None
-    data["grift_ratio"] = None
     data["foreign_expenses"] = None
-    data["foreign_office"] = None
+    data["foreign_office"] = data["foreign_office"]  # Already set above
     data["grift_ratio"] = calculate_percentage(data["officer_comp"] + data["travel"] + data["conferences"], data["total_exp"])
+    data["domestic_misrep_flag"] = False  # PF forms don't have foreign expenses to compare
 
     data["govt_grants"] = None
     data["contributions"] = None
@@ -360,6 +428,17 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     # Parse address information
     address = parse_address_990pf(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
+    # Parse additional balance sheet data
+    total_assets_boy = parse_int_field(root, XPATHS_990PF, "total_assets_boy", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+    total_liabilities = parse_int_field(root, XPATHS_990PF, "total_liabilities", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+    net_assets = parse_int_field(root, XPATHS_990PF, "net_assets", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+
+    # Store additional data in charity object if needed
+    if charity:
+        charity.total_assets_boy = total_assets_boy
+        charity.total_liabilities = total_liabilities
+        charity.net_assets = net_assets
+
     # Debug logging for address components
     if address and not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "DEBUG: Address parsed for EIN %s: line1='%s', line2='%s', city='%s', state='%s', zip='%s', canonical='%s'",
@@ -367,56 +446,164 @@ def parse_990pf(root, xml_filename, xpath_cache, filer_ein, tax_year, form_type,
     elif not global_config.is_quiet() and log_debug is not None and logger is not None:
         log_debug(logger, "DEBUG: No address parsed for EIN %s in file %s", context.get('filer_ein', 'Unknown'), xml_filename)
 
-    # Parse grants, contractors, and political contributions
-    grants, contractors, contributions = parse_related_entities_990pf(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats)
+    # Parse grants, contractors, and political contributions and add to context
+    if context is not None and not isinstance(context, dict):
+        parse_related_entities_990pf(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
+        return  # Context-based parsing doesn't return values
+
+    # Legacy return for backward compatibility
+    grants, contractors, contributions, grant_addresses = parse_related_entities_990pf(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
     if not global_config.is_quiet() and log_debug is not None and logger is not None:
-        log_debug(logger, "TRACE: parse_990pf() returning Charity, Officers, Grants, Contractors, Contributions, and Address for EIN: '%s' in file %s", charity.ein, xml_filename)
-    return charity, officers, grants, contractors, contributions, address
+        log_debug(logger, "TRACE: parse_990pf() returning Charity, Officers, Grants, Contractors, Contributions, Address, and Grant Addresses for EIN: '%s' in file %s", charity.ein, xml_filename)
+    return charity, officers, grants, contractors, contributions, address, grant_addresses
 
-def parse_related_entities_990pf(root, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
+def parse_related_entities_990pf(root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
     """Parse grants, contractors, and political contributions for Form 990PF"""
-    from xpaths import GRANT_XPATHS, NAMESPACES
+    from xpaths import NAMESPACES
 
     grants = []
     contractors = []
     contributions = []
+    addresses = []  # For grant recipient addresses
 
     # Parse grants from Supplementary Information
     grant_elements = []
-    for xpath in GRANT_XPATHS["990PF"]:
+    for xpath in XPATHS_990PF["grant_elements"]:
         result = xpath(root)
         grant_elements.extend(result)
 
-    for grant_elem in grant_elements:
-        # Parse individual grant entries within SupplementaryInformationGrp
-        grant_entries = grant_elem.xpath(".//irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES)
-        for entry in grant_entries:
-            # Parse grant recipient name
-            name_elem = entry.find(".//irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES)
-            grant_name = name_elem.text.strip() if name_elem is not None and name_elem.text else None
+    for entry in grant_elements:
+        # Parse grant recipient name
+        name_elem = entry.find(".//irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES)
+        grant_name = name_elem.text.strip() if name_elem is not None and name_elem.text else None
 
-            # Parse grant amount
-            amt_elem = entry.find("irs:Amt", namespaces=NAMESPACES)
-            grant_amount = 0
-            if amt_elem is not None and amt_elem.text:
-                try:
-                    grant_amount = int(float(amt_elem.text.replace(',', '')))
-                except (ValueError, AttributeError):
-                    pass
+        # Parse grant recipient address for matching (PF forms don't have EINs)
+        grant_address = None
+        if grant_name and charity is not None:
+            # Try to extract address from grant entry
+            addr_line1_elem = entry.find(".//irs:RecipientUSAddress/irs:AddressLine1Txt", namespaces=NAMESPACES)
+            city_elem = entry.find(".//irs:RecipientUSAddress/irs:CityNm", namespaces=NAMESPACES)
+            state_elem = entry.find(".//irs:RecipientUSAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES)
+            zip_elem = entry.find(".//irs:RecipientUSAddress/irs:ZIPCd", namespaces=NAMESPACES)
 
-            if grant_amount > 0:
-                # Create grant record
-                grant = Grant(
-                    filer_ein=context["filer_ein"],
-                    filer_name=context["filer_name"],
-                    grant_ein=None,  # PF forms don't typically have recipient EINs
-                    grant_amt=grant_amount,
-                    tax_year=context["tax_year"]
+            addr_line1 = addr_line1_elem.text.strip() if addr_line1_elem is not None and addr_line1_elem.text else None
+            city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
+            state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
+            zip_code = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+
+            if any([addr_line1, city, state, zip_code]):
+                grant_address = charity.build_address(
+                    address_line1=addr_line1,
+                    address_line2=None,
+                    city=city,
+                    state=state,
+                    zip_code=zip_code
                 )
-                grants.append(grant)
+                if grant_address:
+                    grant_address.address_type = 'grant'
+                    grant_address.grantee_name = grant_name
 
-    return grants, contractors, contributions
+        # Parse grant amount
+        amt_elem = entry.find("irs:Amt", namespaces=NAMESPACES)
+        grant_amount = 0
+        if amt_elem is not None and amt_elem.text:
+            try:
+                grant_amount = int(float(amt_elem.text.replace(',', '')))
+            except (ValueError, AttributeError):
+                pass
+
+        if grant_amount > 0:
+            # Create grant record
+            grant = Grant(
+                filer_ein=context["filer_ein"],
+                filer_name=context["filer_name"],
+                grant_ein=None,  # PF forms don't typically have recipient EINs
+                grant_amt=grant_amount,
+                tax_year=context["tax_year"]
+            )
+            if grant_name:
+                grant.grantee_name = grant_name
+            grants.append(grant)
+
+            # Add address if we parsed one
+            if grant_address:
+                grant_address.owner_id = f"{context['filer_ein']}_{grant_name}_{grant_amount}"  # Temporary ID for matching
+                addresses.append(grant_address)
+
+    # Parse contractors from Schedule L if present
+    contractor_elements = []
+    for xpath in XPATHS_990PF["contractor_elements"]:
+        result = xpath(root)
+        contractor_elements.extend(result)
+
+    for elem in contractor_elements:
+        # Extract contractor name
+        name_xpaths = [
+            etree.XPath("irs:ContractorName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+            etree.XPath("irs:ContractorName/irs:BusinessNameLine1", namespaces=NAMESPACES),
+            etree.XPath("irs:PersonNm", namespaces=NAMESPACES),
+            etree.XPath("irs:Name", namespaces=NAMESPACES),
+        ]
+
+        contractor_name = "Unknown"
+        for name_xpath in name_xpaths:
+            try:
+                name_elem = name_xpath(elem)
+                if name_elem and name_elem[0].text:
+                    contractor_name = name_elem[0].text.strip()
+                    break
+            except:
+                continue
+
+        # Extract compensation amount
+        amount_xpaths = [
+            etree.XPath("irs:CompensationAmt", namespaces=NAMESPACES),
+            etree.XPath("irs:ServicesAmt", namespaces=NAMESPACES),
+            etree.XPath("irs:TotalAmt", namespaces=NAMESPACES),
+        ]
+
+        amount = 0.0
+        for amt_xpath in amount_xpaths:
+            try:
+                amt_elem = amt_xpath(elem)
+                if amt_elem and amt_elem[0].text:
+                    amount = parse_float_field(amt_elem[0].text.strip())
+                    if amount > 0:
+                        break
+            except:
+                continue
+
+        # Extract EIN if available
+        ein_xpaths = [
+            etree.XPath("irs:EIN", namespaces=NAMESPACES),
+            etree.XPath("irs:ContractorEIN", namespaces=NAMESPACES),
+        ]
+
+        contractor_ein = None
+        for ein_xpath in ein_xpaths:
+            try:
+                ein_elem = ein_xpath(elem)
+                if ein_elem and ein_elem[0].text:
+                    raw_ein = ein_elem[0].text.strip()
+                    if raw_ein.isdigit():
+                        contractor_ein = f"{int(raw_ein):09d}"
+                        break
+            except:
+                continue
+
+        if amount > 0:
+            contractor_data = {
+                'filer_ein': context["filer_ein"],
+                'filer_name': context["filer_name"],
+                'name': contractor_name,
+                'amount': amount,
+                'ein': contractor_ein,
+                'tax_year': context["tax_year"]
+            }
+            contractors.append(contractor_data)
+
+    return grants, contractors, contributions, addresses
 
 def main():
     if len(sys.argv) != 2:
@@ -479,23 +666,22 @@ def main():
             break
     filer_ein = filer_ein if filer_ein is not None else "Unknown"
 
-    charity, officers, grants, contractors, contributions, address = parse_990pf(root, xml_file, xpath_cache={}, filer_ein=filer_ein, tax_year=tax_year, form_type=form_type)
-    if charity:
-        # For backward compatibility, create a row-like output
-        row = [
-            charity.tax_year, charity.ein, charity.filer_name, None, None,  # business_name_line1, business_name_line2
-            charity.receipt_amt, charity.govt_amt, charity.contrib_amt, charity.org_type,
-            charity.total_exp, charity.prog_exp, charity.travel_amt, charity.conferences_amt,
-            charity.officer_comp, charity.comp_pct, charity.comp_ptile, charity.travel_pct,
-            charity.travel_ptile, charity.conferences_pct, charity.conferences_ptile,
-            charity.grants_pct, charity.grants_ptile, charity.foreign_expenses_pct,
-            charity.foreign_expenses_ptile, charity.grift_ratio, charity.total_assets,
-            charity.form_type, charity.denominator, charity.foreign_office,
-            charity.foreign_expenses, charity.grants_to_others, charity.domestic_misrep_flag,
-            charity.xml_name
-        ]
-        row_str = [str(x).replace('\t', ' ').replace('\n', ' ') for x in row]
-        print('\t'.join(row_str))
+    # Create context and charity
+    from pending_database_context import PendingDatabaseContext
+    context = PendingDatabaseContext()
+    charity = Charity(
+        ein=filer_ein,
+        tax_year=tax_year,
+        form_type=form_type,
+        xml_name=xml_file
+    )
+    context.addObjectToDatabase(charity)
+
+    # Parse using context
+    parse_990pf(root, xml_file, {}, context)
+
+    # Print object counts
+    print(context.getObjectCounts())
 
 if __name__ == "__main__":
     main()

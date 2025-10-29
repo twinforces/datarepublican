@@ -6,7 +6,7 @@
 -- Charities table - Core charity data from IRS 990 filings
 CREATE TABLE Charities (
     charity_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    ein VARCHAR NOT NULL,
+    ein CHAR(9) NOT NULL,
     -- Employer Identification Number (9 digits)
     tax_year INTEGER NOT NULL,
     -- Tax year of filing
@@ -89,13 +89,13 @@ CREATE TABLE Charities (
 -- Grants table - Grant data from charity filings
 CREATE TABLE Grants (
     grant_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    filer_ein VARCHAR NOT NULL,
+    filer_ein CHAR(9) NOT NULL,
     -- Filer EIN (foreign key to Charities with tax_year)
     filer_name VARCHAR NOT NULL,
     -- Grantee EIN (foreign key to Charities)
     grantee_name VARCHAR NOT NULL,
     -- Filer name
-    grant_ein VARCHAR,
+    grant_ein CHAR(9),
     -- Grantee EIN (may be null for foreign)
     grant_amt DOUBLE NOT NULL,
     -- Grant amount
@@ -109,11 +109,11 @@ CREATE TABLE Grants (
 -- Contributions table - Contribution data from filings
 CREATE TABLE Contributions (
     contribution_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    filer_ein VARCHAR NOT NULL,
+    filer_ein CHAR(9) NOT NULL,
     -- Filer EIN
     filer_name VARCHAR NOT NULL,
     -- Filer name
-    recipient_ein VARCHAR,
+    recipient_ein CHAR(9),
     -- Recipient EIN
     amount DOUBLE NOT NULL,
     -- Contribution amount
@@ -125,8 +125,8 @@ CREATE TABLE Contributions (
 -- Addresses table - Address data for charities and grantees
 CREATE TABLE Addresses (
     address_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    ein VARCHAR NOT NULL,
-    -- EIN this address belongs to
+    ein CHAR(9),
+    -- EIN this address belongs to if Charity
     owner_id VARCHAR,
     -- Owner ID for loose foreign key relationships (NULL for standalone addresses)
     master_id UUID,
@@ -213,8 +213,8 @@ CREATE TABLE XmlFiles (
     -- Path within ZIP archive
     file_size BIGINT,
     -- Size of XML file in bytes
-    ein VARCHAR,
-    -- EIN extracted from XML
+    ein CHAR(9),
+    -- EIN extracted from XML, starts as NULL
     tax_year INTEGER,
     -- Tax year from XML
     form_type VARCHAR,
@@ -232,7 +232,7 @@ CREATE TABLE XmlFiles (
 -- Backfill table - Additional grantee data for unknown EINs
 CREATE TABLE Backfill (
     backfill_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    grant_ein VARCHAR NOT NULL,
+    grant_ein CHAR(9) NOT NULL,
     -- Grantee EIN
     name VARCHAR NOT NULL,
     -- Organization name
@@ -292,13 +292,13 @@ CREATE TABLE Officers (
 -- Contractors table - Contractor payment data
 CREATE TABLE Contractors (
     contractor_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    filer_ein VARCHAR NOT NULL,
+    filer_ein CHAR(9) NOT NULL,
     -- Filer EIN
     name VARCHAR NOT NULL,
     -- Contractor name
     amount DOUBLE NOT NULL,
     -- Payment amount
-    ein VARCHAR,
+    ein CHAR(9),
     -- Contractor EIN if available
     address VARCHAR,
     -- Contractor address
@@ -316,7 +316,7 @@ CREATE TABLE Contractors (
 -- PoliticalContributions table - Political contribution data
 CREATE TABLE PoliticalContributions (
     political_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    filer_ein VARCHAR NOT NULL,
+    filer_ein CHAR(9) NOT NULL,
     -- Filer EIN
     recipient VARCHAR NOT NULL,
     -- Recipient name

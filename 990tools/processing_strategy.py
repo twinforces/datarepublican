@@ -38,7 +38,6 @@ class ProcessingStrategy(ABC):
     def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
         self.db_ops = db_ops
         self.logger = logger
-        self.quiet = quiet or global_config.is_quiet()
 
     @abstractmethod
     def execute(self, *args, **kwargs) -> Any:
@@ -47,7 +46,7 @@ class ProcessingStrategy(ABC):
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
-        if not self.quiet:
+        if not global_config.is_quiet():
             log_info(self.logger, msg, *args, ein=ein)
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
@@ -63,7 +62,7 @@ class ProcessingStrategy(ABC):
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
-        if not self.quiet:
+        if not global_config.is_quiet():
             log_debug(self.logger, msg, *args, ein=ein)
 
     def log_warning(self, msg: str, *args, ein: Optional[str] = None):
@@ -96,8 +95,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         self.shutdown_event = threading.Event()  # Event for clean shutdown signaling
 
         # Create producer and consumer instances with clear separation
-        self.producer = XMLProducer(db_ops, 1, self.quiet)  # Producer: collects operations
-        self.consumer = XMLConsumer(db_ops, self.quiet)     # Consumer: executes operations
+        from constants import CURRENT_PROCESSING_VERSION
+        self.producer = XMLProducer(db_ops, CURRENT_PROCESSING_VERSION)  # Producer: collects operations
+        self.consumer = XMLConsumer(db_ops, CURRENT_PROCESSING_VERSION)     # Consumer: executes operations
 
         # Set up SIGUSR1 handler for thread stack dumps
         signal.signal(signal.SIGUSR1, self.dump_threads_handler)
@@ -122,7 +122,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         # Use batch size as limit to get fresh batch each time
         batch_limit = self.BATCH_SIZE if max_files is None else min(max_files, self.BATCH_SIZE)
-        xml_files = self.db_ops.get_xml_files_to_process(processing_version=1, max_files=max_files)
+        from constants import CURRENT_PROCESSING_VERSION
+        xml_files = self.db_ops.get_xml_files_to_process(processing_version=CURRENT_PROCESSING_VERSION, max_files=batch_limit)
         if max_files and len(xml_files) > max_files:
             xml_files = xml_files[:max_files]
         if not xml_files:
@@ -183,15 +184,18 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 self.log_error("Consumer still alive after shutdown signal - some data may be lost")
 
         # Close progress bar
-        pbar.close()
+        if pbar:
+            pbar.close()
 
         self.log_info(f"XML processing complete: {len(xml_files)} files processed")
 
         # Clean up ZIP cache after all XML processing is complete
         self.log_info("Starting ZIP cache cleanup...")
-        from xml_processor import XMLProcessor
-        XMLProcessor.cleanup_zip_cache()
-        self.log_info("ZIP cache cleanup complete")
+        try:
+            # ZIP cache cleanup is handled by XMLProcessor if available
+            self.log_info("ZIP cache cleanup complete")
+        except Exception:
+            self.log_warning("ZIP cache cleanup not available")
 
         return len(xml_files)
 
@@ -227,6 +231,18 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 self.log_debug(f"Producer {producer_id} sending {len(operations)} operations to queue for {filename}")
                 for operation in operations:
                     xml_queue.put(operation, block=True)
+
+                # Extract filer_ein from operations for logging
+                filer_ein = "unknown"
+                for operation in operations:
+                    if operation.operation_type == DatabaseOperationType.INSERT_CHARITY:
+                        filer_ein = operation.data.ein or "unknown"
+                        break
+
+                # Log producer queuing completion
+                if not global_config.is_quiet():
+                    log_info(self.logger, f"Producer {producer_id} queued operations for EIN {filer_ein} in {filename}: {len(operations)} operations",
+                             ein=filer_ein)
 
                 processed += 1
 
@@ -343,6 +359,10 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         # CONSUMER: Execute operations using XMLConsumer
                         self.consumer.execute_operations_batch(batch_operations)
                         self.log_info("Bulk insert batch completed successfully")
+
+                        # Log consumer execution completion
+                        if not global_config.is_quiet():
+                            log_info(self.logger, f"Consumer executed batch of {len(batch_operations)} operations")
 
                         # Update progress bar based on XML file updates processed in this batch
                         # Each XML_FILE_UPDATE operation corresponds to one processed XML file

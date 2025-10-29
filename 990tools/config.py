@@ -7,7 +7,7 @@ configuration management and eliminate the need to pass command-line
 arguments around the codebase.
 """
 
-from typing import Optional
+from typing import Optional, List
 
 
 class GlobalConfig:

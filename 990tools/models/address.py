@@ -145,6 +145,24 @@ class Address(BaseModel):
             self.canonical_address = ""
 
     @classmethod
+    def create_for_charity(cls, charity, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
+                          city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
+                          zip4: Optional[str] = None, address_type: str = "charity") -> 'Address':
+        """Factory method to create an Address for a specific charity"""
+        return cls(
+            ein=charity.ein,
+            name=charity.filer_name,
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            zip4=zip4,
+            address_type=address_type,
+            owner_id=charity.charity_id
+        )
+
+    @classmethod
     def create_foreign_address(cls, country_code: str, address_type: str = "filer", owner_id: Optional[str] = None) -> 'Address':
         """Factory method to create an Address record for foreign addresses"""
         country_info = lookupCC(country_code)

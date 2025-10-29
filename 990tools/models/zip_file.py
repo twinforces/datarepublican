@@ -50,10 +50,7 @@ class ZipFile(BaseModel):
         # self.xml_count = xml_count  # Not in schema
         # self.error_message = error_message  # Not in schema
 
-    def prep_for_insert(self):
-        """Prepare the record for database insertion"""
-        super().prep_for_insert()
-        pass
+    # get_db_field_names is now inherited from BaseModel and uses dataclass fields
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""

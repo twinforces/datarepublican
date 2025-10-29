@@ -65,6 +65,18 @@ class Grant(BaseModel):
             self.grant_id = generate_uuid_v7()
         return self.grant_id
 
+    @classmethod
+    def create_for_charity(cls, charity, grantee_name: str, grant_ein: Optional[str], grant_amt: float, tax_year: int) -> 'Grant':
+        """Factory method to create a Grant for a specific charity"""
+        return cls(
+            filer_ein=charity.ein,
+            filer_name=charity.filer_name,
+            grantee_name=grantee_name,
+            grant_ein=grant_ein,
+            grant_amt=grant_amt,
+            tax_year=tax_year
+        )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {

@@ -54,6 +54,16 @@ class PoliticalContribution(BaseModel):
         super().prep_for_insert()
         pass
 
+    @classmethod
+    def create_for_charity(cls, charity, recipient: str, amount: float, tax_year: int) -> 'PoliticalContribution':
+        """Factory method to create a PoliticalContribution for a specific charity"""
+        return cls(
+            filer_ein=charity.ein,
+            recipient=recipient,
+            amount=amount,
+            tax_year=tax_year
+        )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {

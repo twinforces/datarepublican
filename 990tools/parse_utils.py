@@ -4,9 +4,9 @@ from lxml import etree  # type: ignore
 from nameparser import HumanName
 from io import BytesIO
 import logging
-from xpaths import NAMESPACES, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
+from xpaths import NAMESPACES, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH, COMMON_XPATHS
 from xpaths_990ez import XPATHS_990EZ
-from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS
+from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS, SCHEDULE_L_XPATHS
 from xpath_utils import find_element
 from constants import MONEY_PATTERN, FLOAT_PATTERN
 from typing import Optional, List, Dict, Any
@@ -39,28 +39,6 @@ def parse_string_field(root, xpaths_dict, field, namespaces, xml_filename, conte
         return elem if return_element else value
     return default
 
-def parse_schedule(root, xpaths_dict, elements_key, sub_elements_key, value_key, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False, debug_eins=None):
-    total = 0
-    elements = []
-    for xpath in xpaths_dict[elements_key]:
-        result = xpath(root)
-        elements.extend(result)
-    for elem in elements:
-        sub_elements = []
-        for sub_xpath in xpaths_dict[sub_elements_key]:
-            sub_result = sub_xpath(elem)
-            sub_elements.extend(sub_result)
-        for sub_elem in sub_elements:
-            value_elem = find_element(sub_elem, xpaths_dict[value_key], namespaces, xpath_cache=xpath_cache, field=value_key, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)
-            if value_elem is not None:
-                try:
-                    amount = int(parse_float_field(value_elem.text.strip()))
-                    total += amount
-                    if verbose:
-                        log_error(f"Parsed schedule amount ${amount} for field in {xml_filename}")
-                except (ValueError, AttributeError):
-                    log_error(f"Invalid schedule value: {value_elem.text} in {xml_filename}")
-    return total
 
 def clean_name(name):
     return re.sub(r'[^a-zA-Z0-9\s]', '', name).strip().upper()
@@ -98,115 +76,18 @@ def parse_float_field(text):
     if not text:
         return 0.0
 
+    # Remove commas and dollar signs first
+    cleaned = str(text).replace(',', '').replace('$', '').strip()
+
     # Use regex to find the first valid number pattern
-    match = FLOAT_PATTERN.search(str(text))
+    match = FLOAT_PATTERN.search(cleaned)
     if match:
-        # Remove commas and dollar signs
-        cleaned = match.group().replace(',', '').replace('$', '')
         try:
-            return float(cleaned)
+            return float(match.group())
         except ValueError:
             pass
 
     return 0.0
-
-def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, known_eins, form_type: str, backfill_entries=None, seen_backfill_keys=None, log_error=None) -> List[Dict[str, Any]]:
-    grants = []
-    try:
-        parser = etree.XMLParser(recover=True)
-        tree = etree.parse(xml_content, parser)
-        root = tree.getroot()
-        grant_xpaths = GRANT_XPATHS.get(form_type, [])
-        for xpath in grant_xpaths:
-            elements = xpath(root)
-            for elem in elements:
-                ein_elem = elem.xpath(GRANT_EIN_XPATHS[0].path, namespaces=NAMESPACES)
-                name_elem = elem.xpath(GRANT_NAME_XPATHS[0].path, namespaces=NAMESPACES)
-                amount_elem = elem.xpath(GRANT_AMOUNT_XPATHS[0].path, namespaces=NAMESPACES)
-                grantee_name = (name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown")
-
-                # Check for US address first (domestic grant)
-                us_address = elem.xpath(GRANT_US_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                if us_address:
-                    # Domestic grant
-                    grant_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
-                    is_foreign = False
-                else:
-                    # Check for foreign address
-                    foreign_address = elem.xpath(GRANT_FOREIGN_ADDRESS_XPATH.path, namespaces=NAMESPACES)
-                    if foreign_address:
-                        # Foreign grant - use Address factory method
-                        country_elem = elem.xpath(GRANT_COUNTRY_XPATH.path, namespaces=NAMESPACES)
-                        country_code = country_elem[0].text.strip() if country_elem else None
-                        if country_code:
-                            # Create foreign address using factory method
-                            foreign_addr = Address.create_foreign_address(
-                                country_code=country_code,
-                                address_type="grant"
-                            )
-                            # Use the EIN from the foreign address for grant processing
-                            grant_ein = foreign_addr.ein  # This will be the country number
-                            grantee_name = foreign_addr.name  # This will be the country name
-                        else:
-                            grant_ein = "999"
-                            grantee_name = "Foreign_Unknown"
-                        is_foreign = True
-                    else:
-                        # No address found, assume domestic
-                        grant_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
-                        is_foreign = False
-                if grant_ein == "Unknown" and not is_foreign:
-                    continue
-                if amount_elem and amount_elem[0].text:
-                    try:
-                        grant_amt = int(parse_float_field(amount_elem[0].text.strip()))
-                        if grant_amt > 0:
-                            grants.append({
-                                'filer_ein': filer_ein,
-                                'filer_name': filer_name,
-                                'grant_ein': grant_ein,
-                                'grant_amt': grant_amt,
-                                'tax_year': tax_year
-                            })
-                    except (ValueError, TypeError):
-                        pass
-    except Exception as e:
-        logging.error(f"Error parsing grants from {xml_filename}: {e}")
-    return grants
-
-def parse_contributions(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, form_type: str) -> List[Dict[str, Any]]:
-    contributions = []
-    try:
-        parser = etree.XMLParser(recover=True)
-        tree = etree.parse(BytesIO(xml_content), parser)
-        root = tree.getroot()
-        schedule_c_xpaths = SCHEDULE_C_XPATHS.get(form_type, [])
-        for xpath in schedule_c_xpaths:
-            elements = xpath(root)
-            for elem in elements:
-                amount_elem = elem.xpath(SCHEDULE_C_AMOUNT_XPATHS[0].path, namespaces=NAMESPACES)
-                recipient_elem = elem.xpath(SCHEDULE_C_RECIPIENT_XPATHS[0].path, namespaces=NAMESPACES)
-                ein_elem = elem.xpath(SCHEDULE_C_EIN_XPATHS[0].path, namespaces=NAMESPACES)
-                recipient_name = recipient_elem[0].text.strip() if recipient_elem else "Unknown"
-                recipient_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
-                if recipient_ein == "Unknown":
-                    continue
-                if amount_elem and amount_elem[0].text:
-                    try:
-                        amount = int(parse_float_field(amount_elem[0].text.strip()))
-                        if amount > 0:
-                            contributions.append({
-                                'filer_ein': filer_ein,
-                                'filer_name': filer_name,
-                                'recipient_ein': recipient_ein,
-                                'amount': amount,
-                                'tax_year': tax_year
-                            })
-                    except (ValueError, TypeError):
-                        pass
-    except Exception as e:
-        logging.error(f"Error parsing contributions from {xml_filename}: {e}")
-    return contributions
 
 def split_zip_code(zip_code_str):
     """
@@ -381,69 +262,3 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             log_info(logger, "DEBUG: No canonical_address created - canonical_address='%s', po_box='%s', colocator='%s'", address.canonical_address, address.po_box, address.colocator)
         return None
 
-
-def parse_political_contribution_element(elem, filer_ein: str, tax_year: int, quiet: bool = False, logger=None) -> Optional[PoliticalContribution]:
-    """Parse a single political contribution element from XML - moved from xml_processor.py"""
-    from models.political_contribution import PoliticalContribution
-    from logging_utils import log_error
-
-    try:
-        # Extract recipient name
-        name_xpaths = COMMON_XPATHS["political_recipient_name"]
-
-        recipient_name = None
-        for xpath in name_xpaths:
-            try:
-                result = xpath(elem)
-                if result and result[0].text:
-                    recipient_name = result[0].text.strip()
-                    break
-            except:
-                continue
-
-        # Extract amount
-        amount_xpaths = COMMON_XPATHS["political_amount"]
-
-        amount = 0.0
-        for xpath in amount_xpaths:
-            try:
-                result = xpath(elem)
-                if result and result[0].text:
-                    try:
-                        amount = float(result[0].text.strip().replace(',', ''))
-                        break
-                    except ValueError:
-                        continue
-            except:
-                continue
-
-        # Extract EIN if available
-        ein_xpaths = COMMON_XPATHS["political_ein"]
-
-        recipient_ein = None
-        for xpath in ein_xpaths:
-            try:
-                result = xpath(elem)
-                if result and result[0].text:
-                    raw_ein = result[0].text.strip()
-                    if raw_ein and raw_ein.isdigit():
-                        recipient_ein = f"{int(raw_ein):09d}"
-                        break
-            except:
-                continue
-
-        if recipient_name and amount > 0:
-            contribution = PoliticalContribution(
-                filer_ein=filer_ein,
-                recipient=recipient_name,
-                amount=amount,
-                tax_year=tax_year
-            )
-            return contribution
-
-    except Exception as e:
-        if not quiet and log_error is not None and logger is not None:
-            log_error(logger, "Error parsing political contribution element: %s", str(e))
-        return None
-
-    return None

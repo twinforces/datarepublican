@@ -55,6 +55,17 @@ class Contractor(BaseModel):
         super().prep_for_insert()
         pass
 
+    @classmethod
+    def create_for_charity(cls, charity, name: str, amount: float, ein: Optional[str], tax_year: int) -> 'Contractor':
+        """Factory method to create a Contractor for a specific charity"""
+        return cls(
+            filer_ein=charity.ein,
+            name=name,
+            amount=amount,
+            ein=ein,
+            tax_year=tax_year
+        )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {

@@ -103,7 +103,7 @@ class OfficerDeduplicationProcessor:
             WHERE officer_id IN ({placeholders})
         """
 
-        self.db_ops.execute_query(update_query, [master_id] + child_ids)
+        self.db_ops.execute_query(update_query, tuple([master_id] + child_ids))
         self.db_ops.commit()
 
         log_debug(self.logger, f"Updated {len(child_ids)} child officers to point to master {master_id}")

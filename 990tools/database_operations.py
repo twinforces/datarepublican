@@ -23,6 +23,7 @@ import os
 import threading
 from enum import Enum
 from functools import lru_cache
+from config import global_config
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(__file__))
@@ -63,8 +64,7 @@ class DatabaseOperation:
 class DatabaseOperations:
     """Handles all DuckDB operations for IRS 990 data processing"""
 
-    # Class variable for SQL logging - can be set via constructor
-    log_sql: bool = False
+    # SQL logging is now read directly from global_config
 
     # Thread-local storage for database connections
     _local = threading.local()
@@ -79,20 +79,18 @@ class DatabaseOperations:
         from uuid7 import generate_uuid_v7
         return generate_uuid_v7()
 
-    def __init__(self, db_path: str, log_sql: bool = False, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False):
+    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False):
         """
         Initialize DuckDB connection
 
         Args:
             db_path: Path to DuckDB database file
-            log_sql: Whether to log SQL queries
             read_only: Whether to open database in read-only mode
             memory_limit: Memory limit for DuckDB (default: 4GB)
             threads: Number of threads for DuckDB (default: auto)
         """
         self.db_path = db_path
-        # Set class variable for SQL logging
-        DatabaseOperations.log_sql = log_sql
+        # SQL logging is now read directly from global_config
         self.read_only = read_only
         self.memory_limit = memory_limit
         self.threads = threads
@@ -137,12 +135,7 @@ class DatabaseOperations:
             pass  # Ignore if not supported
         self.db_conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
 
-        # Enable query logging if requested
-        if self.log_sql:
-            # DuckDB doesn't have a direct trace callback like sqlite3,
-            # but we can implement custom logging
-            pass
-
+   
         # Initialize schema if needed
         self._init_schema()
 
@@ -199,26 +192,28 @@ class DatabaseOperations:
             print(f"Failed to initialize DuckDB database schema: {e}")
             raise
 
-    def execute_query(self, query: str, params: Optional[tuple] = None, conn=None) -> duckdb.DuckDBPyRelation:
+    def execute_query(self, query: str, params: Optional[Tuple] = None, conn=None) -> Any:
         """Execute a query and return results"""
         if conn is None:
             conn = self._get_thread_local_connection()
 
-        if DatabaseOperations.log_sql:
+        if global_config.log_sql:
             import inspect
             # Get the caller's frame, skipping internal functions
-            frame = inspect.currentframe().f_back
-            while frame and (frame.f_code.co_filename.endswith(('database_operations.py', 'logging_utils.py')) or
-                            'execute_query' in frame.f_code.co_name):
-                frame = frame.f_back
-
+            frame = inspect.currentframe()
             if frame:
-                filename = frame.f_code.co_filename
-                line_number = frame.f_lineno
-                function_name = frame.f_code.co_name
-                self.logger.info(f"SQL from {filename}:{line_number} in {function_name}: {query}")
-                if params:
-                    self.logger.info(f"Parameters: {params}")
+                frame = frame.f_back
+                while frame and (frame.f_code.co_filename.endswith(('database_operations.py', 'logging_utils.py')) or
+                                'execute_query' in frame.f_code.co_name):
+                    frame = frame.f_back
+
+                if frame:
+                    filename = frame.f_code.co_filename
+                    line_number = frame.f_lineno
+                    function_name = frame.f_code.co_name
+                    self.logger.info(f"SQL from {filename}:{line_number} in {function_name}: {query}")
+                    if params:
+                        self.logger.info(f"Parameters: {params}")
 
         if params:
             return conn.execute(query, params)
@@ -250,7 +245,7 @@ class DatabaseOperations:
 
         return DatabaseOperations._local.db_conn
 
-    def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: Optional[tuple] = None,
+    def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: Optional[Tuple] = None,
                         order_by: str = "", limit: Optional[int] = None, offset: Optional[int] = None,
                         df_threshold: int = 10000) -> List[Any]:
         """
@@ -299,8 +294,11 @@ class DatabaseOperations:
             if where_clause:
                 count_query += f" WHERE {where_clause}"
             count_result = self.execute_query(count_query, params)
-            row_count = count_result.fetchone()[0]
-            use_dataframe = row_count > df_threshold
+            if count_result:
+                row_count = count_result.fetchone()
+                if row_count and len(row_count) > 0:
+                    row_count = row_count[0]
+                    use_dataframe = row_count > df_threshold
 
         # Execute main query
         result = self.execute_query(query, params)
@@ -442,8 +440,6 @@ class DatabaseOperations:
         return ids[0] if ids else ""
 
     def get_unprocessed_xml_files(self, processing_version: int, max_files: Optional[int] = None) -> List[XMLFile]:
-        if max_files is None:
-            max_files = None
         """Get unprocessed XML files"""
         where_clause = "processed = FALSE OR processing_version < ?"
         params = (processing_version,)
@@ -479,7 +475,7 @@ class DatabaseOperations:
             conn = self.db_conn
         xml_id = operation.xml_id
         data = operation.data
-        ein = data.get("ein")
+        ein = data.get("ein") if data else None
         if ein:
             conn.execute("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
 
@@ -494,7 +490,7 @@ class DatabaseOperations:
         where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '')"
         return self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
 
-    def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: str = None):
+    def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: Optional[str] = None):
         """Update address with geocoding information and propagate colocator to owner"""
         # First update the address
         if geocoding_id is not None and colocator is not None:
@@ -520,8 +516,8 @@ class DatabaseOperations:
                 SELECT address_type, owner_id FROM Addresses WHERE address_id = ?
             """, (address_id,)).fetchone()
 
-            if address_info:
-                address_type, owner_id = address_info
+            if address_info and len(address_info) >= 2:
+                address_type, owner_id = address_info[0], address_info[1]
                 if owner_id:  # Only update if we have an owner_id
                     if address_type == 'charity':
                         self.execute_query("""
@@ -554,8 +550,8 @@ class DatabaseOperations:
             SELECT address_type, owner_id FROM Addresses WHERE address_id = ?
         """, (address_id,)).fetchone()
 
-        if address_info:
-            address_type, owner_id = address_info
+        if address_info and len(address_info) >= 2:
+            address_type, owner_id = address_info[0], address_info[1]
             if owner_id:  # Only update if we have an owner_id
                 if address_type == 'charity':
                     self.execute_query("""
@@ -606,6 +602,28 @@ class DatabaseOperations:
             ORDER BY org_type, tax_year
         """)
         return result.fetchall()
+
+    def get_latest_charities_for_export(self) -> List[Charity]:
+        """Get latest charities for export (most recent tax year for each EIN)"""
+        return self.select_dataclass(Charity, where_clause="""
+            tax_year = (
+                SELECT MAX(tax_year)
+                FROM Charities c2
+                WHERE c2.ein = Charities.ein
+            )
+        """)
+
+    def get_grants_for_export(self) -> List[Grant]:
+        """Get all grants for export"""
+        return self.select_dataclass(Grant)
+
+    def get_contractors_for_export(self) -> List[Contractor]:
+        """Get all contractors for export"""
+        return self.select_dataclass(Contractor)
+
+    def get_political_contributions_for_export(self) -> List[PoliticalContribution]:
+        """Get all political contributions for export"""
+        return self.select_dataclass(PoliticalContribution)
 
     def create_latest_charities_table(self):
         """Create LatestCharities table with most recent filings"""
@@ -694,22 +712,14 @@ class DatabaseOperations:
         if len({type(obj) for obj in objects}) > 1:
             raise ValueError("Uniform types only.")
 
-        # DEBUG: Log the actual values being passed for zip_id fields
-        if obj_type.__name__ == 'ZipFile':
-            self.logger.info(f"DEBUG: bulk_insert called with {len(objects)} ZipFile objects")
-            for i, obj in enumerate(objects):
-                zip_id_val = getattr(obj, 'zip_id', 'MISSING')
-                file_path_val = getattr(obj, 'file_path', 'MISSING')
-                filename_val = getattr(obj, 'filename', 'MISSING')
-                self.logger.info(f"DEBUG: ZipFile[{i}]: zip_id='{zip_id_val}', file_path='{file_path_val}', filename='{filename_val}'")
-                # Check if zip_id looks like a file path
-                if zip_id_val and isinstance(zip_id_val, str) and ('/' in zip_id_val or '\\' in zip_id_val):
-                    self.logger.warning(f"DEBUG: ZipFile[{i}]: zip_id appears to contain file path: '{zip_id_val}'")
+        # Validation moved to pending_database_context.py
 
         conn = conn or self.db_conn
         table_name = self._get_table_name(obj_type)
-        table_cols = self._get_table_columns(table_name, conn)
         model_fields = set(obj_type.get_db_field_names())
+        table_cols = self._get_table_columns(table_name, conn)
+        if not table_cols:
+            raise ValueError(f"No table columns found for {table_name}")
         missing = set(table_cols) - model_fields
         if missing:
             self.logger.warning(f"{table_name}: NULL-filling {len(missing)} DB cols")
@@ -730,7 +740,7 @@ class DatabaseOperations:
         if use_pandas:
             # Fallback: Your current DF path (for A/B)
             data_dict = {col: [getattr(obj, col) if col in model_fields else None for obj in objects] for col in insert_cols}
-            df = pd.DataFrame(data_dict, columns=insert_cols)
+            df = pd.DataFrame(data_dict)
             all_ids = []
             for i in range(0, len(objects), batch_size):
                 batch_df = df.iloc[i:i + batch_size]
@@ -762,6 +772,10 @@ class DatabaseOperations:
                 col_list = ', '.join(insert_cols)
                 placeholders = ', '.join(['?' for _ in insert_cols])
                 insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
+                if global_config.log_sql:
+                    self.logger.info(f"bulk SQL {insert_sql}")
+
+                # SQL logging handled by execute_query method
 
                 batch_start = time.perf_counter()
                 conn.executemany(insert_sql, batch_params)
@@ -770,6 +784,9 @@ class DatabaseOperations:
                 self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
             insert_time = time.perf_counter() - insert_start
             self.logger.info(f"executemany inserted {len(objects)} rows in {insert_time:.2f}s ({len(objects)/insert_time:.0f} rows/s)")
+
+            # Log bulk insert completion with counts
+            log_info(self.logger, f"Bulk insert completed: {len(objects)} {obj_type.__name__} records inserted")
 
             # Return the client-generated IDs
             return [str(getattr(obj, id_field)) for obj in objects]
@@ -821,102 +838,7 @@ class DatabaseOperations:
 
         return self.select_dataclass(XMLFile, where_clause=where_clause, params=params, order_by=order_by, limit=limit)
 
-    def bulk_process_operations_batch(self, batch_operations, conn=None):
-        """Process a batch of database operations using the generic bulk_insert methods"""
-        if conn is None:
-            conn = self.db_conn
-
-        # Check database connection state
-        try:
-            # Test connection with a simple query
-            test_result = conn.execute("SELECT 1").fetchone()
-            print(f"Database connection test: OK (result={test_result})")
-        except Exception as e:
-            print(f"Database connection test FAILED: {e}")
-            return
-
-        print(f"Bulk process batch: STARTING with {len(batch_operations)} operations")
-
-        # Group operations by type for efficient processing
-        operations_by_type = {}
-        xml_ids_in_batch = set()
-
-        for operation in batch_operations:
-            if not isinstance(operation, DatabaseOperation):
-                print(f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
-                continue
-            if operation.operation_type == DatabaseOperationType.OPTIMIZE_DATABASE:
-                print(f"Found OPTIMIZE_DATABASE operation: {operation}")
-
-            xml_ids_in_batch.add(operation.xml_id)
-            op_type = operation.operation_type.value
-            if op_type not in operations_by_type:
-                operations_by_type[op_type] = []
-            operations_by_type[op_type].append(operation)
-
-        print(f"Operations by type: { {k: len(v) for k, v in operations_by_type.items()} }")
-
-        # Process operations in dependency order
-        processed_xml_ids = set()
-
-        try:
-            # Handle OPTIMIZE_DATABASE operations first
-            if DatabaseOperationType.OPTIMIZE_DATABASE.value in operations_by_type:
-                for operation in operations_by_type[DatabaseOperationType.OPTIMIZE_DATABASE.value]:
-                    self._execute_optimize_operation(operation, conn)
-
-            # Handle UPDATE_XML_EIN operations
-            if DatabaseOperationType.UPDATE_XML_EIN.value in operations_by_type:
-                for operation in operations_by_type[DatabaseOperationType.UPDATE_XML_EIN.value]:
-                    self.execute_update_xml_ein_operation(operation, conn)
-
-            # 1. Handle XML file updates first
-            print("Processing XML file update operations...")
-            self._process_xml_file_update_operations(operations_by_type, conn, processed_xml_ids)
-            print("XML file update operations completed")
-
-            # 2. Insert charities
-            print("Processing charity operations...")
-            charity_id_map = self._process_charity_operations(operations_by_type, conn)
-            print(f"Charity operations completed, created {len(charity_id_map)} charity mappings")
-
-            # 3. Insert related data (officers, grants, etc.) using charity_id_map
-            print("Processing related operations (officers, grants, etc.)...")
-            self._process_related_operations(operations_by_type, conn, charity_id_map)
-            print("Related operations completed")
-
-            # 4. Insert addresses
-            print("Processing address operations...")
-            self._process_address_operations(operations_by_type, conn, charity_id_map)
-            print("Address operations completed")
-
-            # Commit all changes
-            print("Bulk process: STARTING batch commit")
-            conn.commit()
-            print("Bulk process: FINISHED batch commit successful")
-
-        except Exception as e:
-            print(f"Failed to process batch: {e}")
-            try:
-                conn.rollback()
-                print("Bulk process: Rollback completed")
-            except Exception as rollback_e:
-                print(f"Failed to rollback: {rollback_e}")
-
-            # Mark unprocessed XML files as having errors
-            unprocessed_xml_ids = xml_ids_in_batch - processed_xml_ids
-            for xml_id in unprocessed_xml_ids:
-                try:
-                    error_msg = self.format_error_with_traceback(e, "Batch processing failed")
-                    print(f"Marking XmlFile {xml_id} as batch error: {error_msg[:100]}...")
-                    conn.execute(
-                        "UPDATE XmlFiles SET processed=TRUE, processing_version=?, error_message=? WHERE xml_id=?",
-                        (CURRENT_PROCESSING_VERSION, error_msg, xml_id)
-                    )
-                    # Do not commit here - rollback will happen in the caller
-                except Exception as mark_error_e:
-                    print(f"Failed to mark xml_id {xml_id} as error: {mark_error_e}")
-            raise  # Re-raise to propagate the error
+    # Context-based approach handles this now
 
     # Export operations
     def get_export_operations(self, final_dir: str):
@@ -939,31 +861,23 @@ class DatabaseOperations:
         self.db_conn.checkpoint()
         self.commit()
 
-    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
-        """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
-
-    def log_info(self, msg: str, *args, ein: Optional[str] = None):
-        """Log info message with optional EIN context"""
-        log_info(self.logger, msg, *args, ein=ein)
-
-    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
-        """Log debug message with optional EIN context"""
-        log_debug(self.logger, msg, *args, ein=ein)
+    # Logging methods removed - use global logging functions directly
 
     def _execute_optimize_operation(self, operation, conn):
         """Execute database optimization operation"""
         if operation.operation_type != DatabaseOperationType.OPTIMIZE_DATABASE:
             return
 
-        self.log_info("Starting database optimization...")
+        log_info(self.logger, "Starting database optimization...")
         try:
             # Call the optimize_database method from DatabaseOperations
             self.optimize_database()
-            self.log_info("Database optimization completed successfully")
+            log_info(self.logger, "Database optimization completed successfully")
         except Exception as e:
-            self.log_error(f"Database optimization failed: {e}", exc_info=True)
+            log_error(self.logger, f"Database optimization failed: {e}", exc_info=True)
             raise
+
+    # All processing methods removed - context-based approach handles this now
 
     def _process_xml_file_update_operations(self, operations_by_type, conn, processed_xml_ids):
         """Process XML file update operations using metadata"""
@@ -980,7 +894,7 @@ class DatabaseOperations:
                 self._update_xml_file_with_metadata(xml_id, metadata, conn)
                 processed_xml_ids.add(xml_id)
             except Exception as e:
-                self.log_error(f"Failed to update XML file {xml_id} with metadata: {e}")
+                log_error(self.logger, f"Failed to update XML file {xml_id} with metadata: {e}")
                 # Do not raise here - continue processing other XML files
 
     def _process_charity_operations(self, operations_by_type, conn):
@@ -995,7 +909,7 @@ class DatabaseOperations:
         if not charities:
             return charity_id_map
 
-        self.log_info(f"Bulk insert: Processing {len(charities)} charities")
+        log_info(self.logger, f"Bulk insert: Processing {len(charities)} charities")
 
         # Set colocator to 'notyet' for new charities
         for charity in charities:
@@ -1004,7 +918,7 @@ class DatabaseOperations:
         try:
             # Use database_operations bulk_insert method which calls prep_for_insert
             ids = self.bulk_insert(charities, conn=conn)
-            self.log_info(f"Bulk insert: Inserted {len(charities)} charities")
+            log_info(self.logger, f"Bulk insert: Inserted {len(charities)} charities")
 
             # Map xml_id to charity_id using the operations list and returned IDs
             charity_ops = operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]
@@ -1014,73 +928,11 @@ class DatabaseOperations:
                     charity_id_map[xml_id] = charity_id
 
         except Exception as e:
-            self.log_error(f"Failed to insert charities: {e}", exc_info=True)
+            log_error(self.logger, f"Failed to insert charities: {e}", exc_info=True)
             raise
 
         return charity_id_map
 
-    def _process_related_operations(self, operations_by_type, conn, charity_id_map):
-        """Process related data operations (officers, grants, contractors, contributions)"""
-
-        # Process officers
-        if DatabaseOperationType.INSERT_OFFICER.value in operations_by_type:
-            officers = []
-            for operation in operations_by_type[DatabaseOperationType.INSERT_OFFICER.value]:
-                officer = operation.data
-                # Set charity_id from mapping
-                if operation.xml_id in charity_id_map:
-                    officer.charity_id = charity_id_map[operation.xml_id]
-                    officers.append(officer)
-
-            if officers:
-                try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.bulk_insert(officers, conn=conn)
-                    self.log_debug(f"Inserted {len(officers)} officers")
-                except Exception as e:
-                    self.log_error(f"Failed to insert officers: {e}", exc_info=True)
-
-        # Process grants
-        if DatabaseOperationType.INSERT_GRANT.value in operations_by_type:
-            grants = []
-            for operation in operations_by_type[DatabaseOperationType.INSERT_GRANT.value]:
-                grant = operation.data
-                # Ensure grantee_name is not None
-                if grant.grantee_name is None:
-                    grant.grantee_name = "Unknown"
-                grants.append(grant)
-
-            if grants:
-                try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.bulk_insert(grants, conn=conn)
-                    self.log_debug(f"Inserted {len(grants)} grants")
-                except Exception as e:
-                    self.log_error(f"Failed to insert grants: {e}", exc_info=True)
-
-        # Process contractors
-        if DatabaseOperationType.INSERT_CONTRACTOR.value in operations_by_type:
-            contractors = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_CONTRACTOR.value]]
-
-            if contractors:
-                try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.bulk_insert(contractors, conn=conn)
-                    self.log_debug(f"Inserted {len(contractors)} contractors")
-                except Exception as e:
-                    self.log_error(f"Failed to insert contractors: {e}", exc_info=True)
-
-        # Process political contributions
-        if DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION.value in operations_by_type:
-            contributions = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_POLITICAL_CONTRIBUTION.value]]
-
-            if contributions:
-                try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.bulk_insert(contributions, conn=conn)
-                    self.log_debug(f"Inserted {len(contributions)} contributions")
-                except Exception as e:
-                    self.log_error(f"Failed to insert contributions: {e}", exc_info=True)
 
     def _process_address_operations(self, operations_by_type, conn, charity_id_map):
         """Process address insert operations"""
@@ -1103,25 +955,19 @@ class DatabaseOperations:
             try:
                 # Use database_operations bulk_insert method which calls prep_for_insert
                 ids = self.bulk_insert(addresses, conn=conn)
-                self.log_debug(f"Inserted {len(addresses)} addresses")
+                log_debug(self.logger, f"Inserted {len(addresses)} addresses")
             except Exception as e:
-                self.log_error(f"Failed to insert addresses: {e}", exc_info=True)
+                log_error(self.logger, f"Failed to insert addresses: {e}", exc_info=True)
 
     def _update_xml_file_with_metadata(self, xml_id, metadata, conn):
         """Update XmlFiles table with metadata from processing"""
         try:
             if metadata["error_message"]:
                 # Error case
-                if metadata["form_type"] == "990T":
-                    conn.execute(
-                        "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, form_type=?, file_size=? WHERE xml_id=?",
-                        (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["form_type"], metadata["file_size"], xml_id)
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, file_size=? WHERE xml_id=?",
-                        (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["file_size"], xml_id)
-                    )
+                conn.execute(
+                    "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, file_size=? WHERE xml_id=?",
+                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["file_size"], xml_id)
+                )
             else:
                 # Success case
                 conn.execute(
@@ -1129,7 +975,7 @@ class DatabaseOperations:
                     (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["form_type"], metadata["ein"], metadata["tax_year"], metadata["file_size"], xml_id)
                 )
         except Exception as e:
-            self.log_error(f"Failed to update XML file {xml_id} with metadata: {e}")
+            log_error(self.logger, f"Failed to update XML file {xml_id} with metadata: {e}")
 
     def format_error_with_traceback(self, error: Exception, context: str = "") -> str:
         """Format error message with full stack trace for better debugging"""

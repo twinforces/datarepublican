@@ -33,7 +33,7 @@ STATE_NAME_TO_ABBREV = {
 
 # Regular expressions for parsing
 MONEY_PATTERN = re.compile(r'[^\d.]+')
-FLOAT_PATTERN = re.compile(r'[^\d.-]+')
+FLOAT_PATTERN = re.compile(r'-?\d*\.?\d+')
 PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'[-\w\d]+')
 
@@ -80,7 +80,7 @@ DEBUG_EINS = {
 }
 
 # Processing constants
-CURRENT_PROCESSING_VERSION = 2
+CURRENT_PROCESSING_VERSION = 3
 
 # Threading constants
 MAX_WORKERS = 17
