@@ -1009,13 +1009,14 @@ class DatabaseOperations:
 
         Args:
             batch_size: Number of canonical addresses to process in this batch
-            offset: Offset for pagination (used for resuming processing)
+            offset: Offset for pagination (removed - always get first batch)
 
         Returns:
             List of deduplication operations, each containing master and children info
         """
         # Query for canonical addresses that have duplicates and haven't been fully deduplicated
         # We need canonical addresses where COUNT(*) > 1 and at least one address has master_id IS NULL
+        # Always get the first batch (no OFFSET) since we want to process the most urgent items first
         query = """
             SELECT
                 canonical_address,
@@ -1028,10 +1029,10 @@ class DatabaseOperations:
             HAVING COUNT(*) > 1
                 AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
             ORDER BY canonical_address
-            LIMIT ? OFFSET ?
+            LIMIT ?
         """
 
-        result = self.execute_query(query, (batch_size, offset))
+        result = self.execute_query(query, (batch_size,))
         rows = result.fetchall() if result else []
 
         batch_operations = []

@@ -176,13 +176,16 @@ class AddressDeduplicationProcessor:
             import queue
             import threading
 
+            # Create shared condition for producer-consumer synchronization
+            batch_condition = threading.Condition()
+
             # Create queues for producer-consumer communication
             operation_queue = queue.Queue(maxsize=1000)  # Queue for DatabaseOperation objects
 
             # Start consumer thread
             consumer_thread = threading.Thread(
                 target=self._consumer_worker,
-                args=(operation_queue, progress_bar)
+                args=(operation_queue, progress_bar, batch_condition)
             )
             consumer_thread.daemon = True
             consumer_thread.start()
@@ -190,7 +193,7 @@ class AddressDeduplicationProcessor:
             # Producer: collect operations and send to consumer
             producer_thread = threading.Thread(
                 target=self._producer_worker,
-                args=(operation_queue,)
+                args=(operation_queue, batch_condition)
             )
             producer_thread.daemon = True
             producer_thread.start()
@@ -213,18 +216,18 @@ class AddressDeduplicationProcessor:
             self.log_error(f"Address deduplication failed: {e}", exc_info=True)
             return 0
 
-    def _producer_worker(self, operation_queue):
+    def _producer_worker(self, operation_queue, batch_condition):
         """Producer thread: collects deduplication operations"""
         try:
-            operations_sent = 0
-            offset = 0
+            canonical_addresses_processed = 0
 
             while True:
-                # Get next batch of deduplication work
-                batch = self.producer._get_work_batch(offset)
+                # Get next batch of deduplication work (always first batch since OFFSET removed)
+                batch = self.producer._get_work_batch(self.batch_size)
 
                 if not batch:
-                    # No more work
+                    # No more work - all canonical addresses have been processed
+                    self.log_info("No more deduplication work found - all canonical addresses processed")
                     break
 
                 # Process batch into operations
@@ -233,20 +236,36 @@ class AddressDeduplicationProcessor:
                 # Send operations to consumer
                 for operation in operations:
                     operation_queue.put(operation, block=True)
-                    operations_sent += 1
 
-                offset += self.batch_size
+                # Send batch completion marker
+                batch_completion = DatabaseOperation(
+                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                    data={"batch_complete": True, "batch_size": len(batch)}
+                )
+                operation_queue.put(batch_completion, block=True)
 
-                # Check global max_files limit
-                if global_config.max_files and operations_sent >= global_config.max_files:
+                # Wait for consumer to signal batch completion
+                with batch_condition:
+                    batch_condition.wait()
+
+                # Count canonical addresses processed
+                canonical_addresses_processed += len(batch)
+
+                # Check global max_files limit based on canonical addresses processed
+                if global_config.max_files and canonical_addresses_processed >= global_config.max_files:
+                    self.log_info(f"Reached max_files limit: {global_config.max_files} canonical addresses")
                     break
 
-            self.log_info(f"Producer sent {operations_sent} operations to consumer")
+                # Log progress periodically
+                if canonical_addresses_processed % 1000 == 0:
+                    self.log_info(f"Processed {canonical_addresses_processed} canonical addresses so far")
+
+            self.log_info(f"Producer completed: sent operations for {canonical_addresses_processed} canonical addresses")
 
         except Exception as e:
             self.log_error(f"Producer worker failed: {e}", exc_info=True)
 
-    def _consumer_worker(self, operation_queue, progress_bar):
+    def _consumer_worker(self, operation_queue, progress_bar, batch_condition):
         """Consumer thread: executes deduplication operations"""
         try:
             batch_operations = []
@@ -262,7 +281,23 @@ class AddressDeduplicationProcessor:
                         batch_updated = self.consumer.execute_operations_batch(batch_operations)
                         total_updated += batch_updated
                         # Progress bar is updated by PROGRESS_UPDATE operations in execute_operations_batch
+                    operation_queue.task_done()  # Mark sentinel as done
                     break
+
+                # Check for batch completion marker
+                if (operation.operation_type == DatabaseOperationType.PROGRESS_UPDATE and
+                    operation.data.get("batch_complete")):
+                    # Process any remaining operations in current batch
+                    if batch_operations:
+                        batch_updated = self.consumer.execute_operations_batch(batch_operations)
+                        total_updated += batch_updated
+                        batch_operations = []  # Clear for next batch
+
+                    # Signal producer that batch is complete
+                    with batch_condition:
+                        batch_condition.notify()
+                    operation_queue.task_done()
+                    continue
 
                 batch_operations.append(operation)
 
@@ -273,7 +308,7 @@ class AddressDeduplicationProcessor:
                     # Progress bar is updated by PROGRESS_UPDATE operations in execute_operations_batch
                     batch_operations = []  # Clear for next batch
 
-                operation_queue.task_done()
+                operation_queue.task_done()  # Mark each operation as done
 
             # Store total for return
             self._total_updated = total_updated
