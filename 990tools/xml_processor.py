@@ -372,6 +372,9 @@ class XMLConsumer:
             # 4. Insert addresses
             self._process_address_operations(operations_by_type, charity_id_map)
 
+            # 5. Handle generic update operations
+            self._process_generic_update_operations(operations_by_type)
+
         except Exception as e:
             log_error(self.logger, f"Failed to execute operations batch: {e}", exc_info=True)
             raise
@@ -466,8 +469,34 @@ class XMLConsumer:
                     charity_id_map[xml_id] = charity_id
 
         except Exception as e:
-            log_error(self.logger, f"Failed to insert charities: {e}", exc_info=True)
-            raise
+            # Check if this is a duplicate constraint violation
+            error_str = str(e)
+            if "Constraint Error: Duplicate key" in error_str and "xml_name:" in error_str:
+                log_warning(self.logger, f"Duplicate charity constraint violation detected: {e}")
+                # Mark XML files as processed with duplicate status
+                charity_ops = operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]
+                for charity_op in charity_ops:
+                    xml_id = charity_op.xml_id
+                    # Create XML_FILE_UPDATE operation for duplicate
+                    if DatabaseOperationType.XML_FILE_UPDATE.value not in operations_by_type:
+                        operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value] = []
+                    operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value].append(
+                        DatabaseOperation(
+                            operation_type=DatabaseOperationType.XML_FILE_UPDATE,
+                            xml_id=xml_id,
+                            data={
+                                "processed": True,
+                                "processing_version": CURRENT_PROCESSING_VERSION,
+                                "error_message": "duplicate"
+                            }
+                        )
+                    )
+                log_info(self.logger, f"Marked {len(charity_ops)} XML files as duplicate")
+                # Return empty map since no charities were inserted
+                return {}
+            else:
+                log_error(self.logger, f"Failed to insert charities: {e}", exc_info=True)
+                raise
 
         return charity_id_map
 
@@ -558,5 +587,37 @@ class XMLConsumer:
                 log_debug(self.logger, f"Inserted {len(addresses)} addresses")
             except Exception as e:
                 log_error(self.logger, f"Failed to insert addresses: {e}", exc_info=True)
+
+    def _process_generic_update_operations(self, operations_by_type):
+        """Process generic update operations using bulk_update"""
+        if DatabaseOperationType.GENERIC_UPDATE.value not in operations_by_type:
+            return
+
+        generic_updates = operations_by_type[DatabaseOperationType.GENERIC_UPDATE.value]
+
+        # Group updates by table name
+        updates_by_table = {}
+        for operation in generic_updates:
+            table_name = operation.data.get("table_name")
+            update_data = operation.data.get("update_data", {})
+            id_column = operation.data.get("id_column", "id")
+
+            if table_name not in updates_by_table:
+                updates_by_table[table_name] = {"updates": [], "id_column": id_column}
+
+            updates_by_table[table_name]["updates"].append(update_data)
+
+        # Execute bulk updates for each table
+        for table_name, table_data in updates_by_table.items():
+            updates = table_data["updates"]
+            id_column = table_data["id_column"]
+
+            if updates:
+                try:
+                    self.db_ops.bulk_update(table_name, updates, id_column=id_column)
+                    log_debug(self.logger, f"Bulk updated {len(updates)} records in {table_name}")
+                except Exception as e:
+                    log_error(self.logger, f"Failed to bulk update {table_name}: {e}")
+                    raise
 
 

@@ -7,7 +7,7 @@ Form 990-T is for Exempt Organization Business Income Tax, which we skip.
 """
 
 from base_parser import BaseParser
-
+from constants import CURRENT_PROCESSING_VERSION
 
 class Parser990T(BaseParser):
     """Stub parser for IRS Form 990-T (Exempt Organization Business Income Tax)"""
@@ -47,17 +47,23 @@ class Parser990T(BaseParser):
         """Stub implementation - Form 990-T is skipped"""
         # Form 990-T is for Exempt Organization Business Income Tax
         # We don't process these forms, just skip them
-        # Add XmlFile update to context to set the status field to "skipped: 990t"
+        # Add generic update operation to update XmlFiles table
         from database_operations import DatabaseOperation, DatabaseOperationType
         operation = DatabaseOperation(
-            DatabaseOperationType.XML_FILE_UPDATE,
+            DatabaseOperationType.GENERIC_UPDATE,
             {
-                "file_size": 0,  # Will be set by metadata extraction
-                "ein": "Unknown",
-                "tax_year": None,
-                "form_type": "990T",
-                "error_message": "skipped: 990t",
-                "processed": True
+                "table_name": "XmlFiles",
+                "update_data": {
+                    "xml_id": context.xml_id if hasattr(context, 'xml_id') else None,
+                    "processed": True,
+                    "processing_version": CURRENT_PROCESSING_VERSION,  # Will be overridden by consumer
+                    "error_message": "skipped: 990t",
+                    "form_type": "990T",
+                    "ein": None,
+                    "tax_year": None,
+                    "file_size": 0  # Will be set by caller
+                },
+                "id_column": "xml_id"
             },
             context.xml_id if hasattr(context, 'xml_id') else None
         )

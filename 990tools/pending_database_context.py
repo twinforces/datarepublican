@@ -35,6 +35,7 @@ class PendingDatabaseContext:
         }
         self._charity: Optional[Charity] = None
         self._updates: List[Dict[str, Any]] = []  # For future UPDATE operations
+        self._operations: List[DatabaseOperation] = []  # For generic database operations
         self.error_message: Optional[str] = None  # Error message for failed processing
 
     def addObjectToDatabase(self, obj: Any) -> None:
@@ -73,6 +74,15 @@ class PendingDatabaseContext:
             'id': obj_id,
             'updates': updates
         })
+
+    def addOperationToDatabase(self, operation: DatabaseOperation) -> None:
+        """
+        Add a generic database operation to be executed.
+
+        Args:
+            operation: The DatabaseOperation to add
+        """
+        self._operations.append(operation)
 
     def getCharity(self) -> Optional[Charity]:
         """
@@ -229,6 +239,9 @@ class PendingDatabaseContext:
             xml_id=self.xml_id
         ))
 
+        # Add any generic operations
+        operations.extend(self._operations)
+
         return operations
 
     def clear(self) -> None:
@@ -236,6 +249,7 @@ class PendingDatabaseContext:
         self._objects = {key: [] for key in self._objects.keys()}
         self._charity = None
         self._updates = []
+        self._operations = []
         self.xml_id = None
         self.xml_content = None
         self.error_message = None

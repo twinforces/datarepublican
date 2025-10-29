@@ -48,6 +48,7 @@ class DatabaseOperationType(Enum):
     XML_FILE_UPDATE = "xml_file_update"
     UPDATE_XML_EIN = "update_xml_ein"
     OPTIMIZE_DATABASE = "optimize_database"
+    GENERIC_UPDATE = "generic_update"
 
 
 class DatabaseOperation:
