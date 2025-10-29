@@ -87,6 +87,10 @@ MAX_WORKERS = 17
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
 
+# Address processing constants
+ADDRESS_BATCH_SIZE = 1000
+ADDRESS_QUEUE_SIZE = 1000
+
 # Database constants
 DEFAULT_DB_PATH = "irs990.duckdb"
 DEFAULT_ZIPS_DIR = "/Volumes/Data/irs_zips"

@@ -44,7 +44,7 @@ except ImportError:
 
 # Import extracted modules
 from database_operations import DatabaseOperations
-from processing_strategy import ParallelXMLProcessingStrategy
+from processing_strategy import ParallelXMLProcessingStrategy, AddressDeduplicationStrategy
 from geolocation_processor import GeolocationProcessor
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
@@ -138,6 +138,7 @@ class IRS990Processor:
         self.db_ops = DatabaseOperations(self.db_path, dbUI=global_config.dbUI)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
         self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, workers=global_config.workers)
+        self.address_deduplication_strategy = AddressDeduplicationStrategy(self.db_ops, self.logger)
         self.geolocation_processor = GeolocationProcessor(self.db_ops)
         self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
@@ -491,7 +492,7 @@ class IRS990Processor:
     def deduplicate_addresses(self):
         """Deduplicate addresses and create master-child relationships (step 4)"""
         self.log_info("Deduplicating addresses and creating master-child relationships")
-        return self.address_dedup_processor.deduplicate_addresses()
+        return self.address_deduplication_strategy.execute(self.max_files)
 
     def export_final_tsvs(self):
         """Export final TSV files (step 11)"""

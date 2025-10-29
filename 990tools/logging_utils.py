@@ -8,6 +8,9 @@ import sys
 from tqdm import tqdm
 from config import global_config
 
+# Global progress bar instance
+_global_progress_bar = None
+
 def get_debug_info():
     """Get debug information about the caller's location, traversing up until not in 'log' or 'database' files"""
     frame = inspect.currentframe()
@@ -79,14 +82,16 @@ def log_warning(logger: logging.Logger, msg: str, *args, ein: Optional[str] = No
 
 def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items"):
     """Start progress reporting with tqdm"""
+    global _global_progress_bar
     try:
           # Always show progress bar, even in quiet mode
         # Force disable=False to ensure progress bar shows regardless of tty detection
         # Use file=sys.stderr to ensure output goes to stderr even in non-TTY environments
-        pbar = tqdm(total=total, desc=desc, unit=unit, disable=False, file=sys.stderr)
-        return pbar
+        _global_progress_bar = tqdm(total=total, desc=desc, unit=unit, disable=False, file=sys.stderr)
+        return _global_progress_bar
     except ImportError:
         # Fallback if tqdm not available
+        _global_progress_bar = None
         return None
 
 def stop_progress_reporting():
@@ -94,10 +99,13 @@ def stop_progress_reporting():
     # This is a no-op for now, tqdm handles its own cleanup
     pass
 
-def update_progress(pbar, n: int = 1):
+def update_progress(pbar=None, n: int = 1):
     """Update progress bar"""
+    global _global_progress_bar
     if pbar:
         pbar.update(n)
+    elif _global_progress_bar:
+        _global_progress_bar.update(n)
 
 def set_progress_description(pbar, desc: str):
     """Set progress bar description"""

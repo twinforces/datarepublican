@@ -30,6 +30,7 @@ from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from models import Address
 from xml_processor import XMLProducer, XMLConsumer
+from address_deduplication_processor import AddressDeduplicationProcessor
 
 
 class ProcessingStrategy(ABC):
@@ -344,6 +345,12 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         signals = 0
         processed_xml_count = 0  # Counter for processed XML files (each generates one XML_FILE_UPDATE)
         self.log_info(f"Consumer starting: expecting {num_expected} sentinel signals")
+
+        # Set up progress callback for consumer
+        def progress_callback(count):
+            if pbar:
+                pbar.update(count)
+
         while signals < num_expected and not self.shutdown_event.is_set():
             # Check if we need to trigger database optimization
             if processed_xml_count > 0 and processed_xml_count % self.OPTIMIZE_INTERVAL == 0:
@@ -382,22 +389,27 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                         self.log_debug(f"Processing batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
                         self.log_info(f"Starting bulk insert batch of {len(batch_operations)} operations...")
-                        # CONSUMER: Execute operations using XMLConsumer
-                        self.consumer.execute_operations_batch(batch_operations)
+                        # CONSUMER: Execute operations using XMLConsumer with progress callback
+                        self.consumer.execute_operations_batch(batch_operations, progress_callback)
                         self.log_info("Bulk insert batch completed successfully")
 
                         # Log consumer execution completion
                         if not global_config.is_quiet():
                             log_info(self.logger, f"Consumer executed batch of {len(batch_operations)} operations")
 
-                        # Update progress bar based on XML file updates processed in this batch
-                        # Each XML_FILE_UPDATE operation corresponds to one processed XML file
+                        # Count XML files processed in this batch for optimization interval
                         xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
                         xml_count_in_batch = len(xml_files_updated)
+                        processed_xml_count += xml_count_in_batch
+
+                        # Send progress update operation
                         if xml_count_in_batch > 0:
-                            pbar.update(xml_count_in_batch)
-                            processed_xml_count += xml_count_in_batch
-                            self.log_debug(f"Updated progress for {xml_count_in_batch} XML files in batch")
+                            progress_op = DatabaseOperation(
+                                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                                data={"count": xml_count_in_batch}
+                            )
+                            # Execute progress update immediately
+                            self.consumer.execute_operations_batch([progress_op])
 
                         batch_operations = []  # Clear batch after successful commit
                     except Exception as e:
@@ -421,28 +433,93 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 self.log_debug(f"Processing final batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
                 self.log_info("Starting final bulk insert batch...")
-                # CONSUMER: Execute final operations using XMLConsumer
-                self.consumer.execute_operations_batch(batch_operations)
+                # CONSUMER: Execute final operations using XMLConsumer with progress callback
+                self.consumer.execute_operations_batch(batch_operations, progress_callback)
                 self.log_info("Final bulk insert batch completed successfully")
 
-                # Update progress bar for final batch
+                # Count XML files processed in final batch
                 xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
                 xml_count_in_batch = len(xml_files_updated)
-                if xml_count_in_batch > 0:
-                    pbar.update(xml_count_in_batch)
-                    processed_xml_count += xml_count_in_batch
-                    self.log_debug(f"Updated progress for {xml_count_in_batch} final XML files")
+                processed_xml_count += xml_count_in_batch
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
 
         self.log_info(f"Consumer done: {total} operations, {signals} signals, processed {processed_xml_count} XML files")
         return total
+def _get_xml_files_updated_in_batch(self, batch_operations):
+    """Get set of XML IDs that were updated in this batch (XML_FILE_UPDATE operations)"""
+    xml_files_updated = set()
+    for op in batch_operations:
+        if op.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
+            xml_files_updated.add(op.xml_id)
+    return xml_files_updated
 
-    def _get_xml_files_updated_in_batch(self, batch_operations):
-        """Get set of XML IDs that were updated in this batch (XML_FILE_UPDATE operations)"""
-        xml_files_updated = set()
-        for op in batch_operations:
-            if op.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
-                xml_files_updated.add(op.xml_id)
-        return xml_files_updated
+
+class AddressDeduplicationStrategy(ProcessingStrategy):
+    """
+    Strategy for address deduplication processing using producer-consumer pattern.
+
+    Processes addresses in batches to create master-child relationships based on
+    canonical_address matching, following the same pattern as XML processing.
+    """
+
+    DEFAULT_BATCH_SIZE = 1000
+
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, batch_size: int = DEFAULT_BATCH_SIZE, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
+        self.batch_size = batch_size
+
+    def execute(self, max_files: Optional[int] = None) -> int:
+        """
+        Execute address deduplication processing.
+
+        Args:
+            max_files: Maximum number of canonical addresses to process (for testing)
+
+        Returns:
+            Number of addresses updated (children that were linked to masters)
+        """
+        self.log_info("Starting address deduplication strategy")
+
+        try:
+            # Create the address deduplication processor
+            processor = AddressDeduplicationProcessor(self.db_ops, self.batch_size)
+
+            # Set up progress bar for address deduplication
+            from logging_utils import start_progress_reporting
+
+            # Estimate total canonical addresses that need deduplication for progress bar
+            if max_files:
+                total_operations = max_files
+            else:
+                # Count total canonical addresses that have duplicates and need deduplication
+                count_query = """
+                    SELECT COUNT(DISTINCT canonical_address) FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 0
+                """
+                result = self.db_ops.execute_query(f"SELECT COUNT(*) FROM ({count_query})")
+                total_operations = result.fetchone()[0] if result else 0
+                # Cap at reasonable limit for progress bar
+                total_operations = min(total_operations, 100000)
+
+            progress_desc = "Deduplicating addresses"
+            pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="addrs")
+
+            # Execute deduplication with progress bar
+            total_updated = processor.deduplicate_addresses(progress_bar=pbar)
+
+            # Close progress bar
+            if pbar:
+                pbar.close()
+
+            self.log_info(f"Address deduplication strategy complete: {total_updated} addresses updated")
+            return total_updated
+
+        except Exception as e:
+            self.log_error(f"Address deduplication strategy failed: {e}", exc_info=True)
+            return 0
 

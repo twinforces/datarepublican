@@ -49,6 +49,8 @@ class DatabaseOperationType(Enum):
     UPDATE_XML_EIN = "update_xml_ein"
     OPTIMIZE_DATABASE = "optimize_database"
     GENERIC_UPDATE = "generic_update"
+    ADDRESS_DEDUPLICATION_BATCH = "address_deduplication_batch"
+    PROGRESS_UPDATE = "progress_update"
 
 
 class DatabaseOperation:
@@ -992,3 +994,92 @@ class DatabaseOperations:
             if op.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
                 xml_files_updated.add(op.xml_id)
         return xml_files_updated
+
+    def get_address_deduplication_batch(self, batch_size: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Get a batch of canonical addresses that have duplicates needing deduplication.
+
+        Returns canonical addresses where there are multiple addresses with the same canonical_address,
+        and at least one of them has master_id IS NULL (not yet deduplicated).
+
+        Returns a list of dicts with:
+        - canonical_address: the canonical address string
+        - master_address_id: the min(address_id) to use as master
+        - child_address_ids: list of address_ids that should point to the master (excluding the master itself)
+
+        Args:
+            batch_size: Number of canonical addresses to process in this batch
+            offset: Offset for pagination (used for resuming processing)
+
+        Returns:
+            List of deduplication operations, each containing master and children info
+        """
+        # Query for canonical addresses that have duplicates and haven't been fully deduplicated
+        # We need canonical addresses where COUNT(*) > 1 and at least one address has master_id IS NULL
+        query = """
+            SELECT
+                canonical_address,
+                MIN(address_id) as master_address_id,
+                LIST(address_id) as all_address_ids
+            FROM Addresses
+            WHERE canonical_address IS NOT NULL
+                AND canonical_address != ''
+            GROUP BY canonical_address
+            HAVING COUNT(*) > 1
+                AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+            ORDER BY canonical_address
+            LIMIT ? OFFSET ?
+        """
+
+        result = self.execute_query(query, (batch_size, offset))
+        rows = result.fetchall() if result else []
+
+        batch_operations = []
+        for row in rows:
+            # DuckDB returns tuples, so access by index: (canonical_address, master_address_id, all_address_ids)
+            canonical_address = str(row[0]) if row[0] is not None else ''
+            master_address_id = str(row[1]) if row[1] is not None else ''
+            all_address_ids = row[2] if row[2] is not None else []
+
+            # Convert all_address_ids to strings and separate master from children
+            all_ids = [str(addr_id) for addr_id in all_address_ids] if all_address_ids else []
+            child_address_ids = [addr_id for addr_id in all_ids if addr_id != master_address_id]
+
+            if child_address_ids:  # Only include if there are children to update
+                batch_operations.append({
+                    'canonical_address': canonical_address,
+                    'master_address_id': master_address_id,
+                    'child_address_ids': child_address_ids
+                })
+
+        return batch_operations
+
+    def execute_address_deduplication_batch(self, master_address_id: str, child_address_ids: List[str]) -> int:
+        """
+        Execute a batch of address deduplication updates.
+
+        Updates all child addresses to point to the master address.
+
+        Args:
+            master_address_id: The address_id of the master address
+            child_address_ids: List of address_ids that should point to the master
+
+        Returns:
+            Number of addresses updated
+        """
+        if not child_address_ids:
+            return 0
+
+        # Update all child addresses to point to the master
+        placeholders = ','.join('?' for _ in child_address_ids)
+        update_query = f"""
+            UPDATE Addresses
+            SET master_id = ?
+            WHERE address_id IN ({placeholders})
+        """
+
+        params = [master_address_id] + child_address_ids
+        self.execute_query(update_query, tuple(params))
+        self.commit()
+
+        return len(child_address_ids)

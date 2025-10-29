@@ -16,6 +16,7 @@ from lxml import etree  # type: ignore
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from pending_database_context import PendingDatabaseContext
+from base_processor import BaseProducer, BaseConsumer
 import parse_990
 import parse_990ez
 import parse_990pf
@@ -28,7 +29,7 @@ from constants import CURRENT_PROCESSING_VERSION
 from xpaths import COMMON_XPATHS, XPATHS_990, XPATHS_990EZ, XPATHS_990PF, tostring
 
 
-class XMLProducer:
+class XMLProducer(BaseProducer):
     """
     XML Producer - Handles XML parsing and operation collection.
 
@@ -47,9 +48,8 @@ class XMLProducer:
     _zip_cache_lock = threading.Lock()
 
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
-        self.db_ops = db_ops
+        super().__init__(db_ops, batch_size=100)  # XML processing uses smaller batches
         self.processing_version = processing_version
-        self.logger = logging.getLogger(__name__)
 
     def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, List[DatabaseOperation]]:
         """
@@ -87,6 +87,38 @@ class XMLProducer:
                 break
 
         return success, operations
+
+    def _get_work_batch(self, offset: int) -> List[Tuple[str, str, str, str, int]]:
+        """Get a batch of XML files to process"""
+        xml_files = self.db_ops.get_xml_files_to_process(
+            processing_version=self.processing_version,
+            max_files=self.batch_size,
+            offset=offset
+        )
+
+        # Convert XMLFile objects to tuples for processing
+        work_items = []
+        for xml_file in xml_files:
+            zip_path = self.db_ops.get_zip_file_path(xml_file.zip_id)
+            if zip_path:
+                work_items.append((
+                    xml_file.xml_id,
+                    xml_file.zip_id,
+                    xml_file.filename,
+                    xml_file.internal_path,
+                    xml_file.file_size
+                ))
+        return work_items
+
+    def _process_work_batch(self, batch: List[Tuple[str, str, str, str, int]]) -> List[DatabaseOperation]:
+        """Process a batch of XML files into operations"""
+        operations = []
+        for xml_id, zip_id, filename, internal_path, file_size in batch:
+            success, file_operations = self.process_single_xml_for_operations(
+                xml_id, zip_id, filename, internal_path, file_size
+            )
+            operations.extend(file_operations)
+        return operations
 
     def process_single_xml_with_context(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, PendingDatabaseContext]:
         """
@@ -312,9 +344,11 @@ class XMLProducer:
 
 
 
-class XMLConsumer:
+
+
+class XMLConsumer(BaseConsumer):
     """
-    XML Consumer - Handles database operations execution.
+    XML Consumer - Handles database operations execution for XML processing.
 
     PRODUCER-CONSUMER PATTERN WARNING:
     This class is responsible for executing database operations.
@@ -325,34 +359,11 @@ class XMLConsumer:
     """
 
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
-        self.db_ops = db_ops
-        self.logger = logging.getLogger(__name__)
+        super().__init__(db_ops)
         self.processing_version = processing_version
 
-    def execute_operations_batch(self, operations: List[DatabaseOperation]) -> None:
-        """
-        Execute a batch of database operations.
-
-        PRODUCER-CONSUMER PATTERN: This is a CONSUMER method.
-        This method safely executes database operations in a single-threaded context.
-
-        Args:
-            operations: List of DatabaseOperation objects to execute
-        """
-        if not operations:
-            return
-
-        # Group operations by type for efficient processing
-        operations_by_type = {}
-        for operation in operations:
-            if not isinstance(operation, DatabaseOperation):
-                log_error(self.logger, f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
-                continue
-            op_type = operation.operation_type.value
-            if op_type not in operations_by_type:
-                operations_by_type[op_type] = []
-            operations_by_type[op_type].append(operation)
-
+    def _process_operations_batch(self, operations_by_type):
+        """Process operations batch for XML consumer"""
         # Execute operations in dependency order
         try:
             # Handle OPTIMIZE_DATABASE operations first
@@ -372,7 +383,10 @@ class XMLConsumer:
             # 4. Insert addresses
             self._process_address_operations(operations_by_type, charity_id_map)
 
-            # 5. Handle generic update operations
+            # 5. Handle address deduplication batch operations
+            self._process_address_deduplication_batch_operations(operations_by_type)
+
+            # 6. Handle generic update operations
             self._process_generic_update_operations(operations_by_type)
 
         except Exception as e:
@@ -619,5 +633,6 @@ class XMLConsumer:
                 except Exception as e:
                     log_error(self.logger, f"Failed to bulk update {table_name}: {e}")
                     raise
+
 
 
