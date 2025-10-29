@@ -12,6 +12,18 @@ from datetime import datetime
 from mako.template import Template
 
 
+def escape_newlines(data):
+    """Recursively escape newlines in all strings within data structures"""
+    if isinstance(data, str):
+        return data.replace('\n', '\\n')
+    elif isinstance(data, (list, tuple)):
+        return type(data)(escape_newlines(item) for item in data)
+    elif isinstance(data, dict):
+        return {key: escape_newlines(value) for key, value in data.items()}
+    else:
+        return data
+
+
 class StatsProcessor:
     """Handles statistics generation and reporting for IRS 990 data"""
 
@@ -46,6 +58,8 @@ class StatsProcessor:
         contractors_analysis = self.get_contractors_analysis()
         political_contributions_analysis = self.get_political_contributions_analysis()
         addresses_analysis = self.get_addresses_analysis()
+        addresses_deduplication_analysis = self.get_addresses_deduplication_analysis()
+        addresses_colocator_analysis = self.get_addresses_colocator_analysis()
 
         # Prepare template data
         template_data = {
@@ -63,8 +77,13 @@ class StatsProcessor:
             'contractors_analysis': contractors_analysis,
             'political_contributions_analysis': political_contributions_analysis,
             'addresses_analysis': addresses_analysis,
+            'addresses_deduplication_analysis': addresses_deduplication_analysis,
+            'addresses_colocator_analysis': addresses_colocator_analysis,
             'notes': notes or "No additional notes."
         }
+
+        # Escape newlines in all string data to prevent markdown confusion
+        template_data = escape_newlines(template_data)
 
         # Load and render template
         template_path = os.path.join(os.path.dirname(__file__), 'stats_template.mako')
@@ -169,6 +188,7 @@ class StatsProcessor:
             ORDER BY count DESC
         """).fetchall()
         group_counts['error_message_prefix'] = result
+        # Note: Newlines are now escaped globally in template_data
 
         return group_counts
 
@@ -455,6 +475,117 @@ class StatsProcessor:
             LIMIT 10
         """).fetchall()
         analysis['top_zip_codes'] = result
+
+        return analysis
+
+    def get_addresses_deduplication_analysis(self) -> Dict[str, Any]:
+        """Get analysis for address deduplication progress"""
+        analysis = {}
+
+        # Total addresses with canonical_address
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as total_canonical
+            FROM Addresses
+            WHERE canonical_address IS NOT NULL AND canonical_address != ''
+        """).fetchone()
+        total_canonical = result[0] if result else 0
+        analysis['total_canonical_addresses'] = total_canonical
+
+        # Distinct canonical addresses
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(DISTINCT canonical_address) as distinct_canonical
+            FROM Addresses
+            WHERE canonical_address IS NOT NULL AND canonical_address != ''
+        """).fetchone()
+        distinct_canonical = result[0] if result else 0
+        analysis['distinct_canonical_addresses'] = distinct_canonical
+
+        # Child addresses (those with master_id set)
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as child_addresses
+            FROM Addresses
+            WHERE master_id IS NOT NULL
+        """).fetchone()
+        child_addresses = result[0] if result else 0
+        analysis['child_addresses'] = child_addresses
+
+        # Master addresses (those without master_id, representing unique canonical addresses)
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as master_addresses
+            FROM Addresses
+            WHERE master_id IS NULL AND canonical_address IS NOT NULL AND canonical_address != ''
+        """).fetchone()
+        master_addresses = result[0] if result else 0
+        analysis['master_addresses'] = master_addresses
+
+        # Still need to be done (canonical addresses that have duplicates but haven't been deduplicated)
+        # This is the count of canonical addresses where there are multiple addresses with the same canonical_address
+        # and at least one of them still has master_id IS NULL
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as still_need_deduplication
+            FROM (
+                SELECT canonical_address
+                FROM Addresses
+                WHERE canonical_address IS NOT NULL AND canonical_address != ''
+                GROUP BY canonical_address
+                HAVING COUNT(*) > 1
+                    AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+            )
+        """).fetchone()
+        still_need_done = result[0] if result else 0
+        analysis['still_need_deduplication'] = still_need_done
+
+        return analysis
+
+    def get_addresses_colocator_analysis(self) -> Dict[str, Any]:
+        """Get analysis for Address colocator field"""
+        analysis = {}
+
+        # Distinct colocator values
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(DISTINCT colocator) as distinct_colocators
+            FROM Addresses
+            WHERE colocator IS NOT NULL AND colocator != ''
+        """).fetchone()
+        distinct_colocators = result[0] if result else 0
+        analysis['distinct_colocators'] = distinct_colocators
+
+        # Count with 'PO%' prefix
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as po_count
+            FROM Addresses
+            WHERE colocator LIKE 'PO%'
+        """).fetchone()
+        po_count = result[0] if result else 0
+        analysis['po_count'] = po_count
+
+        # Count with 'FA%' prefix
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as fa_count
+            FROM Addresses
+            WHERE colocator LIKE 'FA%'
+        """).fetchone()
+        fa_count = result[0] if result else 0
+        analysis['fa_count'] = fa_count
+
+        # Count with 'LL%' prefix
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as ll_count
+            FROM Addresses
+            WHERE colocator LIKE 'LL%'
+        """).fetchone()
+        ll_count = result[0] if result else 0
+        analysis['ll_count'] = ll_count
+
+        # Neither (total with colocator - PO - FA - LL)
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as total_with_colocator
+            FROM Addresses
+            WHERE colocator IS NOT NULL AND colocator != ''
+        """).fetchone()
+        total_with_colocator = result[0] if result else 0
+        neither_count = total_with_colocator - po_count - fa_count - ll_count
+        analysis['neither_count'] = neither_count
 
         return analysis
 

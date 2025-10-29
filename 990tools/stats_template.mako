@@ -265,6 +265,26 @@ ${'####'} Top 10 ZIP Codes
 | ${zip_code} | ${count} |
 % endfor
 
+${'###'} Address Deduplication Progress
+
+| Metric | Count |
+|--------|-------|
+| Total addresses with canonical_address | ${addresses_deduplication_analysis['total_canonical_addresses']} |
+| Distinct canonical addresses | ${addresses_deduplication_analysis['distinct_canonical_addresses']} |
+| Child addresses (deduplicated) | ${addresses_deduplication_analysis['child_addresses']} |
+| Master addresses (unique) | ${addresses_deduplication_analysis['master_addresses']} |
+| Still need deduplication | ${addresses_deduplication_analysis['still_need_deduplication']} |
+
+${'###'} Address Colocator Analysis
+
+| Category | Count |
+|----------|-------|
+| Distinct colocator values | ${addresses_colocator_analysis['distinct_colocators']} |
+| With 'PO%' prefix | ${addresses_colocator_analysis['po_count']} |
+| With 'FA%' prefix | ${addresses_colocator_analysis['fa_count']} |
+| With 'LL%' prefix | ${addresses_colocator_analysis['ll_count']} |
+| Neither (error) | ${addresses_colocator_analysis['neither_count']} |
+
 ${'##'} Processing Details
 
 - **Step**: ${step_name}
