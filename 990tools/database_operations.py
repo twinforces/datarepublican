@@ -465,17 +465,17 @@ class DatabaseOperations:
     def mark_xml_processed(self, xml_id: str, processing_version: int):
         """Mark XML file as processed"""
         self.execute_query("""
-            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
+            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?, processed_at = ?
             WHERE xml_id = ?
-        """, (processing_version, "success", xml_id))
+        """, (processing_version, "success", datetime.now().isoformat(), xml_id))
         self.commit()
 
     def mark_xml_error(self, xml_id: str, processing_version: int, error_msg: str):
         """Mark XML file as having an error"""
         self.execute_query("""
-            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?
+            UPDATE XmlFiles SET processed = TRUE, processing_version = ?, error_message = ?, processed_at = ?
             WHERE xml_id = ?
-        """, (processing_version, error_msg, xml_id))
+        """, (processing_version, error_msg, datetime.now().isoformat(), xml_id))
         self.commit()
 
     def update_xml_ein(self, xml_id: str, ein: str):
@@ -627,17 +627,75 @@ class DatabaseOperations:
             )
         """)
 
+    def get_latest_charities_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
+        """Get batch of latest charities for export (most recent tax year for each EIN)"""
+        query = """
+            SELECT tax_year, filer_ein, filer_name, receipt_amt, govt_amt, contrib_amt,
+                   org_type, total_exp, prog_exp, travel_amt, conferences_amt,
+                   officer_comp, comp_pct, comp_ptile, travel_pct, travel_ptile,
+                   conferences_pct, conferences_ptile, grants_pct, grants_ptile,
+                   foreign_expenses_pct, foreign_expenses_ptile, grift_ratio,
+                   total_assets, form_type, denominator, foreign_office, foreign_expenses,
+                   grants_to_others, domestic_misrep_flag, xml_name
+            FROM Charities
+            WHERE tax_year = (
+                SELECT MAX(tax_year)
+                FROM Charities c2
+                WHERE c2.ein = Charities.ein
+            )
+            ORDER BY filer_ein
+            LIMIT ? OFFSET ?
+        """
+        result = self.execute_query(query, (limit, offset))
+        return result.fetchall() if result else []
+
     def get_grants_for_export(self) -> List[Grant]:
         """Get all grants for export"""
         return self.select_dataclass(Grant)
+
+    def get_grants_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
+        """Get batch of grants for export"""
+        query = """
+            SELECT filer_ein, filer_name, grant_ein, grant_amt, tax_year,
+                   filer_colocator, grantee_colocator
+            FROM Grants
+            ORDER BY filer_ein, grant_ein
+            LIMIT ? OFFSET ?
+        """
+        result = self.execute_query(query, (limit, offset))
+        return result.fetchall() if result else []
 
     def get_contractors_for_export(self) -> List[Contractor]:
         """Get all contractors for export"""
         return self.select_dataclass(Contractor)
 
+    def get_contractors_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
+        """Get batch of contractors for export"""
+        query = """
+            SELECT filer_ein, name, amount, ein, address, zip_code,
+                   po_box, tax_year, colocator
+            FROM Contractors
+            ORDER BY filer_ein, name
+            LIMIT ? OFFSET ?
+        """
+        result = self.execute_query(query, (limit, offset))
+        return result.fetchall() if result else []
+
     def get_political_contributions_for_export(self) -> List[PoliticalContribution]:
         """Get all political contributions for export"""
         return self.select_dataclass(PoliticalContribution)
+
+    def get_political_contributions_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
+        """Get batch of political contributions for export"""
+        query = """
+            SELECT filer_ein, recipient, amount, recipient_address,
+                   recipient_zip, recipient_po_box, tax_year, colocator
+            FROM PoliticalContributions
+            ORDER BY filer_ein, recipient
+            LIMIT ? OFFSET ?
+        """
+        result = self.execute_query(query, (limit, offset))
+        return result.fetchall() if result else []
 
     def create_latest_charities_table(self):
         """Create LatestCharities table with most recent filings"""
@@ -979,14 +1037,14 @@ class DatabaseOperations:
             if metadata["error_message"]:
                 # Error case
                 conn.execute(
-                    "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, file_size=? WHERE xml_id=?",
-                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["file_size"], xml_id)
+                    "UPDATE XmlFiles SET processed=?, processing_version=?, error_message=?, file_size=?, processed_at=? WHERE xml_id=?",
+                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["error_message"], metadata["file_size"], datetime.now().isoformat() if metadata["processed"] else None, xml_id)
                 )
             else:
                 # Success case
                 conn.execute(
-                    "UPDATE XmlFiles SET processed=?, processing_version=?, form_type=?, ein=?, tax_year=?, file_size=? WHERE xml_id=?",
-                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["form_type"], metadata["ein"], metadata["tax_year"], metadata["file_size"], xml_id)
+                    "UPDATE XmlFiles SET processed=?, processing_version=?, form_type=?, ein=?, tax_year=?, org_type=?, file_size=?, processed_at=? WHERE xml_id=?",
+                    (metadata["processed"], CURRENT_PROCESSING_VERSION, metadata["form_type"], metadata["ein"], metadata["tax_year"], metadata.get("org_type"), metadata["file_size"], datetime.now().isoformat() if metadata["processed"] else None, xml_id)
                 )
         except Exception as e:
             log_error(self.logger, f"Failed to update XML file {xml_id} with metadata: {e}")
@@ -1095,3 +1153,14 @@ class DatabaseOperations:
         self.commit()
 
         return len(child_address_ids)
+
+    def get_officers_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
+        """Get batch of officers for export"""
+        query = """
+            SELECT charity_id, first_name, last_name, compensation, tax_year, photo_url
+            FROM Officers
+            ORDER BY charity_id, last_name, first_name
+            LIMIT ? OFFSET ?
+        """
+        result = self.execute_query(query, (limit, offset))
+        return result.fetchall() if result else []

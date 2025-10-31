@@ -114,7 +114,8 @@ class Charity(BaseModel):
             grant_ein=grant_ein or "",
             grant_amt=grant_amt,
             tax_year=self.tax_year,
-            grantee_name=grantee_name or ""
+            grantee_name=grantee_name or "",
+            charity_id = self.id
         )
         return grant
 
@@ -125,7 +126,8 @@ class Charity(BaseModel):
             name=name,
             amount=amount,
             ein=ein,
-            tax_year=self.tax_year
+            tax_year=self.tax_year,
+            charity_id = self.id
         )
         return contractor
 
@@ -135,7 +137,8 @@ class Charity(BaseModel):
             filer_ein=self.ein,
             recipient=recipient,
             amount=amount,
-            tax_year=self.tax_year
+            tax_year=self.tax_year,
+            charity_id = self.id
         )
         return contribution
 

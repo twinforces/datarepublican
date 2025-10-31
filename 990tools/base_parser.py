@@ -173,7 +173,7 @@ class BaseParser:
 
     def parse_schedule_l(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
         """Parse Schedule L (Contractors) - common implementation for 990/990EZ/990PF"""
-        from parse_schedule_l import parse_contractors
+        from parse_contractors import parse_contractors
         xml_content = BytesIO(etree.tostring(root))
         contractors_data = parse_contractors(xml_content, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
         # parse_contractors now adds contractors directly to context
@@ -333,7 +333,10 @@ class BaseParser:
                 )
                 context.addObjectToDatabase(officer)
 
-            # Parse related entities (grants, contractors, political contributions)
+            # Parse Schedule L (Contractors) - part of main form
+            self.parse_schedule_l(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
+
+            # Parse related entities (grants, political contributions)
             self.parse_related_entities(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
             # Parse address information and add to context
@@ -382,15 +385,12 @@ class BaseParser:
             return None
 
     def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
-        """Parse grants, contractors, and political contributions"""
+        """Parse grants and political contributions"""
         # Parse Schedule I (Grants)
         self.parse_schedule_i(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
         # Parse Schedule C (Political Contributions)
         self.parse_schedule_c(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
-
-        # Parse Schedule L (Contractors)
-        self.parse_schedule_l(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
 
 def main():

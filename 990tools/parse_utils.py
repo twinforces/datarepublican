@@ -57,6 +57,12 @@ def parse_name_fast(name):
         return 'Unknown', 'Unknown'
 
     cleaned = CLEAN_NAME_PATTERN.sub('', name).strip().upper()
+
+    # Check if the name represents "Not Applicable" (NA, N/A, N.A., etc.)
+    letters_only = re.sub(r'[^a-zA-Z]', '', cleaned)
+    if letters_only == 'NA':
+        return 'Not', 'Applicable'
+
     parts = SPLIT_NAME_PATTERN.split(cleaned)
 
     if len(parts) <= 2:

@@ -74,13 +74,15 @@ class Grant(BaseModel):
             grantee_name=grantee_name,
             grant_ein=grant_ein,
             grant_amt=grant_amt,
-            tax_year=tax_year
+            tax_year=tax_year,
+            charity_id=charity.id
         )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {
             'grant_id': self.grant_id,
+            'charity_id': self.charity_id,
             'filer_ein': self.filer_ein,
             'filer_name': self.filer_name,
             'grantee_name': self.grantee_name,

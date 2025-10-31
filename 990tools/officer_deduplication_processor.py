@@ -4,107 +4,228 @@ officer_deduplication_processor.py - Officer deduplication for IRS 990 data proc
 
 This module handles deduplication of officers across different charities and tax years,
 creating master-child relationships similar to address deduplication.
+
+Refactored to use producer-consumer pattern with ThreadPoolManager for parallel processing.
 """
 
 import logging
-from typing import List, Tuple, Dict, Set
-from database_operations import DatabaseOperations
+import uuid
+from typing import List, Tuple, Dict, Set, Any
+from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
+from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
 
 
-class OfficerDeduplicationProcessor:
-    """Handles officer deduplication and master-child relationship creation"""
+class OfficerDeduplicationProducer(BaseProducer):
+    """Producer for officer deduplication operations"""
 
-    def __init__(self, db_ops: DatabaseOperations):
-        self.db_ops = db_ops
-        self.logger = get_logger("officer_deduplication")
+    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
+        super().__init__(db_ops, batch_size)
+        self.logger = get_logger("officer_deduplication_producer")
 
-    def deduplicate_officers(self) -> int:
-        """Deduplicate officers and create master-child relationships"""
-        log_info(self.logger, "Starting officer deduplication")
-
-        # Step 1: Find duplicate officers by name
-        duplicates = self._find_duplicate_officers()
-        if not duplicates:
-            log_info(self.logger, "No duplicate officers found")
-            return 0
-
-        log_info(self.logger, f"Found {len(duplicates)} groups of duplicate officers")
-
-        # Step 2: Create master records and update child records
-        updated_count = 0
-        for name_key, officer_ids in duplicates.items():
-            master_id = self._create_master_officer(officer_ids)
-            if master_id:
-                updated_count += self._update_child_officers(officer_ids, master_id)
-
-        log_info(self.logger, f"Officer deduplication complete. Updated {updated_count} officer records.")
-        return updated_count
-
-    def _find_duplicate_officers(self) -> Dict[str, List[str]]:
-        """Find officers with the same name across different charities/years"""
-        # First, we need to get charity names for officers
+    def _get_work_batch(self, offset: int) -> List[Dict[str, Any]]:
+        """Get batch of duplicate officer groups for processing"""
+        # Find duplicate officers by name
         query = """
             SELECT
-                o.officer_id,
-                LOWER(TRIM(o.first_name)) || '|' || LOWER(TRIM(o.last_name)) || '|' || LOWER(TRIM(c.filer_name)) as name_key
+                LOWER(TRIM(o.first_name)) || '|' || LOWER(TRIM(o.last_name)) || '|' || LOWER(TRIM(c.filer_name)) as name_key,
+                LIST(o.officer_id) as officer_ids
             FROM Officers o
             JOIN Charities c ON o.charity_id = c.charity_id
             WHERE o.master_id IS NULL
+            GROUP BY LOWER(TRIM(o.first_name)) || '|' || LOWER(TRIM(o.last_name)) || '|' || LOWER(TRIM(c.filer_name))
+            HAVING COUNT(*) > 1
+            ORDER BY name_key
+            LIMIT ? OFFSET ?
         """
 
-        result = self.db_ops.execute_query(query).fetchall()
+        result = self.db_ops.execute_query(query, (self.batch_size, offset))
+        rows = result.fetchall() if result else []
 
-        # Group by name_key
-        name_groups = {}
-        for officer_id, name_key in result:
-            if name_key not in name_groups:
-                name_groups[name_key] = []
-            name_groups[name_key].append(str(officer_id))
+        work_items = []
+        for row in rows:
+            name_key = row[0]
+            officer_ids = [str(oid) for oid in row[1]] if row[1] else []
+            if len(officer_ids) > 1:
+                work_items.append({
+                    'name_key': name_key,
+                    'officer_ids': officer_ids
+                })
 
-        # Only keep groups with multiple officers
-        duplicates = {k: v for k, v in name_groups.items() if len(v) > 1}
+        return work_items
 
-        return duplicates
+    def _process_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
+        """Process batch of duplicate officer groups into deduplication operations"""
+        operations = []
 
-    def _create_master_officer(self, officer_ids: List[str]) -> str:
-        """Create a master officer record from the first officer in the group"""
-        # Use the first officer as the master
-        master_officer_id = officer_ids[0]
+        for duplicate_group in batch:
+            name_key = duplicate_group['name_key']
+            officer_ids = duplicate_group['officer_ids']
 
-        # Generate a new master_id (UUID)
-        import uuid
-        master_id = str(uuid.uuid4())
+            # Create master officer operation
+            master_id = str(uuid.uuid4())
+            operations.append(DatabaseOperation(
+                DatabaseOperationType.GENERIC_UPDATE,
+                {
+                    'operation': 'create_master_officer',
+                    'master_id': master_id,
+                    'officer_id': officer_ids[0]  # First officer becomes master
+                }
+            ))
 
-        # Update the master officer record
-        update_query = """
-            UPDATE Officers
-            SET master_id = ?
-            WHERE officer_id = ?
-        """
-        self.db_ops.execute_query(update_query, (master_id, master_officer_id))
+            # Create child officer update operations
+            for child_id in officer_ids[1:]:
+                operations.append(DatabaseOperation(
+                    DatabaseOperationType.GENERIC_UPDATE,
+                    {
+                        'operation': 'update_child_officer',
+                        'master_id': master_id,
+                        'officer_id': child_id
+                    }
+                ))
 
-        log_debug(self.logger, f"Created master officer {master_id} from officer {master_officer_id}")
-        return master_id
+        return operations
 
-    def _update_child_officers(self, officer_ids: List[str], master_id: str) -> int:
-        """Update child officers to point to the master"""
-        # Skip the first officer (already set as master)
-        child_ids = officer_ids[1:]
 
-        if not child_ids:
+class OfficerDeduplicationConsumer(BaseConsumer):
+    """Consumer for officer deduplication operations"""
+
+    def __init__(self, db_ops: DatabaseOperations):
+        super().__init__(db_ops)
+        self.logger = get_logger("officer_deduplication_consumer")
+
+    def _process_operations_batch(self, operations_by_type: Dict[str, List[DatabaseOperation]]) -> int:
+        """Process officer deduplication operations"""
+        processed_count = 0
+
+        if DatabaseOperationType.GENERIC_UPDATE.value in operations_by_type:
+            generic_ops = operations_by_type[DatabaseOperationType.GENERIC_UPDATE.value]
+
+            # Group operations by type
+            create_master_ops = []
+            update_child_ops = []
+
+            for op in generic_ops:
+                data = op.data
+                if data.get('operation') == 'create_master_officer':
+                    create_master_ops.append(data)
+                elif data.get('operation') == 'update_child_officer':
+                    update_child_ops.append(data)
+
+            # Process master creation operations
+            if create_master_ops:
+                processed_count += self._process_create_master_operations(create_master_ops)
+
+            # Process child update operations
+            if update_child_ops:
+                processed_count += self._process_update_child_operations(update_child_ops)
+
+        return processed_count
+
+    def _process_create_master_operations(self, operations: List[Dict[str, Any]]) -> int:
+        """Process master officer creation operations"""
+        if not operations:
             return 0
 
-        # Update all child officers
-        placeholders = ','.join('?' for _ in child_ids)
-        update_query = f"""
-            UPDATE Officers
-            SET master_id = ?
-            WHERE officer_id IN ({placeholders})
-        """
+        # Prepare bulk update data
+        updates = []
+        for op in operations:
+            updates.append({
+                'officer_id': op['officer_id'],
+                'master_id': op['master_id']
+            })
 
-        self.db_ops.execute_query(update_query, tuple([master_id] + child_ids))
-        self.db_ops.commit()
+        # Bulk update master officers
+        count = self.db_ops.bulk_update('Officers', updates, 'officer_id')
+        log_debug(self.logger, f"Created {count} master officers")
+        return count
 
-        log_debug(self.logger, f"Updated {len(child_ids)} child officers to point to master {master_id}")
-        return len(child_ids)
+    def _process_update_child_operations(self, operations: List[Dict[str, Any]]) -> int:
+        """Process child officer update operations"""
+        if not operations:
+            return 0
+
+        # Prepare bulk update data
+        updates = []
+        for op in operations:
+            updates.append({
+                'officer_id': op['officer_id'],
+                'master_id': op['master_id']
+            })
+
+        # Bulk update child officers
+        count = self.db_ops.bulk_update('Officers', updates, 'officer_id')
+        log_debug(self.logger, f"Updated {count} child officers")
+        return count
+
+
+class OfficerDeduplicationProcessor:
+    """Handles officer deduplication and master-child relationship creation using producer-consumer pattern"""
+
+    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: ThreadPoolConfig = None):
+        self.db_ops = db_ops
+        self.logger = get_logger("officer_deduplication")
+        self.thread_pool_config = thread_pool_config or ThreadPoolConfig(
+            producer_config=PoolConfig(max_workers=2, batch_size=1000),
+            consumer_config=PoolConfig(max_workers=1, batch_size=1000)  # Single consumer for DB safety
+        )
+
+    def deduplicate_officers(self) -> int:
+        """Deduplicate officers and create master-child relationships using producer-consumer pattern"""
+        log_info(self.logger, "Starting officer deduplication with producer-consumer pattern")
+
+        # Initialize producer and consumer
+        producer = OfficerDeduplicationProducer(self.db_ops)
+        consumer = OfficerDeduplicationConsumer(self.db_ops)
+
+        # Initialize thread pool manager
+        thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
+
+        total_processed = 0
+
+        try:
+            # Start consumer pool
+            thread_pool_manager.start_consumer_pool(
+                consumer.execute_operations_batch,
+                progress_callback=self._progress_callback
+            )
+
+            # Collect operations using producer
+            operations = producer.collect_operations()
+
+            if not operations:
+                log_info(self.logger, "No duplicate officers found")
+                return 0
+
+            log_info(self.logger, f"Collected {len(operations)} deduplication operations")
+
+            # Put operations in work queue for consumer
+            for operation in operations:
+                thread_pool_manager.work_queue.put(operation)
+
+            # Signal end of work
+            thread_pool_manager.work_queue.put(None)
+
+            # Wait for completion
+            thread_pool_manager.wait_for_completion()
+
+            # Collect results
+            while not thread_pool_manager.result_queue.empty():
+                try:
+                    result = thread_pool_manager.result_queue.get_nowait()
+                    if isinstance(result, int):
+                        total_processed += result
+                    thread_pool_manager.result_queue.task_done()
+                except:
+                    break
+
+        finally:
+            # Cleanup
+            thread_pool_manager.shutdown()
+
+        log_info(self.logger, f"Officer deduplication complete. Processed {total_processed} officer records.")
+        return total_processed
+
+    def _progress_callback(self, count: int):
+        """Progress callback for consumer operations"""
+        log_debug(self.logger, f"Processed {count} officer deduplication operations")

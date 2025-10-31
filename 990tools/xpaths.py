@@ -293,12 +293,45 @@ XPATHS_990 = {
         etree.XPath(".//irs:IRS990/irs:TotalAssetsEOYAmt", namespaces=NAMESPACES),
     ],
     "contractor_elements": [
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-        etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
-        etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
-        etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+        etree.XPath(".//irs:ReturnData/irs:IRS990/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+    ],
+    "contractor_name_line1": [
+        etree.XPath("irs:ContractorName/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("ContractorName/BusinessName/BusinessNameLine1Txt"),
+        etree.XPath("ContractorName/BusinessNameLine1Txt"),
+    ],
+    "contractor_name_line2": [
+        etree.XPath("irs:ContractorName/irs:BusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("ContractorName/BusinessName/BusinessNameLine2Txt"),
+        etree.XPath("ContractorName/BusinessNameLine2Txt"),
+    ],
+    "contractor_address_line1": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine1", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/AddressLine1Txt"),
+        etree.XPath("ContractorAddress/USAddress/AddressLine1"),
+    ],
+    "contractor_address_line2": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine2", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/AddressLine2Txt"),
+        etree.XPath("ContractorAddress/USAddress/AddressLine2"),
+    ],
+    "contractor_city": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/CityNm"),
+    ],
+    "contractor_state": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/StateAbbreviationCd"),
+    ],
+    "contractor_zip_code": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/ZIPCd"),
     ],
 }
 
@@ -365,19 +398,19 @@ SCHEDULE_C_XPATHS = {
 # Schedule L (Contractors) XPath patterns
 SCHEDULE_L_XPATHS = {
     "990": [
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        # Also check directly under IRS990 for ContractorCompensationGrp
+        etree.XPath(".//irs:IRS990/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ContractorCompensationGrp", namespaces=NAMESPACES),
     ],
     "990EZ": [
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+         # Also check directly under IRS990EZ for ContractorCompensationGrp
+        etree.XPath(".//irs:IRS990EZ/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ContractorCompensationGrp", namespaces=NAMESPACES),
     ],
     "990PF": [
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+         # Also check directly under IRS990PF for CompensationOfHghstPdCntrctGrp
+        etree.XPath(".//irs:IRS990PF/irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
     ],
 }
 
@@ -477,12 +510,45 @@ XPATHS_990EZ = {
         etree.XPath(".//irs:IRS990EZ/irs:TotalAssetsEOYAmt", namespaces=NAMESPACES),
     ],
     "contractor_elements": [
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-        etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
-        etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
-        etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+        etree.XPath(".//irs:ReturnData/irs:IRS990EZ/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990EZ/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:ContractorCompensationGrp", namespaces=NAMESPACES),
+    ],
+    "contractor_name_line1": [
+        etree.XPath("irs:ContractorName/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("ContractorName/BusinessName/BusinessNameLine1Txt"),
+        etree.XPath("ContractorName/BusinessNameLine1Txt"),
+    ],
+    "contractor_name_line2": [
+        etree.XPath("irs:ContractorName/irs:BusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("ContractorName/BusinessName/BusinessNameLine2Txt"),
+        etree.XPath("ContractorName/BusinessNameLine2Txt"),
+    ],
+    "contractor_address_line1": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine1", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/AddressLine1Txt"),
+        etree.XPath("ContractorAddress/USAddress/AddressLine1"),
+    ],
+    "contractor_address_line2": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:AddressLine2", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/AddressLine2Txt"),
+        etree.XPath("ContractorAddress/USAddress/AddressLine2"),
+    ],
+    "contractor_city": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/CityNm"),
+    ],
+    "contractor_state": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/StateAbbreviationCd"),
+    ],
+    "contractor_zip_code": [
+        etree.XPath("irs:ContractorAddress/irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath("ContractorAddress/USAddress/ZIPCd"),
     ],
 }
 
@@ -547,12 +613,45 @@ XPATHS_990PF = {
         etree.XPath(".//irs:Form990PFBalanceSheetsGrp/irs:TotNetAstOrFundBalancesEOYAmt", namespaces=NAMESPACES),
     ],
     "contractor_elements": [
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndepContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:IndependentContractorGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:IRS990ScheduleL/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-        etree.XPath(".//IRS990ScheduleL/IndepContractorGrp"),
-        etree.XPath(".//IRS990ScheduleL/IndependentContractorGrp"),
-        etree.XPath(".//IRS990ScheduleL/ContractorCompensationGrp"),
+        etree.XPath(".//irs:ReturnData/irs:IRS990PF/irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990PF/irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
+    ],
+    "contractor_name_line1": [
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1", namespaces=NAMESPACES),
+        etree.XPath("BusinessName/BusinessNameLine1Txt"),
+        etree.XPath("BusinessName/BusinessNameLine1"),
+    ],
+    "contractor_name_line2": [
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine2", namespaces=NAMESPACES),
+        etree.XPath("BusinessName/BusinessNameLine2Txt"),
+        etree.XPath("BusinessName/BusinessNameLine2"),
+    ],
+    "contractor_address_line1": [
+        etree.XPath("irs:USAddress/irs:AddressLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:USAddress/irs:AddressLine1", namespaces=NAMESPACES),
+        etree.XPath("USAddress/AddressLine1Txt"),
+        etree.XPath("USAddress/AddressLine1"),
+    ],
+    "contractor_address_line2": [
+        etree.XPath("irs:USAddress/irs:AddressLine2Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:USAddress/irs:AddressLine2", namespaces=NAMESPACES),
+        etree.XPath("USAddress/AddressLine2Txt"),
+        etree.XPath("USAddress/AddressLine2"),
+    ],
+    "contractor_city": [
+        etree.XPath("irs:USAddress/irs:CityNm", namespaces=NAMESPACES),
+        etree.XPath("USAddress/CityNm"),
+    ],
+    "contractor_state": [
+        etree.XPath("irs:USAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES),
+        etree.XPath("USAddress/StateAbbreviationCd"),
+    ],
+    "contractor_zip_code": [
+        etree.XPath("irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES),
+        etree.XPath("USAddress/ZIPCd"),
     ],
     "grant_elements": [
         etree.XPath(".//irs:IRS990PF/irs:SupplementaryInformationGrp/irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),

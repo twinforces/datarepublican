@@ -46,7 +46,7 @@ class Officer(BaseModel):
     def create_for_charity(cls, charity, first_name: str, last_name: str, full_name: str, compensation: float, tax_year: int) -> 'Officer':
         """Factory method to create an Officer for a specific charity"""
         return cls(
-            charity_id=charity.charity_id,
+            charity_id=charity.id,
             first_name=first_name,
             last_name=last_name,
             full_name=full_name,

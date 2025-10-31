@@ -13,6 +13,7 @@ import time
 import sys
 import os
 from pathlib import Path
+from datetime import datetime
 from logging_utils import get_logger, log_info, log_error as proper_log_error, log_debug as proper_log_debug, log_error, log_debug, log_warning
 quiet = False
 
@@ -86,9 +87,9 @@ def profile_pipeline():
                     processed_files += 1
                     # Mark as processed
                     processor.db_conn.execute("""
-                        UPDATE XmlFiles SET processed = TRUE, processing_version = 1, error_message = ?
+                        UPDATE XmlFiles SET processed = TRUE, processing_version = 1, error_message = ?, processed_at = ?
                         WHERE xml_id = ?
-                    """, ("success", xml_id))
+                    """, ("success", datetime.now().isoformat(), xml_id))
                     processor.db_conn.commit()
                 else:
                     error_count += 1

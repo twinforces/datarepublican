@@ -9,7 +9,7 @@ import os
 import sys
 import threading
 from io import BytesIO
-from lxml import etree
+from lxml import etree  # type: ignore
 
 # Add the current directory to sys.path to import extract_utils
 sys.path.insert(0, os.path.dirname(__file__))

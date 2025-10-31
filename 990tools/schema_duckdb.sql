@@ -6,8 +6,8 @@
 -- Charities table - Core charity data from IRS 990 filings
 CREATE TABLE Charities (
     charity_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    ein CHAR(9) NOT NULL,
-    -- Employer Identification Number (9 digits)
+    ein VARCHAR(9) NOT NULL,
+    -- Employer Identification Number (3/9 digits)
     tax_year INTEGER NOT NULL,
     -- Tax year of filing
     filer_name VARCHAR NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE Addresses (
     address_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein CHAR(9),
     -- EIN this address belongs to if Charity
-    owner_id VARCHAR,
+    owner_id UUID,
     -- Owner ID for loose foreign key relationships (NULL for standalone addresses)
     master_id UUID,
     -- Master address ID for deduplication (NULL for root addresses of the tree)
@@ -217,6 +217,10 @@ CREATE TABLE XmlFiles (
     -- Form type (990, 990EZ, 990PF)
     processed BOOLEAN DEFAULT FALSE,
     -- Whether XML has been processed
+    org_type VARCHAR,
+    -- Organization type determined during parsing
+    processed_at TIMESTAMP,
+    -- Timestamp when processed flag was set to TRUE
     processing_version INTEGER DEFAULT 0,
     -- Version of processing pipeline used (for incremental updates)
     error_message VARCHAR,
@@ -228,17 +232,13 @@ CREATE TABLE XmlFiles (
 -- Backfill table - Additional grantee data for unknown EINs
 CREATE TABLE Backfill (
     backfill_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    grant_id UUID,
+    -- Grant originator
     grant_ein CHAR(9) NOT NULL,
     -- Grantee EIN
     name VARCHAR NOT NULL,
     -- Organization name
-    canonical_address VARCHAR,
-    -- Standardized address
-    po_box VARCHAR,
-    -- PO Box
-    zip_code VARCHAR,
-    -- ZIP code
-    source VARCHAR DEFAULT 'xml',
+    colocator VARCHAR source VARCHAR DEFAULT 'xml',
     -- Source of backfill data
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(grant_ein, name, zip_code) -- Prevent duplicates
@@ -270,7 +270,7 @@ CREATE TABLE PipelineProgress (
 -- Officers table - Officer compensation data
 CREATE TABLE Officers (
     officer_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    charity_id VARCHAR NOT NULL,
+    charity_id UUID NOT NULL,
     -- Reference to Charities
     master_id UUID,
     -- Master officer ID for deduplication (NULL for master officers)
@@ -288,6 +288,8 @@ CREATE TABLE Officers (
 -- Contractors table - Contractor payment data
 CREATE TABLE Contractors (
     contractor_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    charity_id UUID NOT NULL,
+    -- owning charity
     filer_ein CHAR(9) NOT NULL,
     -- Filer EIN
     name VARCHAR NOT NULL,
@@ -296,12 +298,6 @@ CREATE TABLE Contractors (
     -- Payment amount
     ein CHAR(9),
     -- Contractor EIN if available
-    address VARCHAR,
-    -- Contractor address
-    zip_code VARCHAR,
-    -- Contractor ZIP code
-    po_box VARCHAR,
-    -- PO Box if applicable
     tax_year INTEGER NOT NULL,
     -- Tax year
     colocator VARCHAR,
@@ -312,18 +308,16 @@ CREATE TABLE Contractors (
 -- PoliticalContributions table - Political contribution data
 CREATE TABLE PoliticalContributions (
     political_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    charity_id UUID NOT NULL,
+    -- owning charity
     filer_ein CHAR(9) NOT NULL,
     -- Filer EIN
     recipient VARCHAR NOT NULL,
     -- Recipient name
     amount DOUBLE NOT NULL,
     -- Contribution amount
-    recipient_address VARCHAR,
-    -- Recipient address
-    recipient_zip VARCHAR,
-    -- Recipient ZIP code
-    recipient_po_box VARCHAR,
-    -- Recipient PO Box
+    recipient_ein CHAR(9),
+    -- EIN if it exists
     tax_year INTEGER NOT NULL,
     -- Tax year
     colocator VARCHAR,

@@ -474,35 +474,16 @@ def parse_related_entities_990pf(root, xml_filename, context, xpath_cache, chari
         grant_elements.extend(result)
 
     for entry in grant_elements:
-        # Parse grant recipient name
-        name_elem = entry.find(".//irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES)
-        grant_name = name_elem.text.strip() if name_elem is not None and name_elem.text else None
+        # Parse grant recipient name - combine BusinessNameLine1Txt and BusinessNameLine2Txt if present
+        name_line1_elem = entry.find(".//irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES)
+        name_line2_elem = entry.find(".//irs:RecipientBusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES)
 
-        # Parse grant recipient address for matching (PF forms don't have EINs)
-        grant_address = None
-        if grant_name and charity is not None:
-            # Try to extract address from grant entry
-            addr_line1_elem = entry.find(".//irs:RecipientUSAddress/irs:AddressLine1Txt", namespaces=NAMESPACES)
-            city_elem = entry.find(".//irs:RecipientUSAddress/irs:CityNm", namespaces=NAMESPACES)
-            state_elem = entry.find(".//irs:RecipientUSAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES)
-            zip_elem = entry.find(".//irs:RecipientUSAddress/irs:ZIPCd", namespaces=NAMESPACES)
-
-            addr_line1 = addr_line1_elem.text.strip() if addr_line1_elem is not None and addr_line1_elem.text else None
-            city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
-            state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
-            zip_code = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
-
-            if any([addr_line1, city, state, zip_code]):
-                grant_address = charity.build_address(
-                    address_line1=addr_line1,
-                    address_line2=None,
-                    city=city,
-                    state=state,
-                    zip_code=zip_code
-                )
-                if grant_address:
-                    grant_address.address_type = 'grant'
-                    grant_address.grantee_name = grant_name
+        grant_name_parts = []
+        if name_line1_elem is not None and name_line1_elem.text:
+            grant_name_parts.append(name_line1_elem.text.strip())
+        if name_line2_elem is not None and name_line2_elem.text:
+            grant_name_parts.append(name_line2_elem.text.strip())
+        grant_name = " ".join(grant_name_parts) if grant_name_parts else None
 
         # Parse grant amount
         amt_elem = entry.find("irs:Amt", namespaces=NAMESPACES)
@@ -526,10 +507,32 @@ def parse_related_entities_990pf(root, xml_filename, context, xpath_cache, chari
                 grant.grantee_name = grant_name
             grants.append(grant)
 
-            # Add address if we parsed one
-            if grant_address:
-                grant_address.owner_id = f"{context['filer_ein']}_{grant_name}_{grant_amount}"  # Temporary ID for matching
-                addresses.append(grant_address)
+            # Parse grant recipient address for matching (PF forms don't have EINs)
+            grant_address = None
+            if grant_name:
+                # Try to extract address from grant entry
+                addr_line1_elem = entry.find(".//irs:RecipientUSAddress/irs:AddressLine1Txt", namespaces=NAMESPACES)
+                city_elem = entry.find(".//irs:RecipientUSAddress/irs:CityNm", namespaces=NAMESPACES)
+                state_elem = entry.find(".//irs:RecipientUSAddress/irs:StateAbbreviationCd", namespaces=NAMESPACES)
+                zip_elem = entry.find(".//irs:RecipientUSAddress/irs:ZIPCd", namespaces=NAMESPACES)
+
+                addr_line1 = addr_line1_elem.text.strip() if addr_line1_elem is not None and addr_line1_elem.text else None
+                city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
+                state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
+                zip_code = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+
+                if any([addr_line1, city, state, zip_code]):
+                    grant_address = grant.build_address(
+                        address_line1=addr_line1,
+                        address_line2=None,
+                        city=city,
+                        state=state,
+                        zip_code=zip_code
+                    )
+                    if grant_address:
+                        grant_address.address_type = 'grant'
+                        grant_address.grantee_name = grant_name
+                        addresses.append(grant_address)
 
     # Parse contractors from Schedule L if present
     contractor_elements = []

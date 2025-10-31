@@ -28,6 +28,8 @@ class XMLFile(BaseModel):
     processing_version: int = 0
     error_message: Optional[str] = None
     created_at: Optional[str] = None
+    org_type: Optional[str] = None
+    processed_at: Optional[str] = None
 
     def is_processed_successfully(self) -> bool:
         """Check if XML file was processed without errors"""
@@ -36,7 +38,7 @@ class XMLFile(BaseModel):
     def mark_processed(self, error_message: Optional[str] = None):
         """Mark XML file as processed"""
         self.processed = True
-        self.processed_at = datetime.now()
+        self.processed_at = datetime.now().isoformat()
         self.error_message = error_message
 
     def prep_for_insert(self):
@@ -59,10 +61,12 @@ class XMLFile(BaseModel):
             'ein': self.ein,
             'tax_year': self.tax_year,
             'form_type': self.form_type,
+            'org_type': self.org_type,
             'processed': self.processed,
             'processing_version': self.processing_version,
             'error_message': self.error_message,
-            'created_at': self.created_at
+            'created_at': self.created_at,
+            'processed_at': self.processed_at
         }
 
     @classmethod

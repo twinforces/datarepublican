@@ -524,7 +524,7 @@ def main():
     parser.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Number of worker threads (default: {MAX_WORKERS})")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
-    parser.add_argument("--profile", type=int, help="Profile XML processing for N seconds and exit")
+    parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
     parser.add_argument("--step", choices=["all", "irsfetch", "zip", "xml", "address", "geolocate",
                                            "match", "percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
@@ -606,9 +606,11 @@ def main():
 
     # Handle profiling mode
     if args.profile:
-        processor.log_info(f"Running profiling for {args.profile} seconds...")
+        processor.log_info(f"Running profiling for {args.profile} seconds on currently executing step...")
+        # The profiling is now handled automatically by the base classes when global_config.profile_seconds is set
+        # Just run the normal processing and let the base classes handle the profiling
         result = processor.process_xml_files()
-        processor.log_info(f"Profiling complete. Processed {result} files.")
+        processor.log_info(f"Profiling complete. Results saved to profile files.")
         sys.exit(0)
 
     try:

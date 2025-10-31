@@ -20,9 +20,7 @@ class PoliticalContribution(BaseModel):
     filer_ein: str = ""
     recipient: str = ""
     amount: float = 0.0
-    recipient_address: Optional[str] = None
-    recipient_zip: Optional[str] = None
-    recipient_po_box: Optional[str] = None
+    recipient_ein: Optional[str] = None
     tax_year: int = 0
     colocator: Optional[str] = None
     created_at: Optional[str] = None
@@ -45,7 +43,7 @@ class PoliticalContribution(BaseModel):
             zip_code=zip_code,
             zip4=zip4,
             address_type="politicalcontribution",
-            owner_id=str(self.political_id) if self.political_id is not None else None  # Convert to string
+            owner_id=self.id  # force creation
         )
         return address
 
@@ -59,6 +57,7 @@ class PoliticalContribution(BaseModel):
         """Factory method to create a PoliticalContribution for a specific charity"""
         return cls(
             filer_ein=charity.ein,
+            charity_id=charity.id,
             recipient=recipient,
             amount=amount,
             tax_year=tax_year
@@ -71,9 +70,7 @@ class PoliticalContribution(BaseModel):
             'filer_ein': self.filer_ein,
             'recipient': self.recipient,
             'amount': self.amount,
-            'recipient_address': self.recipient_address,
-            'recipient_zip': self.recipient_zip,
-            'recipient_po_box': self.recipient_po_box,
+            'charity_id': self.charity_id,
             'tax_year': self.tax_year,
             'colocator': self.colocator,
             'created_at': self.created_at

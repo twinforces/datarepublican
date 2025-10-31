@@ -9,15 +9,13 @@ Now uses Producer-Consumer pattern for safe batch processing with DuckDB.
 """
 
 import logging
-import threading
-import queue
 import time
 from typing import Optional, List, Dict, Any
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
 from config import global_config
 from constants import ADDRESS_BATCH_SIZE, ADDRESS_QUEUE_SIZE
-from base_processor import BaseProducer, BaseConsumer
+from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 
 
 class AddressDeduplicationProducer(BaseProducer):
@@ -155,13 +153,18 @@ class AddressDeduplicationProcessor:
         if global_config.max_files and global_config.max_files < self.batch_size:
             self.batch_size = global_config.max_files
 
+        # Create thread pool configuration for address deduplication
+        producer_config = PoolConfig(max_workers=4, queue_size=ADDRESS_QUEUE_SIZE, batch_size=self.batch_size)
+        consumer_config = PoolConfig(max_workers=1, queue_size=ADDRESS_QUEUE_SIZE, batch_size=self.batch_size)  # Single consumer for DB safety
+        self.thread_pool_config = ThreadPoolConfig(producer_config=producer_config, consumer_config=consumer_config)
+
         # Create producer and consumer instances
-        self.producer = AddressDeduplicationProducer(db_ops, self.batch_size)
-        self.consumer = AddressDeduplicationConsumer(db_ops)
+        self.producer = AddressDeduplicationProducer(db_ops, self.batch_size, self.thread_pool_config)
+        self.consumer = AddressDeduplicationConsumer(db_ops, self.thread_pool_config)
 
     def deduplicate_addresses(self, progress_bar=None) -> int:
         """
-        Deduplicate addresses by creating master-child relationships using producer-consumer pattern with threading.
+        Deduplicate addresses by creating master-child relationships using ThreadPoolManager.
 
         Args:
             progress_bar: Optional progress bar to update
@@ -169,154 +172,134 @@ class AddressDeduplicationProcessor:
         Returns:
             Number of addresses processed (children updated)
         """
-        self.log_info("Starting address deduplication with Producer-Consumer pattern")
+        self.log_info("Starting address deduplication with ThreadPoolManager")
 
         try:
-            # Use producer-consumer pattern with threading for consistency with XML processor
-            import queue
-            import threading
+            # Initialize thread pool manager
+            thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
 
-            # Create shared condition for producer-consumer synchronization
-            batch_condition = threading.Condition()
+            total_updated = 0
 
-            # Create queues for producer-consumer communication
-            operation_queue = queue.Queue(maxsize=1000)  # Queue for DatabaseOperation objects
+            # Collect all deduplication work items
+            all_work_items = []
+            offset = 0
+            canonical_addresses_processed = 0
 
-            # Start consumer thread
-            consumer_thread = threading.Thread(
-                target=self._consumer_worker,
-                args=(operation_queue, progress_bar, batch_condition)
-            )
-            consumer_thread.daemon = True
-            consumer_thread.start()
+            while True:
+                batch = self.producer._get_work_batch(offset)
+                if not batch:
+                    break
+                all_work_items.extend(batch)
 
-            # Producer: collect operations and send to consumer
-            producer_thread = threading.Thread(
-                target=self._producer_worker,
-                args=(operation_queue, batch_condition)
-            )
-            producer_thread.daemon = True
-            producer_thread.start()
+                # Check global limit
+                if global_config.max_files and len(all_work_items) >= global_config.max_files:
+                    all_work_items = all_work_items[:global_config.max_files]
+                    break
 
-            # Wait for producer to finish
-            producer_thread.join()
+                offset += self.batch_size
 
-            # Signal consumer to finish and wait
-            operation_queue.put(None)  # Sentinel value
-            consumer_thread.join(timeout=30.0)
-
-            if consumer_thread.is_alive():
-                self.log_error("Consumer thread did not finish within timeout")
+            if not all_work_items:
+                self.log_info("No deduplication work found")
                 return 0
 
-            # Return the total updated count from consumer
-            return getattr(consumer_thread, '_total_updated', 0)
+            # Start producer pool to process work items
+            thread_pool_manager.start_producer_pool(
+                all_work_items,
+                self._producer_worker_threaded
+            )
+
+            # Start consumer pool to execute operations
+            thread_pool_manager.start_consumer_pool(
+                self._consumer_worker_threaded,
+                progress_bar
+            )
+
+            # Wait for completion
+            thread_pool_manager.wait_for_completion()
+
+            # Collect results
+            while not thread_pool_manager.result_queue.empty():
+                try:
+                    result = thread_pool_manager.result_queue.get_nowait()
+                    if isinstance(result, int):
+                        total_updated += result
+                    thread_pool_manager.result_queue.task_done()
+                except:
+                    break
+
+            # Cleanup
+            thread_pool_manager.shutdown()
+
+            self.log_info(f"Address deduplication completed: {total_updated} addresses updated")
+            return total_updated
 
         except Exception as e:
             self.log_error(f"Address deduplication failed: {e}", exc_info=True)
             return 0
 
-    def _producer_worker(self, operation_queue, batch_condition):
-        """Producer thread: collects deduplication operations"""
+    def _producer_worker_threaded(self, work_items: List[Dict[str, Any]], work_queue, result_queue, thread_id: int, num_threads: int) -> None:
+        """Producer worker for ThreadPoolManager: processes work items into operations"""
         try:
-            canonical_addresses_processed = 0
+            # Distribute work items among threads
+            for i in range(thread_id, len(work_items), num_threads):
+                work_item = work_items[i]
 
-            while True:
-                # Get next batch of deduplication work (always first batch since OFFSET removed)
-                batch = self.producer._get_work_batch(self.batch_size)
+                # Process single work item into operations
+                operations = self.producer._process_work_batch([work_item])
 
-                if not batch:
-                    # No more work - all canonical addresses have been processed
-                    self.log_info("No more deduplication work found - all canonical addresses processed")
-                    break
+                # Put operations in result queue for consumer
+                result_queue.put(operations)
 
-                # Process batch into operations
-                operations = self.producer._process_work_batch(batch)
-
-                # Send operations to consumer
-                for operation in operations:
-                    operation_queue.put(operation, block=True)
-
-                # Send batch completion marker
-                batch_completion = DatabaseOperation(
-                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                    data={"batch_complete": True, "batch_size": len(batch)}
-                )
-                operation_queue.put(batch_completion, block=True)
-
-                # Wait for consumer to signal batch completion
-                with batch_condition:
-                    batch_condition.wait()
-
-                # Count canonical addresses processed
-                canonical_addresses_processed += len(batch)
-
-                # Check global max_files limit based on canonical addresses processed
-                if global_config.max_files and canonical_addresses_processed >= global_config.max_files:
-                    self.log_info(f"Reached max_files limit: {global_config.max_files} canonical addresses")
-                    break
-
-                # Log progress periodically
-                if canonical_addresses_processed % 1000 == 0:
-                    self.log_info(f"Processed {canonical_addresses_processed} canonical addresses so far")
-
-            self.log_info(f"Producer completed: sent operations for {canonical_addresses_processed} canonical addresses")
+                # Log progress
+                if (i + 1) % 50 == 0:
+                    self.log_info(f"Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
 
         except Exception as e:
-            self.log_error(f"Producer worker failed: {e}", exc_info=True)
+            self.log_error(f"Producer worker {thread_id} failed: {e}", exc_info=True)
+        finally:
+            # Signal completion
+            result_queue.put(None)
 
-    def _consumer_worker(self, operation_queue, progress_bar, batch_condition):
-        """Consumer thread: executes deduplication operations"""
+    def _consumer_worker_threaded(self, result_queue, thread_id: int, progress_bar=None) -> None:
+        """Consumer worker for ThreadPoolManager: executes operations"""
         try:
             batch_operations = []
             total_updated = 0
 
             while True:
-                # Get next operation from queue
-                operation = operation_queue.get()
+                try:
+                    # Get operations from result queue
+                    operations = result_queue.get(timeout=1.0)
+                    if operations is None:  # Sentinel
+                        break
 
-                if operation is None:
-                    # Sentinel value - process final batch and exit
-                    if batch_operations:
-                        batch_updated = self.consumer.execute_operations_batch(batch_operations)
-                        total_updated += batch_updated
-                        # Progress bar is updated by PROGRESS_UPDATE operations in execute_operations_batch
-                    operation_queue.task_done()  # Mark sentinel as done
-                    break
+                    if isinstance(operations, list):
+                        batch_operations.extend(operations)
 
-                # Check for batch completion marker
-                if (operation.operation_type == DatabaseOperationType.PROGRESS_UPDATE and
-                    operation.data.get("batch_complete")):
-                    # Process any remaining operations in current batch
-                    if batch_operations:
-                        batch_updated = self.consumer.execute_operations_batch(batch_operations)
-                        total_updated += batch_updated
-                        batch_operations = []  # Clear for next batch
+                        # Process batch when it reaches a reasonable size
+                        if len(batch_operations) >= 50:  # Smaller batch size for address deduplication
+                            batch_updated = self.consumer.execute_operations_batch(batch_operations)
+                            total_updated += batch_updated
+                            batch_operations = []  # Clear for next batch
 
-                    # Signal producer that batch is complete
-                    with batch_condition:
-                        batch_condition.notify()
-                    operation_queue.task_done()
+                    result_queue.task_done()
+
+                except:
+                    if self.thread_pool_manager and self.thread_pool_manager.shutdown_event.is_set():
+                        break
                     continue
 
-                batch_operations.append(operation)
+            # Process remaining operations
+            if batch_operations:
+                batch_updated = self.consumer.execute_operations_batch(batch_operations)
+                total_updated += batch_updated
 
-                # Process batch when it reaches a reasonable size
-                if len(batch_operations) >= 50:  # Smaller batch size for address deduplication
-                    batch_updated = self.consumer.execute_operations_batch(batch_operations)
-                    total_updated += batch_updated
-                    # Progress bar is updated by PROGRESS_UPDATE operations in execute_operations_batch
-                    batch_operations = []  # Clear for next batch
-
-                operation_queue.task_done()  # Mark each operation as done
-
-            # Store total for return
-            self._total_updated = total_updated
-            self.log_info(f"Consumer processed {total_updated} address updates")
+            # Put final result in result queue
+            result_queue.put(total_updated)
 
         except Exception as e:
-            self.log_error(f"Consumer worker failed: {e}", exc_info=True)
-            self._total_updated = 0
+            self.log_error(f"Consumer worker {thread_id} failed: {e}", exc_info=True)
+            result_queue.put(0)
 
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context - always shown even in quiet mode"""

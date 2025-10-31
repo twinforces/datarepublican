@@ -33,6 +33,7 @@ from xml_processor import XMLProducer, XMLConsumer
 from address_deduplication_processor import AddressDeduplicationProcessor
 from geolocation_processor import GeolocationProcessor
 from geolocation_processor import geolocate_addresses
+from base_processor import ThreadPoolManager, ThreadPoolConfig, PoolConfig
 
 
 class ProcessingStrategy(ABC):
@@ -97,10 +98,18 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
         self.total_processed_xml = 0  # Counter for total processed XML files
         self.shutdown_event = threading.Event()  # Event for clean shutdown signaling
 
+        # Create thread pool configuration
+        producer_config = PoolConfig(max_workers=workers, queue_size=self.QUEUE_SIZE, batch_size=self.BATCH_SIZE)
+        consumer_config = PoolConfig(max_workers=1, queue_size=self.QUEUE_SIZE, batch_size=self.BATCH_SIZE)  # Single consumer for DB safety
+        self.thread_pool_config = ThreadPoolConfig(producer_config=producer_config, consumer_config=consumer_config)
+
         # Create producer and consumer instances with clear separation
         from constants import CURRENT_PROCESSING_VERSION
-        self.producer = XMLProducer(db_ops, CURRENT_PROCESSING_VERSION)  # Producer: collects operations
-        self.consumer = XMLConsumer(db_ops, CURRENT_PROCESSING_VERSION)     # Consumer: executes operations
+        self.producer = XMLProducer(db_ops, CURRENT_PROCESSING_VERSION, self.thread_pool_config)  # Producer: collects operations
+        self.consumer = XMLConsumer(db_ops, CURRENT_PROCESSING_VERSION, self.thread_pool_config)     # Consumer: executes operations
+
+        # Initialize thread pool manager
+        self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, logger)
 
         # Set up SIGUSR1 handler for thread stack dumps
         signal.signal(signal.SIGUSR1, self.dump_threads_handler)
@@ -110,7 +119,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
     # Removed _get_xml_files_to_process - now using XMLFile.get_xml_files_to_process()
 
     def execute(self, max_files: Optional[int] = None) -> int:
-        """Process XML files using producer-consumer pattern with thread-safe queues"""
+        """Process XML files using generalized thread pool manager"""
         # Set up signal handlers for graceful shutdown and thread debugging
         def interrupt_handler(signum, frame):
             self.log_error("Received interrupt signal, shutting down gracefully...")
@@ -158,52 +167,29 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                 break  # No more files to process
 
             batch_size = len(xml_files)
-            num_producers = min(self.workers, batch_size)
-            self.log_info(f"Processing batch of {batch_size} files with {num_producers} producers (total processed so far: {total_processed})")
+            self.log_info(f"Processing batch of {batch_size} files with thread pool (total processed so far: {total_processed})")
 
-            # Use thread-safe queues with backpressure
-            xml_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
+            # Use thread pool manager for producer-consumer pattern
+            try:
+                # Start producer pool
+                self.thread_pool_manager.start_producer_pool(
+                    xml_files,
+                    self._xml_producer_with_pool
+                )
 
-            # Start consumer thread (single writer to database)
-            consumer_thread = threading.Thread(
-                target=self._database_consumer,
-                args=(xml_queue, num_producers, self.db_ops.db_conn, pbar)
-            )
-            consumer_thread.daemon = True
-            consumer_thread.start()
+                # Start consumer pool (single consumer for database safety)
+                self.thread_pool_manager.start_consumer_pool(
+                    self._database_consumer_with_pool,
+                    self.db_ops.db_conn,
+                    pbar
+                )
 
-            # Start producer threads
-            producer_threads = []
-            for i in range(num_producers):
-                t = threading.Thread(target=self._xml_producer, args=(xml_files, xml_queue, i, num_producers))
-                t.daemon = True
-                producer_threads.append(t)
-                t.start()
+                # Wait for completion
+                self.thread_pool_manager.wait_for_completion()
 
-            # Wait for producers to finish (parse-heavy operations)
-            self.log_info("Waiting for producer threads to complete...")
-            for i, t in enumerate(producer_threads):
-                self.log_debug(f"Waiting for producer {i} to join...")
-                t.join(timeout=300.0)  # Increased timeout to 5 minutes for large XML files
-                if t.is_alive():
-                    self.log_error(f"Producer {i} timeout after 5 minutes - XML processing may be stuck")
-                    # Don't kill the thread, let it continue in background
-                else:
-                    self.log_info(f"Producer {i} done")
-
-            # Drain queue and wait for consumer
-            self.log_info("Draining XML queue...")
-            xml_queue.join()
-            self.log_info("XML queue drained, waiting for consumer thread...")
-            consumer_thread.join(timeout=30.0)
-            if consumer_thread.is_alive():
-                self.log_error("Consumer timeout - attempting graceful shutdown")
-                # Signal consumer to stop using shutdown event
-                self.shutdown_event.set()
-                self.log_info("Shutdown event set, waiting additional 10 seconds for consumer...")
-                consumer_thread.join(timeout=10.0)
-                if consumer_thread.is_alive():
-                    self.log_error("Consumer still alive after shutdown signal - some data may be lost")
+            except Exception as e:
+                self.log_error(f"Thread pool processing error: {e}", exc_info=True)
+                # Continue to next batch rather than failing completely
 
             # Update total processed count
             total_processed += batch_size
@@ -228,15 +214,15 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
         return total_processed
 
-    def _xml_producer(self, xml_files, xml_queue, producer_id, num_producers) -> None:
-        """Producer thread: parses XML and sends DatabaseOperation objects to consumer"""
+    def _xml_producer_with_pool(self, xml_files, work_queue, result_queue, producer_id, num_producers) -> None:
+        """Producer function for thread pool: parses XML and sends DatabaseOperation objects to consumer"""
         processed = 0
         total_bytes = 0
         start = producer_id
-        self.log_info(f"Producer {producer_id} starting: processing files {start} to {len(xml_files)-1} step {num_producers}")
+        self.log_info(f"Pool Producer {producer_id} starting: processing files {start} to {len(xml_files)-1} step {num_producers}")
         for i in range(start, len(xml_files), num_producers):
             if self.shutdown_event.is_set():
-                self.log_info(f"Producer {producer_id} received shutdown signal, stopping at file {i}")
+                self.log_info(f"Pool Producer {producer_id} received shutdown signal, stopping at file {i}")
                 break
 
             xml_file = xml_files[i]
@@ -251,15 +237,15 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             internal = xml_file.internal_path
             file_size = xml_file.file_size
             try:
-                self.log_debug(f"Producer {producer_id} processing XML {filename} (ID: {xml_id})")
+                self.log_debug(f"Pool Producer {producer_id} processing XML {filename} (ID: {xml_id})")
                 # PRODUCER: Use XMLProducer to parse XML and collect operations (NO database writes)
                 success, operations = self.producer.process_single_xml_for_operations(xml_id, zip_id, filename, internal, file_size)
-                self.log_debug(f"Producer {producer_id} completed processing XML {filename}, got {len(operations)} operations")
+                self.log_debug(f"Pool Producer {producer_id} completed processing XML {filename}, got {len(operations)} operations")
 
-                # Send operations to queue
-                self.log_debug(f"Producer {producer_id} sending {len(operations)} operations to queue for {filename}")
+                # Send operations to result queue (which feeds to consumer)
+                self.log_debug(f"Pool Producer {producer_id} sending {len(operations)} operations to result queue for {filename}")
                 for operation in operations:
-                    xml_queue.put(operation, block=True)
+                    result_queue.put(operation, block=True)
 
                 # Extract filer_ein from operations for logging
                 filer_ein = "unknown"
@@ -270,8 +256,8 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
                 # Log producer queuing completion
                 if not global_config.is_quiet():
-                    log_info(self.logger, f"Producer {producer_id} queued operations for EIN {filer_ein} in {filename}: {len(operations)} operations",
-                             ein=filer_ein)
+                    log_info(self.logger, f"Pool Producer {producer_id} queued operations for EIN {filer_ein} in {filename}: {len(operations)} operations",
+                              ein=filer_ein)
 
                 processed += 1
 
@@ -282,9 +268,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
                 if processed % 50 == 0:
                     progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
-                    self.log_info(f"Producer {producer_id}: {progress_info} queued")
+                    self.log_info(f"Pool Producer {producer_id}: {progress_info} queued")
             except Exception as e:
-                self.log_error(f"Producer {producer_id} error on {filename}: {e}", exc_info=True)
+                self.log_error(f"Pool Producer {producer_id} error on {filename}: {e}", exc_info=True)
                 error_msg = str(e)
                 if not error_msg or error_msg == "":
                     error_msg = f"Unknown error processing {filename}"
@@ -303,9 +289,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     error_metadata,
                     xml_id
                 )
-                xml_queue.put(error_operation, block=True)
-        xml_queue.put(None)  # Sentinel
-        self.log_info(f"Producer {producer_id} done: {processed} files processed")
+                result_queue.put(error_operation, block=True)
+        result_queue.put(None)  # Sentinel
+        self.log_info(f"Pool Producer {producer_id} done: {processed} files processed")
 
     def dump_threads_handler(self, signum, frame):
         """Signal handler: Dumps formatted stack traces for all live threads."""
@@ -333,27 +319,26 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             print(f"Error in thread dump handler: {e}", file=sys.stderr)
             sys.stderr.flush()
 
-    def _database_consumer(self, xml_queue, num_expected, conn, pbar) -> int:
+    def _database_consumer_with_pool(self, work_queue, result_queue, thread_id, conn, pbar) -> None:
         """
-        CONSUMER thread: executes database operations (single-threaded for DuckDB safety).
+        CONSUMER function for thread pool: executes database operations (single-threaded for DuckDB safety).
 
         PRODUCER-CONSUMER PATTERN: This is the CONSUMER.
-        - Receives DatabaseOperation objects from producers via queue
+        - Receives DatabaseOperation objects from producers via work_queue
         - Executes all database operations safely in single-threaded context
         - Producers never touch the database - only collect operations
         """
         batch_operations = []
         total = 0
-        signals = 0
         processed_xml_count = 0  # Counter for processed XML files (each generates one XML_FILE_UPDATE)
-        self.log_info(f"Consumer starting: expecting {num_expected} sentinel signals")
+        self.log_info(f"Pool Consumer {thread_id} starting")
 
         # Set up progress callback for consumer
         def progress_callback(count):
             if pbar:
                 pbar.update(count)
 
-        while signals < num_expected and not self.shutdown_event.is_set():
+        while not self.shutdown_event.is_set():
             # Check if we need to trigger database optimization
             if processed_xml_count > 0 and processed_xml_count % self.OPTIMIZE_INTERVAL == 0:
                 self.log_info(f"Processed {processed_xml_count} XML files, triggering database optimization")
@@ -363,26 +348,28 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
                     self.consumer._execute_optimize_operation(optimize_op)
                 except Exception as e:
                     self.log_error(f"Database optimization failed: {e}", exc_info=True)
+
             try:
-                self.log_debug(f"Consumer waiting for queue item (signals: {signals}/{num_expected})")
+                self.log_debug(f"Pool Consumer {thread_id} waiting for work queue item")
                 # Use short timeout and check shutdown event to allow quick shutdown
-                item = xml_queue.get(timeout=1.0)  # Short timeout to check shutdown event frequently
-                self.log_debug(f"Consumer got item from queue: type={type(item)}, item={item}")
+                item = work_queue.get(timeout=1.0)  # Short timeout to check shutdown event frequently
+                self.log_debug(f"Pool Consumer {thread_id} got item from work queue: type={type(item)}, item={item}")
+
                 if item is None:
-                    signals += 1
-                    self.log_info(f"Consumer received sentinel signal {signals}/{num_expected}")
-                    xml_queue.task_done()
-                    continue
+                    self.log_info(f"Pool Consumer {thread_id} received sentinel signal")
+                    work_queue.task_done()
+                    break
 
                 # Handle DatabaseOperation objects from producer
                 if isinstance(item, DatabaseOperation):
                     batch_operations.append(item)
                     total += 1
                 else:
-                    self.log_error(f"Unexpected queue item type: {type(item)}, item: {item}")
+                    self.log_error(f"Unexpected work queue item type: {type(item)}, item: {item}")
+                    work_queue.task_done()
                     continue
 
-                xml_queue.task_done()
+                work_queue.task_done()
 
                 if len(batch_operations) >= self.BATCH_SIZE:
                     try:
@@ -397,7 +384,7 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
 
                         # Log consumer execution completion
                         if not global_config.is_quiet():
-                            log_info(self.logger, f"Consumer executed batch of {len(batch_operations)} operations")
+                            log_info(self.logger, f"Pool Consumer {thread_id} executed batch of {len(batch_operations)} operations")
 
                         # Count XML files processed in this batch for optimization interval
                         xml_files_updated = self._get_xml_files_updated_in_batch(batch_operations)
@@ -420,17 +407,17 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             except queue.Empty:
                 # Timeout occurred, check if we should shutdown
                 if self.shutdown_event.is_set():
-                    self.log_info("Consumer received shutdown signal during queue wait")
+                    self.log_info(f"Pool Consumer {thread_id} received shutdown signal during queue wait")
                     break
                 continue  # Continue the loop to check for more items
             except Exception as e:
-                self.log_error(f"Consumer error: {e}", exc_info=True)
+                self.log_error(f"Pool Consumer {thread_id} error: {e}", exc_info=True)
                 break
 
         # Final batch - commit any remaining work
         if batch_operations:
             try:
-                self.log_info(f"Committing final batch of {len(batch_operations)} operations ({len(batch_operations)} items)")
+                self.log_info(f"Pool Consumer {thread_id} committing final batch of {len(batch_operations)} operations")
                 xml_ids_before = set(op.xml_id for op in batch_operations if op.xml_id)
                 self.log_debug(f"Processing final batch with {len(batch_operations)} operations from XML IDs: {sorted(xml_ids_before)}")
 
@@ -446,8 +433,9 @@ class ParallelXMLProcessingStrategy(ProcessingStrategy):
             except Exception as e:
                 self.log_error(f"Final batch error: {e}", exc_info=True)
 
-        self.log_info(f"Consumer done: {total} operations, {signals} signals, processed {processed_xml_count} XML files")
-        return total
+        self.log_info(f"Pool Consumer {thread_id} done: {total} operations, processed {processed_xml_count} XML files")
+        # Put result count in result queue
+        result_queue.put(total)
 def _get_xml_files_updated_in_batch(self, batch_operations):
     """Get set of XML IDs that were updated in this batch (XML_FILE_UPDATE operations)"""
     xml_files_updated = set()

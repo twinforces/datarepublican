@@ -70,13 +70,11 @@ class Contractor(BaseModel):
         """Convert to dictionary for database operations"""
         return {
             'contractor_id': self.contractor_id,
+            'charity_id': self.charity_id,
             'filer_ein': self.filer_ein,
             'name': self.name,
             'amount': self.amount,
             'ein': self.ein,
-            'address': self.address,
-            'zip_code': self.zip_code,
-            'po_box': self.po_box,
             'tax_year': self.tax_year,
             'colocator': self.colocator,
             'created_at': self.created_at
