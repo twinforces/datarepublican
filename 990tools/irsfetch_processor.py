@@ -44,6 +44,31 @@ class IRSFetchProducer(BaseProducer):
         if not os.path.exists(self.zips_dir):
             os.makedirs(self.zips_dir)
 
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
+        """Estimate total IRS files needing download and return appropriate unit"""
+        # For IRS fetch, we estimate based on years being processed
+        # Each year typically has multiple ZIP files (around 3-5 per year)
+        # This is a rough estimate since exact count requires scraping IRS website
+
+        # Estimate 4 ZIP files per year on average (conservative estimate)
+        avg_zips_per_year = 4
+
+        # For now, estimate based on a typical range (2017-2030 = 14 years)
+        # In practice, this would be based on actual start/end years from config
+        estimated_years = 14
+        estimated_files = estimated_years * avg_zips_per_year
+
+        if bytes:
+            # Estimate total bytes - average IRS ZIP file is about 50MB
+            avg_zip_size_bytes = 50 * 1024 * 1024  # 50MB in bytes
+            total = estimated_files * avg_zip_size_bytes
+            unit = "bytes"
+        else:
+            total = estimated_files
+            unit = "files"
+
+        return {"total": total, "unit": unit}
+
     def _get_work_batch(self, offset: int) -> List[Tuple[int, str]]:
         """Get a batch of years to process"""
         # For IRS fetch, we process years sequentially

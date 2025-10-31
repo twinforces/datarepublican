@@ -131,6 +131,53 @@ class AddressDeduplicationConsumer(BaseConsumer):
         """Log warning with optional EIN context - always shown even in quiet mode"""
         log_warning(self.logger, msg, *args, ein=ein)
 
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
+        """
+        Get the estimated total work scope for address deduplication.
+
+        Args:
+            bytes: If True, return total in bytes instead of addresses
+
+        Returns:
+            Dictionary with 'total' (estimated work scope) and 'unit' ('addrs' or 'bytes')
+        """
+        if bytes:
+            # Estimate total bytes by summing lengths of canonical addresses needing deduplication
+            query = """
+                SELECT SUM(LENGTH(canonical_address)) as total_bytes
+                FROM (
+                    SELECT canonical_address
+                    FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+                )
+            """
+            result = self.db_ops.execute_query(query)
+            row = result.fetchone() if result else None
+            total = int(row[0]) if row and row[0] is not None else 0
+            return {'total': total, 'unit': 'bytes'}
+        else:
+            # Count total canonical addresses needing deduplication
+            query = """
+                SELECT COUNT(*) as total_addresses
+                FROM (
+                    SELECT canonical_address
+                    FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+                )
+            """
+            result = self.db_ops.execute_query(query)
+            row = result.fetchone() if result else None
+            total = int(row[0]) if row and row[0] is not None else 0
+            return {'total': total, 'unit': 'addrs'}
+
     def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
         """Log error with optional EIN context - always shown even in quiet mode"""
         log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)

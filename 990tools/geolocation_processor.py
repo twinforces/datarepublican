@@ -10,6 +10,7 @@ Now uses Producer-Consumer pattern for safe batch processing with DuckDB.
 
 import logging
 import time
+import queue
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 
@@ -767,33 +768,6 @@ def geolocate_addresses(db_ops: DatabaseOperations, progress_bar=None) -> int:
 
 
 
-def _estimate_total_geocoding_work(db_ops: DatabaseOperations) -> int:
-    """Estimate total geocoding work for progress bar"""
-    try:
-        # Count distinct canonical addresses that need geocoding records created
-        address_query = """
-            SELECT COUNT(DISTINCT canonical_address) FROM Addresses
-            WHERE master_id IS NULL
-                AND (colocator IS NULL OR colocator = '')
-                AND canonical_address IS NOT NULL
-                AND canonical_address != ''
-        """
-        address_result = db_ops.execute_query(address_query)
-        address_count = address_result.fetchone()[0] if address_result else 0
-
-        # Count geocoding records that need API calls
-        geocoding_query = """
-            SELECT COUNT(*) FROM Geocoding
-            WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
-        """
-        geocoding_result = db_ops.execute_query(geocoding_query)
-        geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
-
-        total_work = address_count + geocoding_count
-        return total_work
-    except Exception:
-        # Fallback to a reasonable estimate
-        return 10000
 
 
 
@@ -813,6 +787,48 @@ class GeolocationProcessor:
         self.producer_gc = GeolocationProducerGC(db_ops, GEOCODING_BATCH_SIZE)
         self.producer_api = GeolocationProducerAPI(db_ops, GEOCODING_API_BATCH_SIZE)
         self.consumer = GeolocationConsumer(db_ops)
+
+    def _estimate_total_geocoding_work(self) -> int:
+        """Estimate total geocoding work for progress bar"""
+        try:
+            # Count distinct canonical addresses that need geocoding records created
+            address_query = """
+                SELECT COUNT(DISTINCT canonical_address) FROM Addresses
+                WHERE master_id IS NULL
+                    AND (colocator IS NULL OR colocator = '')
+                    AND canonical_address IS NOT NULL
+                    AND canonical_address != ''
+            """
+            address_result = self.db_ops.execute_query(address_query)
+            address_count = address_result.fetchone()[0] if address_result else 0
+
+            # Count geocoding records that need API calls
+            geocoding_query = """
+                SELECT COUNT(*) FROM Geocoding
+                WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
+            """
+            geocoding_result = self.db_ops.execute_query(geocoding_query)
+            geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
+
+            total_work = address_count + geocoding_count
+            return total_work
+        except Exception:
+            # Fallback to a reasonable estimate
+            return 10000
+
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
+        """
+        Return a dictionary with 'total' (estimated addresses needing geocoding) and 'unit'.
+
+        Args:
+            bytes: If True, unit is 'bytes'; otherwise 'addrs'
+
+        Returns:
+            Dict with 'total' and 'unit'
+        """
+        total = self._estimate_total_geocoding_work()
+        unit = 'bytes' if bytes else 'addrs'
+        return {'total': total, 'unit': unit}
 
 
 class GeolocationProcessorThreaded(GeolocationProcessor):

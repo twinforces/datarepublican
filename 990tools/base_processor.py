@@ -17,7 +17,7 @@ import queue
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
-from logging_utils import log_error, log_info, log_debug, log_warning, get_logger
+from logging_utils import log_error, log_info, log_debug, log_warning, get_logger, start_progress_reporting
 from config import global_config
 
 
@@ -277,6 +277,12 @@ class BaseProducer:
         if global_config.profile_seconds:
             return self._collect_operations_with_profiling()
 
+        # Setup progress bar
+        progress_scope = self.get_progress_scope(bytes=global_config.progress == "bytes")
+        total = progress_scope.get("total", 0)
+        unit = progress_scope.get("unit", "items")
+        start_progress_reporting(total=total, desc="Collecting operations", unit=unit)
+
         operations = []
         offset = 0
         work_items_processed = 0
@@ -438,6 +444,10 @@ class BaseProducer:
     def _process_work_batch(self, batch: List[Any]) -> List[DatabaseOperation]:
         """Process a batch of work items into operations - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement _process_work_batch")
+
+    def get_progress_scope(self) -> Dict[str, Any]:
+        """Get the scope of work for progress bar setup - to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement get_progress_scope")
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""

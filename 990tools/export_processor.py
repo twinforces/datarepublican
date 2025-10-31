@@ -27,6 +27,32 @@ class ExportProducer(BaseProducer):
         super().__init__(db_ops, batch_size=1000, thread_pool_config=thread_pool_config)
         self.export_type = export_type
 
+    def get_progress_scope(self, bytes=False) -> Dict[str, Any]:
+        """Estimate total records needing export and return appropriate unit based on --bytes argument"""
+        total = self._get_total_records()
+        unit = "bytes" if bytes else "records"
+        return {"total": total, "unit": unit}
+
+    def _get_total_records(self) -> int:
+        """Get total number of records for the export type"""
+        if self.export_type == "charities":
+            result = self.db_ops.execute_query("SELECT COUNT(*) FROM Charities")
+            return result.fetchone()[0] if result else 0
+        elif self.export_type == "grants":
+            result = self.db_ops.execute_query("SELECT COUNT(*) FROM Grants")
+            return result.fetchone()[0] if result else 0
+        elif self.export_type == "contractors":
+            result = self.db_ops.execute_query("SELECT COUNT(*) FROM Contractors")
+            return result.fetchone()[0] if result else 0
+        elif self.export_type == "political_contributions":
+            result = self.db_ops.execute_query("SELECT COUNT(*) FROM PoliticalContributions")
+            return result.fetchone()[0] if result else 0
+        elif self.export_type == "officers":
+            result = self.db_ops.execute_query("SELECT COUNT(*) FROM Officers")
+            return result.fetchone()[0] if result else 0
+        else:
+            return 0
+
     def _get_work_batch(self, offset: int) -> List[Dict[str, Any]]:
         """Get a batch of data for export based on export type"""
         if self.export_type == "charities":

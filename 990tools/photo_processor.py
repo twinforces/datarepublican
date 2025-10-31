@@ -89,6 +89,28 @@ class PhotoProducer(BaseProducer):
 
         return operations
 
+    def get_progress_scope(self, bytes=False):
+        """Estimate total officers needing photos and return appropriate unit"""
+        query = """
+            SELECT COUNT(*) FROM Officers o
+            JOIN Charities c ON o.charity_id = c.charity_id
+            WHERE o.master_id IS NULL
+            AND (o.photo_url IS NULL OR o.photo_url = '')
+            AND o.first_name IS NOT NULL AND o.last_name IS NOT NULL
+        """
+        result = self.db_ops.execute_query(query).fetchone()
+        count = result[0] if result else 0
+
+        if bytes:
+            # Estimate total bytes assuming average photo size of 50KB
+            total = count * 50000
+            unit = "bytes"
+        else:
+            total = count
+            unit = "officers"
+
+        return {"total": total, "unit": unit}
+
 
 class PhotoConsumer(BaseConsumer):
     """Consumer for executing photo processing operations"""

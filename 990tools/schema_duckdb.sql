@@ -238,8 +238,12 @@ CREATE TABLE Backfill (
     -- Grantee EIN
     name VARCHAR NOT NULL,
     -- Organization name
-    colocator VARCHAR source VARCHAR DEFAULT 'xml',
+    colocator VARCHAR,
+    -- Colocator data
+    source VARCHAR DEFAULT 'xml',
     -- Source of backfill data
+    zip_code VARCHAR,
+    -- ZIP code for uniqueness
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(grant_ein, name, zip_code) -- Prevent duplicates
 );
@@ -349,7 +353,6 @@ CREATE INDEX idx_addresses_geocoding ON Addresses(geocoding_id);
 CREATE INDEX idx_addresses_master_id ON Addresses(master_id);
 CREATE INDEX idx_addresses_canonical ON Addresses(canonical_address);
 -- Geocoding indexes
-CREATE INDEX idx_geocoding_address_hash ON Geocoding(address_hash);
 CREATE INDEX idx_geocoding_status ON Geocoding(geocoding_status);
 -- ZipFiles indexes
 CREATE INDEX idx_zipfiles_tax_year ON ZipFiles(tax_year);

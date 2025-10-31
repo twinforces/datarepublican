@@ -54,6 +54,30 @@ class OfficerDeduplicationProducer(BaseProducer):
 
         return work_items
 
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
+        """Estimate total officers needing deduplication and return appropriate unit"""
+        # Estimate total duplicate officers by summing counts from duplicate groups
+        query = """
+            SELECT SUM(group_count) as total_officers FROM (
+                SELECT COUNT(*) as group_count
+                FROM Officers o
+                JOIN Charities c ON o.charity_id = c.charity_id
+                WHERE o.master_id IS NULL
+                GROUP BY LOWER(TRIM(o.first_name)) || '|' || LOWER(TRIM(o.last_name)) || '|' || LOWER(TRIM(c.filer_name))
+                HAVING COUNT(*) > 1
+            )
+        """
+
+        result = self.db_ops.execute_query(query)
+        total = 0
+        if result:
+            row = result.fetchone()
+            if row and row[0]:
+                total = row[0]
+
+        unit = "bytes" if bytes else "officers"
+        return {"total": total, "unit": unit}
+
     def _process_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
         """Process batch of duplicate officer groups into deduplication operations"""
         operations = []
