@@ -164,17 +164,13 @@ CREATE TABLE Addresses (
 -- Geocoding table - Cached geocoding results
 CREATE TABLE Geocoding (
     geocoding_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    address_hash VARCHAR NOT NULL,
-    -- Hash of normalized address (removed UNIQUE constraint to prevent duplicate key errors)
     normalized_address VARCHAR NOT NULL,
     -- Normalized address string
     latitude DOUBLE,
     -- Latitude coordinate
     longitude DOUBLE,
     -- Longitude coordinate
-    geocoding_status VARCHAR DEFAULT 'pending' CHECK(
-        geocoding_status IN ('pending', 'success', 'failed', 'parse_error')
-    ),
+    geocoding_status VARCHAR DEFAULT 'pending',
     last_attempt TIMESTAMP,
     -- Last geocoding attempt
     attempt_count INTEGER DEFAULT 0,

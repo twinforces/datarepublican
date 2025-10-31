@@ -33,6 +33,7 @@ from models import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contracto
 from models.base import BaseModel
 from constants import VALID_STATES, CURRENT_PROCESSING_VERSION
 from logging_utils import get_logger, log_error, log_debug, log_info, log_warning
+from loggingDuckDB import LoggingDuckDBConnection
 
 
 class DatabaseOperationType(Enum):
@@ -51,6 +52,8 @@ class DatabaseOperationType(Enum):
     GENERIC_UPDATE = "generic_update"
     ADDRESS_DEDUPLICATION_BATCH = "address_deduplication_batch"
     PROGRESS_UPDATE = "progress_update"
+    INSERT_GEOCODING = "insert_geocoding"
+    UPDATE_GEOCODING = "update_geocoding"
 
 
 class DatabaseOperation:
@@ -117,7 +120,10 @@ class DatabaseOperations:
         self._connection_config = config
 
         # Create main connection for single-threaded operations
-        self.db_conn = duckdb.connect(self.db_path, config=config)
+        if global_config.log_sql:
+            self.db_conn = LoggingDuckDBConnection(self.db_path, config=config)
+        else:
+            self.db_conn = duckdb.connect(self.db_path, config=config)
 
         # Set additional performance settings
         self.db_conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
@@ -200,7 +206,8 @@ class DatabaseOperations:
         if conn is None:
             conn = self._get_thread_local_connection()
 
-        if global_config.log_sql:
+        # Don't log here if we're using LoggingDuckDBConnection - it will handle logging
+        if global_config.log_sql and not isinstance(conn, LoggingDuckDBConnection):
             import inspect
             # Get the caller's frame, skipping internal functions
             frame = inspect.currentframe()
@@ -227,7 +234,10 @@ class DatabaseOperations:
         """Get or create a thread-local database connection"""
         if not hasattr(DatabaseOperations._local, 'db_conn'):
             # Create a new connection for this thread
-            DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=self._connection_config)
+            if global_config.log_sql:
+                DatabaseOperations._local.db_conn = LoggingDuckDBConnection(self.db_path, config=self._connection_config)
+            else:
+                DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=self._connection_config)
             # Apply the same settings as the main connection
             DatabaseOperations._local.db_conn.execute("SET enable_progress_bar = false")
             DatabaseOperations._local.db_conn.execute("SET enable_object_cache = true")
@@ -360,7 +370,8 @@ class DatabaseOperations:
         table_name_map = {
             'XMLFile': 'XmlFiles',
             'ZipFile': 'ZipFiles',
-            'PoliticalContribution': 'PoliticalContributions'
+            'PoliticalContribution': 'PoliticalContributions',
+            'Geocoding': 'Geocoding'
         }
 
         if class_name in table_name_map:
@@ -490,7 +501,7 @@ class DatabaseOperations:
 
     def get_addresses_for_geocoding(self, limit: int = None, offset: int = 0) -> List[Address]:
         """Get addresses that need geocoding, with optional batching support"""
-        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '')"
+        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') and colocator IS NULL"
         return self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
 
     def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: Optional[str] = None):
@@ -678,15 +689,15 @@ class DatabaseOperations:
         return ids[0] if ids else ""
 
     # Geocoding operations
-    def insert_geocoding_record(self, address_hash: str, normalized_address: str,
+    def insert_geocoding_record(self, normalized_address: str,
                                 latitude: Optional[float] = None, longitude: Optional[float] = None,
-                                status: str = 'success') -> str:
+                                status: str = 'pending') -> str:
         """Insert geocoding record. Returns UUID."""
         geocoding_id = self.generate_uuid_v7()
         self.execute_query("""
-            INSERT INTO Geocoding (geocoding_id, address_hash, normalized_address, latitude, longitude, geocoding_status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (geocoding_id, address_hash, normalized_address, latitude, longitude, status))
+            INSERT INTO Geocoding (geocoding_id, normalized_address, latitude, longitude, geocoding_status)
+            VALUES (?, ?, ?, ?, ?)
+        """, (geocoding_id, normalized_address, latitude, longitude, status))
         self.commit()
         return geocoding_id
 

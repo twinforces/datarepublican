@@ -286,6 +286,27 @@ ${'###'} Address Colocator Analysis
 | With 'LL%' prefix | ${addresses_colocator_analysis['ll_count']} |
 | Neither (error) | ${addresses_colocator_analysis['neither_count']} |
 
+${'####'} Colocator by Address Type
+| Address Type | Count |
+|--------------|-------|
+% for address_type, count in addresses_colocator_analysis['colocator_by_address_type']:
+| ${address_type} | ${count} |
+% endfor
+
+${'###'} Geocoding Status Analysis
+
+| Geocoding Status | Count |
+|------------------|-------|
+% for status, count in geocoding_status_analysis['geocoding_status_counts']:
+| ${status if status else 'NULL'} | ${count} |
+% endfor
+
+| Metric | Count |
+|--------|-------|
+| Total geocoding records | ${geocoding_status_analysis['total_geocoding_records']} |
+| Records with coordinates | ${geocoding_status_analysis['geocoded_with_coords']} |
+| Records with API attempts | ${geocoding_status_analysis['attempted_records']} |
+
 ${'##'} Processing Details
 
 - **Step**: ${step_name}

@@ -114,7 +114,16 @@ def set_progress_description(pbar, desc: str):
 
 def get_logger(name: str) -> logging.Logger:
     """Get a configured logger"""
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    # Ensure logger has a handler if it doesn't have one
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        # Set level to DEBUG by default, let the calling code control filtering
+        logger.setLevel(logging.DEBUG)
+    return logger
 
 def create_stub_log_error(logger: logging.Logger) -> Callable:
     """Factory function to create stub_log_error function"""

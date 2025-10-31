@@ -148,11 +148,10 @@ class BaseConsumer:
                 operations_by_type[op_type] = []
             operations_by_type[op_type].append(operation)
 
-
         # Call subclass-specific processing and get count
         processed_count = self._process_operations_batch(operations_by_type)
 
-        # Handle PROGRESS_UPDATE operations first
+        # Handle PROGRESS_UPDATE operations AFTER the actual work is done
         progress_operations = 0
         if DatabaseOperationType.PROGRESS_UPDATE.value in operations_by_type:
             progress_operations = len(operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value])

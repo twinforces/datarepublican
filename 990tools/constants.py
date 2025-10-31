@@ -99,7 +99,10 @@ DEFAULT_ANAL_DIR = "/Volumes/Data/atsvs"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 
 # Geocoding constants
-GEOCODING_BATCH_SIZE = 5000
+GEOCODING_BATCH_SIZE = 1000  # Batch size for geocoding operations
+GEOCODING_API_BATCH_SIZE = 10000  # Maximum addresses per census API call (as per census docs)
+GEOCODING_FAST_WORKERS = 8  # Workers for fast local geocoding record creation
+GEOCODING_API_WORKERS = 4   # Workers for slow census API calls
 
 # Address abbreviation expansions
 STREET_FIXES = {

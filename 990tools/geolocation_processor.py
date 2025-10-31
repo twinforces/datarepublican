@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 """
-geolocation_processor.py - Multithreaded address geocoding for IRS 990 data
+geolocation_processor.py - Geolocation processor using Producer-Consumer pattern
 
-This module handles geocoding of addresses using the census API with multithreading,
+This module handles geocoding of addresses using the census API with Producer-Consumer pattern,
 storing latitude/longitude coordinates for address matching.
+
+Now uses Producer-Consumer pattern for safe batch processing with DuckDB.
 """
 
 import logging
 import threading
 import queue
 import time
+from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
-from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import censusgeocode as cg
 except ImportError:
     cg = None
 
-from database_operations import DatabaseOperations
+from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import Address
-from constants import VALID_STATES, STATE_NAME_TO_ABBREV, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX
-from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description
+from models.geocoding import Geocoding
+from constants import VALID_STATES, STATE_NAME_TO_ABBREV, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX, GEOCODING_BATCH_SIZE, GEOCODING_API_BATCH_SIZE, GEOCODING_FAST_WORKERS, GEOCODING_API_WORKERS
+from logging_utils import log_info, log_error, log_debug, log_warning, start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description, get_logger
 from address_deduplication_processor import AddressDeduplicationProcessor
+from base_processor import BaseProducer, BaseConsumer
 from config import global_config
 
 # Set up logging
@@ -31,466 +34,1038 @@ logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s -
 logger = logging.getLogger(__name__)
 
 
-class GeolocationProcessor:
-    """Handles multithreaded address geocoding operations"""
+class GeolocationProducerGC(BaseProducer):
+    """
+    Producer for creating Geocoding records - Phase 1: Fast processing
 
-    # Threading configuration
-    MAX_API_WORKERS = 4  # Up to 4 concurrent API calls
-    BATCH_SIZE = 5000    # Addresses per batch (under census API limit)
-    QUEUE_SIZE = 1000    # Size of work/result queues
+    Creates Geocoding records for addresses that need geocoding.
+    Does PO Box detection and creates initial geocoding records.
+
+    PRODUCER-CONSUMER PATTERN WARNING:
+    This class MUST NOT perform any database writes directly.
+    Producers collect DatabaseOperation objects and send them to consumers.
+    Only Consumer classes may execute database operations.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
+        super().__init__(db_ops, batch_size)
+        self.address_dedup = AddressDeduplicationProcessor(db_ops)
+
+    def _get_work_batch(self, offset: int) -> List[Dict[str, Any]]:
+        """Get a batch of address_ids that need geocoding records created"""
+        # Get addresses that need geocoding (no geocoding_id and not PO Box)
+        addresses = self.db_ops.get_addresses_for_geocoding(limit=self.batch_size, offset=offset)
+
+        # Return just the address_ids as work items - we'll fetch full Address objects in processing
+        work_items = []
+        for address in addresses:
+            work_items.append({'address_id': address.address_id})
+
+        return work_items
+
+    def _process_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
+        """Process a batch of address_ids into geocoding record creation operations using ThreadPoolExecutor"""
+        operations = []
+
+        # Get full Address objects for this batch
+        address_ids = [work_item['address_id'] for work_item in batch]
+        addresses = self.db_ops.select_dataclass(
+            dataclass_type=Address,
+            where_clause="address_id IN ({})".format(','.join('?' for _ in address_ids)),
+            params=address_ids
+        )
+
+        # Debug logging: Log retrieved address data
+        if not global_config.is_quiet():
+            log_debug(self.logger, f"PHASE 1: Retrieved {len(addresses)} addresses for geocoding record creation")
+            for addr in addresses:
+                log_debug(self.logger, f"PHASE 1: Retrieved address {addr.address_id}: line1='{addr.address_line1}', line2='{addr.address_line2}', city='{addr.city}', state='{addr.state}', zip='{addr.zip_code}'")
+
+        # Create a lookup dict for quick access
+        address_lookup = {addr.address_id: addr for addr in addresses}
+
+        # Process addresses concurrently using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def process_single_address(work_item):
+            """Process a single address for geocoding record creation"""
+            address_id = work_item['address_id']
+            address = address_lookup.get(address_id)
+
+            if not address:
+                if not global_config.is_quiet():
+                    log_warning(self.logger, f"PHASE 1: Address {address_id} not found in lookup")
+                return None
+
+            # Check for PO Box detection
+            if address.is_po_box():
+                # Create PO Box operation
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"PHASE 1: Address {address_id} detected as PO Box: {address.po_box}")
+                operation = DatabaseOperation(
+                    operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                    data={
+                        'table': 'Addresses',
+                        'updates': {
+                            'po_box': address.po_box,
+                            'colocator': f"PO:{address.po_box}:{address.zip_code or ''}"
+                        },
+                        'where': {'address_id': address_id}
+                    }
+                )
+                return operation
+            else:
+                # Use factory method to create geocoding operation
+                geocoding_op = address.create_geocoding_operation()
+                # Add address_id to the operation data so we can update the address later
+                geocoding_op.data['address_id'] = address_id
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"PHASE 1: Created geocoding operation for address {address_id}: normalized_address='{geocoding_op.data.get('normalized_address', 'N/A')}'")
+                return geocoding_op
+
+        # Use ThreadPoolExecutor for concurrent processing
+        with ThreadPoolExecutor(max_workers=GEOCODING_FAST_WORKERS) as executor:
+            futures = [executor.submit(process_single_address, work_item) for work_item in batch]
+
+            for future in as_completed(futures):
+                operation = future.result()
+                if operation:
+                    operations.append(operation)
+
+        # Create progress update operation for the entire batch
+        if operations:
+            progress_op = DatabaseOperation(
+                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                data={"count": len([op for op in operations if op.operation_type != DatabaseOperationType.PROGRESS_UPDATE])}
+            )
+            operations.append(progress_op)
+
+        if not global_config.is_quiet():
+            geocoding_ops = [op for op in operations if op.operation_type == DatabaseOperationType.INSERT_GEOCODING]
+            po_box_ops = [op for op in operations if op.operation_type == DatabaseOperationType.GENERIC_UPDATE]
+            log_debug(self.logger, f"PHASE 1: Batch processing complete - {len(geocoding_ops)} geocoding operations, {len(po_box_ops)} PO Box operations")
+
+        return operations
+
+    def _detect_po_box_from_address(self, address) -> Optional[str]:
+        """Detect PO Box from Address object using regex"""
+        # Use the existing is_po_box method from Address class
+        return address.is_po_box()
+
+
+class GeolocationProducerAPI(BaseProducer):
+    """
+    Producer for API geocoding - Phase 2: Slow processing
+
+    Reads existing Geocoding records and makes census API calls to update them.
+
+    PRODUCER-CONSUMER PATTERN WARNING:
+    This class MUST NOT perform any database writes directly.
+    Producers collect DatabaseOperation objects and send them to consumers.
+    Only Consumer classes may execute database operations.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
+        super().__init__(db_ops, batch_size)
+
+    def _get_work_batch(self, offset: int) -> List[Dict[str, Any]]:
+        """Get a batch of geocoding records that need API calls"""
+        # Get geocoding records that haven't been processed yet
+        query = """
+            SELECT geocoding_id, normalized_address, attempt_count
+            FROM Geocoding
+            WHERE geocoding_status IS NULL OR geocoding_status = 'pending'
+            ORDER BY geocoding_id
+            LIMIT ? OFFSET ?
+        """
+        result = self.db_ops.execute_query(query, (self.batch_size, offset))
+        if result:
+            rows = result.fetchall()
+            batch_data = [
+                {
+                    'geocoding_id': row[0],
+                    'normalized_address': row[1],  # This is the prebuilt JSON dict
+                    'attempt_count': row[2] or 0
+                }
+                for row in rows
+            ]
+
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"PHASE 2: Retrieved {len(batch_data)} geocoding records for API calls")
+                for record in batch_data:
+                    log_debug(self.logger, f"PHASE 2: Retrieved geocoding record {record['geocoding_id']} for API call - attempt_count={record['attempt_count']}")
+
+            return batch_data
+        return []
+
+
+    def _process_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
+        """Process a batch of geocoding records by making a single batch API call"""
+        operations = []
+
+        if not batch:
+            return operations
+
+        # Debug logging: Log geocoding records being prepared for API calls
+        if not global_config.is_quiet():
+            for record in batch:
+                log_debug(self.logger, f"Preparing API call for geocoding_id {record['geocoding_id']}: normalized_address='{record['normalized_address']}'")
+
+        try:
+            # Make a single batch API call for all records in this batch
+            batch_results = self._batch_geocode_addresses(batch)
+
+            # Create operations for each result
+            for result in batch_results:
+                geocoding_record = result['geocoding_record']
+                api_result = result['api_result']
+
+                operation = DatabaseOperation(
+                    operation_type=DatabaseOperationType.UPDATE_GEOCODING,
+                    data={
+                        'geocoding_id': geocoding_record['geocoding_id'],
+                        'api_result': api_result,
+                        'last_attempt': result['last_attempt'],
+                        'attempt_count': result['attempt_count']
+                    }
+                )
+                operations.append(operation)
+
+        except Exception as e:
+            # If batch call fails, fall back to individual calls
+            if not global_config.is_quiet():
+                log_warning(self.logger, f"Batch geocoding failed, falling back to individual calls: {e}")
+
+            for geocoding_record in batch:
+                try:
+                    api_result = self._single_geocode_address(geocoding_record)
+                    operation = DatabaseOperation(
+                        operation_type=DatabaseOperationType.UPDATE_GEOCODING,
+                        data={
+                            'geocoding_id': geocoding_record['geocoding_id'],
+                            'api_result': api_result,
+                            'last_attempt': datetime.now().isoformat(),
+                            'attempt_count': geocoding_record.get('attempt_count', 0) + 1
+                        }
+                    )
+                    operations.append(operation)
+                except Exception as inner_e:
+                    operation = DatabaseOperation(
+                        operation_type=DatabaseOperationType.UPDATE_GEOCODING,
+                        data={
+                            'geocoding_id': geocoding_record['geocoding_id'],
+                            'api_result': {'status': 'failed', 'error': str(inner_e)},
+                            'last_attempt': datetime.now().isoformat(),
+                            'attempt_count': geocoding_record.get('attempt_count', 0) + 1
+                        }
+                    )
+                    operations.append(operation)
+
+        # Create progress update operation for the batch
+        progress_op = DatabaseOperation(
+            operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+            data={"count": len(batch)}
+        )
+        operations.append(progress_op)
+
+        return operations
+
+    def _single_geocode_address(self, geocoding_record: Dict[str, Any]) -> Dict[str, Any]:
+        """Make geocoding API call for a single address using prebuilt JSON"""
+        if not cg:
+            return {'status': 'failed', 'error': 'censusgeocode not available'}
+
+        try:
+            # Use the prebuilt JSON directly from normalized_address field
+            census_json = geocoding_record['normalized_address']
+            if isinstance(census_json, dict):
+                # Set the ID to geocoding_id for easy lookup when results come back
+                api_record = census_json.copy()
+                api_record['id'] = geocoding_record['geocoding_id']
+            else:
+                # Parse as JSON (all records should now be proper JSON)
+                try:
+                    import json
+                    api_record = json.loads(census_json)
+                    api_record['id'] = geocoding_record['geocoding_id']
+                except Exception as json_e:
+                    # If JSON parsing fails, create a minimal record
+                    if not global_config.is_quiet():
+                        log_error(self.logger, f"JSON parsing failed for geocoding_id {geocoding_record['geocoding_id']}: {json_e}")
+                    api_record = {
+                        'id': geocoding_record['geocoding_id'],
+                        'street': '',
+                        'city': '',
+                        'state': '',
+                        'zip': ''
+                    }
+
+            # Make single-item batch API call
+            batch_addresses = [api_record]
+            if not global_config.is_quiet():
+                log_debug(self.logger,f"Census API call params {batch_addresses}")
+                # Log the actual address data being sent to API
+                log_debug(self.logger, f"API call address: id={api_record.get('id')}, street='{api_record.get('street')}', city='{api_record.get('city')}', state='{api_record.get('state')}', zip='{api_record.get('zip')}'")
+            api_results = cg.addressbatch(batch_addresses)
+
+            if api_results and len(api_results) > 0:
+                if not global_config.is_quiet():
+                    log_debug(self.logger,f"Census API call result {api_results}")
+                result = api_results[0]
+                lat = result.get('lat')
+                lon = result.get('lon')
+                geocoding_status = result.get('geocoding_status', 'No_Match')
+
+                if geocoding_status == 'Match' and lat is not None and lon is not None and str(lat).strip() and str(lon).strip():
+                    # Success
+                    return {
+                        'status': 'success',
+                        'latitude': round(float(lat), 4),
+                        'longitude': round(float(lon), 4),
+                        'geocoding_status': geocoding_status
+                    }
+                else:
+                    # No match or invalid result
+                    return {
+                        'status': 'failed',
+                        'geocoding_status': geocoding_status
+                    }
+            else:
+                return {
+                    'status': 'failed',
+                    'error': 'no result from API'
+                }
+
+        except Exception as e:
+            # API call failed
+            log_error(self.logger,f"Census API call failure {str(e)}")
+            return {'status': 'failed', 'error': str(e)}
+
+
+
+    def _batch_geocode_addresses(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Make a batch geocoding API call for multiple addresses"""
+        if not cg:
+            return [{'geocoding_record': record, 'api_result': {'status': 'failed', 'error': 'censusgeocode not available'},
+                     'last_attempt': datetime.now().isoformat(), 'attempt_count': record.get('attempt_count', 0) + 1}
+                    for record in batch]
+
+        try:
+            # Prepare batch addresses for API call
+            batch_addresses = []
+            record_map = {}  # Map API ID to original record
+
+            for geocoding_record in batch:
+                # Use the prebuilt JSON directly from normalized_address field
+                census_json = geocoding_record['normalized_address']
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - census_json type: {type(census_json)}, value: {census_json}")
+
+                if isinstance(census_json, dict):
+                    # Set the ID to geocoding_id for easy lookup when results come back
+                    api_record = census_json.copy()
+                    api_record['id'] = str(geocoding_record['geocoding_id'])  # Ensure string ID
+                    if not global_config.is_quiet():
+                        log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - dict path: api_record after copy: {api_record}")
+                else:
+                    # Parse as JSON (all records should now be proper JSON)
+                    try:
+                        import json
+                        api_record = json.loads(census_json)
+                        api_record['id'] = str(geocoding_record['geocoding_id'])  # Ensure string ID
+                        if not global_config.is_quiet():
+                            log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - JSON parse successful: api_record: {api_record}")
+                    except Exception as json_e:
+                        if not global_config.is_quiet():
+                            log_error(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - JSON parse failed: {json_e}, creating minimal record")
+                        # If JSON parsing fails, create a minimal record
+                        api_record = {
+                            'id': str(geocoding_record['geocoding_id']),  # Ensure string ID
+                            'street': '',
+                            'city': '',
+                            'state': '',
+                            'zip': ''
+                        }
+
+                batch_addresses.append(api_record)
+                record_map[geocoding_record['geocoding_id']] = geocoding_record
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} (type: {type(geocoding_record['geocoding_id'])}) - added to batch_addresses: {api_record}")
+                    log_debug(self.logger, f"DEBUG: record_map keys after addition: {[(k, type(k)) for k in list(record_map.keys())[-3:]]}")
+
+            # Make batch API call
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"Making batch API call with {len(batch_addresses)} addresses")
+                # Log the actual address data being sent to API
+                for addr in batch_addresses:
+                    log_debug(self.logger, f"API call address: id={addr.get('id')}, street='{addr.get('street')}', city='{addr.get('city')}', state='{addr.get('state')}', zip='{addr.get('zip')}'")
+            api_results = cg.addressbatch(batch_addresses)
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: API call completed, api_results: {api_results}")
+
+            # Process results
+            results = []
+            if api_results and len(api_results) > 0:
+                if not global_config.is_quiet():
+                    log_debug(self.logger,f"Census API call params {api_results}")
+
+                for result in api_results:
+                    geocoding_id = result.get('id')
+
+                    # Try multiple lookup strategies to handle type mismatches
+                    geocoding_record = record_map.get(geocoding_id)
+                    if not geocoding_record:
+                        # Try with str() conversion
+                        geocoding_record = record_map.get(str(geocoding_id))
+                    if not geocoding_record:
+                        # Try with UUID conversion if it's a string
+                        try:
+                            from uuid import UUID
+                            if isinstance(geocoding_id, str):
+                                geocoding_record = record_map.get(UUID(geocoding_id))
+                        except (ValueError, TypeError):
+                            pass
+
+                    if not geocoding_record:
+                        if not global_config.is_quiet():
+                            log_error(self.logger, f"PHASE 2: CRITICAL ERROR - No geocoding_record found for geocoding_id {geocoding_id} (type: {type(geocoding_id)})")
+                            log_error(self.logger, f"PHASE 2: Available geocoding_ids in record_map: {[(k, type(k)) for k in list(record_map.keys())[:5]]}")
+                            log_error(self.logger, f"PHASE 2: API result being processed: {result}")
+                        continue
+
+                    lat = result.get('lat')
+                    lon = result.get('lon')
+                    match = result.get('match', False)
+                    matchtype = result.get('matchtype')
+
+                    if not global_config.is_quiet():
+                        log_debug(self.logger, f"DEBUG: Processing result for geocoding_id {geocoding_id}: lat={lat}, lon={lon}, match={match}, matchtype={matchtype}")
+
+                    # The census API uses 'match' boolean and 'matchtype' string
+                    # We need to determine success based on match and presence of coordinates
+                    if match and lat is not None and lon is not None and str(lat).strip() and str(lon).strip():
+                        # Success - include match type in status if not Exact
+                        geocoding_status = 'Match'
+                        if matchtype and matchtype != 'Exact':
+                            geocoding_status = f'Match:{matchtype}'
+
+                        api_result = {
+                            'status': 'success',
+                            'latitude': round(float(lat), 4),
+                            'longitude': round(float(lon), 4),
+                            'geocoding_status': geocoding_status
+                        }
+                        if not global_config.is_quiet():
+                            log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_id} - success result: {api_result}")
+                    else:
+                        # No match or invalid result
+                        api_result = {
+                            'status': 'failed',
+                            'geocoding_status': 'No_Match'
+                        }
+                        if not global_config.is_quiet():
+                            log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_id} - failed result: {api_result}")
+
+
+                    results.append({
+                        'geocoding_record': geocoding_record,
+                        'api_result': api_result,
+                        'last_attempt': datetime.now().isoformat(),
+                        'attempt_count': geocoding_record.get('attempt_count', 0) + 1
+                    })
+            else:
+                # No results from API
+                if not global_config.is_quiet():
+                    log_debug(self.logger,f"Census API call NO RESULT")
+                    log_debug(self.logger, f"DEBUG: batch_addresses that were sent: {batch_addresses}")
+                for geocoding_record in batch:
+                    if not global_config.is_quiet():
+                        log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - no API result, creating failed result")
+                    results.append({
+                        'geocoding_record': geocoding_record,
+                        'api_result': {'status': 'failed', 'error': 'no result from API'},
+                        'last_attempt': datetime.now().isoformat(),
+                        'attempt_count': geocoding_record.get('attempt_count', 0) + 1
+                    })
+
+            return results
+
+        except Exception as e:
+            # Batch API call failed
+            return [{'geocoding_record': record, 'api_result': {'status': 'failed', 'error': str(e)},
+                     'last_attempt': datetime.now().isoformat(), 'attempt_count': record.get('attempt_count', 0) + 1}
+                    for record in batch]
+
+
+
+class GeolocationConsumer(BaseConsumer):
+    """
+    Consumer for address geocoding - executes geocoding result operations.
+
+    PRODUCER-CONSUMER PATTERN WARNING:
+    This class is responsible for executing database operations.
+    Only consumers may perform database writes. Producers handle API calls and pass results.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations):
+        super().__init__(db_ops)
+        self.address_dedup = AddressDeduplicationProcessor(db_ops)
+
+    def _process_operations_batch(self, operations_by_type) -> int:
+        """Process operations batch for geocoding consumer"""
+        total_updated = 0
+
+        # Handle INSERT_GEOCODING operations (creating geocoding records)
+        if DatabaseOperationType.INSERT_GEOCODING.value in operations_by_type:
+            geocoding_objects = []
+            address_updates = []  # Track which addresses need geocoding_id updates
+
+            for operation in operations_by_type[DatabaseOperationType.INSERT_GEOCODING.value]:
+                data = operation.data
+                # Create Geocoding object
+                geocoding = Geocoding(
+                    normalized_address=data['normalized_address'],
+                    latitude=data.get('latitude'),
+                    longitude=data.get('longitude'),
+                    geocoding_status=data.get('status', 'pending')
+                )
+                geocoding_objects.append(geocoding)
+
+                # Track the address that needs to be updated with this geocoding_id
+                if 'address_id' in data:
+                    address_updates.append({
+                        'address_id': data['address_id'],
+                        'geocoding_id': geocoding.geocoding_id  # Will be set after bulk insert
+                    })
+
+            # Bulk insert geocoding records
+            if geocoding_objects:
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"PHASE 1 CONSUMER: About to bulk insert {len(geocoding_objects)} geocoding records")
+                    for geo in geocoding_objects:
+                        log_debug(self.logger, f"PHASE 1 CONSUMER: Inserting geocoding record - geocoding_id={geo.geocoding_id}, normalized_address='{geo.normalized_address}', status='{geo.geocoding_status}'")
+
+                geocoding_ids = self.db_ops.bulk_insert(geocoding_objects)
+                total_updated += len(geocoding_ids)
+
+                # Now update addresses with their geocoding_ids
+                for i, geocoding_id in enumerate(geocoding_ids):
+                    if i < len(address_updates):
+                        address_update = address_updates[i]
+                        address_id = address_update['address_id']
+
+                        if not global_config.is_quiet():
+                            log_debug(self.logger, f"PHASE 1 CONSUMER: Updating address {address_id} with geocoding_id {geocoding_id}")
+
+                        # Update the address with the geocoding_id
+                        self.db_ops.execute_query("""
+                            UPDATE Addresses SET geocoding_id = ? WHERE address_id = ?
+                        """, (str(geocoding_id), address_id))
+
+                        total_updated += 1
+
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"PHASE 1 CONSUMER: Bulk insert completed - inserted {len(geocoding_ids)} geocoding records with IDs: {geocoding_ids[:5]}{'...' if len(geocoding_ids) > 5 else ''}")
+                    # Commit confirmation logging
+                    log_debug(self.logger, f"PHASE 1 CONSUMER: Committing geocoding record insertions and address updates...")
+                    self.db_ops.commit()
+                    log_debug(self.logger, f"PHASE 1 CONSUMER: Geocoding record insertions and address updates committed successfully")
+
+        # Handle UPDATE_GEOCODING operations (updating geocoding records with API results)
+        if DatabaseOperationType.UPDATE_GEOCODING.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.UPDATE_GEOCODING.value]:
+                data = operation.data
+                geocoding_id = data['geocoding_id']
+                api_result = data['api_result']
+
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"PHASE 2 CONSUMER: Processing UPDATE_GEOCODING for geocoding_id {geocoding_id} - status: {api_result['status']}")
+
+                # Update geocoding record with API results
+                if api_result['status'] == 'success':
+                    if not global_config.is_quiet():
+                        log_debug(self.logger, f"PHASE 2 CONSUMER: Updating geocoding_id {geocoding_id} with SUCCESS - lat={api_result['latitude']}, lon={api_result['longitude']}, status={api_result['geocoding_status']}")
+
+                    self.db_ops.execute_query("""
+                        UPDATE Geocoding SET
+                            latitude = ?, longitude = ?, geocoding_status = ?,
+                            last_attempt = ?, attempt_count = ?
+                        WHERE geocoding_id = ?
+                    """, (
+                        api_result['latitude'], api_result['longitude'], api_result['geocoding_status'],
+                        data['last_attempt'], data['attempt_count'], geocoding_id
+                    ))
+
+                    # Update all addresses that reference this geocoding record
+                    colocator = f"LL:{api_result['latitude']}:{api_result['longitude']}"
+                    if not global_config.is_quiet():
+                        log_debug(self.logger, f"PHASE 2 CONSUMER: Updating addresses with geocoding_id {geocoding_id} to colocator '{colocator}'")
+                    self._update_addresses_with_geocoding(geocoding_id, colocator)
+
+                    # Create operations to update owner colocator
+                    self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator)
+                else:
+                    # Update with failed status
+                    if not global_config.is_quiet():
+                        log_debug(self.logger, f"PHASE 2 CONSUMER: Updating geocoding_id {geocoding_id} with FAILED - status={api_result.get('geocoding_status', 'failed')}")
+
+                    self.db_ops.execute_query("""
+                        UPDATE Geocoding SET
+                            geocoding_status = ?,
+                            last_attempt = ?, attempt_count = ?
+                        WHERE geocoding_id = ?
+                    """, (
+                        api_result.get('geocoding_status', 'failed'),
+                        data['last_attempt'], data['attempt_count'], geocoding_id
+                    ))
+
+                total_updated += 1
+
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"PHASE 2 CONSUMER: Processed {len(operations_by_type[DatabaseOperationType.UPDATE_GEOCODING.value])} UPDATE_GEOCODING operations")
+                # Commit confirmation logging
+                log_debug(self.logger, f"PHASE 2 CONSUMER: Committing geocoding API result updates...")
+                self.db_ops.commit()
+                log_debug(self.logger, f"PHASE 2 CONSUMER: Geocoding API result updates committed successfully")
+
+        # Handle GENERIC_UPDATE operations (PO Box updates)
+        if DatabaseOperationType.GENERIC_UPDATE.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.GENERIC_UPDATE.value]:
+                data = operation.data
+
+                if data.get('table') == 'Addresses':
+                    # PO Box update
+                    updates = data['updates']
+                    where = data['where']
+                    self.db_ops.execute_query(f"""
+                        UPDATE Addresses SET {', '.join(f'{k} = ?' for k in updates.keys())}
+                        WHERE {', '.join(f'{k} = ?' for k in where.keys())}
+                    """, list(updates.values()) + list(where.values()))
+
+                    # Update owner with colocator if present
+                    if 'colocator' in updates and where.get('address_id'):
+                        self._update_owner_colocator(where['address_id'], updates['colocator'])
+
+                    total_updated += 1
+
+        return total_updated
+
+    def _update_addresses_with_geocoding(self, geocoding_id: str, colocator: str):
+        """Update all addresses that reference this geocoding record"""
+        # Get all addresses with this geocoding_id
+        addresses = self.db_ops.select_dataclass(
+            dataclass_type=Address,
+            where_clause="geocoding_id = ?",
+            params=(geocoding_id,)
+        )
+
+        if not global_config.is_quiet():
+            log_debug(self.logger, f"PHASE 2 CONSUMER: Found {len(addresses)} addresses referencing geocoding_id {geocoding_id}")
+
+        for address in addresses:
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"PHASE 2 CONSUMER: Updating address {address.address_id} with colocator '{colocator}'")
+            # Update address with colocator only (geocoding_id is already set)
+            self.db_ops.update_address_geocoding(address.address_id, None, colocator)
+
+            # Update owner with colocator - create operations for this
+            try:
+                self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator)
+            except Exception as e:
+                if not global_config.is_quiet():
+                    log_error(self.logger, f"PHASE 2 CONSUMER: Failed to update owner colocator for geocoding_id {geocoding_id}: {e}")
+
+    def _create_owner_colocator_operations_from_geocoding(self, geocoding_id: str, colocator: str):
+        """Create operations to update owner colocator from geocoding success - called from consumer"""
+        # Get all addresses that reference this geocoding record
+        addresses = self.db_ops.select_dataclass(
+            dataclass_type=Address,
+            where_clause="geocoding_id = ?",
+            params=(geocoding_id,)
+        )
+
+        for address in addresses:
+            if address.owner_id:  # Only update if we have an owner_id
+                if address.address_type == 'charity':
+                    # Update charity record
+                    self.db_ops.execute_query("""
+                        UPDATE Charities SET colocator = ? WHERE charity_id = ?
+                    """, (colocator, address.owner_id))
+                elif address.address_type == 'grant':
+                    self.db_ops.execute_query("""
+                        UPDATE Grants SET colocator = ? WHERE grant_id = ?
+                    """, (colocator, address.owner_id))
+                elif address.address_type == 'contractor':
+                    self.db_ops.execute_query("""
+                        UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
+                    """, (colocator, address.owner_id))
+                elif address.address_type == 'politicalcontribution':
+                    self.db_ops.execute_query("""
+                        UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
+                    """, (colocator, address.owner_id))
+
+    def log_info(self, msg: str, *args, ein: Optional[str] = None):
+        """Log info with optional EIN context"""
+        if not global_config.is_quiet():
+            log_info(self.logger, msg, *args, ein=ein)
+
+    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
+        """Log debug with optional EIN context"""
+        if not global_config.is_quiet():
+            log_debug(self.logger, msg, *args, ein=ein)
+
+    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
+        """Log warning with optional EIN context - always shown even in quiet mode"""
+        log_warning(self.logger, msg, *args, ein=ein)
+
+    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
+        """Log error with optional EIN context - always shown even in quiet mode"""
+        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
+
+
+def geolocate_addresses(db_ops: DatabaseOperations, progress_bar=None) -> int:
+    """
+    Geolocate addresses using Producer-Consumer pattern with threading.
+
+    Args:
+        db_ops: Database operations instance
+        progress_bar: Optional progress bar to update
+
+    Returns:
+        Number of addresses processed
+    """
+    logger = get_logger("geolocation")
+
+    # Check if censusgeocode is available
+    if cg is None:
+        if not global_config.is_quiet():
+            log_warning(logger, "censusgeocode library not available. Skipping geocoding. "
+                            "To enable geocoding, install with: pip install censusgeocode")
+        return 0
+
+    try:
+        # Use producer-consumer pattern with threading
+        import queue
+        import threading
+
+        if not global_config.is_quiet():
+            log_info(logger, f"Starting geocoding with batch_size={GEOCODING_BATCH_SIZE}, api_batch_size={GEOCODING_API_BATCH_SIZE}, fast_workers={GEOCODING_FAST_WORKERS}, api_workers={GEOCODING_API_WORKERS}")
+
+        # Set up progress bar for geocoding
+        from logging_utils import start_progress_reporting
+
+        # Estimate total work for progress bar (addresses needing geocoding + geocoding records needing API calls)
+        total_work = _estimate_total_geocoding_work(db_ops)
+        progress_desc = "Geolocating addresses"
+        pbar = start_progress_reporting(total=total_work, desc=progress_desc, unit="tasks")
+
+        # Create producer and consumer instances
+        producer_gc = GeolocationProducerGC(db_ops, GEOCODING_BATCH_SIZE)
+        producer_api = GeolocationProducerAPI(db_ops, GEOCODING_API_BATCH_SIZE)
+        consumer = GeolocationConsumer(db_ops)
+
+        # Phase 1: Create geocoding records
+        phase1_count = self._run_phase_with_producer(producer_gc, "Phase 1: Creating geocoding records", pbar)
+        if not global_config.is_quiet():
+            log_info(logger, f"Phase 1 completed: created geocoding records for {phase1_count} addresses")
+
+        # Phase 2: Make API calls to update geocoding records
+        phase2_count = self._run_phase_with_producer(producer_api, "Phase 2: Making API calls", pbar)
+        if not global_config.is_quiet():
+            log_info(logger, f"Phase 2 completed: made API calls for {phase2_count} geocoding records")
+
+        return phase1_count + phase2_count
+
+    except Exception as e:
+        log_error(logger, f"Address geocoding failed: {e}", exc_info=True)
+        return 0
+
+    def _run_phase_with_producer(self, producer, phase_name: str, progress_bar) -> int:
+        """Run a geocoding phase with a specific producer"""
+        try:
+            # Create shared condition for producer-consumer synchronization
+            batch_condition = threading.Condition()
+
+            # Create queues for producer-consumer communication
+            operation_queue = queue.Queue(maxsize=1000)  # Queue for DatabaseOperation objects
+
+            # Start consumer thread
+            consumer_thread = threading.Thread(
+                target=_consumer_worker,
+                args=(operation_queue, progress_bar, batch_condition, consumer, logger)
+            )
+            consumer_thread.daemon = True
+            consumer_thread.start()
+
+            # Producer: collect operations and send to consumer
+            producer_thread = threading.Thread(
+                target=_producer_worker,
+                args=(operation_queue, batch_condition, producer, logger)
+            )
+            producer_thread.daemon = True
+            producer_thread.start()
+
+            # Wait for producer to finish
+            producer_thread.join()
+
+            # Signal consumer to finish and wait
+            operation_queue.put(None)  # Sentinel value
+            consumer_thread.join(timeout=30.0)
+
+            if consumer_thread.is_alive():
+                log_error(logger, f"Consumer thread did not finish within timeout for {phase_name}")
+                return 0
+
+            # Return the total updated count from consumer
+            return getattr(consumer_thread, '_total_updated', 0)
+
+        except Exception as e:
+            log_error(logger, f"Phase failed ({phase_name}): {e}", exc_info=True)
+            return 0
+
+
+def _producer_worker(operation_queue, batch_condition, producer, logger):
+    """Producer thread: collects geocoding operations"""
+    try:
+        canonical_addresses_processed = 0
+
+        while True:
+            # Get next batch of geocoding work (always first batch due to OFFSET anti-pattern)
+            batch = producer._get_work_batch(0)  # OFFSET removed, always get first batch
+
+            if not batch:
+                # No more work found
+                if not global_config.is_quiet():
+                    log_info(logger, "No more geocoding work found")
+                break
+
+            # Apply max_files limit to the batch if specified
+            if global_config.max_files:
+                remaining = global_config.max_files - canonical_addresses_processed
+                if remaining <= 0:
+                    if not global_config.is_quiet():
+                        log_info(logger, f"Reached max_files limit: {global_config.max_files} canonical addresses")
+                    break
+                batch = batch[:remaining]
+
+            # Process batch into operations
+            operations = producer._process_work_batch(batch)
+
+            # Send operations to consumer
+            for operation in operations:
+                operation_queue.put(operation, block=True)
+
+            # Send batch completion marker
+            batch_completion = DatabaseOperation(
+                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                data={"batch_complete": True, "batch_size": len(batch)}
+            )
+            operation_queue.put(batch_completion, block=True)
+
+            # Wait for consumer to signal batch completion before fetching next batch
+            with batch_condition:
+                batch_condition.wait()
+
+            # Count canonical addresses processed
+            canonical_addresses_processed += len(batch)
+
+            # Log progress periodically
+            if canonical_addresses_processed % 1000 == 0:
+                if not global_config.is_quiet():
+                    log_info(logger, f"Processed {canonical_addresses_processed} canonical addresses so far")
+
+        if not global_config.is_quiet():
+            log_info(logger, f"Producer completed: sent operations for {canonical_addresses_processed} canonical addresses")
+
+        # Print statement when fast threads finish (API work remains)
+        print(f"Fast geocoding threads completed. API geocoding work remaining.")
+
+    except Exception as e:
+        log_error(logger, f"Producer worker failed: {e}", exc_info=True)
+
+
+def _estimate_total_geocoding_work(db_ops: DatabaseOperations) -> int:
+    """Estimate total geocoding work for progress bar"""
+    try:
+        # Count distinct canonical addresses that need geocoding records created
+        address_query = """
+            SELECT COUNT(DISTINCT canonical_address) FROM Addresses
+            WHERE master_id IS NULL
+                AND (colocator IS NULL OR colocator = '')
+                AND canonical_address IS NOT NULL
+                AND canonical_address != ''
+        """
+        address_result = db_ops.execute_query(address_query)
+        address_count = address_result.fetchone()[0] if address_result else 0
+
+        # Count geocoding records that need API calls
+        geocoding_query = """
+            SELECT COUNT(*) FROM Geocoding
+            WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
+        """
+        geocoding_result = db_ops.execute_query(geocoding_query)
+        geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
+
+        total_work = address_count + geocoding_count
+        return total_work
+    except Exception:
+        # Fallback to a reasonable estimate
+        return 10000
+
+
+def _consumer_worker(operation_queue, progress_bar, batch_condition, consumer, logger):
+    """Consumer thread: executes geocoding operations"""
+    try:
+        batch_operations = []
+        total_updated = 0
+
+        while True:
+            # Get next operation from queue
+            operation = operation_queue.get()
+
+            if operation is None:
+                # Sentinel value - process final batch and exit
+                if batch_operations:
+                    batch_updated = consumer.execute_operations_batch(batch_operations)
+                    total_updated += batch_updated
+                operation_queue.task_done()
+                break
+
+            # Check for batch completion marker
+            if (operation.operation_type == DatabaseOperationType.PROGRESS_UPDATE and
+                operation.data.get("batch_complete")):
+                # Process any remaining operations in current batch
+                if batch_operations:
+                    batch_updated = consumer.execute_operations_batch(batch_operations)
+                    total_updated += batch_updated
+                    batch_operations = []
+
+                # Signal producer that batch is complete
+                with batch_condition:
+                    batch_condition.notify()
+                operation_queue.task_done()
+                continue
+
+            batch_operations.append(operation)
+
+            # Process batch when it reaches a reasonable size
+            if len(batch_operations) >= 50:
+                batch_updated = consumer.execute_operations_batch(batch_operations)
+                total_updated += batch_updated
+                batch_operations = []
+
+            operation_queue.task_done()
+
+        # Store total for return
+        consumer_thread = threading.current_thread()
+        consumer_thread._total_updated = total_updated
+        if not global_config.is_quiet():
+            log_info(logger, f"Consumer processed {total_updated} address geocoding operations")
+
+    except Exception as e:
+        log_error(logger, f"Consumer worker failed: {e}", exc_info=True)
+        consumer_thread = threading.current_thread()
+        consumer_thread._total_updated = 0
+
+class GeolocationProcessor:
+    """
+    Main processor for address geocoding using Producer-Consumer pattern.
+
+    This processor coordinates producers and consumers to safely geocode
+    addresses in batches, following the same pattern as XMLProcessor.
+    """
 
     def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
-        self.address_dedup = AddressDeduplicationProcessor(db_ops)
+        self.logger = get_logger("geolocation")
 
-    def _normalize_state(self, state: str) -> Optional[str]:
-        """Normalize state to uppercase abbreviation, handling full names and case issues"""
-        if not state:
-            return None
+        # Create producer and consumer instances
+        self.producer_gc = GeolocationProducerGC(db_ops, GEOCODING_BATCH_SIZE)
+        self.producer_api = GeolocationProducerAPI(db_ops, GEOCODING_API_BATCH_SIZE)
+        self.consumer = GeolocationConsumer(db_ops)
 
-        # Uppercase the input
-        state_upper = state.upper().strip()
+    def geolocate_addresses(self, progress_bar=None) -> int:
+        """
+        Geolocate addresses using two-phase Producer-Consumer pattern.
 
-        # If it's already a valid abbreviation, return it
-        if state_upper in VALID_STATES:
-            return state_upper
+        Phase 1: Create geocoding records for addresses needing geocoding
+        Phase 2: Make API calls to update geocoding records
 
-        # If it's a full state name, map to abbreviation
-        if state_upper in STATE_NAME_TO_ABBREV:
-            return STATE_NAME_TO_ABBREV[state_upper]
+        Args:
+            progress_bar: Optional progress bar to update
 
-        # Not recognized
-        return None
-
-    def _detect_po_box_from_address_lines(self, address: Address) -> Optional[str]:
-        """Detect PO Box from address lines using regex"""
-        address_lines_to_check = []
-        if address.address_line1:
-            address_lines_to_check.append(address.address_line1)
-        if address.address_line2:
-            address_lines_to_check.append(address.address_line2)
-
-        for line_idx, line in enumerate(address_lines_to_check):
-            match = PO_BOX_REGEX.search(line)
-            if match:
-                po_box_str = match.group(1)
-                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                if number_match:
-                    po_box = number_match.group(0)
-                    if not global_config.is_quiet():
-                        log_info(logger, f"Fallback PO Box detection for address {address.address_id}: found '{po_box}' in line{line_idx + 1}='{line}'")
-                    return po_box
-        return None
-
-
-    def geolocate_addresses(self) -> int:
-        """Geolocate addresses using multithreaded census API calls"""
-        if not global_config.is_quiet():
-            log_info(logger, "Starting multithreaded address geolocation")
+        Returns:
+            Number of addresses processed
+        """
+        log_info(self.logger, "Starting address geocoding with two-phase Producer-Consumer pattern")
 
         # Check if censusgeocode is available
         if cg is None:
             if not global_config.is_quiet():
-                log_warning(logger, "censusgeocode library not available. Skipping geocoding. "
+                log_warning(self.logger, "censusgeocode library not available. Skipping geocoding. "
                                 "To enable geocoding, install with: pip install censusgeocode")
             return 0
 
-        # Create work and result queues
-        work_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
-        result_queue = queue.Queue(maxsize=self.QUEUE_SIZE)
-
-        # Start consumer thread
-        consumer_thread = threading.Thread(
-            target=self._geocoding_consumer,
-            args=(result_queue,),
-            daemon=True
-        )
-        consumer_thread.start()
-        if not global_config.is_quiet():
-            log_info(logger, "Started consumer thread")
-
-        # Start API worker threads
-        api_threads = []
-        for i in range(self.MAX_API_WORKERS):
-            thread = threading.Thread(
-                target=self._geocoding_worker,
-                args=(work_queue, result_queue, i),
-                daemon=True
-            )
-            thread.start()
-            api_threads.append(thread)
-        if not global_config.is_quiet():
-            log_info(logger, f"Started {self.MAX_API_WORKERS} API worker threads")
-
-        total_geolocated = 0
-        batch_count = 0
-
-        if not global_config.is_quiet():
-            print("Starting address geocoding...")
-
-        while True:
-            batch_count += 1
-            if not global_config.is_quiet():
-                log_info(logger, f"Batch {batch_count}: Getting addresses for geocoding")
-
-            # Get next batch of master addresses for geocoding
-            batch_addresses = self.address_dedup.get_master_addresses_for_geocoding()
-            if len(batch_addresses) > self.BATCH_SIZE:
-                batch_addresses = batch_addresses[:self.BATCH_SIZE]
-            if not batch_addresses:
-                if not global_config.is_quiet():
-                    log_info(logger, "No more addresses to process, breaking batch loop")
-                break
-
-            if not global_config.is_quiet():
-                log_info(logger, f"Batch {batch_count}: Processing {len(batch_addresses)} addresses")
-
-            # Process batch with multithreading
-            batch_geolocated = self._geolocate_batch_multithreaded(
-                batch_addresses, work_queue, result_queue, batch_count
-            )
-            total_geolocated += batch_geolocated
-            if not global_config.is_quiet():
-                log_info(logger, f"Batch {batch_count}: Geolocation complete, {batch_geolocated} addresses processed")
-
-            pass
-
-        if not global_config.is_quiet():
-            log_info(logger, f"All batches processed, total geolocated: {total_geolocated}")
-
-        # Signal workers to stop
-        if not global_config.is_quiet():
-            log_info(logger, "Signaling workers to stop")
-        for _ in range(self.MAX_API_WORKERS):
-            work_queue.put(None)
-
-        # Wait for all threads to complete
-        if not global_config.is_quiet():
-            log_info(logger, "Waiting for threads to complete")
-        for i, thread in enumerate(api_threads):
-            if not global_config.is_quiet():
-                log_info(logger, f"Waiting for API worker {i}")
-            thread.join(timeout=5.0)
-            if thread.is_alive():
-                if not global_config.is_quiet():
-                    log_warning(logger, f"API worker {i} did not stop cleanly")
-
-        if not global_config.is_quiet():
-            log_info(logger, "Waiting for consumer thread")
-        consumer_thread.join(timeout=5.0)
-        if consumer_thread.is_alive():
-            if not global_config.is_quiet():
-                log_warning(logger, "Consumer thread did not stop cleanly")
-
-        # Stop progress reporting
-        stop_progress_reporting()
-
-        if not global_config.is_quiet():
-            print(f"Geolocation complete: {total_geolocated} addresses geolocated")
-        return total_geolocated
-
-    def _geolocate_batch_multithreaded(self, batch: List[Address], work_queue: queue.Queue, result_queue: queue.Queue, batch_num: int) -> int:
-        """Geolocate a batch of addresses using multithreading"""
-        if not global_config.is_quiet():
-            log_info(logger, f"Batch {batch_num}: Processing {len(batch)} addresses with multithreading")
-
-        # Parse addresses and prepare work items
-        work_items = self._prepare_geocoding_work(batch)
-        if not global_config.is_quiet():
-            log_info(logger, f"Batch {batch_num}: Prepared {len(work_items)} work items")
-        if not work_items:
-            if not global_config.is_quiet():
-                log_info(logger, f"Batch {batch_num}: No work items to process")
-            return 0
-
-        # Submit work to queue
-        if not global_config.is_quiet():
-            log_info(logger, f"Batch {batch_num}: Submitting {len(work_items)} work items to queue")
-        for work_item in work_items:
-            work_queue.put(work_item)
-        if not global_config.is_quiet():
-            log_info(logger, f"Batch {batch_num}: All work items submitted")
-
-        # Wait for all results - results are lists of (address_id, geocoding_id) tuples
-        total_expected_results = len(work_items)  # One result list per work item
-        completed_results = 0
-        geolocated_count = 0
-
-        if not global_config.is_quiet():
-            log_info(logger, f"Batch {batch_num}: Waiting for {total_expected_results} work item results")
-        while completed_results < total_expected_results:
-            if not global_config.is_quiet():
-                log_debug(logger, f"Batch {batch_num}: Waiting for result {completed_results + 1}/{total_expected_results}")
-            try:
-                result = result_queue.get(timeout=30.0)  # 30 second timeout
-                if result is None:  # Shutdown signal
-                    if not global_config.is_quiet():
-                        log_info(logger, f"Batch {batch_num}: Received shutdown signal")
-                    break
-
-                # Result is a list of (address_id, geocoding_id) tuples from one work item
-                if isinstance(result, list):
-                    geolocated_count += len(result)
-                    completed_results += 1
-                    if not global_config.is_quiet():
-                        log_debug(logger, f"Batch {batch_num}: Received result {completed_results}/{total_expected_results}, addresses in result: {len(result)}, total geolocated: {geolocated_count}")
-                else:
-                    if not global_config.is_quiet():
-                        log_warning(logger, f"Batch {batch_num}: Unexpected result type: {type(result)}, value: {result}")
-                    completed_results += 1
-
-            except queue.Empty:
-                if not global_config.is_quiet():
-                    log_warning(logger, f"Batch {batch_num}: Timeout waiting for geocoding results ({completed_results}/{total_expected_results} completed)")
-                break
-
-        if not global_config.is_quiet():
-            log_info(logger, f"Batch {batch_num}: Multithreaded processing complete: {geolocated_count} addresses geolocated from {completed_results} work items")
-        return geolocated_count
-
-    def _prepare_geocoding_work(self, batch: List[Address]) -> List[Dict[str, Any]]:
-        """Prepare geocoding work items from address batch"""
-        if not global_config.is_quiet():
-            log_info(logger, f"Preparing geocoding work for {len(batch)} addresses")
-        work_items = []
-        processed_count = 0
-        skipped_po_box = 0
-        failed_parse = 0
-
-        for address in batch:
-            if not global_config.is_quiet():
-                log_debug(logger, f"Processing address {address.address_id}: {address.canonical_address}")
-
-            # Check for PO Box detection during geocoding
-            fallback_po_box = self._detect_po_box_from_address_lines(address)
-
-            if fallback_po_box:
-                # Update the record with detected PO Box and set colocator
-                colocator = f"PO:{fallback_po_box}:{address.zip_code or ''}"
-                if not global_config.is_quiet():
-                    log_info(logger, f"Skipping PO Box address {address.address_id}, setting colocator: {colocator}")
-                self.db_ops.update_address_po_box_and_colocator(str(address.address_id), fallback_po_box, colocator)
-                skipped_po_box += 1
-                continue
-
-            if address.canonical_address and address.canonical_address.strip():
-                work_item = {
-                    'address_ids': [address.address_id],
-                    'street': f"{address.address_line1 or ''} {address.address_line2 or ''}".strip(),
-                    'city': address.city or '',
-                    'state': address.state or '',
-                    'zip': address.zip_code or '',
-                    'canonical_address': address.canonical_address
-                }
-                work_items.append(work_item)
-                processed_count += 1
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Created work item for address {address.address_id}")
-            else:
-                if not global_config.is_quiet():
-                    log_warning(logger, f"Failed to create work item for address {address.address_id}: no canonical address")
-                failed_parse += 1
-
-        if not global_config.is_quiet():
-            log_info(logger, f"Work preparation complete: {processed_count} work items created, {skipped_po_box} PO boxes skipped, {failed_parse} failed to parse")
-        return work_items
-
-    def _geocoding_worker(self, work_queue: queue.Queue, result_queue: queue.Queue, worker_id: int):
-        """Worker thread that makes API calls"""
-        if not global_config.is_quiet():
-            log_info(logger, f"Geocoding worker {worker_id} started")
-
-        while True:
-            try:
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Worker {worker_id}: Waiting for work item")
-                work_item = work_queue.get(timeout=1.0)
-                if work_item is None:  # Shutdown signal
-                    if not global_config.is_quiet():
-                        log_info(logger, f"Worker {worker_id}: Received shutdown signal")
-                    break
-
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Worker {worker_id}: Processing work item for {len(work_item['address_ids'])} addresses")
-
-                # Process the geocoding work
-                results = self._process_geocoding_work(work_item)
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Worker {worker_id}: Completed work item, {len(results)} address results")
-
-                # Send the entire batch of results to consumer for bulk processing
-                result_queue.put(results)
-
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Worker {worker_id}: Batch results sent to queue")
-
-            except queue.Empty:
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Worker {worker_id}: Queue empty, continuing")
-                continue
-            except Exception as e:
-                if not global_config.is_quiet():
-                    log_error(logger, f"Worker {worker_id} error: {e}", exc_info=True)
-                # Send empty result on error
-                result_queue.put([])
-
-        if not global_config.is_quiet():
-            log_info(logger, f"Geocoding worker {worker_id} stopped")
-
-    def _process_geocoding_work(self, work_item: Dict[str, Any]) -> List[Tuple[str, str]]:
-        """Process a single geocoding work item and return list of (address_id, geocoding_id) tuples"""
         try:
+            # Phase 1: Create geocoding records
+            phase1_count = self._run_geocoding_phase(self.producer_gc, "Phase 1: Creating geocoding records")
             if not global_config.is_quiet():
-                log_debug(logger, f"Processing geocoding work for {len(work_item['address_ids'])} addresses: {work_item['canonical_address']}")
+                log_info(self.logger, f"Phase 1 completed: created geocoding records for {phase1_count} addresses")
 
-            # Prepare batch for censusgeocode (single item batch)
-            batch_addresses = [{
-                'id': 0,
-                'street': work_item['street'],
-                'city': work_item['city'],
-                'state': work_item['state'],
-                'zip': work_item['zip']
-            }]
-
+            # Phase 2: Make API calls to update geocoding records
+            phase2_count = self._run_geocoding_phase(self.producer_api, "Phase 2: Making API calls")
             if not global_config.is_quiet():
-                log_debug(logger, f"Making API call for: {work_item['street']}, {work_item['city']}, {work_item['state']} {work_item['zip']}")
+                log_info(self.logger, f"Phase 2 completed: made API calls for {phase2_count} geocoding records")
 
-            # Make API call
-            results = cg.addressbatch(batch_addresses)
-            if not global_config.is_quiet():
-                log_debug(logger, f"API call returned {len(results) if results else 0} results")
-
-            # addressbatch is not used in this method - results are processed directly
-            pass
-
-            if not results:
-                if not global_config.is_quiet():
-                    log_warning(logger, f"API returned no results for: {work_item['canonical_address']}")
-                # Failed geocoding - create geocoding record and return results
-                geocoding_id = self.db_ops.insert_geocoding_record(
-                    str(hash(work_item['canonical_address'])), work_item['canonical_address'], status='failed'
-                )
-                return [(address_id, geocoding_id) for address_id in work_item['address_ids']]
-
-            result = results[0]
-            lat = result.get('lat')
-            lon = result.get('lon')
-            if not global_config.is_quiet():
-                log_debug(logger, f"API result: lat={lat}, lon={lon}")
-
-            if lat is not None and lon is not None and str(lat).strip() and str(lon).strip():
-                # Success
-                lat = round(float(lat), 4)
-                lon = round(float(lon), 4)
-                colocator = f"LL:{lat}:{lon}"
-                if not global_config.is_quiet():
-                    log_info(logger, f"Successfully geocoded '{work_item['canonical_address']}' -> {colocator}")
-
-                # Insert geocoding record
-                geocoding_id = self.db_ops.insert_geocoding_record(
-                    str(hash(work_item['canonical_address'])), work_item['canonical_address'], lat, lon, 'success'
-                )
-
-                return [(address_id, geocoding_id) for address_id in work_item['address_ids']]
-            else:
-                if not global_config.is_quiet():
-                    log_warning(logger, f"API returned invalid lat/lon for: {work_item['canonical_address']}")
-                # Failed - create geocoding record and return results
-                geocoding_id = self.db_ops.insert_geocoding_record(
-                    str(hash(work_item['canonical_address'])), work_item['canonical_address'], status='failed'
-                )
-                return [(address_id, geocoding_id) for address_id in work_item['address_ids']]
+            return phase1_count + phase2_count
 
         except Exception as e:
-            if not global_config.is_quiet():
-                log_error(logger, f"Failed to process geocoding work for {work_item['canonical_address']}: {e}", exc_info=True)
-            # On error, return empty results
-            return []
-
-    def _geocoding_consumer(self, result_queue: queue.Queue):
-        """Consumer thread that processes results and updates database"""
-        if not global_config.is_quiet():
-            log_info(logger, "Geocoding consumer started")
-        total_geolocated: int = 0
-        results_processed = 0
-
-        while True:
-            try:
-                if not global_config.is_quiet():
-                    log_debug(logger, "Consumer: Waiting for result")
-                result = result_queue.get(timeout=1.0)
-                if result is None:  # Shutdown signal
-                    if not global_config.is_quiet():
-                        log_info(logger, "Consumer: Received shutdown signal")
-                    break
-
-                # Result is a list of (address_id, geocoding_id) tuples from one work item
-                if isinstance(result, list):
-                    if not global_config.is_quiet():
-                        log_debug(logger, f"Consumer: Processing batch of {len(result)} results")
-                    self._bulk_update_geocoding(result)
-                    total_geolocated += len(result)
-                else:
-                    if not global_config.is_quiet():
-                        log_warning(logger, f"Consumer: Unexpected result type: {type(result)}")
-
-                results_processed += 1
-                if not global_config.is_quiet():
-                    log_debug(logger, f"Consumer: Processed result {results_processed}, total geolocated: {total_geolocated}")
-
-            except queue.Empty:
-                if not global_config.is_quiet():
-                    log_debug(logger, "Consumer: Queue empty, continuing")
-                continue
-
-        if not global_config.is_quiet():
-            log_info(logger, f"Geocoding consumer stopped. Processed {results_processed} results, total geolocated: {total_geolocated}")
-
-    def _bulk_update_geocoding(self, updates: List[Tuple[str, str]]):
-        """Bulk update geocoding results in database"""
-        if not updates:
-            return
-
-        if not global_config.is_quiet():
-            log_debug(logger, f"Bulk updating {len(updates)} geocoding results")
-
-        # Group updates by geocoding_id for efficiency
-        geocoding_groups = {}
-        for address_id, geocoding_id in updates:
-            if geocoding_id not in geocoding_groups:
-                geocoding_groups[geocoding_id] = []
-            geocoding_groups[geocoding_id].append(address_id)
-
-        # Update each group
-        for geocoding_id, address_ids in geocoding_groups.items():
-            # Get colocator from geocoding record
-            geocoding_result = self.db_ops.execute_query(
-                "SELECT latitude, longitude FROM Geocoding WHERE geocoding_id = ?",
-                (geocoding_id,)
-            ).fetchone()
-
-            colocator = None
-            if geocoding_result and geocoding_result[0] and geocoding_result[1]:
-                lat, lon = geocoding_result[0], geocoding_result[1]
-                colocator = f"LL:{lat}:{lon}"
-
-            # Bulk update addresses
-            for address_id in address_ids:
-                self.db_ops.update_address_geocoding(address_id, geocoding_id, colocator)
-
-                # Propagate geocoding results to child addresses and related records
-                self.address_dedup.propagate_geocoding_results(address_id)
-
-    # Keep the old single-threaded method for compatibility
-    def _geolocate_batch(self, batch: List[Address]) -> int:
-        """Legacy single-threaded geocoding method"""
-        work_items = self._prepare_geocoding_work(batch)
-        if not work_items:
+            log_error(self.logger, f"Address geocoding failed: {e}", exc_info=True)
             return 0
 
-        geolocated_count = 0
-        for work_item in work_items:
-            results = self._process_geocoding_work(work_item)
-            geolocated_count += len(results)
+    def _run_geocoding_phase(self, producer, phase_name: str) -> int:
+        """Run a single geocoding phase using producer-consumer pattern"""
+        try:
+            # Use producer-consumer pattern with threading
+            import queue
+            import threading
 
-        return geolocated_count
+            # Create shared condition for producer-consumer synchronization
+            batch_condition = threading.Condition()
+
+            # Create queues for producer-consumer communication
+            operation_queue = queue.Queue(maxsize=1000)  # Queue for DatabaseOperation objects
+
+            # Start consumer thread
+            consumer_thread = threading.Thread(
+                target=_consumer_worker,
+                args=(operation_queue, None, batch_condition, self.consumer, self.logger)
+            )
+            consumer_thread.daemon = True
+            consumer_thread.start()
+
+            # Producer: collect operations and send to consumer
+            producer_thread = threading.Thread(
+                target=_producer_worker,
+                args=(operation_queue, batch_condition, producer, self.logger)
+            )
+            producer_thread.daemon = True
+            producer_thread.start()
+
+            # Wait for producer to finish
+            producer_thread.join()
+
+            # Signal consumer to finish and wait
+            operation_queue.put(None)  # Sentinel value
+            consumer_thread.join(timeout=30.0)
+
+            if consumer_thread.is_alive():
+                log_error(self.logger, f"Consumer thread did not finish within timeout for {phase_name}")
+                return 0
+
+            # Return the total updated count from consumer
+            return getattr(consumer_thread, '_total_updated', 0)
+
+        except Exception as e:
+            log_error(self.logger, f"Geocoding phase failed ({phase_name}): {e}", exc_info=True)
+            return 0

@@ -520,7 +520,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     parser.add_argument("--quiet", "-q", action="store_true", help="Quiet mode - minimal logging")
     parser.add_argument("--max-files", type=int, default=None, help="Maximum number of XML files to process (default: no limit)")
-    parser.add_argument("--log-sql", action="store_true", help="Enable SQL logging")
+    parser.add_argument("--log-sql", action="store_true", help="Enable SQL logging (implies --verbose)")
     parser.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Number of worker threads (default: {MAX_WORKERS})")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
@@ -576,6 +576,10 @@ def main():
 
     # Set global config from parsed args
     global_config.set_from_args(args)
+
+    # If --log-sql is specified, force verbose mode for SQL logging
+    if args.log_sql:
+        global_config.verbose = True
 
     processor = IRS990Processor(
         db_path=global_config.db_path,

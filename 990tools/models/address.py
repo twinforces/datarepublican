@@ -14,6 +14,7 @@ Colocator Format:
 This allows downstream database joins by location.
 """
 
+import json
 from dataclasses import dataclass, field
 from typing import Optional
 from constants import VALID_STATES, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX, STREET_FIXES, UNIT_FIXES
@@ -193,6 +194,52 @@ class Address(BaseModel):
         super().prep_for_insert()
         # Then do address-specific logic
         self.canonicalize_address()
+
+    def census_json(self) -> dict:
+        """Build JSON dictionary ready for census geocoding API"""
+        # Use the canonicalized address components
+        street_parts = []
+        if self.address_line1:
+            street_parts.append(self.address_line1)
+        if self.address_line2:
+            street_parts.append(self.address_line2)
+
+        census_data = {
+            'id': 0,  # Will be set by caller
+            'street': ' '.join(street_parts).strip(),
+            'city': self.city or '',
+            'state': self.state or '',
+            'zip': self.zip_code or ''
+        }
+
+        # Debug logging: Log census_json creation
+        from logging_utils import log_debug, get_logger
+        logger = get_logger("address")
+        from config import global_config
+        if not global_config.is_quiet():
+            log_debug(logger, f"Address {self.address_id} census_json: street='{census_data['street']}', city='{census_data['city']}', state='{census_data['state']}', zip='{census_data['zip']}'")
+
+        return census_data
+
+    def create_geocoding_operation(self):
+        """Create a geocoding record insertion operation for this address"""
+        from database_operations import DatabaseOperation, DatabaseOperationType
+
+        # Ensure address is canonicalized
+        self.canonicalize_address()
+
+        # Build census JSON
+        census_json = self.census_json()
+
+        # Create geocoding record insertion operation
+        return DatabaseOperation(
+            operation_type=DatabaseOperationType.INSERT_GEOCODING,
+            data={
+                'normalized_address': json.dumps(census_json),  # Store as proper JSON string
+                'address_id': self.address_id,
+                'geocoding_status': 'pending'
+            }
+        )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""

@@ -15,7 +15,7 @@ from mako.template import Template
 def escape_newlines(data):
     """Recursively escape newlines in all strings within data structures"""
     if isinstance(data, str):
-        return data.replace('\n', '\\n')
+        return data.replace('\n', '\\n').replace('|','\\|')
     elif isinstance(data, (list, tuple)):
         return type(data)(escape_newlines(item) for item in data)
     elif isinstance(data, dict):
@@ -60,6 +60,7 @@ class StatsProcessor:
         addresses_analysis = self.get_addresses_analysis()
         addresses_deduplication_analysis = self.get_addresses_deduplication_analysis()
         addresses_colocator_analysis = self.get_addresses_colocator_analysis()
+        geocoding_status_analysis = self.get_geocoding_status_analysis()
 
         # Prepare template data
         template_data = {
@@ -79,6 +80,7 @@ class StatsProcessor:
             'addresses_analysis': addresses_analysis,
             'addresses_deduplication_analysis': addresses_deduplication_analysis,
             'addresses_colocator_analysis': addresses_colocator_analysis,
+            'geocoding_status_analysis': geocoding_status_analysis,
             'notes': notes or "No additional notes."
         }
 
@@ -594,6 +596,54 @@ class StatsProcessor:
         total_with_colocator = result[0] if result else 0
         neither_count = total_with_colocator - po_count - fa_count - ll_count
         analysis['neither_count'] = neither_count
+
+        # Add address type breakdown for colocator
+        result = self.db_ops.execute_query("""
+            SELECT address_type, COUNT(*) as count
+            FROM Addresses
+            WHERE colocator IS NOT NULL AND colocator != ''
+            GROUP BY address_type
+            ORDER BY count DESC
+        """).fetchall()
+        analysis['colocator_by_address_type'] = result
+
+        return analysis
+
+    def get_geocoding_status_analysis(self) -> Dict[str, Any]:
+        """Get analysis for Geocoding table status distribution"""
+        analysis = {}
+
+        # Group by geocoding_status
+        result = self.db_ops.execute_query("""
+            SELECT geocoding_status, COUNT(*) as count
+            FROM Geocoding
+            GROUP BY geocoding_status
+            ORDER BY count DESC
+        """).fetchall()
+        analysis['geocoding_status_counts'] = result
+
+        # Total geocoding records
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as total_geocoding_records
+            FROM Geocoding
+        """).fetchone()
+        analysis['total_geocoding_records'] = result[0] if result else 0
+
+        # Records with latitude/longitude
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as geocoded_with_coords
+            FROM Geocoding
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        """).fetchone()
+        analysis['geocoded_with_coords'] = result[0] if result else 0
+
+        # Records with attempt_count > 0
+        result = self.db_ops.execute_query("""
+            SELECT COUNT(*) as attempted_records
+            FROM Geocoding
+            WHERE attempt_count > 0
+        """).fetchone()
+        analysis['attempted_records'] = result[0] if result else 0
 
         return analysis
 

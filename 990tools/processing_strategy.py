@@ -31,6 +31,8 @@ from config import global_config
 from models import Address
 from xml_processor import XMLProducer, XMLConsumer
 from address_deduplication_processor import AddressDeduplicationProcessor
+from geolocation_processor import GeolocationProcessor
+from geolocation_processor import geolocate_addresses
 
 
 class ProcessingStrategy(ABC):
@@ -519,5 +521,141 @@ class AddressDeduplicationStrategy(ProcessingStrategy):
 
         except Exception as e:
             self.log_error(f"Address deduplication strategy failed: {e}", exc_info=True)
+            return 0
+
+
+class GeolocationStrategy(ProcessingStrategy):
+    """
+    Strategy for address geocoding processing using producer-consumer pattern.
+
+    Processes addresses in batches to geocode them using census API,
+    following the same pattern as XML processing.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
+
+    def execute(self, max_files: Optional[int] = None) -> int:
+        """
+        Execute address geocoding processing.
+
+        Args:
+            max_files: Maximum number of addresses to process (for testing)
+
+        Returns:
+            Number of addresses geocoded
+        """
+        self.log_info("Starting geolocation strategy")
+
+        try:
+            # Create the geolocation processor
+            processor = GeolocationProcessor(self.db_ops)
+
+            # Set up progress bar for geocoding
+            from logging_utils import start_progress_reporting
+
+            # Estimate total addresses that need geocoding for progress bar
+            if max_files:
+                total_operations = max_files
+            else:
+                # Count distinct canonical addresses that need geocoding
+                count_query = """
+                    SELECT COUNT(DISTINCT canonical_address) FROM Addresses
+                    WHERE master_id IS NULL
+                        AND (colocator IS NULL OR colocator = '')
+                        AND canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                """
+                result = self.db_ops.execute_query(count_query)
+                address_count = result.fetchone()[0] if result else 0
+
+                # Count geocoding records that need API calls
+                geocoding_query = """
+                    SELECT COUNT(*) FROM Geocoding
+                    WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
+                """
+                geocoding_result = self.db_ops.execute_query(geocoding_query)
+                geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
+
+                total_operations = address_count + geocoding_count
+
+            progress_desc = "Geolocating addresses"
+            pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="addrs")
+
+            # Execute geocoding with progress bar
+            total_geocoded = processor.geolocate_addresses(progress_bar=pbar)
+
+            # Close progress bar
+            if pbar:
+                pbar.close()
+
+            self.log_info(f"Geolocation strategy complete: {total_geocoded} addresses geocoded")
+            return total_geocoded
+
+        except Exception as e:
+            self.log_error(f"Geolocation strategy failed: {e}", exc_info=True)
+            return 0
+
+
+class GeolocationStrategy(ProcessingStrategy):
+    """
+    Strategy for address geocoding processing using producer-consumer pattern.
+
+    Processes addresses in batches to geocode them using the census API,
+    following the same pattern as XML processing.
+    """
+
+    DEFAULT_BATCH_SIZE = 1000
+
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger, batch_size: int = DEFAULT_BATCH_SIZE, quiet: bool = False):
+        super().__init__(db_ops, logger, quiet)
+        self.batch_size = batch_size
+
+    def execute(self, max_files: Optional[int] = None) -> int:
+        """
+        Execute address geocoding processing.
+
+        Args:
+            max_files: Maximum number of addresses to process (for testing)
+
+        Returns:
+            Number of addresses processed
+        """
+        self.log_info("Starting address geocoding strategy")
+
+        try:
+            # Set up progress bar for geocoding
+            from logging_utils import start_progress_reporting
+
+            # Estimate total canonical addresses that need geocoding for progress bar
+            if max_files:
+                total_operations = max_files
+            else:
+                # Count total canonical addresses that need geocoding (master addresses without colocator)
+                count_query = """
+                    SELECT COUNT(DISTINCT canonical_address) FROM Addresses
+                    WHERE master_id IS NULL
+                        AND (colocator IS NULL OR colocator = '')
+                        AND canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                """
+                result = self.db_ops.execute_query(count_query)
+                total_operations = result.fetchone()[0] if result else 0
+
+            progress_desc = "Geocoding addresses"
+            pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="addrs")
+
+            # Execute geocoding with progress bar
+            total_processed = geolocate_addresses(self.db_ops, progress_bar=pbar)
+
+            # Close progress bar
+            if pbar:
+                pbar.close()
+
+            self.log_info(f"Address geocoding strategy complete: {total_processed} addresses processed")
+            return total_processed
+
+        except Exception as e:
+            self.log_error(f"Address geocoding strategy failed: {e}", exc_info=True)
             return 0
 
