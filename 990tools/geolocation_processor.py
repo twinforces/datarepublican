@@ -600,10 +600,10 @@ class GeolocationConsumer(BaseConsumer):
                     colocator = f"LL:{api_result['latitude']}:{api_result['longitude']}"
                     if not global_config.is_quiet():
                         log_debug(self.logger, f"PHASE 2 CONSUMER: Updating addresses with geocoding_id {geocoding_id} to colocator '{colocator}'")
-                    self._update_addresses_with_geocoding(geocoding_id, colocator)
+                    address_id, master_id = self._update_addresses_with_geocoding(geocoding_id, colocator)
 
                     # Create operations to update owner colocator
-                    self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator)
+                    self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator, address_id, master_id)
                 else:
                     # Update with failed status
                     if not global_config.is_quiet():
@@ -662,47 +662,56 @@ class GeolocationConsumer(BaseConsumer):
         if not global_config.is_quiet():
             log_debug(self.logger, f"PHASE 2 CONSUMER: Found {len(addresses)} addresses referencing geocoding_id {geocoding_id}")
 
+        # Get the first address to return its IDs for colocation operations
+        first_address = addresses[0] if addresses else None
+
         for address in addresses:
             if not global_config.is_quiet():
                 log_debug(self.logger, f"PHASE 2 CONSUMER: Updating address {address.address_id} with colocator '{colocator}'")
             # Update address with colocator only (geocoding_id is already set)
             self.db_ops.update_address_geocoding(address.address_id, None, colocator)
 
-            # Update owner with colocator - create operations for this
-            try:
-                self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator)
-            except Exception as e:
-                if not global_config.is_quiet():
-                    log_error(self.logger, f"PHASE 2 CONSUMER: Failed to update owner colocator for geocoding_id {geocoding_id}: {e}")
+        # Return the address_id and master_id for colocation operations
+        if first_address:
+            return first_address.address_id, first_address.master_id
+        return None, None
 
-    def _create_owner_colocator_operations_from_geocoding(self, geocoding_id: str, colocator: str):
+    def _create_owner_colocator_operations_from_geocoding(self, geocoding_id: str, colocator: str, address_id: str, master_id: str = None):
         """Create operations to update owner colocator from geocoding success - called from consumer"""
-        # Get all addresses that reference this geocoding record
-        addresses = self.db_ops.select_dataclass(
-            dataclass_type=Address,
-            where_clause="geocoding_id = ?",
-            params=(geocoding_id,)
-        )
+        # Use master_id if it exists (this address is a child), otherwise use address_id (this is the master)
+        update_id = master_id if master_id else address_id
 
-        for address in addresses:
-            if address.owner_id:  # Only update if we have an owner_id
-                if address.address_type == 'charity':
-                    # Update charity record
-                    self.db_ops.execute_query("""
-                        UPDATE Charities SET colocator = ? WHERE charity_id = ?
-                    """, (colocator, address.owner_id))
-                elif address.address_type == 'grant':
-                    self.db_ops.execute_query("""
-                        UPDATE Grants SET colocator = ? WHERE grant_id = ?
-                    """, (colocator, address.owner_id))
-                elif address.address_type == 'contractor':
-                    self.db_ops.execute_query("""
-                        UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
-                    """, (colocator, address.owner_id))
-                elif address.address_type == 'politicalcontribution':
-                    self.db_ops.execute_query("""
-                        UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
-                    """, (colocator, address.owner_id))
+        # Update Charities - all charities that have this address as their master or child
+        self.db_ops.execute_query("""
+            UPDATE Charities SET colocator = ? WHERE charity_id IN (
+                SELECT owner_id FROM Addresses
+                WHERE (address_id = ? OR master_id = ?) AND address_type = 'charity' AND owner_id IS NOT NULL
+            )
+        """, (colocator, update_id, update_id))
+
+        # Update Grants - all grants that have this address as their master or child
+        self.db_ops.execute_query("""
+            UPDATE Grants SET colocator = ? WHERE grant_id IN (
+                SELECT owner_id FROM Addresses
+                WHERE (address_id = ? OR master_id = ?) AND address_type = 'grant' AND owner_id IS NOT NULL
+            )
+        """, (colocator, update_id, update_id))
+
+        # Update Contractors - all contractors that have this address as their master or child
+        self.db_ops.execute_query("""
+            UPDATE Contractors SET colocator = ? WHERE contractor_id IN (
+                SELECT owner_id FROM Addresses
+                WHERE (address_id = ? OR master_id = ?) AND address_type = 'contractor' AND owner_id IS NOT NULL
+            )
+        """, (colocator, update_id, update_id))
+
+        # Update PoliticalContributions - all political contributions that have this address as their master or child
+        self.db_ops.execute_query("""
+            UPDATE PoliticalContributions SET colocator = ? WHERE political_id IN (
+                SELECT owner_id FROM Addresses
+                WHERE (address_id = ? OR master_id = ?) AND address_type = 'politicalcontribution' AND owner_id IS NOT NULL
+            )
+        """, (colocator, update_id, update_id))
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
