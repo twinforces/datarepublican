@@ -23,8 +23,8 @@ class ExportProducer(BaseProducer):
     Collects data from database and creates export operations for parallel processing.
     """
 
-    def __init__(self, db_ops: DatabaseOperations, export_type: str, thread_pool_config: ThreadPoolConfig = None):
-        super().__init__(db_ops, batch_size=1000, thread_pool_config=thread_pool_config)
+    def __init__(self, db_ops: DatabaseOperations, export_type: str):
+        super().__init__(db_ops, batch_size=1000)
         self.export_type = export_type
 
     def get_progress_scope(self, bytes=False) -> Dict[str, Any]:
@@ -53,7 +53,7 @@ class ExportProducer(BaseProducer):
         else:
             return 0
 
-    def _get_work_batch(self, offset: int) -> List[Dict[str, Any]]:
+    def _get_work_batch(self, offset: int) -> List[Any]:
         """Get a batch of data for export based on export type"""
         if self.export_type == "charities":
             return self.db_ops.get_latest_charities_for_export_batch(offset, self.batch_size)
@@ -68,14 +68,14 @@ class ExportProducer(BaseProducer):
         else:
             raise ValueError(f"Unknown export type: {self.export_type}")
 
-    def _process_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
+    def _process_work_batch(self, batch: List[Any]) -> List[DatabaseOperation]:
         """Process batch of data into export operations"""
         operations = []
 
         for row in batch:
             # Create export operation with the row data
             operation = DatabaseOperation(
-                operation_type=DatabaseOperationType.CUSTOM,
+                operation_type=DatabaseOperationType.INSERT_CHARITY,  # Use existing operation type
                 data={
                     "export_type": self.export_type,
                     "row_data": row
@@ -93,8 +93,8 @@ class ExportConsumer(BaseConsumer):
     Writes data to TSV files concurrently.
     """
 
-    def __init__(self, db_ops: DatabaseOperations, final_dir: str, thread_pool_config: ThreadPoolConfig = None):
-        super().__init__(db_ops, thread_pool_config=thread_pool_config)
+    def __init__(self, db_ops: DatabaseOperations, final_dir: str):
+        super().__init__(db_ops)
         self.final_dir = final_dir
         self.file_handles = {}  # Cache file handles for each export type
         self.headers_written = set()  # Track which headers have been written
@@ -103,9 +103,9 @@ class ExportConsumer(BaseConsumer):
         """Process export operations and write to TSV files"""
         processed_count = 0
 
-        # Handle custom export operations
-        if "custom" in operations_by_type:
-            for operation in operations_by_type["custom"]:
+        # Handle export operations
+        if DatabaseOperationType.INSERT_CHARITY.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]:
                 export_type = operation.data["export_type"]
                 row_data = operation.data["row_data"]
 
@@ -180,7 +180,7 @@ class ExportConsumer(BaseConsumer):
         else:
             raise ValueError(f"Unknown export type: {export_type}")
 
-    def _format_row(self, row_data: Dict[str, Any]) -> List[str]:
+    def _format_row(self, row_data: Any) -> List[str]:
         """Format row data, converting None to empty string and escaping tabs/newlines"""
         safe_row = []
         for value in row_data:
@@ -202,10 +202,10 @@ class ExportConsumer(BaseConsumer):
 class TSVExporter:
     """Handles TSV export operations for IRS 990 data using producer-consumer pattern"""
 
-    def __init__(self, db_ops: DatabaseOperations, final_dir: str, thread_pool_config: ThreadPoolConfig = None):
+    def __init__(self, db_ops: DatabaseOperations, final_dir: str):
         self.db_ops = db_ops
         self.final_dir = final_dir
-        self.thread_pool_config = thread_pool_config or ThreadPoolConfig(
+        self.thread_pool_config = ThreadPoolConfig(
             producer_config=PoolConfig(max_workers=4, batch_size=1000),
             consumer_config=PoolConfig(max_workers=1, batch_size=1000)  # Single consumer for file safety
         )
@@ -223,8 +223,8 @@ class TSVExporter:
         self.logger.info(f"Starting parallel export for {export_type}")
 
         # Create producer and consumer
-        producer = ExportProducer(self.db_ops, export_type, self.thread_pool_config)
-        consumer = ExportConsumer(self.db_ops, self.final_dir, self.thread_pool_config)
+        producer = ExportProducer(self.db_ops, export_type)
+        consumer = ExportConsumer(self.db_ops, self.final_dir)
 
         try:
             # Collect operations using producer
@@ -244,23 +244,23 @@ class TSVExporter:
             consumer.close_files()
 
     # Legacy methods for backward compatibility (now use parallel versions)
-    def _export_charities_tsv(self):
+    def _export_charities_tsv_legacy(self):
         """Export charities to TSV (legacy method - now uses parallel processing)"""
         self._export_single_type_parallel("charities")
 
-    def _export_grants_tsv(self):
+    def _export_grants_tsv_legacy(self):
         """Export grants to TSV (legacy method - now uses parallel processing)"""
         self._export_single_type_parallel("grants")
 
-    def _export_contractors_tsv(self):
+    def _export_contractors_tsv_legacy(self):
         """Export contractors to TSV (legacy method - now uses parallel processing)"""
         self._export_single_type_parallel("contractors")
 
-    def _export_political_contributions_tsv(self):
+    def _export_political_contributions_tsv_legacy(self):
         """Export political contributions to TSV (legacy method - now uses parallel processing)"""
         self._export_single_type_parallel("political_contributions")
 
-    def _export_officers_tsv(self):
+    def _export_officers_tsv_legacy(self):
         """Export officers to TSV (legacy method - now uses parallel processing)"""
         self._export_single_type_parallel("officers")
 
@@ -283,10 +283,10 @@ class TSVExporter:
             f.write('\t'.join(header) + '\n')
 
             # Write data rows
-            for row in charities:
+            for charity in charities:
                 # Convert None to empty string and escape tabs/newlines
                 safe_row = []
-                for value in row:
+                for value in charity.__dict__.values():
                     if value is None:
                         safe_row.append('')
                     else:
@@ -311,10 +311,10 @@ class TSVExporter:
             f.write('\t'.join(header) + '\n')
 
             # Write data rows
-            for row in grants:
+            for grant in grants:
                 # Convert None to empty string and escape tabs/newlines
                 safe_row = []
-                for value in row:
+                for value in grant.__dict__.values():
                     if value is None:
                         safe_row.append('')
                     else:
@@ -339,10 +339,10 @@ class TSVExporter:
             f.write('\t'.join(header) + '\n')
 
             # Write data rows
-            for row in contractors:
+            for contractor in contractors:
                 # Convert None to empty string and escape tabs/newlines
                 safe_row = []
-                for value in row:
+                for value in contractor.__dict__.values():
                     if value is None:
                         safe_row.append('')
                     else:
@@ -367,10 +367,10 @@ class TSVExporter:
             f.write('\t'.join(header) + '\n')
 
             # Write data rows
-            for row in contributions:
+            for contribution in contributions:
                 # Convert None to empty string and escape tabs/newlines
                 safe_row = []
-                for value in row:
+                for value in contribution.__dict__.values():
                     if value is None:
                         safe_row.append('')
                     else:

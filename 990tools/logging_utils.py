@@ -5,6 +5,7 @@ import inspect
 import os
 from typing import Optional, Callable
 import sys
+import traceback
 from tqdm import tqdm
 from config import global_config
 
@@ -18,10 +19,11 @@ def get_debug_info():
         return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
 
     # Traverse up the stack until we're not in a file with 'log' or 'database' in the name
-    words = ['log', 'database', 'base']
+    words = ['log', 'database'] #, 'base']
     while frame:
         filename = frame.f_code.co_filename
-        if not any(word in filename.lower() for word in words):           
+        function = frame.f_code.co_name
+        if not any(word in filename.lower() for word in words) and not any(word in function.lower() for word in words):           
             break
         frame = frame.f_back
 
@@ -121,8 +123,8 @@ def get_logger(name: str) -> logging.Logger:
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-        # Set level to DEBUG by default, let the calling code control filtering
-        logger.setLevel(logging.DEBUG)
+        # Set level to NOTSET so it inherits from root logger, allowing global control
+        logger.setLevel(logging.NOTSET)
     return logger
 
 def create_stub_log_error(logger: logging.Logger) -> Callable:
@@ -140,3 +142,11 @@ def create_stub_log_debug(logger: logging.Logger) -> Callable:
         effective_logger = logger if logger is not None else get_logger(__name__)
         log_debug(effective_logger, msg, *args, ein=ein, exc_info=exc_info)
     return stub_log_debug
+
+def dump_traceback(logger: logging.Logger, message: str = "Intentional exception for traceback"):
+    """Logs the full stack trace without raising an exception"""
+    try:
+        raise Exception(message)
+    except Exception:
+        log_error(logger, f"Traceback dump: {message}", exc_info=True)
+        pass

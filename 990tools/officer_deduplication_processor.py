@@ -10,7 +10,7 @@ Refactored to use producer-consumer pattern with ThreadPoolManager for parallel 
 
 import logging
 import uuid
-from typing import List, Tuple, Dict, Set, Any
+from typing import List, Tuple, Dict, Set, Any, Optional
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
@@ -186,7 +186,7 @@ class OfficerDeduplicationConsumer(BaseConsumer):
 class OfficerDeduplicationProcessor:
     """Handles officer deduplication and master-child relationship creation using producer-consumer pattern"""
 
-    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: ThreadPoolConfig = None):
+    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: Optional[ThreadPoolConfig] = None):
         self.db_ops = db_ops
         self.logger = get_logger("officer_deduplication")
         self.thread_pool_config = thread_pool_config or ThreadPoolConfig(
@@ -210,7 +210,9 @@ class OfficerDeduplicationProcessor:
         try:
             # Start consumer pool
             thread_pool_manager.start_consumer_pool(
-                consumer.execute_operations_batch,
+                self._consumer_wrapper,
+                len(thread_pool_manager.producer_threads),
+                consumer,
                 progress_callback=self._progress_callback
             )
 
@@ -249,6 +251,37 @@ class OfficerDeduplicationProcessor:
 
         log_info(self.logger, f"Officer deduplication complete. Processed {total_processed} officer records.")
         return total_processed
+
+    def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, consumer, progress_callback=None):
+        """Wrapper for consumer thread execution"""
+        try:
+            log_debug(self.logger, f"Consumer thread {thread_id} starting")
+            sentinels_received = 0
+
+            while True:
+                try:
+                    operation = result_queue.get(timeout=1.0)
+                    if operation is None:  # Sentinel
+                        sentinels_received += 1
+                        if sentinels_received >= num_producers:
+                            break
+                        continue
+
+                    # Execute the operation
+                    if isinstance(operation, DatabaseOperation):
+                        processed = consumer.execute_operations_batch([operation])
+                        if progress_callback:
+                            progress_callback(processed)
+
+                    result_queue.task_done()
+
+                except:
+                    if hasattr(self, 'thread_pool_manager') and self.thread_pool_manager and self.thread_pool_manager.shutdown_event.is_set():
+                        break
+                    continue
+
+        except Exception as e:
+            log_error(self.logger, f"Consumer thread {thread_id} error: {e}", exc_info=True)
 
     def _progress_callback(self, count: int):
         """Progress callback for consumer operations"""

@@ -17,6 +17,7 @@ class Contractor(BaseModel):
     """Represents an independent contractor paid by a charity"""
 
     contractor_id: Optional[int] = None
+    charity_id: Optional[str] = None
     filer_ein: str = ""
     name: str = ""
     amount: float = 0.0

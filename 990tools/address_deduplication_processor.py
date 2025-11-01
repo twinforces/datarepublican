@@ -207,7 +207,8 @@ class AddressDeduplicationProcessor:
 
         # Create producer and consumer instances
         self.producer = AddressDeduplicationProducer(db_ops, self.batch_size, self.thread_pool_config)
-        self.consumer = AddressDeduplicationConsumer(db_ops, self.thread_pool_config)
+        self.consumer = AddressDeduplicationConsumer(db_ops)
+        self.thread_pool_manager = None
 
     def deduplicate_addresses(self, progress_bar=None) -> int:
         """
@@ -307,18 +308,22 @@ class AddressDeduplicationProcessor:
             # Signal completion
             result_queue.put(None)
 
-    def _consumer_worker_threaded(self, result_queue, thread_id: int, progress_bar=None) -> None:
+    def _consumer_worker_threaded(self, result_queue, thread_id: int, num_producers: int, progress_bar=None) -> None:
         """Consumer worker for ThreadPoolManager: executes operations"""
         try:
             batch_operations = []
             total_updated = 0
+            sentinels_received = 0
 
             while True:
                 try:
                     # Get operations from result queue
                     operations = result_queue.get(timeout=1.0)
                     if operations is None:  # Sentinel
-                        break
+                        sentinels_received += 1
+                        if sentinels_received >= num_producers:
+                            break
+                        continue
 
                     if isinstance(operations, list):
                         batch_operations.extend(operations)
@@ -332,7 +337,7 @@ class AddressDeduplicationProcessor:
                     result_queue.task_done()
 
                 except:
-                    if self.thread_pool_manager and self.thread_pool_manager.shutdown_event.is_set():
+                    if self.thread_pool_manager is not None and self.thread_pool_manager.shutdown_event.is_set():
                         break
                     continue
 

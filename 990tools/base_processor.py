@@ -96,7 +96,7 @@ class ThreadPoolManager:
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self.work_queue = queue.Queue(maxsize=config.producer_config.queue_size)
-        self.result_queue = queue.Queue(maxsize=config.consumer_config.queue_size)
+        self.result_queue = queue.Queue()
         self.shutdown_event = threading.Event()
         self.producer_threads = []
         self.consumer_threads = []
@@ -112,6 +112,8 @@ class ThreadPoolManager:
             *args: Additional positional arguments for producer_func
             **kwargs: Additional keyword arguments for producer_func
         """
+        # Clear producer threads from previous runs to prevent accumulation
+        self.producer_threads.clear()
         num_producers = min(self.config.producer_config.max_workers, len(work_items))
         self.log_info(f"Starting {num_producers} producer threads")
 
@@ -124,12 +126,13 @@ class ThreadPoolManager:
             self.producer_threads.append(thread)
             thread.start()
 
-    def start_consumer_pool(self, consumer_func: Callable, *args, **kwargs) -> None:
+    def start_consumer_pool(self, consumer_func: Callable, num_producers: int = 1, *args, **kwargs) -> None:
         """
         Start consumer threads to process results.
 
         Args:
             consumer_func: Function to be executed by each consumer thread
+            num_producers: Number of producer threads (for sentinel counting)
             *args: Additional positional arguments for consumer_func
             **kwargs: Additional keyword arguments for consumer_func
         """
@@ -139,9 +142,9 @@ class ThreadPoolManager:
         for i in range(num_consumers):
             thread = threading.Thread(
                 target=self._consumer_wrapper,
-                args=(consumer_func, i, args, kwargs)
+                args=(consumer_func, i, num_producers, args, kwargs)
             )
-            thread.daemon = True
+            thread.daemon = False  # Consumer threads must not be daemon threads for proper shutdown
             self.consumer_threads.append(thread)
             thread.start()
 
@@ -152,24 +155,14 @@ class ThreadPoolManager:
         # Wait for producers to finish
         self.log_info("Waiting for producer threads to complete...")
         for i, thread in enumerate(self.producer_threads):
-            thread.join(timeout=self.config.producer_config.shutdown_timeout)
-            if thread.is_alive():
-                self.log_warning(f"Producer thread {i} did not complete within timeout")
-            else:
-                self.log_debug(f"Producer thread {i} completed")
-
-        # Signal consumers that no more work will be added
-        for _ in self.consumer_threads:
-            self.result_queue.put(None)  # Sentinel values
+            thread.join()  # Wait indefinitely for producer threads (they are daemon threads)
+            self.log_debug(f"Producer thread {i} completed")
 
         # Wait for consumers to finish
         self.log_info("Waiting for consumer threads to complete...")
         for i, thread in enumerate(self.consumer_threads):
-            thread.join(timeout=self.config.consumer_config.shutdown_timeout)
-            if thread.is_alive():
-                self.log_warning(f"Consumer thread {i} did not complete within timeout")
-            else:
-                self.log_debug(f"Consumer thread {i} completed")
+            thread.join()  # Wait indefinitely for consumer threads (they are now non-daemon)
+            self.log_debug(f"Consumer thread {i} completed")
 
     def shutdown(self) -> None:
         """
@@ -206,20 +199,21 @@ class ThreadPoolManager:
         except Exception as e:
             self.log_error(f"Producer thread {thread_id} error: {e}", exc_info=True)
 
-    def _consumer_wrapper(self, consumer_func: Callable, thread_id: int,
-                         args: tuple, kwargs: dict) -> None:
+    def _consumer_wrapper(self, consumer_func: Callable, thread_id: int, num_producers: int,
+                          args: tuple, kwargs: dict) -> None:
         """
         Wrapper for consumer thread execution.
 
         Args:
             consumer_func: Consumer function to execute
             thread_id: ID of this consumer thread
+            num_producers: Number of producer threads (for sentinel counting)
             args: Additional positional arguments
             **kwargs: Additional keyword arguments
         """
         try:
             self.log_debug(f"Consumer thread {thread_id} starting")
-            consumer_func(self.result_queue, thread_id, *args, **kwargs)
+            consumer_func(self.result_queue, thread_id, num_producers, *args, **kwargs)
             self.log_debug(f"Consumer thread {thread_id} completed")
         except Exception as e:
             self.log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
@@ -257,7 +251,7 @@ class BaseProducer:
     This is a superclass for all *_producer.py classes to provide common functionality.
     """
 
-    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000, thread_pool_config: ThreadPoolConfig = None):
+    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000, thread_pool_config: Optional[ThreadPoolConfig] = None):
         self.db_ops = db_ops
         self.batch_size = batch_size
         self.logger = get_logger(self.__class__.__name__)
@@ -379,12 +373,14 @@ class BaseProducer:
             )
 
             # Collect results from result queue
-            while True:
+            sentinels_received = 0
+            num_producers = len(self.thread_pool_manager.producer_threads)
+            while sentinels_received < num_producers:
                 try:
                     result = self.thread_pool_manager.result_queue.get(timeout=1.0)
                     if result is None:  # Sentinel
-                        break
-                    if isinstance(result, list):
+                        sentinels_received += 1
+                    elif isinstance(result, list):
                         operations.extend(result)
                         work_items_processed += 1
                     self.thread_pool_manager.result_queue.task_done()
@@ -606,7 +602,7 @@ class BaseConsumer:
     This is a superclass for all *_consumer.py classes to provide common functionality.
     """
 
-    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: ThreadPoolConfig = None):
+    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: Optional[ThreadPoolConfig] = None):
         self.db_ops = db_ops
         self.logger = logging.getLogger(__name__)
         self._profile_seconds = None
@@ -656,6 +652,9 @@ class BaseConsumer:
                 update_progress(n=progress_count)  # Use global progress bar
 
         # Return total operations processed (progress updates + actual operations)
+        # Ensure processed_count is not None
+        if processed_count is None:
+            processed_count = 0
         return progress_operations + processed_count
 
     def execute_operations_parallel(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
@@ -681,6 +680,7 @@ class BaseConsumer:
             # Start consumer pool (single consumer for database safety)
             self.thread_pool_manager.start_consumer_pool(
                 self._parallel_operations_processor,
+                len(self.thread_pool_manager.producer_threads),
                 operations,
                 progress_callback
             )
@@ -713,8 +713,8 @@ class BaseConsumer:
         return total_processed
 
     def _parallel_operations_processor(self, work_queue: queue.Queue, result_queue: queue.Queue,
-                                     thread_id: int, operations: List[DatabaseOperation],
-                                     progress_callback=None) -> None:
+                                      thread_id: int, num_producers: int, operations: List[DatabaseOperation],
+                                      progress_callback=None) -> None:
         """
         Process operations in parallel using thread pool.
 

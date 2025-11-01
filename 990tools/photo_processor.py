@@ -17,7 +17,7 @@ from pathlib import Path
 
 from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
 from config import global_config
-from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig
+from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 
 
@@ -25,7 +25,7 @@ class PhotoProducer(BaseProducer):
     """Producer for collecting officer photo processing operations"""
 
     def __init__(self, db_ops: DatabaseOperations, cache_dir: Optional[str] = None,
-                 thread_pool_config: ThreadPoolConfig = None):
+                 thread_pool_config: Optional[ThreadPoolConfig] = None):
         super().__init__(db_ops, thread_pool_config=thread_pool_config)
         self.cache_dir = cache_dir or os.path.join(global_config.final_dir, "photo_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -82,9 +82,8 @@ class PhotoProducer(BaseProducer):
             }
 
             operations.append(DatabaseOperation(
-                operation_type=DatabaseOperationType.CUSTOM,
-                data=operation_data,
-                operation_name="search_officer_photo"
+                operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                data={**operation_data, 'operation_name': "search_officer_photo"}
             ))
 
         return operations
@@ -115,7 +114,7 @@ class PhotoProducer(BaseProducer):
 class PhotoConsumer(BaseConsumer):
     """Consumer for executing photo processing operations"""
 
-    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: ThreadPoolConfig = None):
+    def __init__(self, db_ops: DatabaseOperations, thread_pool_config: Optional[ThreadPoolConfig] = None):
         super().__init__(db_ops, thread_pool_config=thread_pool_config)
         self.api_key = os.getenv('GOOGLE_KNOWLEDGE_GRAPH_API_KEY')
         self.last_request_time = 0
@@ -210,9 +209,9 @@ class PhotoConsumer(BaseConsumer):
         processed_count = 0
 
         # Handle custom photo search operations
-        if 'custom' in operations_by_type:
-            for operation in operations_by_type['custom']:
-                if operation.operation_name == "search_officer_photo":
+        if 'generic_update' in operations_by_type:
+            for operation in operations_by_type['generic_update']:
+                if operation.data.get('operation_name') == "search_officer_photo":
                     data = operation.data
                     officer_id = data['officer_id']
                     search_query = data['search_query']
@@ -268,7 +267,7 @@ class PhotoConsumer(BaseConsumer):
 class PhotoProcessor:
     """Handles officer photo processing using Google Knowledge Graph API with producer-consumer pattern"""
 
-    def __init__(self, db_ops: DatabaseOperations, cache_dir: Optional[str] = None):
+    def __init__(self, db_ops: DatabaseOperations, cache_dir: Optional[str] = None, thread_pool_config: Optional[ThreadPoolConfig] = None):
         self.db_ops = db_ops
         self.cache_dir = cache_dir or os.path.join(global_config.final_dir, "photo_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -279,10 +278,13 @@ class PhotoProcessor:
             log_warning(self.logger, "GOOGLE_KNOWLEDGE_GRAPH_API_KEY environment variable not set")
 
         # Thread pool configuration for concurrent processing
-        self.thread_pool_config = ThreadPoolConfig(
-            producer_config=PoolConfig(max_workers=4, queue_size=1000, batch_size=50),
-            consumer_config=PoolConfig(max_workers=1, queue_size=1000, batch_size=50)  # Single consumer for API rate limiting
-        )
+        if thread_pool_config is None:
+            self.thread_pool_config = ThreadPoolConfig(
+                producer_config=PoolConfig(max_workers=4, queue_size=1000, batch_size=50),
+                consumer_config=PoolConfig(max_workers=1, queue_size=1000, batch_size=50)  # Single consumer for API rate limiting
+            )
+        else:
+            self.thread_pool_config = thread_pool_config
 
 
     def process_officer_photos(self) -> int:
@@ -314,7 +316,7 @@ class PhotoProcessor:
 
         # Calculate updated count (operations that found photos)
         updated_count = sum(1 for op in operations
-                          if op.operation_name == "search_officer_photo" and
+                          if op.data.get('operation_name') == "search_officer_photo" and
                           op.data.get('photo_found', False))
 
         log_info(self.logger, f"Photo processing complete. Processed {processed_count} operations, updated {updated_count} officers with photos.")

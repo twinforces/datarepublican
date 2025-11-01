@@ -71,7 +71,7 @@ class GeolocationProducerGC(BaseProducer):
         addresses = self.db_ops.select_dataclass(
             dataclass_type=Address,
             where_clause="address_id IN ({})".format(','.join('?' for _ in address_ids)),
-            params=address_ids
+            params=tuple(address_ids)
         )
 
         # Debug logging: Log retrieved address data
@@ -602,7 +602,10 @@ class GeolocationConsumer(BaseConsumer):
                     address_id, master_id = self._update_addresses_with_geocoding(geocoding_id, colocator)
 
                     # Create operations to update owner colocator
-                    self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator, address_id, master_id)
+                    if address_id and master_id:
+                        self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator, address_id, master_id)
+                    elif address_id:
+                        self._create_owner_colocator_operations_from_geocoding(geocoding_id, colocator, address_id, None)
                 else:
                     # Update with failed status
                     if not global_config.is_quiet():
@@ -639,11 +642,15 @@ class GeolocationConsumer(BaseConsumer):
                     self.db_ops.execute_query(f"""
                         UPDATE Addresses SET {', '.join(f'{k} = ?' for k in updates.keys())}
                         WHERE {', '.join(f'{k} = ?' for k in where.keys())}
-                    """, list(updates.values()) + list(where.values()))
+        # Check if _update_owner_colocator method exists
+        if not hasattr(self, '_update_owner_colocator'):
+            log_error(self.logger, "CRITICAL: _update_owner_colocator method not found in GeolocationConsumer")
+            return None
+                    """, tuple(list(updates.values()) + list(where.values())))
 
                     # Update owner with colocator if present
                     if 'colocator' in updates and where.get('address_id'):
-                        self._update_owner_colocator(where['address_id'], updates['colocator'])
+                        self._update_owner_colocator(str(where['address_id']), updates['colocator'])
 
                     total_updated += 1
 
@@ -675,7 +682,7 @@ class GeolocationConsumer(BaseConsumer):
             return first_address.address_id, first_address.master_id
         return None, None
 
-    def _create_owner_colocator_operations_from_geocoding(self, geocoding_id: str, colocator: str, address_id: str, master_id: str = None):
+    def _create_owner_colocator_operations_from_geocoding(self, geocoding_id: str, colocator: str, address_id: str, master_id: Optional[str] = None):
         """Create operations to update owner colocator from geocoding success - called from consumer"""
         # Use master_id if it exists (this address is a child), otherwise use address_id (this is the master)
         update_id = master_id if master_id else address_id
@@ -730,6 +737,38 @@ class GeolocationConsumer(BaseConsumer):
         """Log error with optional EIN context - always shown even in quiet mode"""
         log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
 
+    def _update_owner_colocator(self, address_id: str, colocator: str):
+        """Update owner colocator for a given address"""
+        # Get the owner information for this address
+        owner_query = """
+            SELECT owner_id, address_type FROM Addresses
+            WHERE address_id = ?
+        """
+        owner_result = self.db_ops.execute_query(owner_query, (address_id,))
+        if owner_result:
+            owner_row = owner_result.fetchone()
+            if owner_row:
+                owner_id = owner_row[0]
+                address_type = owner_row[1]
+
+                if owner_id and address_type:
+                    # Update the appropriate table based on address_type
+                    if address_type == 'charity':
+                        self.db_ops.execute_query("""
+                            UPDATE Charities SET colocator = ? WHERE charity_id = ?
+                        """, (colocator, owner_id))
+                    elif address_type == 'grant':
+                        self.db_ops.execute_query("""
+                            UPDATE Grants SET colocator = ? WHERE grant_id = ?
+                        """, (colocator, owner_id))
+                    elif address_type == 'contractor':
+                        self.db_ops.execute_query("""
+                            UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
+                        """, (colocator, owner_id))
+                    elif address_type == 'politicalcontribution':
+                        self.db_ops.execute_query("""
+                            UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
+                        """, (colocator, owner_id))
 
 def geolocate_addresses(db_ops: DatabaseOperations, progress_bar=None) -> int:
     """
@@ -962,6 +1001,16 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
     def _run_geocoding_phase(self, producer, phase_name: str) -> int:
         """Run a single geocoding phase using producer-consumer pattern"""
         try:
+            # Check if _consumer_worker method exists
+            if not hasattr(self, '_consumer_worker'):
+                log_error(self.logger, "CRITICAL: _consumer_worker method not found in GeolocationProcessorThreaded")
+                return 0
+
+            # Check if _producer_worker method exists
+            if not hasattr(self, '_producer_worker'):
+                log_error(self.logger, "CRITICAL: _producer_worker method not found in GeolocationProcessorThreaded")
+                return 0
+
             # Use producer-consumer pattern with threading
             import queue
             import threading
@@ -974,16 +1023,16 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
 
             # Start consumer thread
             consumer_thread = threading.Thread(
-                target=_consumer_worker,
-                args=(operation_queue, None, batch_condition, self.consumer, self.logger)
+                target=self._consumer_worker,
+                args=(operation_queue, self.consumer, self.logger)
             )
             consumer_thread.daemon = True
             consumer_thread.start()
 
             # Producer: collect operations and send to consumer
             producer_thread = threading.Thread(
-                target=_producer_worker,
-                args=(operation_queue, batch_condition, producer, self.logger)
+                target=self._producer_worker,
+                args=(operation_queue, producer, self.logger)
             )
             producer_thread.daemon = True
             producer_thread.start()
@@ -1088,19 +1137,108 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
 
         except Exception as e:
             log_error(self.logger, f"Threaded work processor {thread_id} error: {e}", exc_info=True)
+    def _consumer_worker(self, operation_queue: queue.Queue, consumer, logger):
+        """Consumer worker thread for processing database operations"""
+        try:
+            batch_operations = []
+            total_updated = 0
+
+            while True:
+                # Get next operation from queue
+                operation = operation_queue.get()
+
+                if operation is None:
+                    # Sentinel value - process final batch and exit
+                    if batch_operations:
+                        batch_updated = consumer.execute_operations_batch(batch_operations)
+                        total_updated += batch_updated
+                    operation_queue.task_done()
+                    break
+
+                batch_operations.append(operation)
+
+                # Process batch when it reaches a reasonable size
+                if len(batch_operations) >= 50:
+                    batch_updated = consumer.execute_operations_batch(batch_operations)
+                    total_updated += batch_updated
+                    batch_operations = []
+
+                operation_queue.task_done()
+
+            # Store total for return
+            import threading
+            consumer_thread = threading.current_thread()
+            setattr(consumer_thread, '_total_updated', total_updated)
+            if not global_config.is_quiet():
+                log_info(logger, f"Consumer processed {total_updated} address geocoding operations")
+
+        except Exception as e:
+            log_error(logger, f"Consumer worker failed: {e}", exc_info=True)
+            import threading
+            consumer_thread = threading.current_thread()
+            setattr(consumer_thread, '_total_updated', 0)
+
+    def _producer_worker(self, operation_queue: queue.Queue, producer, logger):
+        """Producer worker thread for collecting geocoding operations"""
+        try:
+            canonical_addresses_processed = 0
+
+            while True:
+                # Get next batch of geocoding work
+                batch = producer._get_work_batch(0)  # Always get first batch due to OFFSET anti-pattern
+
+                if not batch:
+                    # No more work found
+                    if not global_config.is_quiet():
+                        log_info(logger, "No more geocoding work found")
+                    break
+
+                # Apply max_files limit to the batch if specified
+                if global_config.max_files:
+                    remaining = global_config.max_files - canonical_addresses_processed
+                    if remaining <= 0:
+                        if not global_config.is_quiet():
+                            log_info(logger, f"Reached max_files limit: {global_config.max_files} canonical addresses")
+                        break
+                    batch = batch[:remaining]
+
+                # Process batch into operations
+                operations = producer._process_work_batch(batch)
+
+                # Send operations to consumer
+                for operation in operations:
+                    operation_queue.put(operation, block=True)
+
+                # Count canonical addresses processed
+                canonical_addresses_processed += len(batch)
+
+                # Log progress periodically
+                if canonical_addresses_processed % 1000 == 0:
+                    if not global_config.is_quiet():
+                        log_info(logger, f"Processed {canonical_addresses_processed} canonical addresses so far")
+
+            if not global_config.is_quiet():
+                log_info(logger, f"Producer completed: sent operations for {canonical_addresses_processed} canonical addresses")
+
+        except Exception as e:
+            log_error(logger, f"Producer worker failed: {e}", exc_info=True)
 
     def _threaded_consumer_processor(self, result_queue: queue.Queue, thread_id: int,
-                                    consumer) -> None:
+                                    num_producers: int, consumer) -> None:
         """Process operations using ThreadPoolManager"""
         try:
             batch_operations = []
             batch_size = 50  # Process in reasonable batches
+            sentinels_received = 0
 
             while True:
                 try:
                     operations = result_queue.get(timeout=1.0)
                     if operations is None:  # Sentinel
-                        break
+                        sentinels_received += 1
+                        if sentinels_received >= num_producers:
+                            break
+                        continue
 
                     if isinstance(operations, list):
                         batch_operations.extend(operations)

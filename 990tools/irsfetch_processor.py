@@ -15,9 +15,10 @@ import shutil
 import subprocess
 import glob
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 import requests
 from bs4 import BeautifulSoup, Tag
+import queue
 
 try:
     from tqdm import tqdm
@@ -29,7 +30,7 @@ from logging_utils import get_logger, log_info, log_error, log_debug, log_warnin
 from config import global_config
 
 # Import producer-consumer pattern classes
-from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig
+from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 
 
@@ -102,6 +103,24 @@ class IRSFetchConsumer(BaseConsumer):
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str = "/Volumes/Data/irs_zips"):
         super().__init__(db_ops)
         self.zips_dir = zips_dir
+
+    def log_info(self, msg: str, *args, ein: Optional[str] = None):
+        """Log info with optional EIN context"""
+        if not global_config.is_quiet():
+            log_info(self.logger, msg, *args, ein=ein)
+
+    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
+        """Log debug with optional EIN context"""
+        if not global_config.is_quiet():
+            log_debug(self.logger, msg, *args, ein=ein)
+
+    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
+        """Log error with optional EIN context - always shown even in quiet mode"""
+        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
+
+    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
+        """Log warning with optional EIN context - always shown even in quiet mode"""
+        log_warning(self.logger, msg, *args, ein=ein)
 
     def _process_operations_batch(self, operations_by_type):
         """Process IRS fetch operations"""
@@ -444,16 +463,20 @@ class IRSFetchProcessor:
             # Signal completion
             result_queue.put(None)
 
-    def _consumer_wrapper(self, result_queue, thread_id: int):
+    def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int):
         """Wrapper for consumer thread execution"""
         try:
             self.log_debug(f"Consumer thread {thread_id} starting")
+            sentinels_received = 0
 
             while True:
                 try:
                     operation = result_queue.get(timeout=1.0)
                     if operation is None:  # Sentinel
-                        break
+                        sentinels_received += 1
+                        if sentinels_received >= num_producers:
+                            break
+                        continue
 
                     # Execute the operation
                     if isinstance(operation, DatabaseOperation):
@@ -495,7 +518,7 @@ def main():
 
     # Set quiet mode before initializing
     if args.quiet:
-        global_config.set_quiet(True)
+        global_config.quiet = True
 
     processor = IRSFetchProcessor(zips_dir=args.zips_dir, db_path=args.db_path)
 

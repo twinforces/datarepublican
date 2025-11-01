@@ -45,7 +45,7 @@ except ImportError:
 # Import extracted modules
 from database_operations import DatabaseOperations
 from processing_strategy import ParallelXMLProcessingStrategy, AddressDeduplicationStrategy
-from geolocation_processor import GeolocationProcessor
+from geolocation_processor import GeolocationProcessor, GeolocationProcessorThreaded
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
@@ -124,12 +124,14 @@ class IRS990Processor:
 
         # Setup logging
         self.logger = get_logger("irs990")
+        # Set root logger level based on global config - individual loggers inherit from root
+        root_logger = logging.getLogger()
         if global_config.is_quiet():
-            self.logger.setLevel(logging.ERROR)
+            root_logger.setLevel(logging.ERROR)
         elif global_config.is_verbose():
-            self.logger.setLevel(logging.DEBUG)
+            root_logger.setLevel(logging.DEBUG)
         else:
-            self.logger.setLevel(logging.WARNING)
+            root_logger.setLevel(logging.WARNING)
 
         # Log that signal handler is active (USR1 handler is set up in processing_strategy.py)
         self.logger.info("USR1 signal handler available for stack trace dumps (via processing_strategy.py)")
@@ -139,7 +141,7 @@ class IRS990Processor:
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
         self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, workers=global_config.workers)
         self.address_deduplication_strategy = AddressDeduplicationStrategy(self.db_ops, self.logger)
-        self.geolocation_processor = GeolocationProcessor(self.db_ops)
+        self.geolocation_processor = GeolocationProcessorThreaded(self.db_ops)
         self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter
@@ -205,8 +207,12 @@ class IRS990Processor:
             if thread.is_alive():
                 # Get the stack trace for this thread
                 try:
-                    frame = sys._current_frames()[thread.ident]
-                    traceback.print_stack(frame, file=sys.stderr)
+                    thread_id = thread.ident
+                    if thread_id is not None:
+                        frame = sys._current_frames()[thread_id]
+                        traceback.print_stack(frame, file=sys.stderr)
+                    else:
+                        print("  (Thread ident is None)", file=sys.stderr)
                 except KeyError:
                     print("  (Thread frame not available)", file=sys.stderr)
             else:
@@ -221,13 +227,11 @@ class IRS990Processor:
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
-        if not global_config.is_quiet():
-            log_info(self.logger, msg, *args, ein=ein)
+        log_info(self.logger, msg, *args, ein=ein)
 
     def log_debug(self, msg: str, *args, ein: Optional[str] = None):
         """Log debug with optional EIN context"""
-        if not global_config.is_quiet():
-            log_debug(self.logger, msg, *args, ein=ein)
+        log_debug(self.logger, msg, *args, ein=ein)
 
     def log_warning(self, msg: str, *args, ein: Optional[str] = None):
         """Log warning with optional EIN context - always shown even in quiet mode"""
@@ -448,7 +452,7 @@ class IRS990Processor:
 
     def geolocate_addresses(self):
         """Geolocate addresses using census API (step 7)"""
-        return self.geolocation_processor.geolocate_addresses()
+        return self.geolocation_processor.geolocate_addresses_threaded()
 
     def process_officer_photos(self):
         """Process officer photos using Google Knowledge Graph API (step 8)"""

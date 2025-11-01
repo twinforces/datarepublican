@@ -44,6 +44,7 @@ class DatabaseOperationType(Enum):
     INSERT_CONTRACTOR = "insert_contractor"
     INSERT_POLITICAL_CONTRIBUTION = "insert_political_contribution"
     INSERT_ADDRESS = "insert_address"
+    INSERT_ZIP_FILE = "insert_zip_file"
     UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
     UPDATE_XML_FILE_ERROR = "update_xml_file_error"
     XML_FILE_UPDATE = "xml_file_update"
@@ -256,7 +257,7 @@ class DatabaseOperations:
                 pass
             DatabaseOperations._local.db_conn.execute("SET preserve_insertion_order = false")
 
-        return DatabaseOperations._local.db_conn
+        return DatabaseOperations._local.db_conn  # type: ignore
 
     def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: Optional[Tuple] = None,
                         order_by: str = "", limit: Optional[int] = None, offset: Optional[int] = None,
@@ -499,7 +500,7 @@ class DatabaseOperations:
         ids = self.bulk_insert([address])
         return ids[0] if ids else ""
 
-    def get_addresses_for_geocoding(self, limit: int = None, offset: int = 0) -> List[Address]:
+    def get_addresses_for_geocoding(self, limit: Optional[int] = None, offset: int = 0) -> List[Address]:
         """Get addresses that need geocoding, with optional batching support"""
         where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') and colocator IS NULL"
         return self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
@@ -786,7 +787,7 @@ class DatabaseOperations:
 
         # Validation moved to pending_database_context.py
 
-        conn = conn or self.db_conn
+        conn = conn or self.db_conn  # type: ignore
         table_name = self._get_table_name(obj_type)
         model_fields = set(obj_type.get_db_field_names())
         table_cols = self._get_table_columns(table_name, conn)
@@ -817,13 +818,13 @@ class DatabaseOperations:
             for i in range(0, len(objects), batch_size):
                 batch_df = df.iloc[i:i + batch_size]
                 view_name = f'temp_{uuid.uuid4().hex[:8]}'
-                conn.register(view_name, batch_df)
+                conn.register(view_name, batch_df)  # type: ignore
                 col_list = ', '.join(insert_cols)
                 insert_sql = f"INSERT INTO {table_name} ({col_list}) SELECT {col_list} FROM {view_name} RETURNING {id_field}"
-                result = conn.execute(insert_sql)
+                result = conn.execute(insert_sql)  # type: ignore
                 batch_ids = [row[0] for row in result.fetchall()]
                 all_ids.extend(batch_ids)
-                conn.unregister(view_name)
+                conn.unregister(view_name)  # type: ignore
             return all_ids
         else:
             # executemany core: Build param lists (excluding ID field)
@@ -850,7 +851,7 @@ class DatabaseOperations:
                 # SQL logging handled by execute_query method
 
                 batch_start = time.perf_counter()
-                conn.executemany(insert_sql, batch_params)
+                conn.executemany(insert_sql, batch_params)  # type: ignore
                 batch_elapsed = time.perf_counter() - batch_start
                 rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
                 self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
@@ -889,7 +890,7 @@ class DatabaseOperations:
 
         try:
             # Execute bulk update using executemany for proper batching
-            conn.executemany(sql, params)
+            conn.executemany(sql, params)  # type: ignore
             # Do not commit here - let caller handle transaction
             return len(updates)
         except Exception as e:

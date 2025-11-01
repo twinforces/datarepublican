@@ -233,6 +233,7 @@ class PendingDatabaseContext:
             metadata["tax_year"] = self._charity.tax_year
             metadata["ein"] = self._charity.ein
             metadata["org_type"] = self._charity.org_type
+            metadata["error_message"] = "success"  # Set to "success" for successful processing
 
         operations.append(DatabaseOperation(
             DatabaseOperationType.XML_FILE_UPDATE,

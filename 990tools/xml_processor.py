@@ -383,9 +383,6 @@ class XMLConsumer(BaseConsumer):
             # 4. Insert addresses
             self._process_address_operations(operations_by_type, charity_id_map)
 
-            # 5. Handle address deduplication batch operations
-            self._process_address_deduplication_batch_operations(operations_by_type)
-
             # 6. Handle generic update operations
             self._process_generic_update_operations(operations_by_type)
 
@@ -420,23 +417,29 @@ class XMLConsumer(BaseConsumer):
             xml_id = operation.xml_id
             metadata = operation.data
 
-            # Prepare update dictionary for bulk_update
+            # Prepare update dictionary for bulk_update - include all required fields
             update_dict = {
                 "xml_id": xml_id,
                 "processed": metadata["processed"],
                 "processing_version": self.processing_version,
-                "file_size": metadata["file_size"]
+                "file_size": metadata["file_size"],
+                "processed_at": metadata.get("processed_at"),
+                "org_type": metadata.get("org_type"),
+                "error_message": metadata.get("error_message")
             }
+
+            # Set processed_at timestamp if not already set and processing is complete
+            if update_dict["processed"] and update_dict["processed_at"] is None:
+                from datetime import datetime
+                update_dict["processed_at"] = datetime.now().isoformat()
 
             if metadata.get("error_message"):
                 # Error case: set error_message and clear success fields
-                update_dict["error_message"] = metadata["error_message"]
                 update_dict["form_type"] = None
                 update_dict["ein"] = None
                 update_dict["tax_year"] = None
             else:
                 # Success case: set success fields and clear error_message
-                update_dict["error_message"] = None
                 update_dict["form_type"] = metadata.get("form_type")
                 update_dict["ein"] = metadata.get("ein")
                 update_dict["tax_year"] = metadata.get("tax_year")
