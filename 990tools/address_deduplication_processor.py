@@ -312,13 +312,14 @@ class AddressDeduplicationProcessor:
 
             # Collect results
             results_collected = 0
+            self.log_debug(f"Starting result collection, result_queue size: {thread_pool_manager.result_queue.qsize()}")
             while not thread_pool_manager.result_queue.empty():
                 try:
                     result = thread_pool_manager.result_queue.get_nowait()
                     if isinstance(result, int):
                         total_updated += result
                         results_collected += 1
-                        self.log_debug(f"Collected result: {result}, total updated so far: {total_updated}")
+                        self.log_debug(f"Collected result: {result}, total updated so far: {total_updated}, queue size now: {thread_pool_manager.result_queue.qsize()}")
                     thread_pool_manager.result_queue.task_done()
                 except:
                     break
@@ -353,6 +354,7 @@ class AddressDeduplicationProcessor:
 
                 # Put operations in result queue for consumer
                 result_queue.put(operations)
+                self.log_debug(f"Producer {thread_id}: put {len(operations)} operations in queue, queue size now: {result_queue.qsize()}")
 
                 # Log progress
                 if (i + 1) % 50 == 0:
@@ -363,6 +365,7 @@ class AddressDeduplicationProcessor:
         finally:
             # Signal completion
             result_queue.put(None)
+            self.log_debug(f"Producer {thread_id}: sent sentinel, queue size now: {result_queue.qsize()}")
 
     def _consumer_worker_threaded(self, result_queue, thread_id: int, num_producers: int, progress_bar=None) -> None:
         """Consumer worker for ThreadPoolManager: executes operations"""
@@ -374,9 +377,13 @@ class AddressDeduplicationProcessor:
             while True:
                 try:
                     # Get operations from result queue
+                    self.log_debug(f"Consumer {thread_id}: waiting for operations, queue size: {result_queue.qsize()}")
                     operations = result_queue.get(timeout=1.0)
+                    self.log_debug(f"Consumer {thread_id}: got operations from queue, queue size now: {result_queue.qsize()}")
+
                     if operations is None:  # Sentinel
                         sentinels_received += 1
+                        self.log_debug(f"Consumer {thread_id}: received sentinel {sentinels_received}/{num_producers}")
                         if sentinels_received >= num_producers:
                             break
                         continue
@@ -408,6 +415,7 @@ class AddressDeduplicationProcessor:
 
             # Put final result in result queue
             result_queue.put(total_updated)
+            self.log_debug(f"Consumer {thread_id}: put final result {total_updated} in result queue")
 
         except Exception as e:
             self.log_error(f"Consumer worker {thread_id} failed: {e}", exc_info=True)

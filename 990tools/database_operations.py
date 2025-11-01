@@ -529,10 +529,15 @@ class DatabaseOperations:
         ids = self.bulk_insert([address])
         return ids[0] if ids else ""
 
-    def get_addresses_for_geocoding(self, limit: Optional[int] = None, offset: int = 0) -> List[Address]:
-        """Get addresses that need geocoding, with optional batching support"""
+    def get_addresses_for_geocoding(self, limit: Optional[int] = None, last_address_id: Optional[str] = None) -> List[Address]:
+        """Get addresses that need geocoding, with max primary key pagination support"""
         where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') and colocator IS NULL"
-        return self.select_dataclass(Address, where_clause=where_clause, order_by="address_id", limit=limit, offset=offset)
+        if last_address_id is not None:
+            where_clause += " AND address_id > ?"
+            params = (last_address_id,)
+        else:
+            params = None
+        return self.select_dataclass(Address, where_clause=where_clause, params=params, order_by="address_id", limit=limit)
 
     def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: Optional[str] = None):
         """Update address with geocoding information and propagate colocator to owner"""

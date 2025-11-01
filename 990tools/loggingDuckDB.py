@@ -33,14 +33,14 @@ class LoggingDuckDBConnection:
         if parameters:
             log_debug(logger, f"With params: {parameters}")
         return self._conn.execute(query, parameters, **kwargs)
-    
+
     def sql(self, query, parameters=None, **kwargs):
         """
         Execute a SQL query via the sql() method, logging it first.
         Similar to execute(), but returns a DuckDBPyRelation.
         """
         logger = get_logger(__name__)
-        log_debug(logger, f"Executing SQL: {query}")
+        log_debug(logger, f"Executing SQL via sql(): {query}")
         if parameters:
             log_debug(logger, f"With params: {parameters}")
         return self._conn.sql(query, parameters, **kwargs)
