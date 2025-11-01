@@ -417,7 +417,8 @@ class IRSFetchProcessor:
 
             # Start consumer pool
             self.thread_pool_manager.start_consumer_pool(
-                self._consumer_wrapper
+                self._consumer_wrapper,
+                len(self.thread_pool_manager.producer_threads)
             )
 
             # Wait for completion

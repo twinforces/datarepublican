@@ -86,9 +86,11 @@ def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "
     """Start progress reporting with tqdm"""
     global _global_progress_bar
     try:
-          # Always show progress bar, even in quiet mode
+           # Always show progress bar, even in quiet mode
         # Force disable=False to ensure progress bar shows regardless of tty detection
         # Use file=sys.stderr to ensure output goes to stderr even in non-TTY environments
+        if _global_progress_bar is not None:
+            print(f"WARNING: Progress bar already exists with {_global_progress_bar.n}/{_global_progress_bar.total}, creating new one with {total}", file=sys.stderr)
         _global_progress_bar = tqdm(total=total, desc=desc, unit=unit, disable=False, file=sys.stderr)
         return _global_progress_bar
     except ImportError:

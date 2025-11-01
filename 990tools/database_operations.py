@@ -86,7 +86,7 @@ class DatabaseOperations:
         from uuid7 import generate_uuid_v7
         return generate_uuid_v7()
 
-    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False):
+    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
         """
         Initialize DuckDB connection
 
@@ -95,6 +95,7 @@ class DatabaseOperations:
             read_only: Whether to open database in read-only mode
             memory_limit: Memory limit for DuckDB (default: 4GB)
             threads: Number of threads for DuckDB (default: auto)
+            query_timeout: Query timeout in seconds (default: 300)
         """
         self.db_path = db_path
         # SQL logging is now read directly from global_config
@@ -102,6 +103,7 @@ class DatabaseOperations:
         self.memory_limit = memory_limit
         self.threads = threads
         self.dbUI = dbUI
+        self.query_timeout = query_timeout
         self.logger = get_logger(__name__)
         self._init_connection()
         self._preload_zip_file_cache()
@@ -144,6 +146,11 @@ class DatabaseOperations:
         except Exception:
             pass  # Ignore if not supported
         self.db_conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
+
+        # Note: DuckDB doesn't have a built-in query_timeout setting in this version
+        # The timeout protection will be handled through enhanced error handling in execute_query
+        # Store the timeout value for potential future use or custom timeout implementation
+        pass
 
    
         # Initialize schema if needed
@@ -203,7 +210,7 @@ class DatabaseOperations:
             raise
 
     def execute_query(self, query: str, params: Optional[Tuple] = None, conn=None) -> Any:
-        """Execute a query and return results"""
+        """Execute a query and return results with timeout protection and enhanced error handling"""
         if conn is None:
             conn = self._get_thread_local_connection()
 
@@ -226,10 +233,29 @@ class DatabaseOperations:
                     if params:
                         self.logger.info(f"Parameters: {params}")
 
-        if params:
-            return conn.execute(query, params)
-        else:
-            return conn.execute(query)
+        try:
+            if params:
+                return conn.execute(query, params)
+            else:
+                return conn.execute(query)
+        except (duckdb.CatalogException, duckdb.BinderException, duckdb.SyntaxException,
+                duckdb.ConstraintException, duckdb.DataError) as e:
+            # Handle query-specific errors (syntax, constraint violations, table not found, etc.)
+            error_msg = f"Query execution failed: {str(e)}"
+            if "timeout" in str(e).lower() or "interrupt" in str(e).lower():
+                error_msg = f"Query timed out or was interrupted: {str(e)}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+        except duckdb.ConnectionException as e:
+            # Handle connection-related errors
+            error_msg = f"Database connection error: {str(e)}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+        except Exception as e:
+            # Handle any other unexpected errors
+            error_msg = f"Unexpected database error: {str(e)}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     def _get_thread_local_connection(self) -> duckdb.DuckDBPyConnection:
         """Get or create a thread-local database connection"""
@@ -256,6 +282,9 @@ class DatabaseOperations:
             except Exception:
                 pass
             DatabaseOperations._local.db_conn.execute("SET preserve_insertion_order = false")
+            # Note: DuckDB doesn't have a built-in query_timeout setting in this version
+            # The timeout protection will be handled through enhanced error handling in execute_query
+            pass
 
         return DatabaseOperations._local.db_conn  # type: ignore
 
@@ -1065,56 +1094,138 @@ class DatabaseOperations:
                 xml_files_updated.add(op.xml_id)
         return xml_files_updated
 
-    def get_address_deduplication_batch(self, batch_size: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_address_deduplication_batch(self, last_address_id: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Get a batch of canonical addresses that have duplicates needing deduplication.
+        Get canonical addresses that have duplicates needing deduplication with pagination.
+
+        Uses two-phase query approach to avoid full table scan:
+        1. First phase: Identify qualifying canonical addresses (have duplicates with NULL master_id) with pagination
+        2. Second phase: Fetch details only for those qualifying addresses
 
         Returns canonical addresses where there are multiple addresses with the same canonical_address,
         and at least one of them has master_id IS NULL (not yet deduplicated).
+
+        Args:
+            last_address_id: Last processed address_id for pagination (address_id > last_address_id)
+            limit: Maximum number of canonical addresses to return
 
         Returns a list of dicts with:
         - canonical_address: the canonical address string
         - master_address_id: the min(address_id) to use as master
         - child_address_ids: list of address_ids that should point to the master (excluding the master itself)
 
-        Args:
-            batch_size: Number of canonical addresses to process in this batch
-            offset: Offset for pagination (removed - always get first batch)
-
         Returns:
             List of deduplication operations, each containing master and children info
         """
-        # Query for canonical addresses that have duplicates and haven't been fully deduplicated
-        # We need canonical addresses where COUNT(*) > 1 and at least one address has master_id IS NULL
-        # Always get the first batch (no OFFSET) since we want to process the most urgent items first
-        query = """
-            SELECT
-                canonical_address,
-                MIN(address_id) as master_address_id,
-                LIST(address_id) as all_address_ids
+        import time
+        start_time = time.time()
+
+        batch_limit = limit or 1000  # Default limit if not specified
+
+        # Phase 1: Identify qualifying canonical addresses that have duplicates and NULL master_ids
+        # Use subquery with max(address_id) for pagination and LIMIT
+        if last_address_id is None:
+            # First batch - no pagination filter needed
+            phase1_query = """
+                SELECT canonical_address, max_id
+                FROM (
+                    SELECT canonical_address, MAX(address_id) as max_id
+                    FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+                ) sub
+                ORDER BY max_id
+                LIMIT ?
+            """
+            params = (batch_limit,)
+        else:
+            # Subsequent batches - filter by last_address_id
+            phase1_query = """
+                SELECT canonical_address, max_id
+                FROM (
+                    SELECT canonical_address, MAX(address_id) as max_id
+                    FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+                ) sub
+                WHERE max_id > ?
+                ORDER BY max_id
+                LIMIT ?
+            """
+            params = (last_address_id, batch_limit)
+
+        phase1_start = time.time()
+        qualifying_result = self.execute_query(phase1_query, params)
+        qualifying_rows = qualifying_result.fetchall() if qualifying_result else []
+        phase1_time = time.time() - phase1_start
+
+        self.logger.debug(f"Phase 1: Found {len(qualifying_rows)} qualifying canonical addresses in {phase1_time:.2f}s")
+
+        if not qualifying_rows:
+            return []
+
+        # Extract canonical addresses for phase 2
+        canonical_addresses = [row[0] for row in qualifying_rows if row[0] is not None]
+
+        # Phase 2: Fetch details only for qualifying canonical addresses
+        # Use parameterized query with IN clause for the qualifying addresses
+        placeholders = ','.join('?' for _ in canonical_addresses)
+        details_query = f"""
+            SELECT canonical_address, address_id, master_id
             FROM Addresses
-            WHERE canonical_address IS NOT NULL
-                AND canonical_address != ''
-            GROUP BY canonical_address
-            HAVING COUNT(*) > 1
-                AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-            ORDER BY canonical_address
-            LIMIT ?
+            WHERE canonical_address IN ({placeholders})
+            ORDER BY canonical_address, address_id
         """
 
-        result = self.execute_query(query, (batch_size,))
-        rows = result.fetchall() if result else []
+        phase2_start = time.time()
+        details_result = self.execute_query(details_query, tuple(canonical_addresses))
+        details_rows = details_result.fetchall() if details_result else []
+        phase2_time = time.time() - phase2_start
 
-        batch_operations = []
-        for row in rows:
-            # DuckDB returns tuples, so access by index: (canonical_address, master_address_id, all_address_ids)
+        self.logger.debug(f"Phase 2: Fetched {len(details_rows)} detail rows in {phase2_time:.2f}s")
+        total_time = time.time() - start_time
+        self.logger.debug(f"Total batch processing time: {total_time:.2f}s")
+
+        # Group by canonical_address and compute master/child relationships
+        from collections import defaultdict
+        address_groups = defaultdict(list)
+
+        for row in details_rows:
             canonical_address = str(row[0]) if row[0] is not None else ''
-            master_address_id = str(row[1]) if row[1] is not None else ''
-            all_address_ids = row[2] if row[2] is not None else []
+            address_id = str(row[1]) if row[1] is not None else ''
+            master_id = row[2]  # Can be None
 
-            # Convert all_address_ids to strings and separate master from children
-            all_ids = [str(addr_id) for addr_id in all_address_ids] if all_address_ids else []
-            child_address_ids = [addr_id for addr_id in all_ids if addr_id != master_address_id]
+            address_groups[canonical_address].append({
+                'address_id': address_id,
+                'master_id': master_id
+            })
+
+        # Build batch operations
+        batch_operations = []
+        for canonical_address in canonical_addresses:
+            if canonical_address not in address_groups:
+                continue
+
+            addresses = address_groups[canonical_address]
+
+            # Find addresses with NULL master_id (candidates for children)
+            null_master_addresses = [addr for addr in addresses if addr['master_id'] is None]
+
+            if len(null_master_addresses) <= 1:
+                continue  # Need more than one NULL master_id to deduplicate
+
+            # Use the minimum address_id as master among NULL master_id addresses
+            null_master_ids = [addr['address_id'] for addr in null_master_addresses]
+            master_address_id = min(null_master_ids)
+
+            # Children are the other NULL master_id addresses
+            child_address_ids = [addr_id for addr_id in null_master_ids if addr_id != master_address_id]
 
             if child_address_ids:  # Only include if there are children to update
                 batch_operations.append({

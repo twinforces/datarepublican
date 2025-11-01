@@ -98,6 +98,8 @@ DEFAULT_OUT_DIR = "/Volumes/Data/tsvs"
 DEFAULT_ANAL_DIR = "/Volumes/Data/atsvs"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 
+FULL_DB_PATH = f"{DEFAULT_FINAL_DIR}/${DEFAULT_DB_PATH}"
+
 # Geocoding constants
 GEOCODING_BATCH_SIZE = 1000  # Batch size for geocoding operations
 GEOCODING_API_BATCH_SIZE = 10000  # Maximum addresses per census API call (as per census docs)

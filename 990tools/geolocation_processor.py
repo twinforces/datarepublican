@@ -133,11 +133,14 @@ class GeolocationProducerGC(BaseProducer):
 
         # Create progress update operation for the entire batch
         if operations:
+            progress_count = len([op for op in operations if op.operation_type != DatabaseOperationType.PROGRESS_UPDATE])
             progress_op = DatabaseOperation(
                 operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                data={"count": len([op for op in operations if op.operation_type != DatabaseOperationType.PROGRESS_UPDATE])}
+                data={"count": progress_count}
             )
             operations.append(progress_op)
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"PHASE 1: Added progress update operation with count={progress_count}")
 
         if not global_config.is_quiet():
             geocoding_ops = [op for op in operations if op.operation_type == DatabaseOperationType.INSERT_GEOCODING]
@@ -261,11 +264,14 @@ class GeolocationProducerAPI(BaseProducer):
                     operations.append(operation)
 
         # Create progress update operation for the batch
+        progress_count = len(batch)
         progress_op = DatabaseOperation(
             operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-            data={"count": len(batch)}
+            data={"count": progress_count}
         )
         operations.append(progress_op)
+        if not global_config.is_quiet():
+            log_debug(self.logger, f"PHASE 2: Added progress update operation with count={progress_count}")
 
         return operations
 
@@ -850,6 +856,8 @@ class GeolocationProcessor:
             geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
 
             total_work = address_count + geocoding_count
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: _estimate_total_geocoding_work - addresses needing records: {address_count}, geocoding records needing API: {geocoding_count}, total: {total_work}")
             return total_work
         except Exception:
             # Fallback to a reasonable estimate
@@ -867,6 +875,8 @@ class GeolocationProcessor:
         """
         total = self._estimate_total_geocoding_work()
         unit = 'bytes' if bytes else 'addrs'
+        if not global_config.is_quiet():
+            log_debug(self.logger, f"DEBUG: get_progress_scope called - total={total}, unit='{unit}'")
         return {'total': total, 'unit': unit}
 
 
@@ -1093,6 +1103,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                 # Start consumer pool (single consumer for DB safety)
                 thread_pool_manager.start_consumer_pool(
                     self._threaded_consumer_processor,
+                    len(thread_pool_manager.producer_threads),
                     self.consumer
                 )
 
