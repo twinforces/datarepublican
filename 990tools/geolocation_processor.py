@@ -52,8 +52,23 @@ class GeolocationProducerGC(BaseProducer):
 
     def _get_work_batch(self, last_address_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get a batch of address_ids that need geocoding records created"""
+        # Apply max_files limit to batch size if specified
+        effective_batch_size = self.batch_size
+        if global_config.max_files:
+            # Calculate remaining items to process
+            # This is a rough estimate since we don't track total processed across all phases
+            effective_batch_size = min(self.batch_size, global_config.max_files)
+
         # Get addresses that need geocoding (no geocoding_id and not PO Box)
-        addresses = self.db_ops.get_addresses_for_geocoding(limit=self.batch_size, last_address_id=last_address_id)
+        addresses = self.db_ops.get_addresses_for_geocoding(limit=effective_batch_size, last_address_id=last_address_id)
+
+        # DEBUG: Add logging to validate potential causes
+        if not global_config.is_quiet():
+            log_debug(self.logger, f"PHASE 1: Retrieved {len(addresses)} addresses from get_addresses_for_geocoding (last_address_id={last_address_id})")
+            log_debug(self.logger, f"PHASE 1: Query limit was {effective_batch_size} (original: {self.batch_size}, max_files: {global_config.max_files})")
+            # Log specific address_ids being processed
+            address_ids = [addr.address_id for addr in addresses]
+            log_debug(self.logger, f"PHASE 1: Address IDs being processed: {address_ids}")
 
         # Return just the address_ids as work items - we'll fetch full Address objects in processing
         work_items = []
@@ -82,6 +97,7 @@ class GeolocationProducerGC(BaseProducer):
             log_debug(self.logger, f"PHASE 1: Retrieved {len(addresses)} addresses for geocoding record creation")
             for addr in addresses:
                 log_debug(self.logger, f"PHASE 1: Retrieved address {addr.address_id}: line1='{addr.address_line1}', line2='{addr.address_line2}', city='{addr.city}', state='{addr.state}', zip='{addr.zip_code}'")
+                log_debug(self.logger, f"PHASE 1: Address {addr.address_id} geocoding_id='{addr.geocoding_id}', po_box='{addr.po_box}', colocator='{addr.colocator}'")
 
         # Create a lookup dict for quick access
         address_lookup = {addr.address_id: addr for addr in addresses}
@@ -104,6 +120,7 @@ class GeolocationProducerGC(BaseProducer):
                 # Create PO Box operation
                 if not global_config.is_quiet():
                     log_debug(self.logger, f"PHASE 1: Address {address_id} detected as PO Box: {address.po_box}")
+                    log_debug(self.logger, f"PHASE 1: PO Box operation created for address {address_id} - will update po_box and colocator")
                 operation = DatabaseOperation(
                     operation_type=DatabaseOperationType.GENERIC_UPDATE,
                     data={
@@ -123,6 +140,7 @@ class GeolocationProducerGC(BaseProducer):
                 geocoding_op.data['address_id'] = address_id
                 if not global_config.is_quiet():
                     log_debug(self.logger, f"PHASE 1: Created geocoding operation for address {address_id}: normalized_address='{geocoding_op.data.get('normalized_address', 'N/A')}'")
+                    log_debug(self.logger, f"PHASE 1: Geocoding INSERT operation created for address {address_id}")
                 return geocoding_op
 
         # Use ThreadPoolExecutor for concurrent processing
@@ -149,6 +167,16 @@ class GeolocationProducerGC(BaseProducer):
             geocoding_ops = [op for op in operations if op.operation_type == DatabaseOperationType.INSERT_GEOCODING]
             po_box_ops = [op for op in operations if op.operation_type == DatabaseOperationType.GENERIC_UPDATE]
             log_debug(self.logger, f"PHASE 1: Batch processing complete - {len(geocoding_ops)} geocoding operations, {len(po_box_ops)} PO Box operations")
+            # Log geocoding operation details
+            for op in geocoding_ops:
+                addr_id = op.data.get('address_id', 'unknown')
+                normalized_addr = op.data.get('normalized_address', 'N/A')
+                log_debug(self.logger, f"PHASE 1: Geocoding operation for address {addr_id}: normalized_address='{normalized_addr}'")
+            # Log PO Box operation details
+            for op in po_box_ops:
+                addr_id = op.data.get('where', {}).get('address_id', 'unknown')
+                po_box = op.data.get('updates', {}).get('po_box', 'unknown')
+                log_debug(self.logger, f"PHASE 1: PO Box operation for address {addr_id}: po_box='{po_box}'")
 
         return operations
 
@@ -175,6 +203,13 @@ class GeolocationProducerAPI(BaseProducer):
 
     def _get_work_batch(self, last_geocoding_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get a batch of geocoding records that need API calls using max primary key pagination"""
+        # Apply max_files limit to batch size if specified
+        effective_batch_size = self.batch_size
+        if global_config.max_files:
+            # Calculate remaining items to process
+            # This is a rough estimate since we don't track total processed across all phases
+            effective_batch_size = min(self.batch_size, global_config.max_files)
+
         # Get geocoding records that haven't been processed yet using max primary key pagination
         where_clause = "geocoding_status IS NULL OR geocoding_status = 'pending'"
         if last_geocoding_id is not None:
@@ -191,9 +226,9 @@ class GeolocationProducerAPI(BaseProducer):
             LIMIT ?
         """
         if params:
-            params = params + (self.batch_size,)
+            params = params + (effective_batch_size,)
         else:
-            params = (self.batch_size,)
+            params = (effective_batch_size,)
 
         result = self.db_ops.execute_query(query, params)
         if result:
@@ -207,8 +242,12 @@ class GeolocationProducerAPI(BaseProducer):
                 for row in rows
             ]
 
+            # DEBUG: Add logging to validate potential causes
             if not global_config.is_quiet():
                 log_debug(self.logger, f"PHASE 2: Retrieved {len(batch_data)} geocoding records for API calls (last_geocoding_id={last_geocoding_id})")
+                log_debug(self.logger, f"PHASE 2: Query limit was {effective_batch_size} (original: {self.batch_size}, max_files: {global_config.max_files})")
+                log_debug(self.logger, f"PHASE 2: Query used: {query}")
+                log_debug(self.logger, f"PHASE 2: Query params: {params}")
                 for record in batch_data:
                     log_debug(self.logger, f"PHASE 2: Retrieved geocoding record {record['geocoding_id']} for API call - attempt_count={record['attempt_count']}")
 
@@ -564,9 +603,12 @@ class GeolocationConsumer(BaseConsumer):
                     log_debug(self.logger, f"PHASE 1 CONSUMER: About to bulk insert {len(geocoding_objects)} geocoding records")
                     for geo in geocoding_objects:
                         log_debug(self.logger, f"PHASE 1 CONSUMER: Inserting geocoding record - geocoding_id={geo.geocoding_id}, normalized_address='{geo.normalized_address}', status='{geo.geocoding_status}'")
+                    log_debug(self.logger, f"PHASE 1 CONSUMER: Geocoding objects to insert: {[geo.geocoding_id for geo in geocoding_objects]}")
 
                 geocoding_ids = self.db_ops.bulk_insert(geocoding_objects)
                 total_updated += len(geocoding_ids)
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"PHASE 1 CONSUMER: Bulk insert returned geocoding_ids: {geocoding_ids}")
 
                 # Now update addresses with their geocoding_ids using bulk update
                 if address_updates:
@@ -596,6 +638,7 @@ class GeolocationConsumer(BaseConsumer):
 
                         if not global_config.is_quiet():
                             log_debug(self.logger, f"PHASE 1 CONSUMER: Bulk updated {updated_count} addresses with geocoding_ids")
+                            log_debug(self.logger, f"PHASE 1 CONSUMER: Address updates: {bulk_update_data}")
 
                 if not global_config.is_quiet():
                     log_debug(self.logger, f"PHASE 1 CONSUMER: Bulk insert completed - inserted {len(geocoding_ids)} geocoding records with IDs: {geocoding_ids[:5]}{'...' if len(geocoding_ids) > 5 else ''}")
@@ -1016,12 +1059,29 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
             import threading
 
             # Create shared operation_queue for both producers
-            operation_queue = queue.Queue(maxsize=1000)
+            operation_queue = queue.Queue()  # Unbounded to prevent deadlocks
+
+            # Initialize progress tracking for concurrent execution
+            # FIX: Create progress bar BEFORE starting consumer thread so consumer can update it
+            if progress_bar:
+                # Create combined progress bar for both phases
+                total_work = self._estimate_total_geocoding_work()
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - estimated total work: {total_work}")
+                    log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - progress_bar type: {type(progress_bar)}")
+                    log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - progress_bar attributes: {dir(progress_bar) if progress_bar else 'None'}")
+                # FIX: Instead of modifying existing progress bar, create new one like working processors
+                progress_bar = start_progress_reporting(total=total_work, desc="Concurrent geocoding: Phase 1 & 2", unit="addrs")
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - progress bar initialized with total={progress_bar.total if progress_bar else 'None'}, n={progress_bar.n if progress_bar else 'None'}")
+            else:
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - no progress_bar provided")
 
             # Start consumer thread first
             consumer_thread = threading.Thread(
                 target=self._consumer_worker,
-                args=(operation_queue, self.consumer, self.logger)
+                args=(operation_queue, self.consumer, self.logger, progress_bar)
             )
             consumer_thread.daemon = True
             consumer_thread.start()
@@ -1029,7 +1089,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
             # Start Phase 1 producer thread (geocoding record creation)
             phase1_thread = threading.Thread(
                 target=self._producer_worker_paginated,
-                args=(operation_queue, self.producer_gc, self.logger)
+                args=(operation_queue, self.producer_gc, self.logger, "Phase 1", progress_bar)
             )
             phase1_thread.daemon = True
             phase1_thread.start()
@@ -1037,7 +1097,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
             # Start Phase 2 producer thread (API calls for ALL pending records)
             phase2_thread = threading.Thread(
                 target=self._producer_worker_paginated,
-                args=(operation_queue, self.producer_api, self.logger)
+                args=(operation_queue, self.producer_api, self.logger, "Phase 2", progress_bar)
             )
             phase2_thread.daemon = True
             phase2_thread.start()
@@ -1053,8 +1113,18 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                 log_error(self.logger, "Consumer thread did not finish within timeout")
                 return 0
 
+            # Stop progress reporting
+            if progress_bar:
+                if not global_config.is_quiet():
+                    log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - stopping progress reporting, final n={progress_bar.n}, total={progress_bar.total}")
+                # FIX: Use stop_progress_reporting() without parameter like working processors
+                stop_progress_reporting()
+
             # Return the total updated count from consumer
-            return getattr(consumer_thread, '_total_updated', 0)
+            total_updated = getattr(consumer_thread, '_total_updated', 0)
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: geolocate_addresses_threaded - returning total_updated={total_updated}")
+            return total_updated
 
         except Exception as e:
             log_error(self.logger, f"Concurrent threaded address geocoding failed: {e}", exc_info=True)
@@ -1081,7 +1151,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
             batch_condition = threading.Condition()
 
             # Create queues for producer-consumer communication
-            operation_queue = queue.Queue(maxsize=1000)  # Queue for DatabaseOperation objects
+            operation_queue = queue.Queue()  # Queue for DatabaseOperation objects (unbounded to prevent deadlocks)
 
             # Start consumer thread
             consumer_thread = threading.Thread(
@@ -1332,7 +1402,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
 
         except Exception as e:
             log_error(self.logger, f"Threaded work processor Phase 2 {thread_id} error: {e}", exc_info=True)
-    def _consumer_worker(self, operation_queue: queue.Queue, consumer, logger):
+    def _consumer_worker(self, operation_queue: queue.Queue, consumer, logger, progress_bar=None):
         """Consumer worker thread for processing database operations"""
         try:
             batch_operations = []
@@ -1350,6 +1420,8 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                         batch_updated = consumer.execute_operations_batch(batch_operations)
                         total_updated += batch_updated
                         batch_operations = []
+                        if not global_config.is_quiet():
+                            log_debug(logger, f"DEBUG: Consumer processed batch of {len(batch_operations)} operations, total_updated now {total_updated}")
 
                     operation_queue.task_done()
 
@@ -1361,6 +1433,8 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                     batch_updated = consumer.execute_operations_batch(batch_operations)
                     total_updated += batch_updated
                     batch_operations = []
+                    if not global_config.is_quiet():
+                        log_debug(logger, f"DEBUG: Consumer processed final batch, total_updated={total_updated}")
                     break
 
             # Store total for return
@@ -1376,7 +1450,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
             consumer_thread = threading.current_thread()
             setattr(consumer_thread, '_total_updated', 0)
 
-    def _producer_worker_paginated(self, operation_queue: queue.Queue, producer, logger):
+    def _producer_worker_paginated(self, operation_queue: queue.Queue, producer, logger, phase_name="", progress_bar=None):
         """Producer worker thread for collecting geocoding operations using max primary key pagination"""
         try:
             items_processed = 0
@@ -1389,7 +1463,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                 if not batch:
                     # No more work found
                     if not global_config.is_quiet():
-                        log_info(logger, "No more geocoding work found")
+                        log_info(logger, f"{phase_name}: No more geocoding work found")
                     break
 
                 # Apply max_files limit to the batch if specified
@@ -1397,7 +1471,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                     remaining = global_config.max_files - items_processed
                     if remaining <= 0:
                         if not global_config.is_quiet():
-                            log_info(logger, f"Reached max_files limit: {global_config.max_files} items")
+                            log_info(logger, f"{phase_name}: Reached max_files limit: {global_config.max_files} items")
                         break
                     batch = batch[:remaining]
 
@@ -1420,16 +1494,23 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                             max_id = item_id
                     last_id = max_id
 
+                # Update progress bar thread-safely
+                if progress_bar:
+                    # FIX: Use update_progress() with progress_bar parameter like working processors
+                    update_progress(progress_bar, len(batch))
+                    if not global_config.is_quiet():
+                        log_debug(logger, f"DEBUG: {phase_name}: Updated progress bar by {len(batch)}, new n={progress_bar.n}")
+
                 # Log progress periodically
                 if items_processed % 1000 == 0:
                     if not global_config.is_quiet():
-                        log_info(logger, f"Processed {items_processed} items so far")
+                        log_info(logger, f"{phase_name}: Processed {items_processed} items so far")
 
             if not global_config.is_quiet():
-                log_info(logger, f"Producer completed: sent operations for {items_processed} items")
+                log_info(logger, f"{phase_name}: Producer completed: sent operations for {items_processed} items")
 
         except Exception as e:
-            log_error(logger, f"Producer worker failed: {e}", exc_info=True)
+            log_error(logger, f"{phase_name}: Producer worker failed: {e}", exc_info=True)
 
     def _threaded_consumer_processor(self, result_queue: queue.Queue, thread_id: int,
                                      num_producers: int, consumer) -> None:

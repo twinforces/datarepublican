@@ -531,7 +531,7 @@ class DatabaseOperations:
 
     def get_addresses_for_geocoding(self, limit: Optional[int] = None, last_address_id: Optional[str] = None) -> List[Address]:
         """Get addresses that need geocoding, with max primary key pagination support"""
-        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') and colocator IS NULL"
+        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') and colocator IS NULL AND master_id IS NULL"
         if last_address_id is not None:
             where_clause += " AND address_id > ?"
             params = (last_address_id,)
@@ -834,6 +834,11 @@ class DatabaseOperations:
         if not id_field:
             raise ValueError(f"No ID in {table_name}.")
 
+        # DEBUG: Log connection type and logging status
+        self.logger.info(f"DEBUG: bulk_insert called for {len(objects)} {obj_type.__name__} objects, table={table_name}")
+        self.logger.info(f"DEBUG: global_config.log_sql={global_config.log_sql}, conn type={type(conn).__name__}")
+        self.logger.info(f"DEBUG: Using LoggingDuckDBConnection: {isinstance(conn, LoggingDuckDBConnection)}")
+
         # Prep all (upfront; chunk if >100k in future) - generate IDs client-side for object relationships
         prep_start = time.perf_counter()
         for obj in objects:
@@ -879,6 +884,9 @@ class DatabaseOperations:
                 col_list = ', '.join(insert_cols)
                 placeholders = ', '.join(['?' for _ in insert_cols])
                 insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
+                self.logger.info(f"DEBUG: About to execute INSERT SQL: {insert_sql[:100]}...")
+                self.logger.info(f"DEBUG: Batch has {len(batch_params)} parameter sets")
+
                 if global_config.log_sql:
                     self.logger.info(f"bulk SQL {insert_sql}")
 
