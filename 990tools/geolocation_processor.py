@@ -915,16 +915,26 @@ class GeolocationProcessor:
                     AND canonical_address IS NOT NULL
                     AND canonical_address != ''
             """
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: Executing address count query: {address_query.strip()}")
             address_result = self.db_ops.execute_query(address_query)
             address_count = address_result.fetchone()[0] if address_result else 0
+            address_count = min(address_count, global_config.max_files) if global_config.max_files else address_count
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: Address count query result: {address_count}")
 
             # Count geocoding records that need API calls
             geocoding_query = """
                 SELECT COUNT(*) FROM Geocoding
                 WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
             """
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: Executing geocoding count query: {geocoding_query.strip()}")
             geocoding_result = self.db_ops.execute_query(geocoding_query)
             geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
+            geocoding_count = min(geocoding_count, global_config.max_files) if global_config.max_files else geocoding_count
+            if not global_config.is_quiet():
+                log_debug(self.logger, f"DEBUG: Geocoding count query result: {geocoding_count}")
 
             total_work = address_count + geocoding_count
             if not global_config.is_quiet():
@@ -1063,7 +1073,7 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
 
             # Initialize progress tracking for concurrent execution
             # FIX: Create progress bar BEFORE starting consumer thread so consumer can update it
-            if progress_bar:
+            if not progress_bar:
                 # Create combined progress bar for both phases
                 total_work = self._estimate_total_geocoding_work()
                 if not global_config.is_quiet():
@@ -1494,12 +1504,6 @@ class GeolocationProcessorThreaded(GeolocationProcessor):
                             max_id = item_id
                     last_id = max_id
 
-                # Update progress bar thread-safely
-                if progress_bar:
-                    # FIX: Use update_progress() with progress_bar parameter like working processors
-                    update_progress(progress_bar, len(batch))
-                    if not global_config.is_quiet():
-                        log_debug(logger, f"DEBUG: {phase_name}: Updated progress bar by {len(batch)}, new n={progress_bar.n}")
 
                 # Log progress periodically
                 if items_processed % 1000 == 0:

@@ -828,8 +828,6 @@ class DatabaseOperations:
         if not table_cols:
             raise ValueError(f"No table columns found for {table_name}")
         missing = set(table_cols) - model_fields
-        if missing:
-            self.logger.warning(f"{table_name}: NULL-filling {len(missing)} DB cols")
         id_field = next((col for col in table_cols if col.endswith('_id') or col == 'id'), None)
         if not id_field:
             raise ValueError(f"No ID in {table_name}.")
