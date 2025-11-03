@@ -14,6 +14,7 @@ import zipfile
 import shutil
 import subprocess
 import glob
+import re
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 import requests
@@ -171,26 +172,34 @@ class IRSFetchConsumer(BaseConsumer):
                     f.write(chunk)
             self.log_info(f"Downloaded {filename}")
 
+        # Fetch the page once
         base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
         response = requests.get(base_url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        for year in range(start_year, end_year + 1):
-            year_str = str(year)
-            # Find links containing the year and ending in .zip
-            zip_links = []
-            for a in soup.find_all('a', href=True):
-                if isinstance(a, Tag):
-                    href = a.get('href')
-                    if href and isinstance(href, str) and year_str in href and href.endswith('.zip') and 'TEOS_XML' in href:
-                        zip_links.append(href)
+        # Parse all ZIP links and group by year
+        zip_links_by_year = {}
+        for a in soup.find_all('a', href=True):
+            if isinstance(a, Tag):
+                href = a.get('href')
+                if href and isinstance(href, str) and href.endswith('.zip') and 'TEOS_XML' in href:
+                    # Extract year from href using regex (assuming year is 4 digits)
+                    year_match = re.search(r'(\d{4})', href)
+                    if year_match:
+                        year = int(year_match.group(1))
+                        if start_year <= year <= end_year:
+                            if year not in zip_links_by_year:
+                                zip_links_by_year[year] = []
+                            zip_links_by_year[year].append(href)
 
-            if not zip_links:
+        # Download files for each year
+        for year in range(start_year, end_year + 1):
+            if year not in zip_links_by_year:
                 self.log_warning(f"No ZIP files found for {year}")
                 continue
 
-            for link in zip_links:
+            for link in zip_links_by_year[year]:
                 full_url = f"https://www.irs.gov{link}" if link.startswith('/') else link
                 download_file(full_url, zips_dir)
 

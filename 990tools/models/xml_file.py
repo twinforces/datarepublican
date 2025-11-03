@@ -48,6 +48,9 @@ class XMLFile(BaseModel):
             self.zip_id = ""
         elif not isinstance(self.zip_id, str):
             self.zip_id = str(self.zip_id)
+        # Ensure xml_id is set
+        if not self.xml_id:
+            self.xml_id = self.generate_id()
         pass
 
     def to_dict(self) -> dict:

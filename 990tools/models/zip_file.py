@@ -52,6 +52,16 @@ class ZipFile(BaseModel):
 
     # get_db_field_names is now inherited from BaseModel and uses dataclass fields
 
+    def create_xml_file(self, filename: str, internal_path: str, file_size: Optional[int] = None) -> 'XMLFile':
+        """Factory method to create XMLFile objects with correct zip_id"""
+        from .xml_file import XMLFile
+        return XMLFile(
+            zip_id=self.zip_id,
+            filename=filename,
+            internal_path=internal_path,
+            file_size=file_size
+        )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {

@@ -418,7 +418,7 @@ class DatabaseOperations:
 
     # ZipFile operations
     def insert_zip_file(self, zip_file: ZipFile) -> str:
-        """Insert ZipFile into database using generic bulk_insert method"""
+        """Insert ZipFile into database using generic insert_dataclass method"""
         ids = self.bulk_insert([zip_file])
         zip_id = ids[0] if ids else ""
         # Update cache if insertion successful
@@ -463,7 +463,7 @@ class DatabaseOperations:
 
     # XMLFile operations
     def insert_xml_file(self, xml_file: XMLFile) -> str:
-        """Insert XMLFile into database using generic bulk_insert method"""
+        """Insert XMLFile into database using generic insert_dataclass method"""
         ids = self.bulk_insert([xml_file])
         return ids[0] if ids else ""
 
@@ -509,7 +509,7 @@ class DatabaseOperations:
 
     # Address operations
     def insert_address(self, address: Address) -> str:
-        """Insert Address into database using generic bulk_insert method"""
+        """Insert Address into database using generic insert_dataclass method"""
         ids = self.bulk_insert([address])
         return ids[0] if ids else ""
 
@@ -607,7 +607,7 @@ class DatabaseOperations:
 
     # Charity operations
     def insert_charity(self, charity: Charity) -> str:
-        """Insert Charity into database using generic bulk_insert method"""
+        """Insert Charity into database using generic insert_dataclass method"""
         ids = self.bulk_insert([charity])
         return ids[0] if ids else ""
 
@@ -732,7 +732,7 @@ class DatabaseOperations:
 
     # Grant operations
     def insert_grant(self, grant: Grant) -> str:
-        """Insert Grant into database using generic bulk_insert method"""
+        """Insert Grant into database using generic insert_dataclass method"""
         ids = self.bulk_insert([grant])
         return ids[0] if ids else ""
 
@@ -749,21 +749,37 @@ class DatabaseOperations:
 
     # Officer operations
     def insert_officer(self, officer: Officer) -> str:
-        """Insert Officer into database using generic bulk_insert method"""
+        """Insert Officer into database using generic insert_dataclass method"""
         ids = self.bulk_insert([officer])
         return ids[0] if ids else ""
 
     # Contractor operations
     def insert_contractor(self, contractor: Contractor) -> str:
-        """Insert Contractor into database using generic bulk_insert method"""
+        """Insert Contractor into database using generic insert_dataclass method"""
         ids = self.bulk_insert([contractor])
         return ids[0] if ids else ""
 
     # Political Contribution operations
     def insert_political_contribution(self, contribution: PoliticalContribution) -> str:
-        """Insert PoliticalContribution into database using generic bulk_insert method"""
+        """Insert PoliticalContribution into database using generic insert_dataclass method"""
         ids = self.bulk_insert([contribution])
         return ids[0] if ids else ""
+
+    def GENERIC_INSERT(self, objects: List[BaseModel]) -> List[str]:
+        """
+        Generic insert method that validates objects are BaseModel instances
+        and delegates to bulk_insert.
+
+        Args:
+            objects: List of BaseModel instances to insert
+
+        Returns:
+            List of generated IDs
+        """
+        for obj in objects:
+            if not isinstance(obj, BaseModel):
+                raise ValueError("All objects must be BaseModel instances")
+        return self.bulk_insert(objects)
 
     # Geocoding operations
     def insert_geocoding_record(self, normalized_address: str,
@@ -779,7 +795,7 @@ class DatabaseOperations:
         return geocoding_id
 
     # Bulk operations
-    def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, use_pandas: bool = False, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
+    def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         """
         Bulk insert with executemany for high-throughput; optional Pandas fallback.
         Now uses database-generated UUIDs with RETURNING clause for better performance.
@@ -821,6 +837,14 @@ class DatabaseOperations:
         self.logger.info(f"DEBUG: global_config.log_sql={global_config.log_sql}, conn type={type(conn).__name__}")
         self.logger.info(f"DEBUG: Using LoggingDuckDBConnection: {isinstance(conn, LoggingDuckDBConnection)}")
 
+        # COUNT VALIDATION: Check count before insert
+        try:
+            count_before = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            self.logger.info(f"DEBUG: Count before bulk_insert: {count_before} rows in {table_name}")
+        except Exception as e:
+            self.logger.warning(f"DEBUG: Could not get count before insert: {e}")
+            count_before = None
+
         # Prep all (upfront; chunk if >100k in future) - generate IDs client-side for object relationships
         prep_start = time.perf_counter()
         for obj in objects:
@@ -831,62 +855,63 @@ class DatabaseOperations:
         # Use all table columns including ID field since we generate them client-side
         insert_cols = table_cols
 
-        if use_pandas:
-            # Fallback: Your current DF path (for A/B)
-            data_dict = {col: [getattr(obj, col) if col in model_fields else None for obj in objects] for col in insert_cols}
-            df = pd.DataFrame(data_dict)
-            all_ids = []
-            for i in range(0, len(objects), batch_size):
-                batch_df = df.iloc[i:i + batch_size]
-                view_name = f'temp_{uuid.uuid4().hex[:8]}'
-                conn.register(view_name, batch_df)  # type: ignore
-                col_list = ', '.join(insert_cols)
-                insert_sql = f"INSERT INTO {table_name} ({col_list}) SELECT {col_list} FROM {view_name} RETURNING {id_field}"
-                result = conn.execute(insert_sql)  # type: ignore
-                batch_ids = [row[0] for row in result.fetchall()]
-                all_ids.extend(batch_ids)
-                conn.unregister(view_name)  # type: ignore
-            return all_ids
-        else:
-            # executemany core: Build param lists (excluding ID field)
-            build_start = time.perf_counter()
-            param_rows = []
-            for obj in objects:
-                row = tuple(getattr(obj, col) if col in model_fields else None for col in insert_cols)
-                param_rows.append(row)
-            build_time = time.perf_counter() - build_start
-            self.logger.debug(f"Built {len(objects)} param rows in {build_time:.2f}s")
 
-            # Batched executemany for maximum performance - IDs already generated client-side
-            insert_start = time.perf_counter()
-            for i in range(0, len(objects), batch_size):
-                batch_params = param_rows[i:i + batch_size]
+        # executemany core: Build param lists (excluding ID field)
+        build_start = time.perf_counter()
+        param_rows = []
+        for obj in objects:
+            row = tuple(getattr(obj, col) if col in model_fields else None for col in insert_cols)
+            param_rows.append(row)
+        build_time = time.perf_counter() - build_start
+        self.logger.debug(f"Built {len(objects)} param rows in {build_time:.2f}s")
 
-                # Use executemany with single row inserts - no RETURNING needed since IDs are client-generated
-                col_list = ', '.join(insert_cols)
-                placeholders = ', '.join(['?' for _ in insert_cols])
-                insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
-                self.logger.info(f"DEBUG: About to execute INSERT SQL: {insert_sql[:100]}...")
-                self.logger.info(f"DEBUG: Batch has {len(batch_params)} parameter sets")
+        # Batched executemany for maximum performance - IDs already generated client-side
+        insert_start = time.perf_counter()
+        for i in range(0, len(objects), batch_size):
+            batch_params = param_rows[i:i + batch_size]
 
-                if global_config.log_sql:
-                    self.logger.info(f"bulk SQL {insert_sql}")
+            # Use executemany with single row inserts - no RETURNING needed since IDs are client-generated
+            col_list = ', '.join(insert_cols)
+            placeholders = ', '.join(['?' for _ in insert_cols])
+            insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
+            self.logger.info(f"DEBUG: About to execute INSERT SQL: {insert_sql[:100]}...")
+            self.logger.info(f"DEBUG: Batch has {len(batch_params)} parameter sets")
 
-                # SQL logging handled by execute_query method
+            if global_config.log_sql:
+                self.logger.info(f"bulk SQL {insert_sql}")
 
-                batch_start = time.perf_counter()
-                conn.executemany(insert_sql, batch_params)  # type: ignore
-                batch_elapsed = time.perf_counter() - batch_start
-                rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
-                self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
+            # SQL logging handled by execute_query method
+
+            batch_start = time.perf_counter()
+            conn.executemany(insert_sql, batch_params)  # type: ignore
+            batch_elapsed = time.perf_counter() - batch_start
+            rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
+            self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
             insert_time = time.perf_counter() - insert_start
             self.logger.info(f"executemany inserted {len(objects)} rows in {insert_time:.2f}s ({len(objects)/insert_time:.0f} rows/s)")
 
-            # Log bulk insert completion with counts
-            log_info(self.logger, f"Bulk insert completed: {len(objects)} {obj_type.__name__} records inserted")
+        # COUNT VALIDATION: Check count after insert
+        try:
+            count_after = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            self.logger.info(f"DEBUG: Count after bulk_insert: {count_after} rows in {table_name}")
+            if count_before is not None:
+                expected_count = count_before + len(objects)
+                if count_after != expected_count:
+                    error_msg = f"CRITICAL: Bulk insert validation FAILED! Expected {expected_count} rows, got {count_after}. Difference: {count_after - count_before} (expected +{len(objects)})"
+                    self.logger.error(error_msg)
+                    raise RuntimeError(error_msg)
+                else:
+                    self.logger.info(f"DEBUG: Bulk insert validation PASSED: +{len(objects)} rows added")
+        except Exception as e:
+            self.logger.error(f"DEBUG: Could not validate count after insert: {e}")
+            if "CRITICAL" in str(e):
+                raise  # Re-raise critical validation failures
 
-            # Return the client-generated IDs
-            return [str(getattr(obj, id_field)) for obj in objects]
+        # Log bulk insert completion with counts
+        log_info(self.logger, f"Bulk insert completed: {len(objects)} {obj_type.__name__} records inserted")
+
+        # Return the client-generated IDs
+        return [str(getattr(obj, id_field)) for obj in objects]
 
     def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', conn=None) -> int:
         """Generic bulk update method for database operations"""

@@ -200,7 +200,7 @@ CREATE TABLE ZipFiles (
 );
 -- XmlFiles table - XML file metadata within ZIPs
 CREATE TABLE XmlFiles (
-    xml_id UUID PRIMARY KEY,
+    xml_id UUID DEFAULT uuidv7() PRIMARY KEY,
     zip_id UUID NOT NULL,
     -- Reference to ZIP file
     filename VARCHAR NOT NULL,
