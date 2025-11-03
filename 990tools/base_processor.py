@@ -649,6 +649,7 @@ class BaseConsumer:
             for operation in operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value]:
                 from logging_utils import update_progress
                 progress_count = operation.data.get("count", 0)
+                self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
                 update_progress(n=progress_count)  # Use global progress bar
 
         # Return total operations processed (progress updates + actual operations)
@@ -796,6 +797,7 @@ class BaseConsumer:
             for operation in operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value]:
                 from logging_utils import update_progress
                 progress_count = operation.data.get("count", 0)
+                self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
                 update_progress(n=progress_count)
                 if progress_callback:
                     progress_callback(progress_count)
@@ -842,6 +844,7 @@ class BaseConsumer:
                 for operation in operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value]:
                     from logging_utils import update_progress
                     progress_count = operation.data.get("count", 0)
+                    self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
                     update_progress(n=progress_count)  # Use global progress bar
 
             processed_total = progress_operations + processed_count

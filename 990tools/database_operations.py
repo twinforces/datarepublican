@@ -331,29 +331,13 @@ class DatabaseOperations:
 
         # Determine if we should use DataFrame for large result sets
         use_dataframe = False
-        if df_threshold is not None:
-            # Execute count query to check result size
-            count_query = f"SELECT COUNT(*) FROM {table_name}"
-            if where_clause:
-                count_query += f" WHERE {where_clause}"
-            count_result = self.execute_query(count_query, params)
-            if count_result:
-                row_count = count_result.fetchone()
-                if row_count and len(row_count) > 0:
-                    row_count = row_count[0]
-                    use_dataframe = row_count > df_threshold
-
+ 
         # Execute main query
         result = self.execute_query(query, params)
 
-        if use_dataframe:
-            # Use DataFrame for large result sets
-            df = result.df()
-            row_dicts = df.to_dict('records')
-        else:
-            # Use fetchall for smaller result sets
-            rows = result.fetchall()
-            row_dicts = [dict(zip(field_names, row)) for row in rows]
+        # Use fetchall for smaller result sets
+        rows = result.fetchall()
+        row_dicts = [dict(zip(field_names, row)) for row in rows]
 
         # Convert row dicts to dataclass instances
         instances = []
@@ -531,7 +515,7 @@ class DatabaseOperations:
 
     def get_addresses_for_geocoding(self, limit: Optional[int] = None, last_address_id: Optional[str] = None) -> List[Address]:
         """Get addresses that need geocoding, with max primary key pagination support"""
-        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') and colocator IS NULL AND master_id IS NULL"
+        where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') AND colocator IS NULL AND master_id IS NULL AND canonical_address IS NOT NULL AND canonical_address != ''"
         if last_address_id is not None:
             where_clause += " AND address_id > ?"
             params = (last_address_id,)
@@ -1105,138 +1089,108 @@ class DatabaseOperations:
                 xml_files_updated.add(op.xml_id)
         return xml_files_updated
 
-    def get_address_deduplication_batch(self, last_address_id: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_address_deduplication_batch(self, last_address_id: Optional[str] = None, limit: Optional[int] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """
-        Get canonical addresses that have duplicates needing deduplication with pagination.
+        Get canonical addresses that have duplicates needing deduplication with key-value pagination.
 
-        Uses two-phase query approach to avoid full table scan:
-        1. First phase: Identify qualifying canonical addresses (have duplicates with NULL master_id) with pagination
-        2. Second phase: Fetch details only for those qualifying addresses
+        Optimized single-phase query approach using master address_ids for efficient IN() queries:
+        - Collects all address_ids and master_ids for qualifying canonical addresses in one query
+        - Uses LIST aggregates to collect address data efficiently
+        - Avoids the expensive Phase 2 query by processing master/child logic directly from collected data
 
         Returns canonical addresses where there are multiple addresses with the same canonical_address,
         and at least one of them has master_id IS NULL (not yet deduplicated).
 
         Args:
-            last_address_id: Last processed address_id for pagination (address_id > last_address_id)
+            last_address_id: Last address_id from previous batch for key-value pagination
             limit: Maximum number of canonical addresses to return
 
-        Returns a list of dicts with:
-        - canonical_address: the canonical address string
-        - master_address_id: the min(address_id) to use as master
-        - child_address_ids: list of address_ids that should point to the master (excluding the master itself)
+        Returns a tuple of:
+        - List of deduplication operations, each containing master and children info
+        - Next last_address_id for pagination (maximum of the minimum address_ids from master addresses)
 
         Returns:
-            List of deduplication operations, each containing master and children info
+            Tuple of (batch_operations, next_last_address_id)
         """
         import time
         start_time = time.time()
 
         batch_limit = limit or 1000  # Default limit if not specified
 
-        # Phase 1: Identify qualifying canonical addresses that have duplicates and NULL master_ids
-        # Use subquery with max(address_id) for pagination and LIMIT
-        if last_address_id is None:
-            # First batch - no pagination filter needed
-            phase1_query = """
-                SELECT canonical_address, max_id
-                FROM (
-                    SELECT canonical_address, MAX(address_id) as max_id
-                    FROM Addresses
-                    WHERE canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                    GROUP BY canonical_address
-                    HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-                ) sub
-                ORDER BY max_id
-                LIMIT ?
-            """
-            params = (batch_limit,)
-        else:
-            # Subsequent batches - filter by last_address_id
-            phase1_query = """
-                SELECT canonical_address, max_id
-                FROM (
-                    SELECT canonical_address, MAX(address_id) as max_id
-                    FROM Addresses
-                    WHERE canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                    GROUP BY canonical_address
-                    HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-                ) sub
-                WHERE max_id > ?
-                ORDER BY max_id
-                LIMIT ?
-            """
-            params = (last_address_id, batch_limit)
+        # Single optimized query: Collect all address_ids and master_ids for qualifying canonical addresses
+        # Use key-value pagination with min_id > last_address_id
+        where_clause = ""
+        params = []
+        if last_address_id is not None:
+            where_clause = "WHERE min_id > ?"
+            params = [last_address_id]
 
-        phase1_start = time.time()
-        qualifying_result = self.execute_query(phase1_query, params)
-        qualifying_rows = qualifying_result.fetchall() if qualifying_result else []
-        phase1_time = time.time() - phase1_start
-
-        self.logger.debug(f"Phase 1: Found {len(qualifying_rows)} qualifying canonical addresses in {phase1_time:.2f}s")
-
-        if not qualifying_rows:
-            return []
-
-        # Extract canonical addresses for phase 2
-        canonical_addresses = [row[0] for row in qualifying_rows if row[0] is not None]
-
-        # Phase 2: Fetch details only for qualifying canonical addresses
-        # Use parameterized query with IN clause for the qualifying addresses
-        placeholders = ','.join('?' for _ in canonical_addresses)
-        details_query = f"""
-            SELECT canonical_address, address_id, master_id
-            FROM Addresses
-            WHERE canonical_address IN ({placeholders})
-            ORDER BY canonical_address, address_id
+        # Use LIST aggregates to collect all address_ids and master_ids for each canonical_address
+        # This allows us to determine master/child relationships without a separate Phase 2 query
+        optimized_query = f"""
+            SELECT
+                canonical_address,
+                min_id,
+                address_ids,
+                master_ids
+            FROM (
+                SELECT
+                    canonical_address,
+                    MIN(address_id) as min_id,
+                    LIST(address_id ORDER BY address_id) as address_ids,
+                    LIST(master_id ORDER BY address_id) as master_ids
+                FROM Addresses
+                WHERE canonical_address IS NOT NULL
+                    AND canonical_address != ''
+                GROUP BY canonical_address
+                HAVING COUNT(*) > 1
+                    AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+            ) sub
+            {where_clause}
+            ORDER BY min_id
+            LIMIT ?
         """
+        params.append(batch_limit)
 
-        phase2_start = time.time()
-        details_result = self.execute_query(details_query, tuple(canonical_addresses))
-        details_rows = details_result.fetchall() if details_result else []
-        phase2_time = time.time() - phase2_start
+        query_start = time.time()
+        result = self.execute_query(optimized_query, tuple(params))
+        rows = result.fetchall() if result else []
+        query_time = time.time() - query_start
 
-        self.logger.debug(f"Phase 2: Fetched {len(details_rows)} detail rows in {phase2_time:.2f}s")
-        total_time = time.time() - start_time
-        self.logger.debug(f"Total batch processing time: {total_time:.2f}s")
+        self.logger.debug(f"Optimized query: Found {len(rows)} qualifying canonical addresses in {query_time:.2f}s")
 
-        # Group by canonical_address and compute master/child relationships
-        from collections import defaultdict
-        address_groups = defaultdict(list)
+        if not rows:
+            return [], None
 
-        for row in details_rows:
-            canonical_address = str(row[0]) if row[0] is not None else ''
-            address_id = str(row[1]) if row[1] is not None else ''
-            master_id = row[2]  # Can be None
+        # Calculate next last_address_id as the maximum of the min_id values from this batch
+        next_last_address_id = max(row[1] for row in rows if row[1] is not None) if rows else None
 
-            address_groups[canonical_address].append({
-                'address_id': address_id,
-                'master_id': master_id
-            })
-
-        # Build batch operations
+        # Process collected data to build batch operations
+        # address_ids and master_ids are returned as lists from LIST aggregate
         batch_operations = []
-        for canonical_address in canonical_addresses:
-            if canonical_address not in address_groups:
-                continue
+        for row in rows:
+            canonical_address = str(row[0]) if row[0] is not None else ''
+            min_id = row[1]
+            address_ids = row[2] if row[2] is not None else []
+            master_ids = row[3] if row[3] is not None else []
 
-            addresses = address_groups[canonical_address]
+            if not address_ids or len(address_ids) != len(master_ids):
+                continue  # Skip invalid data
 
             # Find addresses with NULL master_id (candidates for children)
-            null_master_addresses = [addr for addr in addresses if addr['master_id'] is None]
+            null_master_indices = [i for i, master_id in enumerate(master_ids) if master_id is None]
 
-            if len(null_master_addresses) <= 1:
+            if len(null_master_indices) <= 1:
                 continue  # Need more than one NULL master_id to deduplicate
 
-            # Use the minimum address_id as master among NULL master_id addresses
-            null_master_ids = [addr['address_id'] for addr in null_master_addresses]
-            master_address_id = min(null_master_ids)
+            # Get address_ids for NULL master_id addresses
+            null_master_address_ids = [address_ids[i] for i in null_master_indices]
+
+            # Use the maximum address_id among NULL master_id addresses as master
+            master_address_id = max(null_master_address_ids)
 
             # Children are the other NULL master_id addresses
-            child_address_ids = [addr_id for addr_id in null_master_ids if addr_id != master_address_id]
+            child_address_ids = [addr_id for addr_id in null_master_address_ids if addr_id != master_address_id]
 
             if child_address_ids:  # Only include if there are children to update
                 batch_operations.append({
@@ -1245,7 +1199,10 @@ class DatabaseOperations:
                     'child_address_ids': child_address_ids
                 })
 
-        return batch_operations
+        total_time = time.time() - start_time
+        self.logger.debug(f"Total optimized batch processing time: {total_time:.2f}s")
+
+        return batch_operations, next_last_address_id
 
     def execute_address_deduplication_batch(self, master_address_id: str, child_address_ids: List[str]) -> int:
         """

@@ -224,6 +224,7 @@ class Address(BaseModel):
     def create_geocoding_operation(self):
         """Create a geocoding record insertion operation for this address"""
         from database_operations import DatabaseOperation, DatabaseOperationType
+        from models.geocoding import Geocoding
 
         # Ensure address is canonicalized
         self.canonicalize_address()
@@ -231,13 +232,18 @@ class Address(BaseModel):
         # Build census JSON
         census_json = self.census_json()
 
-        # Create geocoding record insertion operation
+        # Create Geocoding object
+        geocoding = Geocoding(
+            normalized_address=json.dumps(census_json),  # Store as proper JSON string
+            geocoding_status='pending'
+        )
+
+        # Create geocoding record insertion operation containing the Geocoding object
         return DatabaseOperation(
             operation_type=DatabaseOperationType.INSERT_GEOCODING,
             data={
-                'normalized_address': json.dumps(census_json),  # Store as proper JSON string
-                'address_id': self.address_id,
-                'geocoding_status': 'pending'
+                'records': [geocoding],
+                'table': 'Geocoding'
             }
         )
 

@@ -29,7 +29,7 @@ from config import global_config
 from models import Address
 from xml_processor import XMLProducer, XMLConsumer
 from address_deduplication_processor import AddressDeduplicationProcessor
-from geolocation_processor import GeolocationProcessor
+from geolocation_processor import GeocodingProcessor
 from geolocation_processor import geolocate_addresses
 from base_processor import ThreadPoolManager, ThreadPoolConfig, PoolConfig
 
@@ -703,35 +703,24 @@ class GeolocationStrategyOld(ProcessingStrategy):
 
         try:
             # Create the geolocation processor
-            processor = GeolocationProcessor(self.db_ops)
+            processor = GeocodingProcessor(self.db_ops)
 
             # Set up progress bar for geocoding
             from logging_utils import start_progress_reporting
 
             # Estimate total addresses that need geocoding for progress bar
-            if max_files:
-                total_operations = max_files
-            else:
-                # Count distinct canonical addresses that need geocoding
-                count_query = """
-                    SELECT COUNT(DISTINCT canonical_address) FROM Addresses
-                    WHERE master_id IS NULL
-                        AND (colocator IS NULL OR colocator = '')
-                        AND canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                """
-                result = self.db_ops.execute_query(count_query)
-                address_count = result.fetchone()[0] if result else 0
+   
+            # Count geocoding records that need API calls
+            geocoding_query = """
+                SELECT COUNT(*) FROM Geocoding
+                WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
+            """
+            geocoding_result = self.db_ops.execute_query(geocoding_query)
+            geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
 
-                # Count geocoding records that need API calls
-                geocoding_query = """
-                    SELECT COUNT(*) FROM Geocoding
-                    WHERE geocoding_status = 'pending' OR geocoding_status IS NULL
-                """
-                geocoding_result = self.db_ops.execute_query(geocoding_query)
-                geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
-
-                total_operations = address_count + geocoding_count
+            total_operations = geocoding_count
+            if global_config.max_files:
+                total_operations = min(total_operations,global_config.max_files)
 
             progress_desc = "Geolocating addresses"
             pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="addrs")
@@ -754,10 +743,11 @@ class GeolocationStrategyOld(ProcessingStrategy):
 
 class GeolocationStrategy(ProcessingStrategy):
     """
-    Strategy for address geocoding processing using producer-consumer pattern.
+    Strategy for geocoding record processing using producer-consumer pattern.
 
-    Processes addresses in batches to geocode them using the census API,
-    following the same pattern as XML processing.
+    Processes geocoding records in batches to geocode them using the census API,
+    following the same pattern as XML processing. Now only processes pending
+    geocoding records that require API calls.
     """
 
     DEFAULT_BATCH_SIZE = 1000
@@ -768,50 +758,52 @@ class GeolocationStrategy(ProcessingStrategy):
 
     def execute(self, max_files: Optional[int] = None) -> int:
         """
-        Execute address geocoding processing.
+        Execute geocoding record processing.
 
         Args:
-            max_files: Maximum number of addresses to process (for testing)
+            max_files: Maximum number of geocoding records to process (for testing)
 
         Returns:
-            Number of addresses processed
+            Number of geocoding records processed
         """
-        self.log_info("Starting address geocoding strategy")
+        self.log_info("Starting geocoding strategy")
 
         try:
             # Set up progress bar for geocoding
             from logging_utils import start_progress_reporting
 
-            # Estimate total canonical addresses that need geocoding for progress bar
+            # Estimate total operations that need geocoding for progress bar
+            # This includes geocoding records that need API calls
             if max_files:
                 total_operations = max_files
             else:
-                # Count total canonical addresses that need geocoding (master addresses without colocator)
-                count_query = """
-                    SELECT COUNT(DISTINCT canonical_address) FROM Addresses
-                    WHERE master_id IS NULL
-                        AND (colocator IS NULL OR colocator = '')
-                        AND canonical_address IS NOT NULL
-                        AND canonical_address != ''
+                # Count geocoding records that need API calls
+                geocoding_count_query = """
+                    SELECT COUNT(*) FROM Geocoding
+                    WHERE geocoding_status IS NULL OR geocoding_status = 'pending'
                 """
-                result = self.db_ops.execute_query(count_query)
-                total_operations = result.fetchone()[0] if result else 0
+                geocoding_result = self.db_ops.execute_query(geocoding_count_query)
+                geocoding_count = geocoding_result.fetchone()[0] if geocoding_result else 0
 
-            progress_desc = "Geocoding addresses"
-            pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="addrs")
+                # Total operations = geocoding records that need API calls
+                total_operations = geocoding_count
 
-            # Execute geocoding with progress bar
-            from geolocation_processor import geolocate_addresses
-            total_processed = geolocate_addresses(self.db_ops, progress_bar=pbar)
+            progress_desc = "Geocoding records"
+            pbar = start_progress_reporting(total=total_operations, desc=progress_desc, unit="recs")
+
+            # Execute geocoding with progress bar using threaded processor
+            from geolocation_processor import GeolocationProcessorThreaded
+            processor = GeolocationProcessorThreaded(self.db_ops)
+            total_processed = processor.geolocate_addresses_threaded(progress_bar=pbar)
 
             # Close progress bar
             if pbar:
                 pbar.close()
 
-            self.log_info(f"Address geocoding strategy complete: {total_processed} addresses processed")
+            self.log_info(f"Geocoding strategy complete: {total_processed} geocoding records processed")
             return total_processed
 
         except Exception as e:
-            self.log_error(f"Address geocoding strategy failed: {e}", exc_info=True)
+            self.log_error(f"Geocoding strategy failed: {e}", exc_info=True)
             return 0
 

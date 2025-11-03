@@ -102,7 +102,7 @@ FULL_DB_PATH = f"{DEFAULT_FINAL_DIR}/${DEFAULT_DB_PATH}"
 
 # Geocoding constants
 GEOCODING_BATCH_SIZE = 1000  # Batch size for geocoding operations
-GEOCODING_API_BATCH_SIZE = 10000  # Maximum addresses per census API call (as per census docs)
+GEOCODING_API_BATCH_SIZE = 10000  # Maximum addresses per census API call (as per census docs) - updated to comply with actual API limits
 GEOCODING_FAST_WORKERS = 8  # Workers for fast local geocoding record creation
 GEOCODING_API_WORKERS = 4   # Workers for slow census API calls
 

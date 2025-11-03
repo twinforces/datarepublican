@@ -127,6 +127,8 @@ def get_logger(name: str) -> logging.Logger:
         logger.addHandler(handler)
         # Set level to NOTSET so it inherits from root logger, allowing global control
         logger.setLevel(logging.NOTSET)
+        # Disable propagation to prevent duplicate messages when root logger also has handlers
+        logger.propagate = False
     return logger
 
 def create_stub_log_error(logger: logging.Logger) -> Callable:

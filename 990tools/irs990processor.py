@@ -45,7 +45,7 @@ except ImportError:
 # Import extracted modules
 from database_operations import DatabaseOperations
 from processing_strategy import ParallelXMLProcessingStrategy, AddressDeduplicationStrategy
-from geolocation_processor import GeolocationProcessor, GeolocationProcessorThreaded
+from geolocation_processor import GeocodingProcessor, GeolocationProcessorThreaded
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
@@ -451,8 +451,28 @@ class IRS990Processor:
 
 
     def geolocate_addresses(self):
-        """Geolocate addresses using census API (step 7)"""
-        return self.geolocation_processor.geolocate_addresses_threaded()
+        """Geolocate addresses using census API (step 7) - Phase 2 only"""
+        # Import here to avoid circular imports
+        from geocoding_api_processor import GeocodingAPIProcessor
+
+        # Check if censusgeocode is available
+        if cg is None:
+            if not global_config.is_quiet():
+                log_warning(self.logger, "censusgeocode library not available. Skipping geocoding. "
+                                  "To enable geocoding, install with: pip install censusgeocode")
+            return 0
+
+        try:
+            if not global_config.is_quiet():
+                log_info(self.logger, "Starting geocoding API processing (Phase 2) - geocoding records should be created during address deduplication (Phase 1)")
+
+            # Create and run the API processor for Phase 2
+            api_processor = GeocodingAPIProcessor(self.db_ops)
+            return api_processor.process_pending_geocoding_records()
+
+        except Exception as e:
+            log_error(self.logger, f"Address geocoding failed: {e}", exc_info=True)
+            return 0
 
     def process_officer_photos(self):
         """Process officer photos using Google Knowledge Graph API (step 8)"""
