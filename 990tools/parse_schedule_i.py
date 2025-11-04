@@ -55,28 +55,28 @@ def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str
                     grantee_name = (name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown")
                     grant_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
 
-                    if grant_ein == "Unknown":
-                        continue
-
+                    grant_amt = 0
                     if amount_elem and amount_elem[0].text:
                         try:
-                            grant_amt = int(parse_float_field(amount_elem[0].text.strip()))
-                            if grant_amt > 0:
-                                grant_data = {
-                                    'filer_ein': filer_ein,
-                                    'filer_name': filer_name,
-                                    'grant_ein': grant_ein,
-                                    'grant_amt': grant_amt,
-                                    'tax_year': tax_year
-                                }
-                                grants.append(grant_data)
-
-                                # If context is provided, also add to context
-                                if context is not None:
-                                    grant_obj = Grant(**grant_data)
-                                    context.addObjectToDatabase(grant_obj)
+                            amt_text = amount_elem[0].text.strip()
+                            if amt_text:  # Only parse if not empty
+                                grant_amt = int(parse_float_field(amt_text))
                         except (ValueError, TypeError):
                             pass
+
+                    grant_data = {
+                        'filer_ein': filer_ein,
+                        'filer_name': filer_name,
+                        'grant_ein': grant_ein,
+                        'grant_amt': grant_amt,
+                        'tax_year': tax_year
+                    }
+                    grants.append(grant_data)
+
+                    # If context is provided, also add to context
+                    if context is not None:
+                        grant_obj = Grant(**grant_data)
+                        context.addObjectToDatabase(grant_obj)
                 except Exception as e:
                     continue
     except Exception as e:

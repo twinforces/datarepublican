@@ -151,6 +151,6 @@ def dump_traceback(logger: logging.Logger, message: str = "Intentional exception
     """Logs the full stack trace without raising an exception"""
     try:
         raise Exception(message)
-    except Exception:
-        log_error(logger, f"Traceback dump: {message}", exc_info=True)
+    except Exception as e:
+        log_error(logger, f"Traceback dump: {message} {e}", exc_info=True)
         pass

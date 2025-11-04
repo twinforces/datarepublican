@@ -392,30 +392,13 @@ SCHEDULE_C_XPATHS = {
     ],
     "990PF": [
         etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
-    ],
-}
-
-# Schedule L (Contractors) XPath patterns
-SCHEDULE_L_XPATHS = {
-    "990": [
-        # Also check directly under IRS990 for ContractorCompensationGrp
-        etree.XPath(".//irs:IRS990/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-    ],
-    "990EZ": [
-         # Also check directly under IRS990EZ for ContractorCompensationGrp
-        etree.XPath(".//irs:IRS990EZ/irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:ContractorCompensationGrp", namespaces=NAMESPACES),
-    ],
-    "990PF": [
-         # Also check directly under IRS990PF for CompensationOfHghstPdCntrctGrp
-        etree.XPath(".//irs:IRS990PF/irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
-        etree.XPath(".//irs:CompensationOfHghstPdCntrctGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleC/irs:Section527PoliticalOrgGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleC/irs:NoncharitableExemptOrgSchGrp[irs:ExemptOrganizationTypeCd='527']", namespaces=NAMESPACES),
     ],
 }
 
 SCHEDULE_C_AMOUNT_XPATHS = [
-    etree.XPath("irs:TotalDirectExpendAmt", namespaces=NAMESPACES),
+    etree.XPath("irs:PoliticalExpendituresAmt", namespaces=NAMESPACES),
     etree.XPath("irs:Amount", namespaces=NAMESPACES),
 ]
 
@@ -428,6 +411,26 @@ SCHEDULE_C_EIN_XPATHS = [
     etree.XPath("irs:EIN", namespaces=NAMESPACES),
     etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
 ]
+
+# Schedule L (Contractors) XPath patterns
+SCHEDULE_L_XPATHS = {
+    "990": [
+        etree.XPath(".//irs:IRS990ScheduleL/irs:TransactionsWithInterestedPersonsGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:LoansToFromOfficersGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:BusinessTransactionsGrp", namespaces=NAMESPACES),
+    ],
+    "990EZ": [
+        etree.XPath(".//irs:IRS990ScheduleL/irs:TransactionsWithInterestedPersonsGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:LoansToFromOfficersGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:BusinessTransactionsGrp", namespaces=NAMESPACES),
+    ],
+    "990PF": [
+        etree.XPath(".//irs:IRS990ScheduleL/irs:TransactionsWithInterestedPersonsGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:LoansToFromOfficersGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleL/irs:BusinessTransactionsGrp", namespaces=NAMESPACES),
+    ],
+}
+
 
 XPATHS_990EZ = {
     **COMMON_XPATHS,  # Include all common patterns

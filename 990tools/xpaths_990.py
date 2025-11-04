@@ -144,3 +144,26 @@ XPATHS_990 = {
         etree.XPath(".//ReturnData", namespaces=NAMESPACES),
     ],
 }
+
+# Schedule C (Political Contributions) XPath patterns
+SCHEDULE_C_XPATHS = {
+    "990": [
+        etree.XPath(".//irs:IRS990ScheduleC/irs:PoliticalCampaignActyGrp", namespaces=NAMESPACES),
+        etree.XPath(".//irs:IRS990ScheduleC/irs:Section527PoliticalOrgGrp", namespaces=NAMESPACES),
+    ],
+}
+
+SCHEDULE_C_AMOUNT_XPATHS = [
+    etree.XPath("irs:PoliticalExpendituresAmt", namespaces=NAMESPACES),
+    etree.XPath("irs:Amount", namespaces=NAMESPACES),
+]
+
+SCHEDULE_C_RECIPIENT_XPATHS = [
+    etree.XPath("irs:RecipientNm", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientName", namespaces=NAMESPACES),
+]
+
+SCHEDULE_C_EIN_XPATHS = [
+    etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
+]
