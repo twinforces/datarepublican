@@ -4,84 +4,206 @@ zip_processor.py - ZIP file processing for IRS 990 data
 
 This module handles the processing of IRS ZIP files, including
 downloading, listing contents, and registering files in the database.
-Includes ZIP file connection caching for improved performance.
+Uses producer-consumer pattern for safe batch processing with DuckDB.
 """
 
 import os
 import zipfile
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any, Optional
 
-# ZipFile and XMLFile are imported from database_operations
-from database_operations import DatabaseOperations
+# Import producer-consumer pattern classes
+from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
+from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import ZipFile, XMLFile
-from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress
+from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress, get_logger
+from config import global_config
+
+
+class ZipProducer(BaseProducer):
+    """Producer for ZIP file processing operations"""
+
+    def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
+        super().__init__(db_ops, batch_size=10)  # Process ZIPs in small batches
+        self.zips_dir = zips_dir
+
+    def _get_work_batch(self, offset: int) -> List[Path]:
+        """Get a batch of ZIP files to process"""
+        # For ZIP processing, we process all files in a directory
+        # This is a simple implementation - get all ZIP files
+        zip_files = []
+        for zip_path in Path(self.zips_dir).glob("*.zip"):
+            # Check if ZIP file is already processed
+            zip_filename = zip_path.name
+            existing_zip = self.db_ops.execute_query(
+                "SELECT status FROM ZipFiles WHERE filename = ?",
+                (zip_filename,)
+            ).fetchone()
+
+            if not existing_zip or existing_zip[0] != 'processed':
+                zip_files.append(zip_path)
+
+        # Apply offset and batch size
+        start_idx = offset
+        end_idx = start_idx + self.batch_size
+        batch = zip_files[start_idx:end_idx] if start_idx < len(zip_files) else []
+
+        return batch
+
+    def _process_work_batch_to_contexts(self, batch: List[Path]) -> 'PendingDatabaseContext':
+        """Process a batch of ZIP files into PendingDatabaseContext objects"""
+        from pending_database_context import PendingDatabaseContext
+
+        contexts = []
+
+        for zip_path in batch:
+            # Create context for this ZIP file
+            context = PendingDatabaseContext()
+
+            # Create ZipFile using factory method
+            tax_year = int(zip_path.name[:4]) if zip_path.name[:4].isdigit() else 0
+            zip_file = ZipFile.create_from_path(str(zip_path), tax_year)
+            context.addObjectToDatabase(zip_file)
+
+            contexts.append(context)
+
+        return contexts
+
+
+class ZipConsumer(BaseConsumer):
+    """Consumer for ZIP file operations"""
+
+    def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
+        super().__init__(db_ops)
+        self.zips_dir = zips_dir
+
+    def _process_operations_batch(self, operations_by_type):
+        """Process ZIP file operations using standardized pattern"""
+        # All operations are now handled by PendingDatabaseContext.save_to_database()
+        # which executes all operations directly
+        pass
+
+    def _execute_zip_operation(self, operation):
+        """Execute a ZIP file operation"""
+        data = operation.data
+        zip_path_str = data["zip_path"]
+        zips_dir = data["zips_dir"]
+        operation_type = data["operation"]
+
+        if operation_type == "process_zip_contents":
+            zip_path = Path(zip_path_str)
+            self._process_single_zip(zip_path)
+
+    def _execute_operations_batch(self, operations):
+        """Execute a batch of operations using the consumer pattern"""
+        # All operations are now handled by the base class execute_operations_batch method
+        # which properly groups and executes operations in dependency order
+        self.execute_operations_batch(operations)
 
 
 class ZipProcessor:
-    """Handles ZIP file processing operations"""
-
+    """Main processor for ZIP file processing using producer-consumer pattern"""
 
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
         self.db_ops = db_ops
         self.zips_dir = zips_dir
+        self.logger = get_logger("zip_processor")
+
+        # Initialize producer and consumer
+        self.producer = ZipProducer(db_ops, zips_dir)
+        self.consumer = ZipConsumer(db_ops, zips_dir)
+
+        # Initialize thread pool manager
+        thread_config = ThreadPoolConfig(
+            producer_config=PoolConfig(max_workers=2, queue_size=20),  # Process 2 ZIPs at a time
+            consumer_config=PoolConfig(max_workers=1, queue_size=10)   # Single consumer for DB safety
+        )
+        self.thread_pool_manager = ThreadPoolManager(thread_config, self.logger)
 
     def process_zip_files(self, start_year: int, end_year: int) -> List[Path]:
-        """Process ZIP files and register XML files (steps 2-4)"""
-        print(f"Processing ZIP files from {start_year} to {end_year}")
+        """Process ZIP files and register XML files using producer-consumer pattern with PendingDatabaseContext"""
+        self.log_info(f"Processing ZIP files from {start_year} to {end_year} using producer-consumer pattern with PendingDatabaseContext")
 
-        # Step 2: Read the directory with the zip files as specified in the args
-        zip_files = []
-        for year in range(start_year, end_year + 1):
-            year_str = f"{year}"
-            zip_pattern = f"{year}*.zip"
-            for zip_path in Path(self.zips_dir).glob(zip_pattern):
-                zip_files.append(zip_path)
+        try:
+            # Collect contexts using the new PendingDatabaseContext approach
+            contexts = self.producer.collect_contexts()
 
-        print(f"Found {len(zip_files)} ZIP files to process")
+            if not contexts:
+                self.log_info("No ZIP files to process")
+                return []
 
-        # Step 3: Pull the list of zip files available from the IRS site, see if there are any new ones to be downloaded
-        # For now, we'll work with existing files - download logic can be added later
+            self.log_info(f"Collected {len(contexts)} ZIP processing contexts")
 
-        # Step 4: Use command line tools to get a listing of each zip file, and register the zip as ZipFile in the database,
-        # and the contents as XMLFile
-        # Start thread-safe progress reporting
-        progress_reporter = start_progress_reporting(
-            total=len(zip_files),
-            desc="Processing ZIP files",
-            unit="zip"
-        )
+            # Execute contexts using consumer
+            total_processed = self.consumer.execute_contexts_batch(contexts)
 
-        processed_zips = []
-        for zip_path in zip_files:
-            try:
-                # Check if ZIP file is already processed
-                zip_filename = zip_path.name
-                existing_zip = self.db_ops.execute_query(
-                    "SELECT status FROM ZipFiles WHERE filename = ?",
-                    (zip_filename,)
-                ).fetchone()
+            self.log_info(f"ZIP file processing complete: {total_processed} operations processed")
+            return [Path(ctx._operations[0].data["zip_path"]) for ctx in contexts if ctx._operations]
 
-                if existing_zip and existing_zip[0] == 'processed':
-                    print(f"Skipping already processed ZIP file: {zip_filename}")
-                    update_progress(progress_reporter, 1)
+        except Exception as e:
+            self.log_error(f"ZIP processing failed: {e}", exc_info=True)
+            return []
+
+    def _producer_wrapper(self, zip_files: List[Path], work_queue, result_queue, thread_id: int, num_threads: int):
+        """Wrapper for producer thread execution"""
+        try:
+            self.log_debug(f"ZIP Producer thread {thread_id} starting")
+
+            # Distribute work items among threads
+            for i in range(thread_id, len(zip_files), num_threads):
+                zip_path = zip_files[i]
+
+                # Create operation to process this ZIP file
+                operation = DatabaseOperation(
+                    operation_type=DatabaseOperationType.INSERT_ZIP_FILE,
+                    data={
+                        "zip_path": str(zip_path),
+                        "zips_dir": self.zips_dir,
+                        "operation": "process_zip_contents"
+                    }
+                )
+
+                # Put operation in result queue for consumer
+                result_queue.put(operation)
+
+                self.log_debug(f"ZIP Producer {thread_id}: queued operation for {zip_path.name}")
+
+        except Exception as e:
+            self.log_error(f"ZIP Producer thread {thread_id} error: {e}", exc_info=True)
+        finally:
+            # Signal completion
+            result_queue.put(None)
+
+    def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, progress_bar=None):
+        """Wrapper for consumer thread execution"""
+        try:
+            self.log_debug(f"ZIP Consumer thread {thread_id} starting")
+            sentinels_received = 0
+
+            while True:
+                try:
+                    operation = result_queue.get(timeout=1.0)
+                    if operation is None:  # Sentinel
+                        sentinels_received += 1
+                        if sentinels_received >= num_producers:
+                            break
+                        continue
+
+                    # Execute the operation
+                    if isinstance(operation, DatabaseOperation):
+                        self.consumer._execute_zip_operation(operation)
+
+                        # Update progress
+                        if progress_bar:
+                            progress_bar.update(1)
+
+                    result_queue.task_done()
+
+                except:
                     continue
 
-                print(f"DEBUG: Processing ZIP file: {zip_filename}")
-                self._process_single_zip(zip_path)
-                processed_zips.append(zip_path)
-                update_progress(progress_reporter, 1)
-            except Exception as e:
-                print(f"Failed to process ZIP {zip_path}: {e}")
-                # DEBUG: Log exception details
-                import traceback
-                print(f"DEBUG: Exception traceback: {traceback.format_exc()}")
-                update_progress(progress_reporter, 1)
-
-        # Stop progress reporting
-        stop_progress_reporting()
-
-        return processed_zips
+        except Exception as e:
+            self.log_error(f"ZIP Consumer thread {thread_id} error: {e}", exc_info=True)
 
     def _process_single_zip(self, zip_path: Path):
         """Process a single ZIP file"""
@@ -101,22 +223,12 @@ class ZipProcessor:
         if zip_path.exists():
             zip_file.checksum = f"{zip_path.name}:{zip_path.stat().st_size}"
 
-        # Insert ZIP file into database
-        zip_id = self.db_ops.insert_zip_file(zip_file)
-        print(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
+        # Create PDC context for this ZIP processing
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
 
-        # DEBUG: Validate ZIP file insertion
-        try:
-            result = self.db_ops.execute_query(
-                "SELECT zip_id, filename, status FROM ZipFiles WHERE zip_id = ?",
-                (zip_id,)
-            ).fetchone()
-            if result:
-                print(f"DEBUG: ZIP file validation - ID: {result[0]}, Filename: {result[1]}, Status: {result[2]}")
-            else:
-                print(f"WARNING: ZIP file {zip_filename} not found in database after insertion!")
-        except Exception as e:
-            print(f"ERROR: Failed to validate ZIP file insertion: {e}")
+        # Add ZIP file to context
+        context.addObjectToDatabase(zip_file)
 
         # Extract XML file listing and sizes in one pass
         xml_sizes = self._get_all_xml_sizes(zip_path)
@@ -129,38 +241,45 @@ class ZipProcessor:
             print(f"DEBUG: First 5 XML files: {xml_files[:5]}")
             print(f"DEBUG: XML file sizes: {list(xml_sizes.values())[:5]}")
 
-        # Batch insert all XML files for this ZIP
-        xml_file_objects = []
+        # Create XML file objects and add to context
         for xml_filename in xml_files:
             xml_file = zip_file.create_xml_file(
                 filename=xml_filename,
                 internal_path=xml_filename,
                 file_size=xml_sizes[xml_filename]
             )
-            xml_file_objects.append(xml_file)
+            context.addObjectToDatabase(xml_file)
 
-        # Bulk insert XML files
-        if xml_file_objects:
-            ids = self.db_ops.bulk_insert(xml_file_objects)
-            print(f"Bulk inserted {len(xml_file_objects)} XML files for ZIP {zip_filename}")
-            print(f"DEBUG: Bulk insert returned {len(ids)} IDs")
+        # Add ZIP status update operation
+        from database_operations import DatabaseOperation, DatabaseOperationType
+        # Note: We need the zip_id, but we don't have it yet since PDC hasn't executed
+        # This is a limitation - for now we'll handle status updates separately
+        # In a full PDC refactor, this would be handled by PDC as well
 
-            # Validate insertion by checking database count
-            try:
+        # Execute the context operations directly
+        context.save_to_database(self.db_ops)
+
+        # Get the zip_id from the first operation (INSERT_ZIP_FILE)
+        zip_id = None
+        for op in operations:
+            if hasattr(op, 'data') and 'zip_id' in str(op.data):
+                # This is a hack - in a proper refactor, PDC would return IDs
+                # For now, query the database to get the zip_id
                 result = self.db_ops.execute_query(
-                    "SELECT COUNT(*) FROM XmlFiles WHERE zip_id = ?",
-                    (zip_id,)
+                    "SELECT zip_id FROM ZipFiles WHERE filename = ? ORDER BY zip_id DESC LIMIT 1",
+                    (zip_filename,)
                 ).fetchone()
-                actual_count = result[0] if result else 0
-                print(f"DEBUG: Database validation - Expected {len(xml_file_objects)} XML files, found {actual_count}")
-                if actual_count != len(xml_file_objects):
-                    print(f"WARNING: XML file count mismatch! Expected {len(xml_file_objects)}, got {actual_count}")
-            except Exception as e:
-                print(f"ERROR: Failed to validate XML file insertion: {e}")
+                if result:
+                    zip_id = result[0]
+                break
 
-        # Update ZIP status
-        self.db_ops.update_zip_status(zip_id, 'processed')
-        print(f"DEBUG: Updated ZIP {zip_filename} status to 'processed'")
+        if zip_id:
+            # Update ZIP status (this should eventually be handled by PDC too)
+            self.db_ops.update_zip_status(zip_id, 'processed')
+            print(f"DEBUG: Updated ZIP {zip_filename} status to 'processed'")
+            print(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
+        else:
+            print(f"WARNING: Could not determine zip_id for {zip_filename}")
 
     def _get_xml_files_from_zip(self, zip_path: Path) -> List[str]:
         """Get XML files from ZIP"""

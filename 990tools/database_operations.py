@@ -6,6 +6,31 @@ This module contains all database-related operations for the IRS 990 processor,
 including CRUD operations for all data models.
 
 This module now uses DuckDB exclusively.
+
+ARCHITECTURE OVERVIEW:
+- DatabaseOperations: Main class handling all DuckDB interactions
+- GENERIC_INSERT(): Organizes objects by type and inserts in ownership order (Charity→Officer→Grant→Contractor→PoliticalContribution→Address)
+- INSERT_BY_TYPE(): For PDC when objects are pre-sorted by type
+- bulk_insert(): High-performance batched inserts with client-side UUID generation
+- Thread-local connections for multi-threaded safety
+- Static ZIP file path cache for performance
+
+KEY CLASSES:
+- DatabaseOperations: Main database interface class
+- DatabaseOperationType: Enum of operation types (mostly deprecated)
+- DatabaseOperation: Represents individual operations (mostly deprecated)
+
+DATABASE CONSTRAINTS:
+- DuckDB allows multiple readers but only one writer
+- Uses thread-local connections to avoid writer conflicts
+- Client-side UUID7 generation for object relationships
+- Strict ownership order enforcement for referential integrity
+
+PERFORMANCE FEATURES:
+- Preloaded ZIP file path cache
+- Batched executemany operations
+- Connection pooling with thread-local storage
+- Query timeout protection and error handling
 """
 
 import duckdb
@@ -37,31 +62,42 @@ from loggingDuckDB import LoggingDuckDBConnection
 
 
 class DatabaseOperationType(Enum):
-    """Enumeration of database operation types for flexible processing"""
-    INSERT_CHARITY = "insert_charity"
-    INSERT_OFFICER = "insert_officer"
-    INSERT_GRANT = "insert_grant"
-    INSERT_CONTRACTOR = "insert_contractor"
-    INSERT_POLITICAL_CONTRIBUTION = "insert_political_contribution"
-    INSERT_ADDRESS = "insert_address"
-    INSERT_ZIP_FILE = "insert_zip_file"
-    UPDATE_XML_FILE_SUCCESS = "update_xml_file_success"
-    UPDATE_XML_FILE_ERROR = "update_xml_file_error"
+    """
+    Enumeration of database operation types for flexible processing.
+
+    MOSTLY DEPRECATED: These operation types were used in the old operation-based
+    processing model. The new PDC (PendingDatabaseContext) approach handles
+    operations internally without explicit operation types.
+
+    Still used for:
+    - XML_FILE_UPDATE: Updating XML file processing status
+    - OPTIMIZE_DATABASE: Database optimization operations
+    - PROGRESS_UPDATE: Progress bar updates
+    """
     XML_FILE_UPDATE = "xml_file_update"
     UPDATE_XML_EIN = "update_xml_ein"
     OPTIMIZE_DATABASE = "optimize_database"
     GENERIC_UPDATE = "generic_update"
+    GENERIC_INSERT = "generic_insert"
+    INSERT_BY_TYPE = "insert_by_type"
     ADDRESS_DEDUPLICATION_BATCH = "address_deduplication_batch"
     PROGRESS_UPDATE = "progress_update"
-    INSERT_GEOCODING = "insert_geocoding"
     UPDATE_GEOCODING = "update_geocoding"
 
 
 class DatabaseOperation:
-    """Represents a single database operation with its data and dependencies"""
+    """
+    Represents a single database operation with its data and dependencies.
+
+    DEPRECATED: This class was used in the old operation-based processing model.
+    The new PDC (PendingDatabaseContext) approach handles operations internally
+    without explicit DatabaseOperation objects.
+
+    Still used for XML file updates and progress tracking operations.
+    """
 
     def __init__(self, operation_type: DatabaseOperationType, data: Any, xml_id: Optional[str] = None,
-                 dependencies: Optional[List[str]] = None):
+                  dependencies: Optional[List[str]] = None):
         self.operation_type = operation_type
         self.data = data
         self.xml_id = xml_id
@@ -69,7 +105,33 @@ class DatabaseOperation:
 
 
 class DatabaseOperations:
-    """Handles all DuckDB operations for IRS 990 data processing"""
+    """
+    Handles all DuckDB operations for IRS 990 data processing.
+
+    This is the main database interface class that provides:
+    - Connection management with thread-local connections
+    - Generic CRUD operations for all dataclass types
+    - Bulk insert operations with ownership order enforcement
+    - ZIP file path caching for performance
+    - Schema initialization and optimization
+
+    THREADING MODEL:
+    - Uses thread-local connections to avoid DuckDB's single-writer constraint
+    - Multiple readers allowed, but only one writer per connection
+    - Static ZIP cache shared across all instances
+
+    PERFORMANCE FEATURES:
+    - Preloaded ZIP file path cache at startup
+    - Batched executemany operations for bulk inserts
+    - Client-side UUID7 generation for object relationships
+    - Connection pooling and reuse
+
+    KEY METHODS:
+    - GENERIC_INSERT(): Organizes mixed objects by type and inserts in ownership order
+    - INSERT_BY_TYPE(): For PDC when objects are pre-sorted by type
+    - bulk_insert(): High-performance batched inserts
+    - select_dataclass(): Generic SELECT with reflection-based field mapping
+    """
 
     # SQL logging is now read directly from global_config
 
@@ -88,14 +150,21 @@ class DatabaseOperations:
 
     def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
         """
-        Initialize DuckDB connection
+        Initialize DuckDB connection with performance optimizations.
+
+        Sets up thread-local connections, preloads ZIP cache, and initializes schema.
+        Configures DuckDB with performance settings for bulk operations.
 
         Args:
             db_path: Path to DuckDB database file
             read_only: Whether to open database in read-only mode
             memory_limit: Memory limit for DuckDB (default: 4GB)
             threads: Number of threads for DuckDB (default: auto)
+            dbUI: Whether to start DuckDB's web UI
             query_timeout: Query timeout in seconds (default: 300)
+
+        THREADING: Creates thread-local connections to avoid DuckDB's single-writer constraint.
+        PERFORMANCE: Preloads ZIP file cache and applies bulk operation optimizations.
         """
         self.db_path = db_path
         # SQL logging is now read directly from global_config
@@ -210,7 +279,23 @@ class DatabaseOperations:
             raise
 
     def execute_query(self, query: str, params: Optional[Tuple] = None, conn=None) -> Any:
-        """Execute a query and return results with timeout protection and enhanced error handling"""
+        """
+        Execute a query with timeout protection and enhanced error handling.
+
+        Uses thread-local connections for thread safety. Handles DuckDB-specific errors
+        and provides detailed logging when SQL logging is enabled.
+
+        Args:
+            query: SQL query string
+            params: Query parameters tuple
+            conn: Optional connection override (uses thread-local by default)
+
+        Returns:
+            DuckDB result object
+
+        Raises:
+            RuntimeError: For query execution failures with detailed error messages
+        """
         if conn is None:
             conn = self._get_thread_local_connection()
 
@@ -294,6 +379,9 @@ class DatabaseOperations:
         """
         Generic method to select records and convert them to dataclass instances using reflection.
 
+        Uses Python dataclass introspection to dynamically build SELECT queries and map
+        database columns to dataclass fields. Handles field filtering for database compatibility.
+
         Args:
             dataclass_type: The dataclass type to instantiate (e.g., Charity, Address)
             where_clause: Optional WHERE clause (without the WHERE keyword)
@@ -304,7 +392,10 @@ class DatabaseOperations:
             df_threshold: Threshold for using DataFrame vs fetchall (default: 10000)
 
         Returns:
-            List of dataclass instances
+            List of dataclass instances with proper field mapping and type conversion
+
+        REFLECTION: Uses dataclass.fields() to dynamically determine table schema
+        PERFORMANCE: Filters out non-init fields and missing database columns
         """
         # Get table name from dataclass name (pluralize by adding 's' or 'ies')
         table_name = self._get_table_name(dataclass_type)
@@ -507,12 +598,6 @@ class DatabaseOperations:
         if ein:
             conn.execute("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
 
-    # Address operations
-    def insert_address(self, address: Address) -> str:
-        """Insert Address into database using generic insert_dataclass method"""
-        ids = self.bulk_insert([address])
-        return ids[0] if ids else ""
-
     def get_addresses_for_geocoding(self, limit: Optional[int] = None, last_address_id: Optional[str] = None) -> List[Address]:
         """Get addresses that need geocoding, with max primary key pagination support"""
         where_clause = "geocoding_id IS NULL AND (po_box IS NULL OR po_box = '') AND colocator IS NULL AND master_id IS NULL AND canonical_address IS NOT NULL AND canonical_address != ''"
@@ -604,12 +689,6 @@ class DatabaseOperations:
                     """, (colocator, owner_id))
 
         self.commit()
-
-    # Charity operations
-    def insert_charity(self, charity: Charity) -> str:
-        """Insert Charity into database using generic insert_dataclass method"""
-        ids = self.bulk_insert([charity])
-        return ids[0] if ids else ""
 
     def update_charity_percentiles(self, ein: str, tax_year: int, comp_ptile: Optional[float] = None,
                                     travel_ptile: Optional[float] = None, conferences_ptile: Optional[float] = None,
@@ -730,12 +809,6 @@ class DatabaseOperations:
         """)
         self.commit()
 
-    # Grant operations
-    def insert_grant(self, grant: Grant) -> str:
-        """Insert Grant into database using generic insert_dataclass method"""
-        ids = self.bulk_insert([grant])
-        return ids[0] if ids else ""
-
     def update_grant_ein(self, grant_id: str, grant_ein: str):
         """Update grant with matched EIN"""
         self.execute_query("""
@@ -747,38 +820,74 @@ class DatabaseOperations:
         """Get grants with unknown EINs for matching"""
         return self.select_dataclass(Grant, where_clause="grant_ein IS NULL OR grant_ein = ''")
 
-    # Officer operations
-    def insert_officer(self, officer: Officer) -> str:
-        """Insert Officer into database using generic insert_dataclass method"""
-        ids = self.bulk_insert([officer])
-        return ids[0] if ids else ""
-
-    # Contractor operations
-    def insert_contractor(self, contractor: Contractor) -> str:
-        """Insert Contractor into database using generic insert_dataclass method"""
-        ids = self.bulk_insert([contractor])
-        return ids[0] if ids else ""
-
-    # Political Contribution operations
-    def insert_political_contribution(self, contribution: PoliticalContribution) -> str:
-        """Insert PoliticalContribution into database using generic insert_dataclass method"""
-        ids = self.bulk_insert([contribution])
-        return ids[0] if ids else ""
-
     def GENERIC_INSERT(self, objects: List[BaseModel]) -> List[str]:
         """
-        Generic insert method that validates objects are BaseModel instances
-        and delegates to bulk_insert.
+        Generic insert method that organizes objects by class type and inserts them
+        in ownership order from the Architecture.md file.
+
+        This is the PRIMARY insert method for mixed object collections. It enforces
+        the strict ownership hierarchy to maintain referential integrity:
+        Charity → Officer → Grant → Contractor → PoliticalContribution → Address
 
         Args:
-            objects: List of BaseModel instances to insert
+            objects: List of BaseModel instances to insert (mixed types allowed)
 
         Returns:
-            List of generated IDs
+            List of generated IDs in the order they were inserted
+
+        OWNERSHIP ORDER: Ensures parent objects are inserted before their children
+        THREADING: Safe for multi-threaded use with thread-local connections
+        PERFORMANCE: Organizes by type first, then bulk inserts each type
         """
         for obj in objects:
             if not isinstance(obj, BaseModel):
                 raise ValueError("All objects must be BaseModel instances")
+
+        # Organize objects by type
+        objects_by_type = {}
+        for obj in objects:
+            obj_type = type(obj).__name__
+            if obj_type not in objects_by_type:
+                objects_by_type[obj_type] = []
+            objects_by_type[obj_type].append(obj)
+
+        # Insert in ownership order: Charity first, then related objects, Address last
+        # Order: Charity, Officer, Grant, Contractor, PoliticalContribution, Address
+        ownership_order = ['Charity', 'Officer', 'Grant', 'Contractor', 'PoliticalContribution', 'Address']
+        all_ids = []
+
+        for obj_type in ownership_order:
+            if obj_type in objects_by_type:
+                ids = self.bulk_insert(objects_by_type[obj_type])
+                all_ids.extend(ids)
+
+        return all_ids
+
+    def INSERT_BY_TYPE(self, objects: List[BaseModel], obj_type: str) -> List[str]:
+        """
+        Insert method for DatabasePendingContext that takes a list of objects of the same type
+        and calls bulk_insert directly (no sorting needed since DPC has already sorted by type).
+
+        This is the SECONDARY insert method used by PDC when objects are already grouped
+        by type. PDC handles ownership ordering, so this method just validates and bulk inserts.
+
+        Args:
+            objects: List of BaseModel instances of the same type to insert
+            obj_type: The type name (for validation/logging)
+
+        Returns:
+            List of generated IDs
+
+        VALIDATION: Ensures all objects are of the specified type
+        PDC INTEGRATION: Called by PendingDatabaseContext.save_to_database()
+        PERFORMANCE: Direct bulk insert without type sorting overhead
+        """
+        for obj in objects:
+            if not isinstance(obj, BaseModel):
+                raise ValueError("All objects must be BaseModel instances")
+            if type(obj).__name__ != obj_type:
+                raise ValueError(f"All objects must be of type {obj_type}, got {type(obj).__name__}")
+
         return self.bulk_insert(objects)
 
     # Geocoding operations
@@ -797,21 +906,27 @@ class DatabaseOperations:
     # Bulk operations
     def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         """
-        Bulk insert with executemany for high-throughput; optional Pandas fallback.
-        Now uses database-generated UUIDs with RETURNING clause for better performance.
+        High-performance bulk insert with executemany and client-side UUID generation.
+
+        This is the CORE insert method used by both GENERIC_INSERT and INSERT_BY_TYPE.
+        Uses batched executemany operations for maximum throughput while maintaining
+        thread safety and referential integrity.
 
         Args:
-            objects: Non-empty same-type BaseModels (prepped).
-            batch_size: Rows per executemany call (10k-50k; smaller = less mem).
-            use_pandas: Toggle vectorized DF (slower on str-heavy; for testing).
-            conn: Optional for txns.
+            objects: Non-empty same-type BaseModels (all must be same type)
+            batch_size: Rows per executemany call (10k-50k; smaller = less memory)
+            conn: Optional connection override (uses thread-local by default)
 
         Returns:
-            List of str IDs (from database RETURNING clause).
+            List of str IDs (client-generated UUIDs returned in insertion order)
 
         Raises:
-            ValueError: Invalid inputs.
-            RuntimeError: Param/build fail.
+            ValueError: Invalid inputs or type mismatches
+            RuntimeError: Database errors with detailed validation
+
+        PERFORMANCE: Batched executemany with client-side UUIDs for relationship integrity
+        THREADING: Uses thread-local connections for DuckDB writer safety
+        VALIDATION: Count validation ensures all rows were inserted successfully
         """
         if not objects:
             return []

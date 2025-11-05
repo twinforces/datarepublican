@@ -78,24 +78,30 @@ class IRSFetchProducer(BaseProducer):
         # For now, return a single year batch
         return [(2023 + offset, "download")]  # Example: start from 2023
 
-    def _process_work_batch(self, batch: List[Tuple[int, str]]) -> List[DatabaseOperation]:
-        """Process a batch of years into download operations"""
-        operations = []
+    def _process_work_batch_to_contexts(self, batch: List[Tuple[int, str]]) -> 'PendingDatabaseContext':
+        """Process a batch of years into PendingDatabaseContext objects"""
+        from pending_database_context import PendingDatabaseContext
+
+        contexts = []
 
         for year, operation_type in batch:
             if operation_type == "download":
-                # Create operation to download ZIP files for this year
-                operation = DatabaseOperation(
-                    operation_type=DatabaseOperationType.INSERT_ZIP_FILE,
-                    data={
-                        "year": year,
-                        "zips_dir": self.zips_dir,
-                        "operation": "download_and_recompress"
-                    }
-                )
-                operations.append(operation)
+                # Create context for this year
+                context = PendingDatabaseContext()
 
-        return operations
+                # IRS fetch downloads and recompresses ZIP files, but doesn't create database objects
+                # The zip_processor.py will handle creating ZipFile records when it processes the files
+                # So we don't create any objects here - IRS fetch is purely file system operations
+                # Just add a progress operation to track the download
+                progress_op = DatabaseOperation(
+                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                    data={"count": 1}  # Count each year processed
+                )
+                context.addOperationToDatabase(progress_op)
+
+                contexts.append(context)
+
+        return contexts
 
 
 class IRSFetchConsumer(BaseConsumer):
@@ -124,11 +130,11 @@ class IRSFetchConsumer(BaseConsumer):
         log_warning(self.logger, msg, *args, ein=ein)
 
     def _process_operations_batch(self, operations_by_type):
-        """Process IRS fetch operations"""
-        # Handle ZIP file operations
-        if DatabaseOperationType.INSERT_ZIP_FILE.value in operations_by_type:
-            for operation in operations_by_type[DatabaseOperationType.INSERT_ZIP_FILE.value]:
-                self._execute_zip_operation(operation)
+        """Process IRS fetch operations using standardized pattern"""
+        # IRS fetch doesn't create database objects - it just downloads and recompresses files
+        # The zip_processor.py will handle creating ZipFile records when it processes the files
+        # This consumer is essentially a no-op for database operations
+        pass
 
     def _execute_zip_operation(self, operation):
         """Execute a ZIP file operation"""
@@ -411,37 +417,21 @@ class IRSFetchProcessor:
         log_warning(self.logger, msg, *args, ein=ein)
 
     def fetch_irs_zips(self, start_year: int, end_year: int) -> bool:
-        """Download and recompress IRS 990 ZIP files from IRS website using producer-consumer pattern"""
-        self.log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year} using producer-consumer pattern")
+        """Download and recompress IRS 990 ZIP files from IRS website"""
+        self.log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
 
         try:
-            # Create work items for each year
-            work_items = [(year, "download") for year in range(start_year, end_year + 1)]
+            # IRS fetch is a simple sequential process - no need for producer-consumer pattern
+            # since it's primarily I/O bound downloading and file operations
+            success = self._download_and_recompress_year(start_year, self.zips_dir)
 
-            # Start producer pool
-            self.thread_pool_manager.start_producer_pool(
-                work_items,
-                self._producer_wrapper
-            )
-
-            # Start consumer pool
-            self.thread_pool_manager.start_consumer_pool(
-                self._consumer_wrapper,
-                len(self.thread_pool_manager.producer_threads)
-            )
-
-            # Wait for completion
-            self.thread_pool_manager.wait_for_completion()
-
-            self.log_info("IRS ZIP file fetch and recompression complete")
-            return True
+            if success:
+                self.log_info("IRS ZIP file fetch and recompression complete")
+            return success
 
         except Exception as e:
             self.log_error(f"IRS fetch processing failed: {e}", exc_info=True)
             return False
-        finally:
-            # Cleanup
-            self.thread_pool_manager.shutdown()
 
     def _producer_wrapper(self, work_items: List[Tuple[int, str]], work_queue, result_queue, thread_id: int, num_threads: int):
         """Wrapper for producer thread execution"""

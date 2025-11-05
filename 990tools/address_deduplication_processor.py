@@ -17,8 +17,144 @@ from logging_utils import get_logger, log_info, log_error, log_debug, log_warnin
 from config import global_config
 from constants import ADDRESS_BATCH_SIZE, ADDRESS_QUEUE_SIZE
 from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
-from geocoding_record_creator import GeocodingRecordCreator
 from models.address import Address
+
+
+class GeocodingRecordCreator:
+    """
+    Creates geocoding records for addresses that need geocoding.
+
+    This class is integrated into the address deduplication process to create
+    geocoding records for addresses that don't have them yet. It performs
+    PO Box detection and creates initial geocoding records with normalized
+    addresses for later API processing.
+    """
+
+    def __init__(self, db_ops):
+        self.db_ops = db_ops
+        self.logger = get_logger("geocoding_record_creator")
+
+    def create_geocoding_records_for_addresses(self, addresses):
+        """
+        Create geocoding records for addresses that need them.
+
+        Args:
+            addresses: List of Address objects that may need geocoding records
+
+        Returns:
+            Dictionary containing:
+            - 'geocoding_records': List of Geocoding objects to insert
+            - 'address_updates': List of address update dictionaries for bulk_update
+            - 'progress_count': Number of addresses processed
+        """
+        geocoding_records = []
+        address_updates = []
+
+        if not addresses:
+            log_debug(self.logger, f"DEBUG: No addresses provided to create_geocoding_records_for_addresses")
+            return {
+                'geocoding_records': geocoding_records,
+                'address_updates': address_updates,
+                'progress_count': 0
+            }
+
+        log_debug(self.logger, f"DEBUG: Starting geocoding record creation for {len(addresses)} addresses")
+
+        # DEBUG: Log what addresses we're processing
+        for addr in addresses[:5]:  # Log first 5 addresses
+            log_debug(self.logger, f"DEBUG: Processing address {addr.address_id}: geocoding_id={addr.geocoding_id}, canonical='{addr.canonical_address[:50] if addr.canonical_address else None}'")
+        if len(addresses) > 5:
+            log_debug(self.logger, f"DEBUG: ... and {len(addresses) - 5} more addresses")
+
+        # Process addresses sequentially
+        geocoding_records_created = 0
+        address_updates_created = 0
+
+        for address in addresses:
+            # Check if address already has a geocoding record
+            if address.geocoding_id:
+                log_debug(self.logger, f"DEBUG: Address {address.address_id} already has geocoding_id {address.geocoding_id}, skipping")
+                continue
+
+            # Validate address has required fields
+            if not address.canonical_address:
+                log_debug(self.logger, f"DEBUG: Address {address.address_id} missing canonical_address, skipping")
+                continue
+
+            # Check for PO Box detection
+            if address.is_po_box():
+                # Create PO Box update
+                log_debug(self.logger, f"DEBUG: Address {address.address_id} detected as PO Box: {address.po_box}")
+                log_debug(self.logger, f"DEBUG: Creating PO Box update for address {address.address_id}")
+
+                address_updates.append({
+                    'address_id': address.address_id,
+                    'po_box': address.po_box,
+                    'colocator': f"PO:{address.po_box}:{address.zip_code or ''}"
+                })
+                address_updates_created += 1
+            else:
+                # Create geocoding record for API processing
+                log_debug(self.logger, f"DEBUG: Creating geocoding record for address {address.address_id}")
+                geocoding_op = address.create_geocoding_operation()
+
+                # Validate the geocoding operation was created properly
+                if not geocoding_op or not geocoding_op.data:
+                    log_debug(self.logger, f"DEBUG: Failed to create geocoding operation for address {address.address_id}")
+                    continue
+
+                # Validate operation data integrity
+                if 'geocoding' not in geocoding_op.data or 'address_id' not in geocoding_op.data:
+                    log_debug(self.logger, f"DEBUG: Geocoding operation missing required keys for address {address.address_id}")
+                    continue
+
+                geocoding_obj = geocoding_op.data['geocoding']
+                log_debug(self.logger, f"DEBUG: Geocoding record created for address {address.address_id}: normalized_address='{geocoding_obj.normalized_address[:50]}'")
+
+                geocoding_records.append(geocoding_obj)
+                geocoding_records_created += 1
+
+                # Create address update to link geocoding_id after insertion
+                address_updates.append({
+                    'address_id': address.address_id,
+                    'geocoding_id': geocoding_obj.geocoding_id  # Will be set after bulk insert
+                })
+                address_updates_created += 1
+                log_debug(self.logger, f"DEBUG: Created address update to link geocoding_id to address {address.address_id}")
+
+        progress_count = geocoding_records_created + address_updates_created
+
+        log_debug(self.logger, f"DEBUG: Batch processing complete - {geocoding_records_created} geocoding records, {address_updates_created} address updates, total progress: {progress_count}")
+
+        # DEBUG: Log records being created
+        for i, geocoding in enumerate(geocoding_records[:3]):  # Log first 3 geocoding records
+            log_debug(self.logger, f"DEBUG: Created geocoding record {i+1}: geocoding_id={geocoding.geocoding_id}, normalized_address='{geocoding.normalized_address[:50]}'")
+        if len(geocoding_records) > 3:
+            log_debug(self.logger, f"DEBUG: ... and {len(geocoding_records) - 3} more geocoding records")
+
+        return {
+            'geocoding_records': geocoding_records,
+            'address_updates': address_updates,
+            'progress_count': progress_count
+        }
+
+    def get_addresses_needing_geocoding_records(self, limit=None):
+        """
+        Get addresses that need geocoding records created.
+
+        Args:
+            limit: Maximum number of addresses to return
+
+        Returns:
+            List of Address objects that need geocoding records
+        """
+        # Get addresses that need geocoding (no geocoding_id and not PO Box)
+        addresses = self.db_ops.get_addresses_for_geocoding(limit=limit)
+
+        if not global_config.is_quiet():
+            log_debug(self.logger, f"PHASE 1: Retrieved {len(addresses)} addresses from get_addresses_for_geocoding")
+
+        return addresses
 
 
 class AddressDeduplicationProducer(BaseProducer):
@@ -44,35 +180,57 @@ class AddressDeduplicationProducer(BaseProducer):
 
         return batch
 
-    def _process_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
-        """Process a batch of deduplication work into operations"""
-        operations = []
+    def _process_work_batch_to_contexts(self, batch: List[Dict[str, Any]]) -> 'PendingDatabaseContext':
+        """Process a batch of deduplication work into PendingDatabaseContext objects"""
+        from pending_database_context import PendingDatabaseContext
 
-        # Create deduplication operations for each canonical address
+        # Create a single context for the entire batch
+        context = PendingDatabaseContext()
+
         for dedup_info in batch:
+            # Get the canonical address for geocoding
+            canonical_address = dedup_info.get("canonical_address", "")
+
+            # Create geocoding operation for the master address
+            if canonical_address:
+                # Get the master address directly from database instead of creating temporary object
+                master_address_id = dedup_info.get("master_address_id")
+                if master_address_id:
+                    # Fetch the actual Address object from database
+                    addresses = self.db_ops.select_dataclass(Address, where_clause="address_id = ?", params=(master_address_id,))
+                    if addresses:
+                        master_address = addresses[0]
+                        # Create geocoding record using factory method
+                        geocoding = master_address.create_geocoding()
+                        context.addObjectToDatabase(geocoding)
+
+            # Add deduplication operation
             operation = DatabaseOperation(
                 operation_type=DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH,
                 data=dedup_info
             )
-            operations.append(operation)
+            context.addOperationToDatabase(operation)
 
-        # Create single progress update operation for the entire batch
-        if batch:
-            canonical_addresses_processed = len(batch)
+            # Add progress operation
             progress_op = DatabaseOperation(
                 operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                data={"count": canonical_addresses_processed}  # Count the number of canonical addresses processed
+                data={"count": 1}  # Count each canonical address processed
             )
-            operations.append(progress_op)
-            self.log_debug(f"DEBUG: Created progress update operation for {canonical_addresses_processed} canonical addresses (batch size: {len(batch)})")
+            context.addOperationToDatabase(progress_op)
 
-        return operations
+        return context
 
-    def _process_unified_work_batch(self, batch: List[Dict[str, Any]]) -> List[DatabaseOperation]:
-        """Process a batch of unified deduplication + geocoding work into operations"""
-        operations = []
+    def _process_work_batch_to_context(self, batch: List[Dict[str, Any]]) -> Optional['PendingDatabaseContext']:
+        """Process a batch of deduplication work into a single PendingDatabaseContext"""
+        from pending_database_context import PendingDatabaseContext
 
-        # Create unified operations for each canonical address group
+        if not batch:
+            return None
+
+        # Create a single context for this batch
+        context = PendingDatabaseContext()
+
+        # Process each deduplication item in the batch
         for dedup_info in batch:
             # Get the canonical address for geocoding
             canonical_address = dedup_info.get("canonical_address", "")
@@ -82,35 +240,31 @@ class AddressDeduplicationProducer(BaseProducer):
                 operation_type=DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH,
                 data=dedup_info
             )
-            operations.append(dedup_operation)
+            context.addOperationToDatabase(dedup_operation)
 
             # Create geocoding operation for the master address
             if canonical_address:
-                from models.geocoding import Geocoding
-                geocoding_record = Geocoding(
-                    normalized_address=canonical_address,
-                    geocoding_status='pending'
-                )
-                geocoding_operation = DatabaseOperation(
-                    operation_type=DatabaseOperationType.INSERT_GEOCODING,
-                    data={
-                        'records': [geocoding_record],
-                        'table': 'Geocoding'
-                    }
-                )
-                operations.append(geocoding_operation)
+                # Get the master address directly from database instead of creating temporary object
+                master_address_id = dedup_info.get("master_address_id")
+                if master_address_id:
+                    # Fetch the actual Address object from database
+                    addresses = self.db_ops.select_dataclass(Address, where_clause="address_id = ?", params=(master_address_id,))
+                    if addresses:
+                        master_address = addresses[0]
+                        # Create geocoding record using factory method
+                        geocoding = master_address.create_geocoding()
+                        context.addObjectToDatabase(geocoding)
 
-        # Create single progress update operation for the entire batch
-        if batch:
-            work_items_processed = len(batch)
-            progress_op = DatabaseOperation(
-                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                data={"count": work_items_processed}
-            )
-            operations.append(progress_op)
-            self.log_debug(f"DEBUG: Created unified progress update operation for {work_items_processed} work items")
+        # Create progress update operation for the entire batch
+        work_items_processed = len(batch)
+        progress_op = DatabaseOperation(
+            operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+            data={"count": work_items_processed}
+        )
+        context.addOperationToDatabase(progress_op)
+        self.log_debug(f"DEBUG: Created PDC context with {work_items_processed} work items")
 
-        return operations
+        return context
 
     def _get_geocoding_work_batch(self, last_address_id: Optional[str] = None) -> List[Address]:
         """Get a batch of addresses needing geocoding records"""
@@ -125,18 +279,15 @@ class AddressDeduplicationProducer(BaseProducer):
 
         return addresses
 
-    def _process_geocoding_work_batch(self, batch: List[Address]) -> List[DatabaseOperation]:
-        """Process a batch of geocoding work into operations"""
-        operations = []
-
+    def _process_geocoding_work_batch_to_context(self, batch: List[Address], context: 'PendingDatabaseContext') -> None:
+        """Process a batch of geocoding work into a PendingDatabaseContext"""
         if not batch:
             self.log_debug(f"DEBUG: No addresses in geocoding batch")
-            return operations
+            return
 
         self.log_debug(f"DEBUG: Processing geocoding batch with {len(batch)} addresses")
 
-        # Import here to avoid circular imports
-        from geocoding_record_creator import GeocodingRecordCreator
+        # Use integrated geocoding record creator
         geocoding_creator = GeocodingRecordCreator(self.db_ops)
 
         # Create geocoding records and address updates for this batch
@@ -148,19 +299,12 @@ class AddressDeduplicationProducer(BaseProducer):
 
         self.log_debug(f"DEBUG: Created {len(geocoding_records)} geocoding records and {len(address_updates)} address updates from {len(batch)} addresses")
 
-        # Create bulk insert operation for geocoding records
-        if geocoding_records:
-            bulk_insert_op = DatabaseOperation(
-                operation_type=DatabaseOperationType.INSERT_GEOCODING,
-                data={
-                    'records': geocoding_records,
-                    'table': 'Geocoding'
-                }
-            )
-            operations.append(bulk_insert_op)
-            self.log_debug(f"DEBUG: Created bulk insert operation for {len(geocoding_records)} geocoding records")
+        # Add geocoding records to context
+        for geocoding_record in geocoding_records:
+            context.addObjectToDatabase(geocoding_record)
+            self.log_debug(f"DEBUG: Added geocoding record to context")
 
-        # Create bulk update operation for address updates
+        # Add address update operations to context
         if address_updates:
             bulk_update_op = DatabaseOperation(
                 operation_type=DatabaseOperationType.GENERIC_UPDATE,
@@ -170,20 +314,17 @@ class AddressDeduplicationProducer(BaseProducer):
                     'id_column': 'address_id'
                 }
             )
-            operations.append(bulk_update_op)
-            self.log_debug(f"DEBUG: Created bulk update operation for {len(address_updates)} address updates")
+            context.addOperationToDatabase(bulk_update_op)
+            self.log_debug(f"DEBUG: Added bulk update operation for {len(address_updates)} address updates to context")
 
-        # Create progress update operation
+        # Add progress update operation
         if progress_count > 0:
             progress_op = DatabaseOperation(
                 operation_type=DatabaseOperationType.PROGRESS_UPDATE,
                 data={"count": progress_count}
             )
-            operations.append(progress_op)
-            self.log_debug(f"DEBUG: Added progress update operation with count={progress_count}")
-
-        self.log_debug(f"DEBUG: Returning {len(operations)} total operations from geocoding batch processing")
-        return operations
+            context.addOperationToDatabase(progress_op)
+            self.log_debug(f"DEBUG: Added progress update operation with count={progress_count} to context")
 
 
 class AddressDeduplicationConsumer(BaseConsumer):
@@ -244,8 +385,8 @@ class AddressDeduplicationConsumer(BaseConsumer):
                             self.log_error(f"CRITICAL: INSERT_GEOCODING operation missing records: {operation.data}")
                             continue
 
-                        # Use bulk_insert for geocoding records
-                        geocoding_ids = self.db_ops.bulk_insert(geocoding_records)
+                        # Use INSERT_BY_TYPE for geocoding records (single type, no sorting needed)
+                        geocoding_ids = self.db_ops.INSERT_BY_TYPE(geocoding_records, 'Geocoding')
                         self.log_debug(f"DEBUG: Bulk inserted {len(geocoding_records)} geocoding records, got {len(geocoding_ids)} IDs")
 
                         # Update geocoding objects with generated IDs for dependent operations
@@ -281,24 +422,9 @@ class AddressDeduplicationConsumer(BaseConsumer):
         return total_updated
 
     def _process_address_deduplication_batch_operations(self, operations_by_type):
-        """Process address deduplication batch operations"""
-        if DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH.value not in operations_by_type:
-            return
-
-        dedup_operations = operations_by_type[DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH.value]
-
-        for operation in dedup_operations:
-            batch_data = operation.data
-            master_address_id = batch_data.get("master_address_id")
-            child_address_ids = batch_data.get("child_address_ids", [])
-
-            if master_address_id and child_address_ids:
-                try:
-                    updated_count = self.db_ops.execute_address_deduplication_batch(master_address_id, child_address_ids)
-                    log_debug(self.logger, f"Updated {updated_count} child addresses to point to master {master_address_id}")
-                except Exception as e:
-                    log_error(self.logger, f"Failed to execute address deduplication batch for master {master_address_id}: {e}")
-                    raise
+        """Process address deduplication batch operations - DEPRECATED: Use _process_operations_batch instead"""
+        # This method is now redundant since _process_operations_batch handles all operation types
+        pass
 
     def log_info(self, msg: str, *args, ein: Optional[str] = None):
         """Log info with optional EIN context"""
@@ -419,7 +545,7 @@ class AddressDeduplicationProcessor:
 
     def deduplicate_addresses(self, progress_bar=None) -> int:
         """
-        Deduplicate addresses by creating master-child relationships and geocoding records in a single unified process.
+        Deduplicate addresses by creating master-child relationships using PendingDatabaseContext.
 
         Args:
             progress_bar: Optional progress bar to update
@@ -427,128 +553,25 @@ class AddressDeduplicationProcessor:
         Returns:
             Number of addresses processed (children updated)
         """
-        self.log_info("Starting unified address deduplication with geocoding record creation")
-
-        # DEBUG: Log current database state before processing
-        try:
-            geocoding_count = self.db_ops.execute_query("SELECT COUNT(*) FROM Geocoding").fetchone()[0]
-            addresses_count = self.db_ops.execute_query("SELECT COUNT(*) FROM Addresses WHERE canonical_address IS NOT NULL AND canonical_address != ''").fetchone()[0]
-            master_addresses_count = self.db_ops.execute_query("SELECT COUNT(*) FROM Addresses WHERE master_id IS NULL AND canonical_address IS NOT NULL").fetchone()[0]
-            self.log_info(f"DEBUG: Before deduplication - Geocoding records: {geocoding_count}, Addresses with canonical: {addresses_count}, Master addresses: {master_addresses_count}")
-        except Exception as e:
-            self.log_warning(f"DEBUG: Could not query database state: {e}")
+        self.log_info("Starting address deduplication using PendingDatabaseContext")
 
         try:
-            # Initialize thread pool manager
-            thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
+            # Collect contexts using the PendingDatabaseContext approach
+            contexts = self.producer.collect_contexts()
 
-            # Initialize progress bar if not provided
-            if progress_bar is None:
-                from logging_utils import start_progress_reporting
-                # Get progress scope for unified process
-                progress_scope = self.consumer.get_progress_scope()
-                total = progress_scope.get("total", 0)
-                unit = progress_scope.get("unit", "addrs")
-                start_progress_reporting(
-                    total=total,
-                    desc="Unified: Deduplicating addresses with geocoding",
-                    unit=unit
-                )
-                self.log_debug(f"Initialized unified progress bar with total={total} {unit}")
-                self.log_info(f"Unified progress bar initialized: {total} {unit} to process")
-
-            total_updated = 0
-
-            # Collect all deduplication work items with key-value pagination
-            all_work_items = []
-            last_address_id = None
-
-            while True:
-                batch, next_last_address_id = self.db_ops.get_address_deduplication_batch(last_address_id, self.batch_size)
-                if not batch:
-                    break
-                all_work_items.extend(batch)
-                self.log_debug(f"Collected batch of {len(batch)} deduplication work items, total so far: {len(all_work_items)}")
-
-                # Check global limit
-                if global_config.max_files and len(all_work_items) >= global_config.max_files:
-                    all_work_items = all_work_items[:global_config.max_files]
-                    self.log_info(f"Reached max_files limit: {global_config.max_files} work items")
-                    break
-
-                if last_address_id is None:
-                    last_address_id = next_last_address_id
-                elif next_last_address_id is not None:
-                    last_address_id = max(last_address_id, next_last_address_id)
-
-            if not all_work_items:
+            if not contexts:
                 self.log_info("No deduplication work found")
                 return 0
 
-            self.log_info(f"Collected total of {len(all_work_items)} unified work items for processing")
+            # Execute contexts using consumer
+            total_processed = self.consumer.execute_contexts_batch(contexts, progress_bar)
 
-            # Start producer pool to process unified work items
-            thread_pool_manager.start_producer_pool(
-                all_work_items,
-                self._unified_producer_worker_threaded
-            )
-
-            # Start consumer pool to execute unified operations
-            thread_pool_manager.start_consumer_pool(
-                self._consumer_worker_threaded,
-                len(thread_pool_manager.producer_threads),
-                progress_bar
-            )
-            self.log_debug(f"Started consumer pool with {len(thread_pool_manager.consumer_threads)} threads")
-
-            # Wait for unified processing completion
-            thread_pool_manager.wait_for_completion()
-
-            # Collect results
-            unified_results = 0
-            self.log_debug(f"Starting unified result collection, result_queue size: {thread_pool_manager.result_queue.qsize()}")
-            while not thread_pool_manager.result_queue.empty():
-                try:
-                    result = thread_pool_manager.result_queue.get_nowait()
-                    if isinstance(result, int):
-                        unified_results += result
-                        self.log_debug(f"Collected unified result: {result}, total so far: {unified_results}")
-                    thread_pool_manager.result_queue.task_done()
-                except:
-                    break
-            self.log_info(f"Unified deduplication + geocoding completed: {unified_results} work items processed")
-
-            # Cleanup thread pool
-            thread_pool_manager.shutdown()
-
-            # DEBUG: Log final database state after processing
-            try:
-                final_geocoding_count = self.db_ops.execute_query("SELECT COUNT(*) FROM Geocoding").fetchone()[0]
-                final_addresses_with_geocoding = self.db_ops.execute_query("SELECT COUNT(*) FROM Addresses WHERE geocoding_id IS NOT NULL").fetchone()[0]
-                final_master_addresses = self.db_ops.execute_query("SELECT COUNT(*) FROM Addresses WHERE master_id IS NULL AND canonical_address IS NOT NULL").fetchone()[0]
-                self.log_info(f"DEBUG: After unified processing - Geocoding records: {final_geocoding_count}, Addresses with geocoding_id: {final_addresses_with_geocoding}, Master addresses: {final_master_addresses}")
-            except Exception as e:
-                self.log_warning(f"DEBUG: Could not query final database state: {e}")
-
-            total_updated = unified_results
-            self.log_info(f"Unified address deduplication + geocoding record creation completed: {unified_results} work items processed")
-            return total_updated
+            self.log_info(f"Address deduplication completed: {total_processed} operations processed")
+            return total_processed
 
         except Exception as e:
-            self.log_error(f"Unified address deduplication failed: {e}", exc_info=True)
+            self.log_error(f"Address deduplication failed: {e}", exc_info=True)
             return 0
-
-        finally:
-            # Ensure progress bar is cleaned up
-            if progress_bar:
-                from logging_utils import stop_progress_reporting
-                stop_progress_reporting()
-                self.log_debug("Progress bar cleanup completed")
-            else:
-                # Stop unified progress bar if we initialized it
-                from logging_utils import stop_progress_reporting
-                stop_progress_reporting()
-                self.log_debug("Unified progress bar cleanup completed")
 
     def _producer_worker_threaded(self, work_items: List[Dict[str, Any]], work_queue, result_queue, thread_id: int, num_threads: int) -> None:
         """Producer worker for ThreadPoolManager: processes work items into operations"""
@@ -664,26 +687,30 @@ class AddressDeduplicationProcessor:
             result_queue.put(0)
 
     def _geocoding_producer_worker_threaded(self, work_items: List[Address], work_queue, result_queue, thread_id: int, num_threads: int) -> None:
-        """Geocoding producer worker for ThreadPoolManager: processes geocoding work items into operations"""
+        """Geocoding producer worker for ThreadPoolManager: processes geocoding work items into context"""
         try:
+            # Create a single context for this thread's work
+            from pending_database_context import PendingDatabaseContext
+            thread_context = PendingDatabaseContext()
+
             # Distribute work items among threads
             for i in range(thread_id, len(work_items), num_threads):
                 work_item = work_items[i]
 
                 self.log_debug(f"DEBUG: Geocoding Producer {thread_id}: processing work item {i+1}/{len(work_items)} - address_id={work_item.address_id}")
 
-                # Process single work item into geocoding operations
-                operations = self.producer._process_geocoding_work_batch([work_item])
+                # Process single work item into geocoding context
+                self.producer._process_geocoding_work_batch_to_context([work_item], thread_context)
 
-                self.log_debug(f"DEBUG: Geocoding Producer {thread_id}: created {len(operations)} operations for address {work_item.address_id}")
-
-                # Put operations in result queue for consumer
-                result_queue.put(operations)
-                self.log_debug(f"DEBUG: Geocoding Producer {thread_id}: queued {len(operations)} operations, queue size now: {result_queue.qsize()}")
+                self.log_debug(f"DEBUG: Geocoding Producer {thread_id}: added geocoding work to context for address {work_item.address_id}")
 
                 # Log progress
                 if (i + 1) % 50 == 0:
                     self.log_info(f"Geocoding Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
+
+            # Put the single merged context in result queue
+            result_queue.put(thread_context)
+            self.log_debug(f"DEBUG: Geocoding Producer {thread_id}: queued context, queue size now: {result_queue.qsize()}")
 
         except Exception as e:
             self.log_error(f"Geocoding Producer worker {thread_id} failed: {e}", exc_info=True)

@@ -262,26 +262,45 @@ class BaseProducer:
 
     def collect_operations(self) -> List[DatabaseOperation]:
         """
-        Collect operations for processing.
+        DEPRECATED: Use collect_contexts() instead for PDC-based processing.
+        This method is kept for backward compatibility only.
+        """
+        # Convert PDC to operations for backward compatibility
+        context = self.collect_contexts()
+        if not context or context.isEmpty():
+            return []
+
+        # Convert context to operations
+        return context.save_to_database(self.db_ops)
+
+    def collect_contexts(self) -> 'PendingDatabaseContext':
+        """
+        Collect PendingDatabaseContext objects for processing.
+
+        This is the preferred method for processors that can use PendingDatabaseContext
+        to collect related objects before converting to DatabaseOperation objects.
 
         Returns:
-            List of DatabaseOperation objects for the consumer to execute
+            List of PendingDatabaseContext objects for the consumer to process
         """
         # Check if profiling is enabled
         if global_config.profile_seconds:
-            return self._collect_operations_with_profiling()
+            return self._collect_contexts_with_profiling()
 
         # Setup progress bar
         progress_scope = self.get_progress_scope(bytes=global_config.progress == "bytes")
         total = progress_scope.get("total", 0)
         unit = progress_scope.get("unit", "items")
-        start_progress_reporting(total=total, desc="Collecting operations", unit=unit)
+        start_progress_reporting(total=total, desc="Collecting contexts", unit=unit)
 
-        operations = []
+        # Create a single master context to accumulate all work
+        from pending_database_context import PendingDatabaseContext
+        master_context = PendingDatabaseContext()
+
         offset = 0
         work_items_processed = 0
 
-        self.log_info(f"Starting to collect operations (batch_size={self.batch_size})")
+        self.log_info(f"Starting to collect contexts (batch_size={self.batch_size})")
 
         while True:
             # Get next batch of work items
@@ -291,27 +310,17 @@ class BaseProducer:
                 # No more work to process
                 break
 
-            # Process this batch into operations
-            batch_operations = self._process_work_batch(batch)
-            operations.extend(batch_operations)
+            # Process this batch into a single context
+            context = self._process_work_batch_to_context(batch)
+            if context:
+                # Merge this context into the master context
+                master_context = PendingDatabaseContext.merge([master_context, context])
 
             # Count work items processed (each batch represents one work item)
             work_items_processed += len(batch)
 
             # Check if we've reached the global limit
             if global_config.max_files and work_items_processed >= global_config.max_files:
-                # Truncate operations to match the limit
-                # Find how many operations to keep based on work items processed
-                operations_to_keep = 0
-                work_count = 0
-                for op in operations:
-                    operations_to_keep += 1
-                    if op.operation_type.value == "progress_update":
-                        work_count += 1
-                        if work_count >= global_config.max_files:
-                            break
-
-                operations = operations[:operations_to_keep]
                 self.log_info(f"Reached max_files limit: {global_config.max_files} work items")
                 break
 
@@ -319,20 +328,103 @@ class BaseProducer:
 
             # Log progress
             if work_items_processed % 100 == 0:
-                self.log_info(f"Collected operations for {work_items_processed} work items so far")
+                self.log_info(f"Collected contexts for {work_items_processed} work items so far")
 
-        self.log_info(f"Collected total of {len(operations)} operations for {work_items_processed} work items")
-        return operations
+        self.log_info(f"Collected master context with {work_items_processed} work items")
+        return master_context
 
-    def collect_operations_parallel(self, max_workers: int = None) -> List[DatabaseOperation]:
+    def _process_work_batch_to_context(self, batch) -> Optional['PendingDatabaseContext']:
         """
-        Collect operations using thread pool for parallel processing.
+        Process a batch of work items into a single PendingDatabaseContext object.
+
+        This method should be overridden by subclasses that want to use
+        PendingDatabaseContext instead of direct DatabaseOperation objects.
+
+        Args:
+            batch: Batch of work items to process
+
+        Returns:
+            Single PendingDatabaseContext object, or None if no work was processed
+        """
+        # Default implementation - subclasses should override this
+        raise NotImplementedError("Subclasses using PendingDatabaseContext must implement _process_work_batch_to_context")
+
+    def _collect_contexts_with_profiling(self) -> 'PendingDatabaseContext':
+        """
+        Collect contexts with profiling enabled for the specified duration.
+        """
+        self._profile_seconds = global_config.profile_seconds
+        self._profiler = cProfile.Profile()
+
+        self.log_info(f"Starting profiling for {self._profile_seconds} seconds during context collection")
+
+        # Start profiling
+        self._profiler.enable()
+        start_time = time.time()
+
+        # Create a single master context to accumulate all work
+        from pending_database_context import PendingDatabaseContext
+        master_context = PendingDatabaseContext()
+
+        offset = 0
+        work_items_processed = 0
+
+        try:
+            while True:
+                # Check if profiling time has elapsed
+                if time.time() - start_time >= self._profile_seconds:
+                    self.log_info(f"Profiling time limit ({self._profile_seconds}s) reached during context collection")
+                    break
+
+                # Get next batch of work items
+                batch = self._get_work_batch(offset)
+
+                if not batch:
+                    # No more work to process
+                    break
+
+                # Process this batch into a single context
+                context = self._process_work_batch_to_context(batch)
+                if context:
+                    # Merge this context into the master context
+                    master_context = PendingDatabaseContext.merge([master_context, context])
+
+                # Count work items processed (each batch represents one work item)
+                work_items_processed += len(batch)
+
+                # Check if we've reached the global limit
+                if global_config.max_files and work_items_processed >= global_config.max_files:
+                    self.log_info(f"Reached max_files limit: {global_config.max_files} work items")
+                    break
+
+                offset += self.batch_size
+
+                # Log progress
+                if work_items_processed % 100 == 0:
+                    self.log_info(f"Collected contexts for {work_items_processed} work items so far")
+
+        finally:
+            # Stop profiling
+            self._profiler.disable()
+            end_time = time.time()
+            execution_time = end_time - start_time
+
+            self.log_info(f"Context collection profiling complete. Time: {execution_time:.2f}s, Work items: {work_items_processed}")
+
+            # Generate profiling report
+            self._generate_profiling_report("collect_contexts", execution_time, work_items_processed)
+
+        return master_context
+
+    def collect_contexts_parallel(self, max_workers: int = None) -> 'PendingDatabaseContext':
+        """
+        Collect contexts using thread pool for parallel processing.
 
         Args:
             max_workers: Maximum number of producer threads (overrides config)
 
         Returns:
-            List of DatabaseOperation objects for the consumer to execute
+            List of PendingDatabaseContext objects for the consumer to execute
         """
         # Initialize thread pool manager
         self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
@@ -341,10 +433,13 @@ class BaseProducer:
         if max_workers is not None:
             self.thread_pool_config.producer_config.max_workers = max_workers
 
-        operations = []
+        # Create a single master context to accumulate all work
+        from pending_database_context import PendingDatabaseContext
+        master_context = PendingDatabaseContext()
+
         work_items_processed = 0
 
-        self.log_info(f"Starting parallel operation collection (max_workers={self.thread_pool_config.producer_config.max_workers})")
+        self.log_info(f"Starting parallel context collection (max_workers={self.thread_pool_config.producer_config.max_workers})")
 
         try:
             # Get all work items first (for parallel distribution)
@@ -364,7 +459,7 @@ class BaseProducer:
                 offset += self.batch_size
 
             if not all_work_items:
-                return operations
+                return master_context
 
             # Start producer pool
             self.thread_pool_manager.start_producer_pool(
@@ -372,7 +467,7 @@ class BaseProducer:
                 self._parallel_work_batch_processor
             )
 
-            # Collect results from result queue
+            # Collect results from result queue and merge into master context
             sentinels_received = 0
             num_producers = len(self.thread_pool_manager.producer_threads)
             while sentinels_received < num_producers:
@@ -381,8 +476,11 @@ class BaseProducer:
                     if result is None:  # Sentinel
                         sentinels_received += 1
                     elif isinstance(result, list):
-                        operations.extend(result)
-                        work_items_processed += 1
+                        # Each result is a list of contexts from one producer
+                        # Merge them into the master context
+                        if result:
+                            master_context = PendingDatabaseContext.merge([master_context] + result)
+                        work_items_processed += len(result)
                     self.thread_pool_manager.result_queue.task_done()
                 except queue.Empty:
                     if self.thread_pool_manager.shutdown_event.is_set():
@@ -397,11 +495,11 @@ class BaseProducer:
             if self.thread_pool_manager:
                 self.thread_pool_manager.shutdown()
 
-        self.log_info(f"Collected total of {len(operations)} operations for {work_items_processed} work items (parallel)")
-        return operations
+        self.log_info(f"Collected master context with {work_items_processed} work items (parallel)")
+        return master_context
 
     def _parallel_work_batch_processor(self, work_items: List[Any], work_queue: queue.Queue,
-                                     result_queue: queue.Queue, thread_id: int, num_threads: int) -> None:
+                                      result_queue: queue.Queue, thread_id: int, num_threads: int) -> None:
         """
         Process work items in parallel using thread pool.
 
@@ -413,19 +511,25 @@ class BaseProducer:
             num_threads: Total number of threads
         """
         try:
+            # Create a single context for this thread's work
+            from pending_database_context import PendingDatabaseContext
+            thread_context = PendingDatabaseContext()
+
             # Distribute work items among threads
             for i in range(thread_id, len(work_items), num_threads):
                 work_item = work_items[i]
 
-                # Process single work item (wrap in list for batch processing)
-                batch_operations = self._process_work_batch([work_item])
-
-                # Put results in result queue
-                result_queue.put(batch_operations)
+                # Process single work item into context and merge into thread context
+                context = self._process_work_batch_to_context([work_item])
+                if context:
+                    thread_context = PendingDatabaseContext.merge([thread_context, context])
 
                 # Log progress
                 if (i + 1) % 50 == 0:
                     self.log_info(f"Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
+
+            # Put the single merged context in result queue
+            result_queue.put(thread_context)
 
         except Exception as e:
             self.log_error(f"Parallel work processor {thread_id} error: {e}", exc_info=True)
@@ -438,8 +542,12 @@ class BaseProducer:
         raise NotImplementedError("Subclasses must implement _get_work_batch")
 
     def _process_work_batch(self, batch: List[Any]) -> List[DatabaseOperation]:
-        """Process a batch of work items into operations - to be implemented by subclasses"""
-        raise NotImplementedError("Subclasses must implement _process_work_batch")
+        """DEPRECATED: Use _process_work_batch_to_context instead for PDC-based processing"""
+        # Convert PDC to operations for backward compatibility
+        context = self._process_work_batch_to_context(batch)
+        if not context or context.isEmpty():
+            return []
+        return context.save_to_database(self.db_ops)
 
     def get_progress_scope(self) -> Dict[str, Any]:
         """Get the scope of work for progress bar setup - to be implemented by subclasses"""
@@ -460,77 +568,12 @@ class BaseProducer:
         log_warning(self.logger, msg, *args, ein=ein)
 
     def _collect_operations_with_profiling(self) -> List[DatabaseOperation]:
-        """
-        Collect operations with profiling enabled for the specified duration.
-        """
-        self._profile_seconds = global_config.profile_seconds
-        self._profiler = cProfile.Profile()
-
-        self.log_info(f"Starting profiling for {self._profile_seconds} seconds during operation collection")
-
-        # Start profiling
-        self._profiler.enable()
-        start_time = time.time()
-
-        operations = []
-        offset = 0
-        work_items_processed = 0
-
-        try:
-            while True:
-                # Check if profiling time has elapsed
-                if time.time() - start_time >= self._profile_seconds:
-                    self.log_info(f"Profiling time limit ({self._profile_seconds}s) reached during collection")
-                    break
-
-                # Get next batch of work items
-                batch = self._get_work_batch(offset)
-
-                if not batch:
-                    # No more work to process
-                    break
-
-                # Process this batch into operations
-                batch_operations = self._process_work_batch(batch)
-                operations.extend(batch_operations)
-
-                # Count work items processed (each batch represents one work item)
-                work_items_processed += len(batch)
-
-                # Check if we've reached the global limit
-                if global_config.max_files and work_items_processed >= global_config.max_files:
-                    # Truncate operations to match the limit
-                    operations_to_keep = 0
-                    work_count = 0
-                    for op in operations:
-                        operations_to_keep += 1
-                        if op.operation_type.value == "progress_update":
-                            work_count += 1
-                            if work_count >= global_config.max_files:
-                                break
-
-                    operations = operations[:operations_to_keep]
-                    self.log_info(f"Reached max_files limit: {global_config.max_files} work items")
-                    break
-
-                offset += self.batch_size
-
-                # Log progress
-                if work_items_processed % 100 == 0:
-                    self.log_info(f"Collected operations for {work_items_processed} work items so far")
-
-        finally:
-            # Stop profiling
-            self._profiler.disable()
-            end_time = time.time()
-            execution_time = end_time - start_time
-
-            self.log_info(f"Collection profiling complete. Time: {execution_time:.2f}s, Operations: {len(operations)}, Work items: {work_items_processed}")
-
-            # Generate profiling report
-            self._generate_profiling_report("collect_operations", execution_time, work_items_processed)
-
-        return operations
+        """DEPRECATED: Use PDC-based profiling instead"""
+        # Convert PDC to operations for backward compatibility
+        context = self._collect_contexts_with_profiling()
+        if not context or context.isEmpty():
+            return []
+        return context.save_to_database(self.db_ops)
 
     def _generate_profiling_report(self, operation_name: str, execution_time: float, work_items_processed: int):
         """
@@ -591,6 +634,88 @@ class BaseProducer:
                 self.log_info(line)
 
 
+class ProcessorCoordinator:
+    """
+    Coordinator for processor operations using producer-consumer pattern.
+
+    This class provides a standardized way to coordinate any processor that follows
+    the collect operations → bulk execute pattern. It centralizes the threading logic
+    and ensures all processors work consistently.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger = None):
+        self.db_ops = db_ops
+        self.logger = logger or logging.getLogger(__name__)
+
+    def process_with_producer_consumer(self, producer: 'BaseProducer', consumer: 'BaseConsumer',
+                                      max_files: Optional[int] = None, workers: int = 4) -> int:
+        """
+        Process using producer-consumer pattern with standardized coordination.
+
+        Args:
+            producer: Producer instance that collects operations
+            consumer: Consumer instance that executes operations
+            max_files: Maximum number of files/items to process
+            workers: Number of worker threads for parallel processing
+
+        Returns:
+            Number of items processed
+        """
+        # Set global max_files limit if specified
+        if max_files is not None:
+            global_config.max_files = max_files
+
+        # Collect context using producer
+        context = producer.collect_contexts_parallel(max_workers=workers)
+
+        if not context or context.isEmpty():
+            producer.log_info("No context to process")
+            return 0
+
+        # Execute context using consumer
+        processed_count = consumer.execute_contexts_batch(context)
+
+        producer.log_info(f"Processing complete: {processed_count} objects inserted")
+        return processed_count
+
+
+def dump_threads_handler(signum, frame):
+    """Signal handler: Dumps formatted stack traces for all live threads."""
+    try:
+        import os
+        # Get frame snapshots for all threads.
+        frames = sys._current_frames()
+
+        print(f"\n{'='*60}", file=sys.stderr)
+        print(f"Stack traces for {len(frames)} threads (PID: {os.getpid()})", file=sys.stderr)
+        print(f"Time: {time.ctime()}", file=sys.stderr)
+        print(f"{'='*60}\n", file=sys.stderr)
+
+        for thread_id, frame in frames.items():
+            thread_name = threading.get_ident() == thread_id and "Main" or f"Thread-{thread_id}"
+            print(f"\nThread: {thread_name} (ID: 0x{thread_id:x})", file=sys.stderr)
+
+            # Extract and format the stack.
+            stack_lines = traceback.format_stack(frame)
+            print("".join(stack_lines), file=sys.stderr)
+
+        print(f"{'='*60}\n", file=sys.stderr)
+        sys.stderr.flush()  # Ensure output in signal context.
+    except Exception as e:
+        print(f"Error in thread dump: {e}", file=sys.stderr)
+        sys.stderr.flush()
+
+
+def setup_thread_dump_handler():
+    """Setup SIGUSR1 handler for thread stack dumps (available in all processors)"""
+    try:
+        import signal
+        signal.signal(signal.SIGUSR1, dump_threads_handler)
+    except (OSError, ValueError):
+        # Signal not available on this platform
+        pass
+
+
 class BaseConsumer:
     """
     Base Consumer class for database operations execution.
@@ -612,6 +737,8 @@ class BaseConsumer:
 
     def execute_operations_batch(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
         """
+        DEPRECATED: Use execute_contexts_batch instead for PDC-based processing.
+
         Execute a batch of database operations.
 
         Args:
@@ -621,28 +748,45 @@ class BaseConsumer:
         Returns:
             Number of operations processed
         """
-        # Check if profiling is enabled
-        if global_config.profile_seconds:
-            return self._execute_operations_batch_with_profiling(operations, progress_callback)
+        # Convert operations to PDC and execute
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
 
-        if not operations:
+        # Add all operations to context
+        for operation in operations:
+            context.addOperationToDatabase(operation)
+
+        return self.execute_contexts_batch(context, progress_callback)
+
+    def execute_contexts_batch(self, context: 'PendingDatabaseContext', progress_callback=None) -> int:
+        """
+        Execute a PendingDatabaseContext object.
+
+        This method executes all operations directly. PDC handles all operation execution internally.
+
+        Args:
+            context: PendingDatabaseContext object to execute
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Total number of objects inserted
+        """
+        if not context:
             return 0
 
-        # Group operations by type for efficient processing
-        operations_by_type = {}
-        for operation in operations:
-            if not isinstance(operation, DatabaseOperation):
-                log_error(self.logger, f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
-                continue
-            op_type = operation.operation_type.value
-            if op_type not in operations_by_type:
-                operations_by_type[op_type] = []
-            operations_by_type[op_type].append(operation)
+        # Execute the context (handles all operations)
+        ids = context.save_to_database(self.db_ops)
 
-        # Call subclass-specific processing and get count
-        processed_count = self._process_operations_batch(operations_by_type)
+        return len(ids) if ids else 0
+    
+    def _execute_tail_operations(self, operations_by_type, processed_count):
+        """Execute tail operations (optimize and progress updates)"""
+        # Handle OPTIMIZE_DATABASE operations next to last, then progress bar
+        if DatabaseOperationType.OPTIMIZE_DATABASE.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.OPTIMIZE_DATABASE.value]:
+                self._execute_optimize_operation(operation)
+                processed_count += 1
 
-        # Handle PROGRESS_UPDATE operations AFTER the actual work is done
         progress_operations = 0
         if DatabaseOperationType.PROGRESS_UPDATE.value in operations_by_type:
             progress_operations = len(operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value])
@@ -651,217 +795,95 @@ class BaseConsumer:
                 progress_count = operation.data.get("count", 0)
                 self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
                 update_progress(n=progress_count)  # Use global progress bar
+                processed_count += 1
+        return processed_count
 
-        # Return total operations processed (progress updates + actual operations)
-        # Ensure processed_count is not None
-        if processed_count is None:
-            processed_count = 0
-        return progress_operations + processed_count
+    def _execute_optimize_operation(self, operation):
+        """Execute database optimization operation"""
+        if operation.operation_type != DatabaseOperationType.OPTIMIZE_DATABASE:
+            return
 
-    def execute_operations_parallel(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
-        """
-        Execute operations using thread pool for parallel processing.
-
-        Args:
-            operations: List of DatabaseOperation objects to execute
-            progress_callback: Optional callback for progress updates
-
-        Returns:
-            Number of operations processed
-        """
-        if not operations:
-            return 0
-
-        # Initialize thread pool manager
-        self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
-
-        total_processed = 0
-
+        log_info(self.logger, "Starting database optimization...")
         try:
-            # Start consumer pool (single consumer for database safety)
-            self.thread_pool_manager.start_consumer_pool(
-                self._parallel_operations_processor,
-                len(self.thread_pool_manager.producer_threads),
-                operations,
-                progress_callback
-            )
+            # Call the optimize_database method from DatabaseOperations
+            self.db_ops.optimize_database()
+            log_info(self.logger, "Database optimization completed successfully")
+        except Exception as e:
+            log_error(self.logger, f"Database optimization failed: {e}", exc_info=True)
+            raise
 
-            # Put operations in work queue
-            for operation in operations:
-                self.thread_pool_manager.work_queue.put(operation)
+    def _execute_progress_update_operation(self, operation):
+        """Execute progress update operation"""
+        if operation.operation_type != DatabaseOperationType.PROGRESS_UPDATE:
+            return
 
-            # Signal end of work
-            self.thread_pool_manager.work_queue.put(None)
+        from logging_utils import update_progress
+        progress_count = operation.data.get("count", 0)
+        self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
+        update_progress(n=progress_count)
 
-            # Wait for completion
-            self.thread_pool_manager.wait_for_completion()
+    
+    def execute_operations_parallel(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
+        """DEPRECATED: Use PDC-based parallel execution instead"""
+        # Convert operations to PDC and execute
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
 
-            # Collect results
-            while not self.thread_pool_manager.result_queue.empty():
-                try:
-                    result = self.thread_pool_manager.result_queue.get_nowait()
-                    if isinstance(result, int):
-                        total_processed += result
-                    self.thread_pool_manager.result_queue.task_done()
-                except queue.Empty:
-                    break
+        # Add all operations to context
+        for operation in operations:
+            context.addOperationToDatabase(operation)
 
-        finally:
-            # Cleanup
-            if self.thread_pool_manager:
-                self.thread_pool_manager.shutdown()
-
-        return total_processed
+        return self.execute_contexts_batch(context, progress_callback)
 
     def _parallel_operations_processor(self, work_queue: queue.Queue, result_queue: queue.Queue,
                                       thread_id: int, num_producers: int, operations: List[DatabaseOperation],
                                       progress_callback=None) -> None:
-        """
-        Process operations in parallel using thread pool.
+        """DEPRECATED: Use PDC-based parallel processing instead"""
+        # Convert operations to PDC and execute
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
 
-        Args:
-            work_queue: Queue containing operations to process
-            result_queue: Queue to put results
-            thread_id: ID of this thread
-            operations: Original operations list (for reference)
-            progress_callback: Optional progress callback
-        """
-        try:
-            batch_operations = []
-            batch_size = self.thread_pool_config.consumer_config.batch_size
+        # Add all operations to context
+        for operation in operations:
+            context.addOperationToDatabase(operation)
 
-            while True:
-                try:
-                    operation = work_queue.get(timeout=1.0)
-                    if operation is None:  # Sentinel
-                        break
-
-                    batch_operations.append(operation)
-
-                    if len(batch_operations) >= batch_size:
-                        # Process batch
-                        processed = self._process_batch_operations(batch_operations, progress_callback)
-                        result_queue.put(processed)
-                        batch_operations = []
-
-                    work_queue.task_done()
-
-                except queue.Empty:
-                    if self.thread_pool_manager and self.thread_pool_manager.shutdown_event.is_set():
-                        break
-                    continue
-
-            # Process remaining operations
-            if batch_operations:
-                processed = self._process_batch_operations(batch_operations, progress_callback)
-                result_queue.put(processed)
-
-        except Exception as e:
-            self.log_error(f"Parallel operations processor {thread_id} error: {e}", exc_info=True)
-        finally:
-            # Signal completion
-            result_queue.put(None)
+        processed = self.execute_contexts_batch(context, progress_callback)
+        result_queue.put(processed)
+        result_queue.put(None)  # Signal completion
 
     def _process_batch_operations(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
-        """
-        Process a batch of operations and return count.
+        """DEPRECATED: Use PDC-based batch processing instead"""
+        # Convert operations to PDC and execute
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
 
-        Args:
-            operations: List of operations to process
-            progress_callback: Optional progress callback
-
-        Returns:
-            Number of operations processed
-        """
-        if not operations:
-            return 0
-
-        # Group operations by type for efficient processing
-        operations_by_type = {}
+        # Add all operations to context
         for operation in operations:
-            if not isinstance(operation, DatabaseOperation):
-                log_error(self.logger, f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
-                continue
-            op_type = operation.operation_type.value
-            if op_type not in operations_by_type:
-                operations_by_type[op_type] = []
-            operations_by_type[op_type].append(operation)
+            context.addOperationToDatabase(operation)
 
-        # Call subclass-specific processing and get count
-        processed_count = self._process_operations_batch(operations_by_type)
-
-        # Handle PROGRESS_UPDATE operations
-        progress_operations = 0
-        if DatabaseOperationType.PROGRESS_UPDATE.value in operations_by_type:
-            progress_operations = len(operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value])
-            for operation in operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value]:
-                from logging_utils import update_progress
-                progress_count = operation.data.get("count", 0)
-                self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
-                update_progress(n=progress_count)
-                if progress_callback:
-                    progress_callback(progress_count)
-
-        return progress_operations + processed_count
+        return self.execute_contexts_batch(context, progress_callback)
 
     def _execute_operations_batch_with_profiling(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
-        """
-        Execute operations batch with profiling enabled for the specified duration.
-        """
-        self._profile_seconds = global_config.profile_seconds
-        self._profiler = cProfile.Profile()
+        """DEPRECATED: Use PDC-based profiling instead"""
+        # Convert operations to PDC and execute
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
 
-        self.log_info(f"Starting profiling for {self._profile_seconds} seconds during operation execution")
+        # Add all operations to context
+        for operation in operations:
+            context.addOperationToDatabase(operation)
 
-        # Start profiling
-        self._profiler.enable()
-        start_time = time.time()
-
-        processed_total = 0
-
-        try:
-            if not operations:
-                return 0
-
-            # Group operations by type for efficient processing
-            operations_by_type = {}
-            for operation in operations:
-                if not isinstance(operation, DatabaseOperation):
-                    log_error(self.logger, f"Invalid operation type: {type(operation)}, expected DatabaseOperation")
-                    continue
-                op_type = operation.operation_type.value
-                if op_type not in operations_by_type:
-                    operations_by_type[op_type] = []
-                operations_by_type[op_type].append(operation)
-
-            # Call subclass-specific processing and get count
-            processed_count = self._process_operations_batch(operations_by_type)
-
-            # Handle PROGRESS_UPDATE operations AFTER the actual work is done
-            progress_operations = 0
-            if DatabaseOperationType.PROGRESS_UPDATE.value in operations_by_type:
-                progress_operations = len(operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value])
-                for operation in operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value]:
-                    from logging_utils import update_progress
-                    progress_count = operation.data.get("count", 0)
-                    self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
-                    update_progress(n=progress_count)  # Use global progress bar
-
-            processed_total = progress_operations + processed_count
-
-        finally:
-            # Stop profiling
-            self._profiler.disable()
-            end_time = time.time()
-            execution_time = end_time - start_time
-
-            self.log_info(f"Execution profiling complete. Time: {execution_time:.2f}s, Operations: {processed_total}")
-
-            # Generate profiling report
-            self._generate_profiling_report("execute_operations_batch", execution_time, processed_total)
-
-        return processed_total
+        return self.execute_contexts_batch(context, progress_callback)
 
     def _process_operations_batch(self, operations_by_type):
-        """Process operations batch - to be implemented by subclasses"""
-        raise NotImplementedError("Subclasses must implement _process_operations_batch")
+        """DEPRECATED: Use PDC-based processing instead"""
+        # Convert operations to PDC and execute
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
+
+        # Add all operations to context
+        for op_list in operations_by_type.values():
+            for operation in op_list:
+                context.addOperationToDatabase(operation)
+
+        return self.execute_contexts_batch(context)

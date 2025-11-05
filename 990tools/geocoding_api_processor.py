@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-geocoding_api_processor.py - Standalone geocoding API processor for Phase 2
+geocoding_api_processor.py - Geocoding API processor using producer-consumer pattern
 
 This module handles the API calls for geocoding records created in Phase 1.
 It processes geocoding records that are pending API calls, makes census API
-calls, and updates the records with the results. This is a standalone process
-that can run independently of address deduplication.
+calls, and updates the records with the results. Uses producer-consumer pattern
+for safe batch processing with DuckDB.
 """
 
 import logging
@@ -23,6 +23,7 @@ try:
 except ImportError:
     tqdm = None
 
+from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models.geocoding import Geocoding
 from logging_utils import log_info, log_error, log_debug, log_warning, get_logger
@@ -30,18 +31,11 @@ from config import global_config
 from constants import GEOCODING_API_BATCH_SIZE
 
 
-class GeocodingAPIProcessor:
-    """
-    Standalone processor for geocoding API calls (Phase 2).
-
-    This processor reads existing geocoding records and makes census API calls
-    to update them with latitude/longitude coordinates. It can run independently
-    of the address deduplication process.
-    """
+class GeocodingAPIProducer(BaseProducer):
+    """Producer for geocoding API operations"""
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_API_BATCH_SIZE):
-        self.db_ops = db_ops
-        self.batch_size = batch_size
+        super().__init__(db_ops, batch_size=batch_size)
         self.logger = get_logger("geocoding_api_processor")
 
         # API performance tracking for dynamic batch sizing
@@ -58,97 +52,8 @@ class GeocodingAPIProcessor:
             'very_slow': 0.3 # Significantly reduce batch size when API is very slow
         }
 
-    def process_pending_geocoding_records(self, progress_bar=None) -> int:
-        """
-        Process all pending geocoding records by making API calls.
-
-        Args:
-            progress_bar: Optional progress bar to update
-
-        Returns:
-            Number of geocoding records processed
-        """
-        if cg is None:
-            if not global_config.is_quiet():
-                log_warning(self.logger, "censusgeocode library not available. Skipping geocoding API calls. "
-                                "To enable geocoding, install with: pip install censusgeocode")
-            return 0
-
-        # Get total pending records for progress bar
-        total_pending_query = """
-            SELECT COUNT(*) FROM Geocoding
-            WHERE geocoding_status IS NULL OR geocoding_status = 'pending'
-        """
-        result = self.db_ops.execute_query(total_pending_query)
-        total_pending = result.fetchone()[0] if result else 0
-
-        # Apply max_files limit if set
-        if global_config.max_files:
-            total_pending = min(total_pending, global_config.max_files)
-
-        # Create progress bar if none provided and tqdm is available
-        created_progress_bar = False
-        if progress_bar is None and tqdm is not None and not global_config.is_quiet():
-            progress_bar = tqdm.tqdm(
-                total=total_pending,
-                desc="Geocoding records",
-                unit="records",
-                bar_format='{desc}: {n}/{total} |{bar}| {percentage:3.0f}% | {elapsed} | {rate_fmt}'
-            )
-            created_progress_bar = True
-
-        total_processed = 0
-        last_geocoding_id = None
-
-        if not global_config.is_quiet():
-            log_info(self.logger, f"Starting geocoding API processing with batch_size={self.batch_size}")
-
-        while True:
-            # Check if we've reached the global max_files limit
-            if global_config.max_files and total_processed >= global_config.max_files:
-                if not global_config.is_quiet():
-                    log_info(self.logger, f"Reached max_files limit: {global_config.max_files} records processed")
-                break
-
-            # Get next batch of geocoding records needing API calls
-            batch = self._get_pending_geocoding_records(last_geocoding_id)
-            if not batch:
-                break
-
-            # Process the batch
-            batch_processed = self._process_geocoding_batch(batch)
-            total_processed += batch_processed
-
-            # Update progress bar
-            if progress_bar:
-                progress_bar.update(batch_processed)
-
-            # Update last_geocoding_id for pagination
-            if batch:
-                last_geocoding_id = max(record['geocoding_id'] for record in batch)
-
-            if not global_config.is_quiet():
-                log_debug(self.logger, f"PHASE 2: Processed batch of {len(batch)} records, total processed: {total_processed}")
-
-        if not global_config.is_quiet():
-            log_info(self.logger, f"Geocoding API processing completed: {total_processed} records processed")
-
-        # Close progress bar if we created it
-        if created_progress_bar and progress_bar:
-            progress_bar.close()
-
-        return total_processed
-
-    def _get_pending_geocoding_records(self, last_geocoding_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Get a batch of geocoding records that need API calls.
-
-        Args:
-            last_geocoding_id: Last geocoding_id from previous batch for pagination
-
-        Returns:
-            List of geocoding record dictionaries
-        """
+    def _get_work_batch(self, last_geocoding_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get a batch of geocoding records needing API calls"""
         current_batch_size = self._get_dynamic_batch_size()
 
         where_clause = "geocoding_status IS NULL OR geocoding_status = 'pending'"
@@ -189,6 +94,235 @@ class GeocodingAPIProcessor:
 
             return batch_data
         return []
+
+    def _process_work_batch_to_contexts(self, batch: List[Dict[str, Any]]) -> 'PendingDatabaseContext':
+        """Process a batch of geocoding records into PendingDatabaseContext objects"""
+        from pending_database_context import PendingDatabaseContext
+
+        contexts = []
+
+        if not batch:
+            return contexts
+
+        # Create context for geocoding batch
+        context = PendingDatabaseContext()
+
+        # Create operation to process geocoding batch
+        operation = DatabaseOperation(
+            operation_type=DatabaseOperationType.UPDATE_GEOCODING,
+            data={
+                "batch": batch,
+                "operation": "process_geocoding_api_batch"
+            }
+        )
+        context.addOperationToDatabase(operation)
+
+        contexts.append(context)
+
+        return contexts
+
+    def _get_dynamic_batch_size(self) -> int:
+        """Calculate dynamic batch size based on API performance"""
+        performance_level = self._get_api_performance_level()
+        factor = self._batch_factors[performance_level]
+
+        dynamic_size = int(self.batch_size * factor)
+        # Cap at 10,000 to comply with census API batch limit
+        dynamic_size = max(5, min(10000, dynamic_size))
+
+        if not global_config.is_quiet():
+            avg_time = 0.0
+            if self._api_performance_history:
+                recent = self._api_performance_history[-3:]
+                avg_time = sum(b['avg_time_per_record'] for b in recent) / len(recent)
+            log_debug(self.logger, f"PHASE 2: Dynamic batch sizing - performance: {performance_level}, avg_time_per_record: {avg_time:.2f}s, factor: {factor}, batch_size: {self.batch_size} -> {dynamic_size}")
+
+        return dynamic_size
+
+    def _get_api_performance_level(self) -> str:
+        """Determine API performance level based on recent history"""
+        if not self._api_performance_history:
+            return 'normal'
+
+        # Calculate average time per record over recent batches
+        recent_batches = self._api_performance_history[-5:]  # Last 5 batches
+        if not recent_batches:
+            return 'normal'
+
+        avg_time_per_record = sum(b['avg_time_per_record'] for b in recent_batches) / len(recent_batches)
+
+        if avg_time_per_record < self._fast_threshold:
+            return 'fast'
+        elif avg_time_per_record > self._slow_threshold:
+            return 'very_slow'
+        elif avg_time_per_record > (self._slow_threshold * 0.7):  # 70% of slow threshold
+            return 'slow'
+        else:
+            return 'normal'
+
+    def _update_api_performance(self, batch_size: int, duration: float):
+        """Update API performance tracking"""
+        self._api_performance_history.append({
+            'batch_size': batch_size,
+            'duration': duration,
+            'avg_time_per_record': duration / batch_size
+        })
+
+        # Keep only recent history
+        if len(self._api_performance_history) > self._performance_window:
+            self._api_performance_history = self._api_performance_history[-self._performance_window:]
+
+
+class GeocodingAPIConsumer(BaseConsumer):
+    """Consumer for geocoding API operations"""
+
+    def __init__(self, db_ops: DatabaseOperations):
+        super().__init__(db_ops)
+        self.logger = get_logger("geocoding_api_processor")
+
+    def _process_operations_batch(self, operations_by_type):
+        """Process geocoding API operations"""
+        # Handle geocoding operations
+        if DatabaseOperationType.UPDATE_GEOCODING.value in operations_by_type:
+            for operation in operations_by_type[DatabaseOperationType.UPDATE_GEOCODING.value]:
+                self._execute_geocoding_operation(operation)
+
+
+class GeocodingAPIProcessor:
+    """
+    Processor for geocoding API calls using producer-consumer pattern.
+
+    This processor reads existing geocoding records and makes census API calls
+    to update them with latitude/longitude coordinates. Uses producer-consumer
+    pattern for safe batch processing with DuckDB.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_API_BATCH_SIZE):
+        self.db_ops = db_ops
+        self.batch_size = batch_size
+        self.logger = get_logger("geocoding_api_processor")
+
+        # Initialize producer and consumer
+        self.producer = GeocodingAPIProducer(db_ops, batch_size)
+        self.consumer = GeocodingAPIConsumer(db_ops)
+
+        # Initialize thread pool manager
+        thread_config = ThreadPoolConfig(
+            producer_config=PoolConfig(max_workers=4, queue_size=1000),  # Multiple producers for parallel processing
+            consumer_config=PoolConfig(max_workers=1, queue_size=1000)   # Single consumer for DB safety
+        )
+        self.thread_pool_manager = ThreadPoolManager(thread_config, self.logger)
+
+    def process_pending_geocoding_records(self, progress_bar=None) -> int:
+        """
+        Process all pending geocoding records by making API calls using PendingDatabaseContext.
+
+        Args:
+            progress_bar: Optional progress bar to update
+
+        Returns:
+            Number of geocoding records processed
+        """
+        if cg is None:
+            if not global_config.is_quiet():
+                log_warning(self.logger, "censusgeocode library not available. Skipping geocoding API calls. "
+                                "To enable geocoding, install with: pip install censusgeocode")
+            return 0
+
+        if not global_config.is_quiet():
+            log_info(self.logger, f"Starting geocoding API processing using PendingDatabaseContext")
+
+        try:
+            # Collect contexts using the PendingDatabaseContext approach
+            contexts = self.producer.collect_contexts()
+
+            if not contexts:
+                if not global_config.is_quiet():
+                    log_info(self.logger, "No geocoding records to process")
+                return 0
+
+            # Execute contexts using consumer
+            total_processed = self.consumer.execute_contexts_batch(contexts, progress_bar)
+
+            if not global_config.is_quiet():
+                log_info(self.logger, f"Geocoding API processing completed: {total_processed} operations processed")
+
+            return total_processed
+
+        except Exception as e:
+            log_error(self.logger, f"Geocoding API processing failed: {e}", exc_info=True)
+            return 0
+
+    def _producer_wrapper(self, batches: List[List[Dict[str, Any]]], work_queue, result_queue, thread_id: int, num_threads: int):
+        """Wrapper for producer thread execution"""
+        try:
+            log_debug(self.logger, f"Geocoding Producer thread {thread_id} starting")
+
+            # Distribute batches among threads
+            for i in range(thread_id, len(batches), num_threads):
+                batch = batches[i]
+
+                # Create operation to process geocoding batch
+                operation = DatabaseOperation(
+                    operation_type=DatabaseOperationType.UPDATE_GEOCODING,
+                    data={
+                        "batch": batch,
+                        "operation": "process_geocoding_api_batch"
+                    }
+                )
+
+                # Put operation in result queue for consumer
+                result_queue.put(operation)
+
+                log_debug(self.logger, f"Geocoding Producer {thread_id}: queued operation for batch of {len(batch)} records")
+
+        except Exception as e:
+            log_error(self.logger, f"Geocoding Producer thread {thread_id} error: {e}", exc_info=True)
+        finally:
+            # Signal completion
+            result_queue.put(None)
+
+    def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, progress_bar=None):
+        """Wrapper for consumer thread execution"""
+        try:
+            log_debug(self.logger, f"Geocoding Consumer thread {thread_id} starting")
+            sentinels_received = 0
+
+            while True:
+                try:
+                    operation = result_queue.get(timeout=1.0)
+                    if operation is None:  # Sentinel
+                        sentinels_received += 1
+                        if sentinels_received >= num_producers:
+                            break
+                        continue
+
+                    # Execute the operation
+                    if isinstance(operation, DatabaseOperation):
+                        self.consumer._execute_geocoding_operation(operation)
+
+                        # Update progress for the batch
+                        if progress_bar and operation.data.get("batch"):
+                            batch_size = len(operation.data["batch"])
+                            progress_bar.update(batch_size)
+
+                    result_queue.task_done()
+
+                except:
+                    continue
+
+        except Exception as e:
+            log_error(self.logger, f"Geocoding Consumer thread {thread_id} error: {e}", exc_info=True)
+
+    def _execute_geocoding_operation(self, operation):
+        """Execute a geocoding operation"""
+        data = operation.data
+        batch = data.get("batch", [])
+        operation_type = data.get("operation")
+
+        if operation_type == "process_geocoding_api_batch":
+            # Process the geocoding batch
+            self._process_geocoding_batch(batch)
 
     def _process_geocoding_batch(self, batch: List[Dict[str, Any]]) -> int:
         """

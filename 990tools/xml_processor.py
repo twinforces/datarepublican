@@ -20,10 +20,11 @@ from base_processor import BaseProducer, BaseConsumer
 import parse_990
 import parse_990ez
 import parse_990pf
-from logging_utils import log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning, dump_traceback, get_logger
 from typing import Optional, List, Tuple
 from config import global_config
 from constants import CURRENT_PROCESSING_VERSION
+from datetime import datetime
 
 # Import XPath configurations from xpaths.py
 from xpaths import COMMON_XPATHS, XPATHS_990, XPATHS_990EZ, XPATHS_990PF, tostring
@@ -51,12 +52,12 @@ class XMLProducer(BaseProducer):
         super().__init__(db_ops, batch_size=100)  # XML processing uses smaller batches
         self.processing_version = processing_version
 
-    def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, List[DatabaseOperation]]:
+    def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, List[str]]:
         """
-        Process a single XML file and return operations for producer-consumer pattern.
+        Process a single XML file and execute operations directly.
 
-        PRODUCER-CONSUMER PATTERN: This method collects operations but does NOT execute them.
-        All database operations are returned as DatabaseOperation objects for the consumer to handle.
+        This method now directly executes database operations instead of returning
+        DatabaseOperation objects, following the simplified PDC architecture.
 
         Args:
             xml_id: XML file ID
@@ -66,7 +67,7 @@ class XMLProducer(BaseProducer):
             file_size: Size of XML file in bytes
 
         Returns:
-            Tuple of (success: bool, operations: List[DatabaseOperation])
+            Tuple of (success: bool, ids: List[str] of inserted object IDs)
         """
         # Validate that zip_id is a UUID string, not a file path
         if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
@@ -77,16 +78,42 @@ class XMLProducer(BaseProducer):
 
         success = self._process_single_xml_with_context(xml_id, zip_id, filename, internal_path, context)
 
-        # Convert context objects to database operations (including XML_FILE_UPDATE)
-        operations = context.save_to_database(self.db_ops)
+        # Execute context objects directly to database and get IDs
+        ids = context.save_to_database(self.db_ops)
 
-        # Update the XML_FILE_UPDATE operation with file_size from caller
-        for operation in operations:
-            if operation.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
-                operation.data["file_size"] = file_size
-                break
+        # Add XML_FILE_UPDATE operation to context instead of executing directly
+        from database_operations import DatabaseOperation, DatabaseOperationType
+        from constants import CURRENT_PROCESSING_VERSION
 
-        return success, operations
+        metadata = {
+            "file_size": file_size,
+            "ein": context.getObjectsByType('charity')[0].ein if context.getObjectsByType('charity') else "Unknown",
+            "tax_year": context.getObjectsByType('charity')[0].tax_year if context.getObjectsByType('charity') else None,
+            "form_type": context.getObjectsByType('charity')[0].form_type if context.getObjectsByType('charity') else None,
+            "error_message": context.error_message,  # Include error message if parsing failed
+            "processed": True, # at least attempted
+            "xml_id": xml_id,
+            "processing_version": CURRENT_PROCESSING_VERSION
+        }
+
+        # If successful, populate metadata with actual parsed values from charity
+        if not context.error_message and context.getObjectsByType('charity'):
+            charity = context.getObjectsByType('charity')[0]
+            metadata["form_type"] = charity.form_type
+            metadata["tax_year"] = charity.tax_year
+            metadata["ein"] = charity.ein
+            metadata["org_type"] = charity.org_type
+            metadata["error_message"] = "success"  # Set to "success" for successful processing
+
+        # Create XML_FILE_UPDATE operation and add to context
+        xml_update_op = DatabaseOperation(
+            DatabaseOperationType.XML_FILE_UPDATE,
+            metadata,
+            xml_id=xml_id
+        )
+        context.addOperationToDatabase(xml_update_op)
+
+        return success, ids
 
     def _get_work_batch(self, offset: int) -> List[Tuple[str, str, str, str, int]]:
         """Get a batch of XML files to process"""
@@ -110,15 +137,15 @@ class XMLProducer(BaseProducer):
                 ))
         return work_items
 
-    def _process_work_batch(self, batch: List[Tuple[str, str, str, str, int]]) -> List[DatabaseOperation]:
-        """Process a batch of XML files into operations"""
-        operations = []
+    def _process_work_batch(self, batch: List[Tuple[str, str, str, str, int]]) -> List[str]:
+        """Process a batch of XML files and return all inserted IDs"""
+        all_ids = []
         for xml_id, zip_id, filename, internal_path, file_size in batch:
-            success, file_operations = self.process_single_xml_for_operations(
+            success, ids = self.process_single_xml_for_operations(
                 xml_id, zip_id, filename, internal_path, file_size
             )
-            operations.extend(file_operations)
-        return operations
+            all_ids.extend(ids)
+        return all_ids
 
     def process_single_xml_with_context(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, PendingDatabaseContext]:
         """
@@ -165,6 +192,9 @@ class XMLProducer(BaseProducer):
             if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
                 raise ValueError(f"zip_id parameter contains file path instead of UUID: {zip_id}")
 
+            # Clear context at the start of each XML file processing to ensure isolation
+            context.clear()
+
             # Get ZIP file path from cache
             zip_path = self.db_ops.get_zip_file_path(zip_id)
             if not zip_path:
@@ -203,6 +233,8 @@ class XMLProducer(BaseProducer):
                 form_type=form_type,
                 xml_name=filename
             )
+            if not global_config.is_quiet():
+                log_info(self.logger, f"CREATING CHARITY: EIN {filer_ein}, tax_year {tax_year}, form_type {form_type}, xml_name {filename}")
             context.addObjectToDatabase(charity)
 
             # Use base parser factory to get the correct parser and parse the form
@@ -218,16 +250,16 @@ class XMLProducer(BaseProducer):
             # Log grant collection results
             counts = context.getObjectCounts()
             if not global_config.is_quiet():
-                log_info(self.logger, f"Grant collection completed for EIN {filer_ein} in {filename}: {counts['grant']} grants, {counts['contractor']} contractors, {counts['political_contribution']} contributions",
+                log_info(self.logger, f"PROCESSING COMPLETE: EIN {filer_ein} in {filename}: {counts['grant']} grants, {counts['contractor']} contractors, {counts['political_contribution']} contributions, {counts['officer']} officers, {counts['address']} addresses",
                           ein=filer_ein)
 
             if not global_config.is_quiet():
-                log_debug(self.logger, f"Successfully parsed {filename}: charity={filer_ein}, grants={counts['grant']}, officers={counts['officer']}")
+                log_debug(self.logger, f"SUCCESS: Parsed {filename}: charity={filer_ein}, grants={counts['grant']}, officers={counts['officer']}, contractors={counts['contractor']}, contributions={counts['political_contribution']}, addresses={counts['address']}")
             return True
 
         except Exception as e:
             if not global_config.is_quiet():
-                log_error(self.logger, f"Failed to process XML {filename}: {e}")
+                log_error(self.logger, f"FAILED: XML {filename}: {e}")
             # Store error message with stack trace in context instead of direct DB update
             import traceback
             error_msg = f"{str(e)}\n\nStack Trace:\n{traceback.format_exc()}"
@@ -354,8 +386,7 @@ class XMLConsumer(BaseConsumer):
     This class is responsible for executing database operations.
     Only consumers may perform database writes. Producers must never write to the database.
 
-    If you need to modify this class to handle new operation types,
-    ensure all database writes go through the bulk operation methods.
+    Uses the standardized BaseConsumer._process_operations_batch pattern.
     """
 
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
@@ -363,32 +394,10 @@ class XMLConsumer(BaseConsumer):
         self.processing_version = processing_version
 
     def _process_operations_batch(self, operations_by_type):
-        """Process operations batch for XML consumer"""
-        # Execute operations in dependency order
-        try:
-            # Handle OPTIMIZE_DATABASE operations first
-            if DatabaseOperationType.OPTIMIZE_DATABASE.value in operations_by_type:
-                for operation in operations_by_type[DatabaseOperationType.OPTIMIZE_DATABASE.value]:
-                    self._execute_optimize_operation(operation)
-
-            # 1. Handle XML file updates first
-            self._process_xml_file_update_operations(operations_by_type)
-
-            # 2. Insert charities
-            charity_id_map = self._process_charity_operations(operations_by_type)
-
-            # 3. Insert related data (officers, grants, etc.) using charity_id_map
-            self._process_related_operations(operations_by_type, charity_id_map)
-
-            # 4. Insert addresses
-            self._process_address_operations(operations_by_type, charity_id_map)
-
-            # 6. Handle generic update operations
-            self._process_generic_update_operations(operations_by_type)
-
-        except Exception as e:
-            log_error(self.logger, f"Failed to execute operations batch: {e}", exc_info=True)
-            raise
+        """Process operations batch for XML consumer using standardized pattern"""
+        # DEPRECATED: All operations are now handled by PendingDatabaseContext.save_to_database()
+        # which executes all operations directly. This method should not exist.
+        pass
 
     def _execute_optimize_operation(self, operation):
         """Execute database optimization operation"""
@@ -404,8 +413,22 @@ class XMLConsumer(BaseConsumer):
             log_error(self.logger, f"Database optimization failed: {e}", exc_info=True)
             raise
 
+    def _execute_progress_update_operation(self, operation):
+        """Execute progress update operation"""
+        # DEPRECATED: Progress updates should be handled by PDC, not individual operations
+        # This method should not exist in the new PDC architecture.
+        if operation.operation_type != DatabaseOperationType.PROGRESS_UPDATE:
+            return
+
+        from logging_utils import update_progress
+        progress_count = operation.data.get("count", 0)
+        self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
+        update_progress(n=progress_count)
+
     def _process_xml_file_update_operations(self, operations_by_type):
         """Process XML file update operations using bulk_update"""
+        # DEPRECATED: XML file updates should be handled by PDC, not individual operations
+        # This method should not exist in the new PDC architecture.
         if DatabaseOperationType.XML_FILE_UPDATE.value not in operations_by_type:
             return
 
@@ -413,37 +436,48 @@ class XMLConsumer(BaseConsumer):
 
         # Collect all updates for bulk operation
         updates = []
+        update_dict={
+                "xml_id": "A",
+                "processed": False,
+                "processing_version": self.processing_version,
+                "file_size": -1,
+                "processed_at": datetime.now().isoformat() ,
+                "org_type": "None",
+                "form_type": "no-form",
+                "error_message": "whiz"
+        }
+
         for operation in xml_updates:
             xml_id = operation.xml_id
             metadata = operation.data
-
+            prev_update_dict = update_dict
             # Prepare update dictionary for bulk_update - include all required fields
             update_dict = {
                 "xml_id": xml_id,
-                "processed": metadata["processed"],
+                "processed": metadata["processed"] or prev_update_dict["processed"],
                 "processing_version": self.processing_version,
-                "file_size": metadata["file_size"],
-                "processed_at": metadata.get("processed_at"),
-                "org_type": metadata.get("org_type"),
+                "file_size": metadata["file_size"]  or prev_update_dict["file_size"],
+                "processed_at": metadata.get("processed_at", prev_update_dict["processed_at"]) ,
+                "org_type": metadata.get("org_type",  prev_update_dict["processed_at"]),
+                "form_type": metadata.get("form_type",  prev_update_dict["form_type"]),
                 "error_message": metadata.get("error_message")
             }
 
             # Set processed_at timestamp if not already set and processing is complete
             if update_dict["processed"] and update_dict["processed_at"] is None:
-                from datetime import datetime
                 update_dict["processed_at"] = datetime.now().isoformat()
 
-            if metadata.get("error_message"):
+            if metadata.get("error_message") != "success":
                 # Error case: set error_message and clear success fields
-                update_dict["form_type"] = None
+                ##update_dict["form_type"] = None
                 update_dict["ein"] = None
-                update_dict["tax_year"] = None
+                ##update_dict["tax_year"] = None
             else:
                 # Success case: set success fields and clear error_message
                 update_dict["form_type"] = metadata.get("form_type")
                 update_dict["ein"] = metadata.get("ein")
                 update_dict["tax_year"] = metadata.get("tax_year")
-
+            prev_update_dict={}
             updates.append(update_dict)
 
         # Execute bulk update
@@ -455,70 +489,12 @@ class XMLConsumer(BaseConsumer):
                 log_error(self.logger, f"Failed to bulk update XML files: {e}")
                 raise
 
-    def _process_charity_operations(self, operations_by_type):
-        """Process charity insert operations and return charity_id mapping"""
-        charity_id_map = {}  # xml_id -> charity_id
-
-        if DatabaseOperationType.INSERT_CHARITY.value not in operations_by_type:
-            return charity_id_map
-
-        charities = [op.data for op in operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]]
-
-        if not charities:
-            return charity_id_map
-
-        log_info(self.logger, f"Bulk insert: Processing {len(charities)} charities")
-
-        # Set colocator to 'notyet' for new charities
-        for charity in charities:
-            charity.colocator = 'notyet'
-
-        try:
-            # Use database_operations bulk_insert method which calls prep_for_insert
-            ids = self.db_ops.bulk_insert(charities)
-            log_info(self.logger, f"Bulk insert: Inserted {len(charities)} charities")
-
-            # Map xml_id to charity_id using the operations list and returned IDs
-            charity_ops = operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]
-            for i, charity_id in enumerate(ids):
-                if i < len(charity_ops):
-                    xml_id = charity_ops[i].xml_id
-                    charity_id_map[xml_id] = charity_id
-
-        except Exception as e:
-            # Check if this is a duplicate constraint violation
-            error_str = str(e)
-            if "Constraint Error: Duplicate key" in error_str and "xml_name:" in error_str:
-                log_warning(self.logger, f"Duplicate charity constraint violation detected: {e}")
-                # Mark XML files as processed with duplicate status
-                charity_ops = operations_by_type[DatabaseOperationType.INSERT_CHARITY.value]
-                for charity_op in charity_ops:
-                    xml_id = charity_op.xml_id
-                    # Create XML_FILE_UPDATE operation for duplicate
-                    if DatabaseOperationType.XML_FILE_UPDATE.value not in operations_by_type:
-                        operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value] = []
-                    operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value].append(
-                        DatabaseOperation(
-                            operation_type=DatabaseOperationType.XML_FILE_UPDATE,
-                            xml_id=xml_id,
-                            data={
-                                "processed": True,
-                                "processing_version": CURRENT_PROCESSING_VERSION,
-                                "error_message": "duplicate"
-                            }
-                        )
-                    )
-                log_info(self.logger, f"Marked {len(charity_ops)} XML files as duplicate")
-                # Return empty map since no charities were inserted
-                return {}
-            else:
-                log_error(self.logger, f"Failed to insert charities: {e}", exc_info=True)
-                raise
-
-        return charity_id_map
+    # _process_charity_operations method removed - now handled by BaseConsumer.execute_contexts_batch
 
     def _process_related_operations(self, operations_by_type, charity_id_map):
         """Process related data operations (officers, grants, contractors, contributions)"""
+        # DEPRECATED: All object insertions should be handled by PDC, not individual operations
+        # This method should not exist in the new PDC architecture.
 
         # Process officers
         if DatabaseOperationType.INSERT_OFFICER.value in operations_by_type:
@@ -532,8 +508,8 @@ class XMLConsumer(BaseConsumer):
 
             if officers:
                 try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.db_ops.bulk_insert(officers)
+                    # Use INSERT_BY_TYPE for officers (single type, no sorting needed)
+                    ids = self.db_ops.INSERT_BY_TYPE(officers, 'Officer')
                     log_debug(self.logger, f"Inserted {len(officers)} officers")
                 except Exception as e:
                     log_error(self.logger, f"Failed to insert officers: {e}", exc_info=True)
@@ -550,8 +526,8 @@ class XMLConsumer(BaseConsumer):
 
             if grants:
                 try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.db_ops.bulk_insert(grants)
+                    # Use INSERT_BY_TYPE for grants (single type, no sorting needed)
+                    ids = self.db_ops.INSERT_BY_TYPE(grants, 'Grant')
                     log_debug(self.logger, f"Inserted {len(grants)} grants")
                 except Exception as e:
                     log_error(self.logger, f"Failed to insert grants: {e}", exc_info=True)
@@ -562,8 +538,8 @@ class XMLConsumer(BaseConsumer):
 
             if contractors:
                 try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.db_ops.bulk_insert(contractors)
+                    # Use INSERT_BY_TYPE for contractors (single type, no sorting needed)
+                    ids = self.db_ops.INSERT_BY_TYPE(contractors, 'Contractor')
                     log_debug(self.logger, f"Inserted {len(contractors)} contractors")
                 except Exception as e:
                     log_error(self.logger, f"Failed to insert contractors: {e}", exc_info=True)
@@ -574,14 +550,16 @@ class XMLConsumer(BaseConsumer):
 
             if contributions:
                 try:
-                    # Use database_operations bulk_insert method which calls prep_for_insert
-                    ids = self.db_ops.bulk_insert(contributions)
+                    # Use INSERT_BY_TYPE for political contributions (single type, no sorting needed)
+                    ids = self.db_ops.INSERT_BY_TYPE(contributions, 'PoliticalContribution')
                     log_debug(self.logger, f"Inserted {len(contributions)} contributions")
                 except Exception as e:
                     log_error(self.logger, f"Failed to insert contributions: {e}", exc_info=True)
 
     def _process_address_operations(self, operations_by_type, charity_id_map):
         """Process address insert operations"""
+        # DEPRECATED: All object insertions should be handled by PDC, not individual operations
+        # This method should not exist in the new PDC architecture.
 
         if DatabaseOperationType.INSERT_ADDRESS.value not in operations_by_type:
             return
@@ -599,14 +577,16 @@ class XMLConsumer(BaseConsumer):
 
         if addresses:
             try:
-                # Use database_operations bulk_insert method which calls prep_for_insert
-                ids = self.db_ops.bulk_insert(addresses)
+                # Use INSERT_BY_TYPE for addresses (single type, no sorting needed)
+                ids = self.db_ops.INSERT_BY_TYPE(addresses, 'Address')
                 log_debug(self.logger, f"Inserted {len(addresses)} addresses")
             except Exception as e:
                 log_error(self.logger, f"Failed to insert addresses: {e}", exc_info=True)
 
     def _process_generic_update_operations(self, operations_by_type):
         """Process generic update operations using bulk_update"""
+        # DEPRECATED: All database updates should be handled by PDC, not individual operations
+        # This method should not exist in the new PDC architecture.
         if DatabaseOperationType.GENERIC_UPDATE.value not in operations_by_type:
             return
 
@@ -638,4 +618,227 @@ class XMLConsumer(BaseConsumer):
                     raise
 
 
+class XMLProcessor:
+    """
+    XML Processor - Main entry point for XML processing operations.
+
+    This class coordinates XML processing using the producer-consumer pattern.
+    It can operate in both single-threaded and multi-threaded modes.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
+        self.db_ops = db_ops
+        self.processing_version = processing_version
+        self.logger = get_logger(self.__class__.__name__)
+
+    def process_xml_files(self, max_files: Optional[int] = None, workers: int = 4) -> int:
+        """
+        Process XML files using parallel producer-consumer pattern.
+
+        Args:
+            max_files: Maximum number of files to process (for testing)
+            workers: Number of worker threads for parallel processing
+
+        Returns:
+            Number of XML files processed
+        """
+        return self._process_xml_files_parallel(max_files, workers)
+
+    def _process_xml_files_parallel(self, max_files: Optional[int] = None, workers: int = 4) -> int:
+        """
+        Process XML files using parallel producer-consumer pattern.
+
+        This method implements the threading and coordination logic directly,
+        eliminating the artificial processor/strategy split.
+        """
+        from constants import CURRENT_PROCESSING_VERSION
+        from logging_utils import start_progress_reporting
+        import signal
+        import threading
+        import queue
+
+        # Setup signal handlers for graceful shutdown
+        shutdown_event = threading.Event()
+        def interrupt_handler(signum, frame):
+            self.log_error("Received interrupt signal, shutting down gracefully...")
+            shutdown_event.set()
+
+        signal.signal(signal.SIGINT, interrupt_handler)
+
+        # Get total count for progress bar
+        if max_files is None:
+            total_files_query = """
+                SELECT COUNT(*) FROM XmlFiles
+                WHERE processed = FALSE OR processing_version < ?
+            """
+            result = self.db_ops.execute_query(total_files_query, (CURRENT_PROCESSING_VERSION,))
+            total_files = result.fetchone()[0] if result else 0
+        else:
+            total_files = max_files
+
+        # Setup progress bar
+        progress_unit = "file" if global_config.progress == "files" else "B"
+        progress_desc = "Processing XML files" if global_config.progress == "files" else "XML bytes"
+        pbar = start_progress_reporting(total=total_files, desc=progress_desc, unit=progress_unit)
+
+        # Create producer and consumer instances
+        producer = XMLProducer(self.db_ops, CURRENT_PROCESSING_VERSION)
+        consumer = XMLConsumer(self.db_ops, CURRENT_PROCESSING_VERSION)
+
+        # Setup thread pool configuration
+        from base_processor import ThreadPoolConfig, PoolConfig
+        producer_config = PoolConfig(max_workers=workers, queue_size=1000, batch_size=100)
+        thread_pool_config = ThreadPoolConfig(producer_config=producer_config)
+
+        # Initialize thread pool manager
+        from base_processor import ThreadPoolManager
+        thread_pool_manager = ThreadPoolManager(thread_pool_config, self.logger)
+
+        total_processed = 0
+
+        try:
+            # Process batches until we reach max_files or run out of files
+            while True:
+                # Calculate remaining files for this batch
+                remaining_files = None if max_files is None else max_files - total_processed
+                batch_limit = 100 if remaining_files is None else min(remaining_files, 100)
+
+                # Get next batch of files
+                xml_files = self.db_ops.get_xml_files_to_process(
+                    processing_version=CURRENT_PROCESSING_VERSION,
+                    max_files=batch_limit
+                )
+                if not xml_files:
+                    break
+
+                batch_size = len(xml_files)
+                self.log_info(f"Processing batch of {batch_size} files with {workers} workers")
+
+                # Start producer pool
+                thread_pool_manager.start_producer_pool(
+                    xml_files,
+                    self._xml_producer_worker
+                )
+
+                # Start single consumer thread
+                consumer_thread = threading.Thread(
+                    target=self._xml_consumer_worker,
+                    args=(thread_pool_manager.result_queue, consumer, pbar, shutdown_event)
+                )
+                consumer_thread.daemon = False
+                consumer_thread.start()
+
+                # Wait for completion
+                self._wait_for_completion(thread_pool_manager, consumer_thread)
+
+                # Update total processed
+                total_processed += batch_size
+
+                # Check limits
+                if max_files and total_processed >= max_files:
+                    break
+
+        finally:
+            # Cleanup
+            if pbar:
+                pbar.close()
+
+            # Clean up ZIP cache
+            XMLProducer.cleanup_zip_cache()
+
+        self.log_info(f"XML processing complete: {total_processed} files processed")
+        return total_processed
+
+    def _xml_producer_worker(self, xml_files, work_queue, result_queue, producer_id, num_producers):
+        """Producer worker function for thread pool"""
+        processed = 0
+        total_bytes = 0
+
+        # Create producer instance for this thread
+        from constants import CURRENT_PROCESSING_VERSION
+        producer = XMLProducer(self.db_ops, CURRENT_PROCESSING_VERSION)
+
+        for i in range(producer_id, len(xml_files), num_producers):
+            if shutdown_event.is_set():
+                break
+
+            xml_file = xml_files[i]
+            xml_id = xml_file.xml_id
+            zip_id = xml_file.zip_id
+            zip_path = self.db_ops.get_zip_file_path(zip_id)
+            if not zip_path:
+                continue
+
+            filename = xml_file.filename
+            internal_path = xml_file.internal_path
+            file_size = xml_file.file_size
+
+            try:
+                # Parse XML and collect operations
+                success, operations = producer.process_single_xml_for_operations(
+                    xml_id, zip_id, filename, internal_path, file_size
+                )
+
+                # Send operations to consumer
+                for operation in operations:
+                    result_queue.put(operation)
+
+                processed += 1
+
+                # Track progress
+                if global_config.progress == "bytes" and file_size:
+                    total_bytes += file_size
+
+                if processed % 50 == 0:
+                    progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
+                    self.log_info(f"Producer {producer_id}: {progress_info} queued")
+
+            except Exception as e:
+                self.log_error(f"Producer {producer_id} error on {filename}: {e}")
+
+        # Send sentinel
+        result_queue.put(None)
+
+    def _xml_consumer_worker(self, operations_queue, consumer, pbar, shutdown_event):
+        """Consumer worker function"""
+        batch_operations = []
+        processed_xml_count = 0
+
+        sentinels_received = 0
+        num_producers = len(thread_pool_manager.producer_threads) if thread_pool_manager else 1
+
+        while sentinels_received < num_producers:
+            try:
+                item = operations_queue.get(timeout=1.0)
+                if item is None:
+                    sentinels_received += 1
+                    continue
+
+                if isinstance(item, DatabaseOperation):
+                    batch_operations.append(item)
+
+                if len(batch_operations) >= 100:
+                    # Execute batch
+                    consumer.execute_operations_batch(batch_operations)
+                    batch_operations = []
+
+                operations_queue.task_done()
+
+            except queue.Empty:
+                if shutdown_event.is_set():
+                    break
+
+        # Final batch
+        if batch_operations:
+            consumer.execute_operations_batch(batch_operations)
+
+    def _wait_for_completion(self, thread_pool_manager, consumer_thread):
+        """Wait for producer and consumer threads to complete"""
+        # Wait for producers
+        for thread in thread_pool_manager.producer_threads:
+            thread.join()
+
+        # Wait for consumer
+        if consumer_thread and consumer_thread.is_alive():
+            consumer_thread.join()
 
