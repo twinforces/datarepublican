@@ -340,3 +340,78 @@ When this work, which will be extensive, is complete, we will be able to produce
 * Once you process and save an XML file to the point of creating a Charity object, you cannot at this time processed it again to save. This is intentional, we're solving the reprocessing step later. 
 * There are some sample XML files in ./990tools/test_xmls. If you want more, you can search against the real database to find ideally a collection by form_type and org type, and use unzip against the zip files in /Volumes/Data/irs_zips, and extract them to test_xmls with appropriate names, generally (form_type)_(ein)_(tax_year).xml. Note that the files in ./990tools/test_xmls with "FAIL" in the name are hacked versions of CHAI.xml in that same folder but broken in various ways. 
 * You can run the XML portion of the pipeline yourself with --start-step xml --stop-step xml --max-files N that will parse and save N XML files. --verbose will give you the most logs, but you will want to redirect to a file and grep the results in that case, --log-sql is also useful to make sure the SQL is being generated correctly. 
+
+
+Contractors in 990PF forms:
+
+       <CompensationOfHghstPdCntrctGrp>
+          <BusinessName>
+            <BusinessNameLine1Txt>RGM CAPITAL</BusinessNameLine1Txt>
+          </BusinessName>
+          <USAddress>
+            <AddressLine1Txt>9010 STRADA STELL CT 105</AddressLine1Txt>
+            <CityNm>NAPLES</CityNm>
+            <StateAbbreviationCd>FL</StateAbbreviationCd>
+            <ZIPCd>34109</ZIPCd>
+          </USAddress>
+          <ServiceTypeTxt>INVESTMENT MANAGEMENT FEES</ServiceTypeTxt>
+          <CompensationAmt>2117470</CompensationAmt>
+        </CompensationOfHghstPdCntrctGrp>
+        
+There were zero political Contributions found when scanning through all 2.8M XML files, however Sierra Club files a schedule C, here is a sample: ```<IRS990ScheduleC documentId="RetDoc1039500001">
+<PoliticalExpendituresAmt>963678</PoliticalExpendituresAmt>
+<VolunteerHoursCnt>5797</VolunteerHoursCnt>
+<Expended527ActivitiesAmt>1552</Expended527ActivitiesAmt>
+<InternalFundsContributedAmt>10000</InternalFundsContributedAmt>
+<TotalExemptFunctionExpendAmt>11552</TotalExemptFunctionExpendAmt>
+<Form1120POLFiledInd>1</Form1120POLFiledInd>
+<Section527PoliticalOrgGrp>
+<OrganizationBusinessName>
+<BusinessNameLine1Txt>MISSISSIPPI SIERRA CLUB PAC</BusinessNameLine1Txt>
+</OrganizationBusinessName>
+<USAddress>
+<AddressLine1Txt>148 OAKHURST TRAIL</AddressLine1Txt>
+<CityNm>RIDGELAND</CityNm>
+<StateAbbreviationCd>MS</StateAbbreviationCd>
+<ZIPCd>39157</ZIPCd>
+</USAddress>
+<EIN>454833193</EIN>
+<PaidInternalFundsAmt>10000</PaidInternalFundsAmt>
+</Section527PoliticalOrgGrp>
+<SubstantiallyAllDuesNondedInd>1</SubstantiallyAllDuesNondedInd>
+<OnlyInHouseLobbyingInd>0</OnlyInHouseLobbyingInd>
+<AgreeCarryoverPriorYearInd>0</AgreeCarryoverPriorYearInd>
+<SupplementalInformationDetail>
+<FormAndLineReferenceDesc>PART I-A, LINE 1:</FormAndLineReferenceDesc>
+<ExplanationTxt>SIERRA CLUB PROVIDES ADMINISTRATIVE AND FUNDRAISING SUPPORT TO ITS SEPARATE SEGREGATED FUNDS (SIERRA CLUB POLITICAL COMMITTEE AND SIERRA CLUB VOTER EDUCATION FUND AND STATE POLITICAL ORGANIZATIONS) AND COMMUNICATES WITH ITS MEMBERS AND OTHERS ABOUT CANDIDATES, INCLUDING EXPRESSLY ADVOCATING FOR THEIR ELECTION OR DEFEAT, AS PERMITTED UNDER FEDERAL AND STATE LAW.</ExplanationTxt>
+</SupplementalInformationDetail>
+</IRS990ScheduleC>``` and you can find their data in ./990tools/test_xmls/SierraClub.xml for testing. This should generate a politicalcontribution records with the name of the orgazation with BusinessNameLine1 and BusinessNameLine2 combined with a space if line2 is present stored in "recipient", with the PaidInternalFundsAmt stored as the Amount, the tax_year from the return, and the associated address record should be built using the build_address factory method. Another one is Alliance.xml in the same directory, their data looks like this: ```<IRS990ScheduleC documentId="RetDoc1039500001">
+<PoliticalExpendituresAmt>6000</PoliticalExpendituresAmt>
+<VolunteerHoursCnt>0</VolunteerHoursCnt>
+<InternalFundsContributedAmt>6000</InternalFundsContributedAmt>
+<TotalExemptFunctionExpendAmt>6000</TotalExemptFunctionExpendAmt>
+<Form1120POLFiledInd>0</Form1120POLFiledInd>
+<Section527PoliticalOrgGrp>
+<OrganizationBusinessName>
+<BusinessNameLine1Txt>ALLIANCE FOR GUN RESPONSIBILITY VICTORY FUND</BusinessNameLine1Txt>
+</OrganizationBusinessName>
+<USAddress>
+<AddressLine1Txt>PO BOX 4187</AddressLine1Txt>
+<CityNm>SEATTLE</CityNm>
+<StateAbbreviationCd>WA</StateAbbreviationCd>
+<ZIPCd>98194</ZIPCd>
+</USAddress>
+<EIN>471304996</EIN>
+<PaidInternalFundsAmt>6000</PaidInternalFundsAmt>
+</Section527PoliticalOrgGrp>
+<SupplementalInformationDetail>
+<FormAndLineReferenceDesc>PART I-A, LINE 1:</FormAndLineReferenceDesc>
+<ExplanationTxt>DONATION TO AGR PAC.</ExplanationTxt>
+</SupplementalInformationDetail>
+</IRS990ScheduleC>
+``` Same thing, pull the EIN, Address, name out and create a Political Contribution record with linked address. 
+
+
+Ok, the QueueDisplay you implemented is REALLY Cool. Since we have a Producers reading/Consumer writing split in all the steps with thread pools wrapped around the producers, I'd like to have the QueueDisplay on every step so we can see if the Producers are getting too far ahead of the Consumer. So please:
+1. Move the QueueDisplay into its only .py file. 
+2. Add it to every step from zip through to geocode.

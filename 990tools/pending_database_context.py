@@ -63,7 +63,8 @@ class PendingDatabaseContext:
             'contractor': [],
             'political_contribution': [],
             'address': [],
-            'geocoding': []  # For geocoding records
+            'geocoding': [],  # For geocoding records
+            'zipfile': []  # For ZIP file records
         }
         self._updates: List[Dict[str, Any]] = []  # For future UPDATE operations
         self._operations: List[DatabaseOperation] = []  # For generic database operations

@@ -11,7 +11,7 @@ The system processes IRS 990 data through several sequential stages:
 - **zip**: Processes ZIP files, creates ZipFile and XmlFile records
 - **xml**: Parses 2.9M XML files, creates Charity, Grant, Contractor, PoliticalContribution, Officer, and Address records
 - **address**: Deduplicates 4M addresses, designates master addresses
-- **geolocate**: Uses Census API to get lat/long for non-PO Box addresses
+- **geolocate**: Uses Census API to get lat/long for non-PO Box addresses and US addresses.
 
 ### 2. **Database Constraints**
 - DuckDB allows multiple readers but only one writer
@@ -44,6 +44,7 @@ Address (created by everything, saved last)
 - Handles ownership relationships
 - Provides `save_to_database()` method for bulk operations
 - Ensures proper insertion order
+- merge class method allows multiple PDCs to be combined into a giant PDC by the consumer threads for maximum throughput.
 
 #### **UUID7 Primary Keys**
 - Time-ordered UUIDs for efficient indexing
@@ -60,9 +61,10 @@ The codebase underwent a major refactoring to standardize on PDC-based processin
 3. **Inconsistent Threading**: Some processors use PDC accumulation, others use operation queues
 
 ### **Database Operations Layer**
-- `GENERIC_INSERT()`: Organizes objects by type, inserts in ownership order
+- `GENERIC_INSERT()`: Organizes objects by type, inserts in ownership order by PDC, leverages dataclass idiom
 - `INSERT_BY_TYPE()`: For PDC when objects are pre-sorted
-- Legacy `insert_*()` methods marked as DEPRECATED
+- Legacy `insert_*()` methods deleted
+- `GENERIC_UPDATE` performs simple primary_key and keys to update, should be expanded to accept more general where clauses. 
 
 ### **Processor Architecture**
 
@@ -146,6 +148,9 @@ The `--max-files` global configuration limits work scope for testing and develop
 - `990tools/models/`: Dataclass definitions
 - `990tools/docs/`: Documentation
 - `990tools/test_xmls/`: Test XML files
+- `/Volumes/Data/final`: Location of irs990.duckdb the live database with real data.
+- `/Volumes/Data/irs_zips/`: Location of the irs zip files
+- Other directories are defined in ./990tools/constants.py but not applicable at the moment.
 
 ### **Key Files**
 - `database_operations.py`: Database interaction layer

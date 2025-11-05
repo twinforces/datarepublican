@@ -18,7 +18,7 @@ This document provides a comprehensive audit of all Python files in the 990Tools
 #### Methods Needing Work
 - `insert_zip_file()` - ✅ Uses bulk_insert (good)
 - `insert_xml_file()` - ✅ Uses bulk_insert (good)
-- Legacy `insert_*()` methods - ✅ Marked DEPRECATED (correct approach)
+- Legacy `insert_*()` methods - ✅ Deleted
 
 ### `pending_database_context.py`
 **Status**: ✅ COMPLETE - Fully PDC-compliant
@@ -36,7 +36,7 @@ This document provides a comprehensive audit of all Python files in the 990Tools
 - `ProcessorCoordinator.process_producer_consumer()` - ✅ PDC-based
 - `BaseProducer.collect_contexts()` - ✅ PDC method exists
 - `BaseConsumer.execute_contexts_batch()` - ✅ PDC method exists
-- `collect_operations()` - ⚠️ DEPRECATED wrapper (acceptable for compatibility)
+- `collect_operations()` - ⚠️ DEPRECATED wrapper (acceptable for compatibility, should delete)
 - Various `_process_*_operations()` methods - ❌ Still operation-based, need PDC conversion
 
 ## Processor Layer
@@ -88,8 +88,8 @@ This document provides a comprehensive audit of all Python files in the 990Tools
 - Not analyzed - needs complete rewrite for PDC compliance
 
 #### `stats_processor.py`
-**Status**: NOTYET
-- Not analyzed - needs complete rewrite for PDC compliance
+**Status**: N/A
+- Run after each step to gather table stats, special case. 
 
 ## Model Layer
 
@@ -138,17 +138,6 @@ This document provides a comprehensive audit of all Python files in the 990Tools
 - `CURRENT_PROCESSING_VERSION` - ✅ Version tracking
 
 ## Test Files
-
-### Performance/Integration Tests
-**Status**: ✅ UPDATED - Use GENERIC_INSERT
-- `performance_test_bulk_insert.py` - ✅ Updated to use GENERIC_INSERT
-- `test_xml_address_geolocation.py` - ✅ Updated to use GENERIC_INSERT
-- `test_unpack_error.py` - ✅ Updated to use GENERIC_INSERT
-
-### Other Test Files
-**Status**: ✅ COMPATIBLE - Use legacy methods (acceptable for tests)
-- Various test files still use deprecated insert methods
-- This is acceptable for test isolation
 
 ## Infrastructure Files
 

@@ -44,15 +44,14 @@ except ImportError:
 
 # Import extracted modules
 from database_operations import DatabaseOperations
-from processing_strategy import ParallelXMLProcessingStrategy, AddressDeduplicationStrategy
-from geolocation_processor import GeocodingProcessor, GeolocationProcessorThreaded
+from xml_processor import XMLProcessor
+from geocoding_api_processor import GeocodingAPIProcessor
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
 from address_matcher import AddressMatcher
 from address_deduplication_processor import AddressDeduplicationProcessor
 from irsfetch_processor import IRSFetchProcessor
-from address_deduplication_processor import AddressDeduplicationProcessor
 from officer_deduplication_processor import OfficerDeduplicationProcessor
 from photo_processor import PhotoProcessor
 from extract_processor import ExtractProcessor
@@ -139,9 +138,8 @@ class IRS990Processor:
         # Initialize components
         self.db_ops = DatabaseOperations(self.db_path, dbUI=global_config.dbUI)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
-        self.xml_processing_strategy = ParallelXMLProcessingStrategy(self.db_ops, self.logger, workers=global_config.workers)
-        self.address_deduplication_strategy = AddressDeduplicationStrategy(self.db_ops, self.logger)
-        self.geolocation_processor = GeolocationProcessorThreaded(self.db_ops)
+        self.xml_processor = XMLProcessor(self.db_ops)
+        self.geolocation_processor = GeocodingAPIProcessor(self.db_ops)
         self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter
@@ -415,7 +413,7 @@ class IRS990Processor:
         if self.profile_seconds:
             return self._profile_xml_processing()
 
-        return self.xml_processing_strategy.execute(self.max_files)
+        return self.xml_processor.process_xml_files(self.max_files, self.workers)
 
     def _profile_xml_processing(self):
         """Profile XML processing for a specified number of seconds"""
@@ -516,7 +514,7 @@ class IRS990Processor:
     def deduplicate_addresses(self):
         """Deduplicate addresses and create master-child relationships (step 4)"""
         self.log_info("Deduplicating addresses and creating master-child relationships")
-        return self.address_deduplication_strategy.execute(self.max_files)
+        return self.address_dedup_processor.deduplicate_addresses()
 
     def export_final_tsvs(self):
         """Export final TSV files (step 11)"""

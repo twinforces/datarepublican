@@ -421,17 +421,36 @@ class IRSFetchProcessor:
         self.log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
 
         try:
-            # IRS fetch is a simple sequential process - no need for producer-consumer pattern
-            # since it's primarily I/O bound downloading and file operations
-            success = self._download_and_recompress_year(start_year, self.zips_dir)
+            # Process each year sequentially
+            for year in range(start_year, end_year + 1):
+                success = self._download_and_recompress_year(year, self.zips_dir)
+                if not success:
+                    self.log_error(f"Failed to process year {year}")
+                    return False
 
-            if success:
-                self.log_info("IRS ZIP file fetch and recompression complete")
-            return success
+            self.log_info("IRS ZIP file fetch and recompression complete")
+            return True
 
         except Exception as e:
             self.log_error(f"IRS fetch processing failed: {e}", exc_info=True)
             return False
+
+    def _download_and_recompress_year(self, year: int, zips_dir: str) -> bool:
+        """Download and recompress ZIP files for a specific year"""
+        self.log_info(f"Processing year {year}")
+
+        # Download ZIP files
+        if not self.consumer._download_irs_zips(year, year, zips_dir):
+            self.log_error(f"Failed to download ZIP files for {year}")
+            return False
+
+        # Recompress ZIP files
+        if not self.consumer._recompress_zips(zips_dir):
+            self.log_error(f"Failed to recompress ZIP files for {year}")
+            return False
+
+        self.log_info(f"Successfully processed year {year}")
+        return True
 
     def _producer_wrapper(self, work_items: List[Tuple[int, str]], work_queue, result_queue, thread_id: int, num_threads: int):
         """Wrapper for producer thread execution"""
