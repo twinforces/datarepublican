@@ -84,6 +84,7 @@ class XMLProducer(BaseProducer):
         # Add XML_FILE_UPDATE operation to context
         from database_operations import DatabaseOperation, DatabaseOperationType
         from constants import CURRENT_PROCESSING_VERSION
+        from config import global_config
 
         metadata = {
             "file_size": file_size,
@@ -112,6 +113,14 @@ class XMLProducer(BaseProducer):
             xml_id=xml_id
         )
         context.addOperationToDatabase(xml_update_op)
+
+        # Add PROGRESS_UPDATE operation per XML file
+        progress_data = {"bytes": file_size} if global_config.progress == "bytes" else {"count": 1}
+        progress_op = DatabaseOperation(
+            DatabaseOperationType.PROGRESS_UPDATE,
+            progress_data
+        )
+        context.addOperationToDatabase(progress_op)
 
         return success, context
 
@@ -640,15 +649,7 @@ class XMLProcessor:
         signal.signal(signal.SIGINT, interrupt_handler)
 
         # Get total count for progress bar
-        if max_files is None:
-            total_files_query = """
-                SELECT COUNT(*) FROM XmlFiles
-                WHERE processed = FALSE OR processing_version < ?
-            """
-            result = self.db_ops.execute_query(total_files_query, (CURRENT_PROCESSING_VERSION,))
-            total_files = result.fetchone()[0] if result else 0
-        else:
-            total_files = max_files
+        total_files = self.db_ops.get_xml_files_to_process_count(CURRENT_PROCESSING_VERSION) if max_files is None else max_files
 
         # Setup progress bar
         progress_unit = "file" if global_config.progress == "files" else "B"
@@ -799,9 +800,18 @@ class XMLProcessor:
 
                 if len(batch_contexts) >= 100:
                     # Execute batch
+                    batch_size = len(batch_contexts)
                     for context in batch_contexts:
                         context.save_to_database(consumer.db_ops)
                     batch_contexts = []
+                    if batch_size > 0:
+                        progress_context = PendingDatabaseContext()
+                        progress_op = DatabaseOperation(
+                            DatabaseOperationType.PROGRESS_UPDATE,
+                            {"count": batch_size}
+                        )
+                        progress_context.addOperationToDatabase(progress_op)
+                        progress_context.save_to_database(consumer.db_ops)
 
                 operations_queue.task_done()
 
@@ -811,8 +821,17 @@ class XMLProcessor:
 
         # Final batch
         if batch_contexts:
+            batch_size = len(batch_contexts)
             for context in batch_contexts:
                 context.save_to_database(consumer.db_ops)
+            if batch_size > 0:
+                progress_context = PendingDatabaseContext()
+                progress_op = DatabaseOperation(
+                    DatabaseOperationType.PROGRESS_UPDATE,
+                    {"count": batch_size}
+                )
+                progress_context.addOperationToDatabase(progress_op)
+                progress_context.save_to_database(consumer.db_ops)
 
     def _wait_for_completion(self, thread_pool_manager, consumer_thread):
         """Wait for producer and consumer threads to complete"""

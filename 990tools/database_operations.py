@@ -36,7 +36,7 @@ PERFORMANCE FEATURES:
 import duckdb
 import pandas as pd
 import inspect
-from typing import Optional, List, Tuple, Dict, Any, Type
+from typing import Optional, List, Tuple, Dict, Any, Type, Union
 from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
@@ -942,9 +942,26 @@ class DatabaseOperations:
 
         conn = conn or self.db_conn  # type: ignore
 
+        # Prep all objects for insert - call prep_for_insert if method exists
+        prep_start = time.perf_counter()
+        prepped_count = 0
+        missing_prep_types = set()
+        for obj in objects:
+            if hasattr(obj, 'prep_for_insert'):
+                obj.prep_for_insert()
+                prepped_count += 1
+            else:
+                missing_prep_types.add(type(obj).__name__)
+            obj.set_id_if_needed()  # Generate IDs client-side for object tree relationships
+        prep_time = time.perf_counter() - prep_start
+        self.logger.debug(f"Prepped {prepped_count} out of {len(objects)} objects in {prep_time:.2f}s")
+        if missing_prep_types:
+            self.logger.warning(f"Objects without prep_for_insert method: {missing_prep_types}")
+
         # Pre-insert deduplication check for Charities
         if type(objects[0]).__name__ == 'Charity' and objects:
             filtered_objects = []
+            original_count = len(objects)
             skipped = 0
             for obj in objects:
                 if hasattr(obj, 'xml_name') and obj.xml_name:
@@ -954,8 +971,8 @@ class DatabaseOperations:
                         skipped += 1
                         continue
                 filtered_objects.append(obj)
-            if skipped > 0:
-                log_warning(self.logger, f"Skipped {skipped} duplicate charities in bulk insert")
+            if skipped > 0 and skipped / original_count > 0.1:
+                log_info(self.logger, f"Skipped {skipped} duplicate charities in bulk insert")
             objects = filtered_objects
             if not objects:
                 return []
@@ -983,12 +1000,6 @@ class DatabaseOperations:
             self.logger.warning(f"DEBUG: Could not get count before insert: {e}")
             count_before = None
 
-        # Prep all (upfront; chunk if >100k in future) - generate IDs client-side for object relationships
-        prep_start = time.perf_counter()
-        for obj in objects:
-            obj.prep_for_insert()
-            obj.set_id_if_needed()  # Generate IDs client-side for object tree relationships
-        self.logger.debug(f"Prepped {len(objects)} objs in {time.perf_counter() - prep_start:.2f}s")
 
         # Use all table columns including ID field since we generate them client-side
         insert_cols = table_cols
@@ -1111,6 +1122,56 @@ class DatabaseOperations:
         limit = max_files
 
         return self.select_dataclass(XMLFile, where_clause=where_clause, params=params, order_by=order_by, limit=limit)
+
+    def get_xml_files_to_process_count(self, processing_version: int, mode: str = 'count', max_files: Optional[int] = None) -> Union[int, float]:
+        """
+        Get the count or total bytes of unprocessed XML files.
+        
+        Args:
+            processing_version: Processing version to filter by
+            mode: 'count' for file count, 'bytes' for total file size sum
+            max_files: Optional limit for testing (affects both count and sum)
+        
+        Returns:
+            int for count mode, float for bytes mode (sum of file_size)
+        """
+        base_where = "processed = FALSE OR processing_version < ?"
+        base_params = [processing_version]
+        
+        if mode == 'bytes':
+            if max_files is not None:
+                subquery = f"""
+                    SELECT file_size FROM XmlFiles
+                    WHERE {base_where}
+                    ORDER BY xml_id
+                    LIMIT ?
+                """
+                params = base_params + [max_files]
+                query = f"SELECT COALESCE(SUM(file_size), 0) FROM ({subquery})"
+            else:
+                query = f"""
+                    SELECT COALESCE(SUM(file_size), 0) FROM XmlFiles
+                    WHERE {base_where}
+                """
+                params = base_params
+        else:  # 'count'
+            if max_files is not None:
+                # For count with limit, the count is min(actual_count, max_files)
+                # But to be precise, query the limited count
+                subquery = f"""
+                    SELECT 1 FROM XmlFiles
+                    WHERE {base_where}
+                    ORDER BY xml_id
+                    LIMIT ?
+                """
+                params = base_params + [max_files]
+                query = f"SELECT COUNT(*) FROM ({subquery})"
+            else:
+                query = f"SELECT COUNT(*) FROM XmlFiles WHERE {base_where}"
+                params = base_params
+        
+        result = self.execute_query(query, tuple(params))
+        return result.fetchone()[0] if result else 0
 
     # Context-based approach handles this now
 

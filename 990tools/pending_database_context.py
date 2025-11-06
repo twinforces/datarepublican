@@ -201,13 +201,26 @@ class PendingDatabaseContext:
     
             log_info(logger, "Inserts completed")
     
-            # Execute all collected operations
+            # Separate DB operations from non-DB operations (like PROGRESS_UPDATE)
+            db_operations = []
+            non_db_operations = []
             for operation in self._operations:
+                if operation.operation_type == DatabaseOperationType.PROGRESS_UPDATE:
+                    non_db_operations.append(operation)
+                else:
+                    db_operations.append(operation)
+    
+            # Execute DB operations before commit
+            for operation in db_operations:
                 self._execute_operation(db_ops, operation)
     
-            log_info(logger, "Updates completed, committing")
+            log_info(logger, "DB updates completed, committing")
             conn.execute("COMMIT")
             log_info(logger, "Transaction committed successfully")
+    
+            # Execute non-DB operations after commit (e.g., progress updates)
+            for operation in non_db_operations:
+                self._execute_operation(db_ops, operation)
     
         except Exception as e:
             conn.execute("ROLLBACK")
