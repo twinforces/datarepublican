@@ -20,6 +20,7 @@ from typing import Optional
 from constants import VALID_STATES, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX, STREET_FIXES, UNIT_FIXES
 from countryCodes import lookupCC
 from .base import BaseModel
+from models.geocoding import Geocoding
 
 
 @dataclass
@@ -221,11 +222,8 @@ class Address(BaseModel):
 
         return census_data
 
-    def create_geocoding_operation(self):
-        """Create a geocoding record insertion operation for this address"""
-        from database_operations import DatabaseOperation, DatabaseOperationType
-        from models.geocoding import Geocoding
-
+    def create_geocoding(self) -> 'Geocoding':
+        """Factory method to create a Geocoding record for this address"""
         # Ensure address is canonicalized
         self.canonicalize_address()
 
@@ -238,14 +236,7 @@ class Address(BaseModel):
             geocoding_status='pending'
         )
 
-        # Create geocoding record insertion operation containing the Geocoding object
-        return DatabaseOperation(
-            operation_type=DatabaseOperationType.INSERT_GEOCODING,
-            data={
-                'records': [geocoding],
-                'table': 'Geocoding'
-            }
-        )
+        return geocoding
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""

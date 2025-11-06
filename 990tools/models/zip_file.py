@@ -62,6 +62,19 @@ class ZipFile(BaseModel):
             file_size=file_size
         )
 
+    @classmethod
+    def create_from_path(cls, zip_path: str, tax_year: int, file_size: Optional[int] = None) -> 'ZipFile':
+        """Factory method to create a ZipFile from a file path"""
+        from pathlib import Path
+        path = Path(zip_path)
+        return cls(
+            filename=path.name,
+            file_path=str(path),
+            tax_year=tax_year,
+            file_size=file_size or path.stat().st_size if path.exists() else None,
+            status='downloaded'
+        )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {

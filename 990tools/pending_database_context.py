@@ -166,25 +166,55 @@ class PendingDatabaseContext:
     def save_to_database(self, db_ops: DatabaseOperations) -> List[str]:
         """
         Execute all collected objects and operations directly.
-
+        
         This is the PRIMARY execution method for PDC. It handles both:
         1. Objects collected via addObjectToDatabase (using INSERT_BY_TYPE for each type)
         2. Operations collected via addOperationToDatabase (XML updates, geocoding, etc.)
-
+        
         EXECUTION ORDER:
         - Objects inserted first (by type, respecting ownership)
         - Operations executed second (updates, geocoding, etc.)
-
+        
         Args:
             db_ops: DatabaseOperations instance for executing operations
-
+        
         Returns:
             List of generated IDs from all inserted objects (for relationship tracking)
-
+        
         THREADING: Must be called from single consumer thread (DuckDB writer constraint)
         PERFORMANCE: Batches by type for efficient bulk inserts
         """
+        from logging_utils import log_info, log_error
+        logger = db_ops.logger if hasattr(db_ops, 'logger') else get_logger(__name__)
+    
         all_ids = []
+        conn = db_ops.db_conn
+        try:
+            log_info(logger, "Starting transaction for batch")
+            conn.execute("BEGIN TRANSACTION")
+    
+            # Execute objects by type (inserts) - use INSERT_BY_TYPE for each type
+            for obj_type, obj_list in self._objects.items():
+                if obj_list:
+                    ids = db_ops.INSERT_BY_TYPE(obj_list, obj_type, commit_batches=False)
+                    all_ids.extend(ids)
+    
+            log_info(logger, "Inserts completed")
+    
+            # Execute all collected operations
+            for operation in self._operations:
+                self._execute_operation(db_ops, operation)
+    
+            log_info(logger, "Updates completed, committing")
+            conn.execute("COMMIT")
+            log_info(logger, "Transaction committed successfully")
+    
+        except Exception as e:
+            conn.execute("ROLLBACK")
+            log_error(logger, f"Transaction rolled back due to error: {str(e)}")
+            raise
+    
+        return all_ids
 
         # Execute objects by type (inserts) - use INSERT_BY_TYPE for each type
         for obj_type, obj_list in self._objects.items():
@@ -234,7 +264,7 @@ class PendingDatabaseContext:
         """Execute XML file update operation"""
         metadata = operation.data
         xml_id = operation.xml_id
-
+    
         from constants import CURRENT_PROCESSING_VERSION
         db_ops.execute_query("""
             UPDATE XmlFiles SET
@@ -260,7 +290,6 @@ class PendingDatabaseContext:
             datetime.now().isoformat() if metadata["processed"] else None,
             xml_id
         ))
-        db_ops.commit()
 
     def _execute_update_xml_ein(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
         """Execute UPDATE_XML_EIN operation"""
@@ -289,7 +318,7 @@ class PendingDatabaseContext:
         status = data.get("status", "pending")
 
         if normalized_address is not None:
-            geocoding_id = db_ops.insert_geocoding_record(normalized_address, latitude, longitude, status)
+            geocoding_id = db_ops.insert_geocoding_record(normalized_address, latitude, longitude, status, commit=False)
 
     def _execute_update_geocoding(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
         """Execute geocoding update operation"""
@@ -305,7 +334,7 @@ class PendingDatabaseContext:
         child_address_ids = data.get("child_address_ids", [])
 
         if master_address_id and child_address_ids:
-            db_ops.execute_address_deduplication_batch(master_address_id, child_address_ids)
+            db_ops.execute_address_deduplication_batch(master_address_id, child_address_ids, commit=False)
 
     @classmethod
     def merge(cls, contexts: List['PendingDatabaseContext']) -> 'PendingDatabaseContext':

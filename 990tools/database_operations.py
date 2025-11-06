@@ -866,7 +866,7 @@ class DatabaseOperations:
 
         return all_ids
 
-    def INSERT_BY_TYPE(self, objects: List[BaseModel], obj_type: str) -> List[str]:
+    def INSERT_BY_TYPE(self, objects: List[BaseModel], obj_type: str, commit_batches: bool = True) -> List[str]:
         """
         Insert method for DatabasePendingContext that takes a list of objects of the same type
         and calls bulk_insert directly (no sorting needed since DPC has already sorted by type).
@@ -891,23 +891,24 @@ class DatabaseOperations:
             if type(obj).__name__.lower() != obj_type.lower():
                 raise ValueError(f"All objects must be of type {obj_type}, got {type(obj).__name__}")
 
-        return self.bulk_insert(objects)
+        return self.bulk_insert(objects, commit_batches=commit_batches)
 
     # Geocoding operations
     def insert_geocoding_record(self, normalized_address: str,
                                 latitude: Optional[float] = None, longitude: Optional[float] = None,
-                                status: str = 'pending') -> str:
+                                status: str = 'pending', commit: bool = True) -> str:
         """Insert geocoding record. Returns UUID."""
         geocoding_id = self.generate_uuid_v7()
         self.execute_query("""
             INSERT INTO Geocoding (geocoding_id, normalized_address, latitude, longitude, geocoding_status)
             VALUES (?, ?, ?, ?, ?)
         """, (geocoding_id, normalized_address, latitude, longitude, status))
-        self.commit()
+        if commit:
+            self.commit()
         return geocoding_id
 
     # Bulk operations
-    def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
+    def bulk_insert(self, objects: List[BaseModel], batch_size: int = 50000, commit_batches: bool = True, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         """
         High-performance bulk insert with executemany and client-side UUID generation.
 
@@ -940,6 +941,25 @@ class DatabaseOperations:
         # Validation moved to pending_database_context.py
 
         conn = conn or self.db_conn  # type: ignore
+
+        # Pre-insert deduplication check for Charities
+        if type(objects[0]).__name__ == 'Charity' and objects:
+            filtered_objects = []
+            skipped = 0
+            for obj in objects:
+                if hasattr(obj, 'xml_name') and obj.xml_name:
+                    count_result = conn.execute("SELECT COUNT(*) FROM Charities WHERE xml_name = ?", (obj.xml_name,)).fetchone()
+                    count = count_result[0] if count_result else 0
+                    if count > 0:
+                        skipped += 1
+                        continue
+                filtered_objects.append(obj)
+            if skipped > 0:
+                log_warning(self.logger, f"Skipped {skipped} duplicate charities in bulk insert")
+            objects = filtered_objects
+            if not objects:
+                return []
+
         table_name = self._get_table_name(obj_type)
         model_fields = set(obj_type.get_db_field_names())
         table_cols = self._get_table_columns(table_name, conn)
@@ -1002,7 +1022,8 @@ class DatabaseOperations:
 
             batch_start = time.perf_counter()
             conn.executemany(insert_sql, batch_params)  # type: ignore
-            self.commit() # flush quickly
+            if commit_batches:
+                conn.commit()
             batch_elapsed = time.perf_counter() - batch_start
             rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
             self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
@@ -1104,7 +1125,7 @@ class DatabaseOperations:
         from stats_processor import StatsProcessor
         return StatsProcessor(self)
 
-    def optimize_database(self):
+    def optimize_database(self, commit: bool = True):
         """Run database optimization commands"""
         # Analyze tables for better query planning
         for table in ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]:
@@ -1112,7 +1133,8 @@ class DatabaseOperations:
 
         # Checkpoint to ensure data is written
         self.db_conn.checkpoint()
-        self.commit()
+        if commit:
+            self.commit()
 
     # Logging methods removed - use global logging functions directly
 
@@ -1360,7 +1382,7 @@ class DatabaseOperations:
 
         return batch_operations, next_last_address_id
 
-    def execute_address_deduplication_batch(self, master_address_id: str, child_address_ids: List[str]) -> int:
+    def execute_address_deduplication_batch(self, master_address_id: str, child_address_ids: List[str], commit: bool = True) -> int:
         """
         Execute a batch of address deduplication updates.
 
@@ -1386,7 +1408,8 @@ class DatabaseOperations:
 
         params = [master_address_id] + child_address_ids
         self.execute_query(update_query, tuple(params))
-        self.commit()
+        if commit:
+            self.commit()
 
         return len(child_address_ids)
 

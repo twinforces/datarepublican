@@ -15,8 +15,8 @@ from .base import BaseModel
 class Officer(BaseModel):
     """Represents a charity officer with compensation information"""
 
-    officer_id: Optional[int] = None
-    charity_id: int = 0
+    officer_id: str = None
+    charity_id: Optional[str] = None
     master_id: Optional[str] = None
     first_name: str = ""
     last_name: str = ""

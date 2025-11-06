@@ -235,6 +235,8 @@ class XMLProducer(BaseProducer):
                 form_type=form_type,
                 xml_name=filename
             )
+            # Force ID generation before adding to context and parsing dependents
+            charity.prep_for_insert()
             if not global_config.is_quiet():
                 log_info(self.logger, f"CREATING CHARITY: EIN {filer_ein}, tax_year {tax_year}, form_type {form_type}, xml_name {filename}")
             context.addObjectToDatabase(charity)

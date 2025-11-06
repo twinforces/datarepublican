@@ -51,6 +51,9 @@ class XMLFile(BaseModel):
         # Ensure xml_id is set
         if not self.xml_id:
             self.xml_id = self.generate_id()
+        # Ensure processing_version is not None
+        if self.processing_version is None:
+            self.processing_version = 0
         pass
 
     def to_dict(self) -> dict:

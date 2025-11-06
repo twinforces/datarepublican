@@ -626,7 +626,8 @@ class Parser990EZ(BaseParser):
                     last_name=entry["last_name"],
                     full_name=entry["full_name"],
                     compensation=entry["amount"],
-                    tax_year=charity.tax_year
+                    tax_year=charity.tax_year,
+                    charity_id=charity.id
                 )
                 context.addObjectToDatabase(officer)
 
