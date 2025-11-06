@@ -1079,11 +1079,14 @@ class DatabaseOperations:
         # DuckDB handles bulk operations internally
         return self
 
-    def get_xml_files_to_process(self, processing_version: int, max_files: Optional[int] = None) -> List[XMLFile]:
-        """Get unprocessed XML files"""
+    def get_xml_files_to_process(self, processing_version: int, max_files: Optional[int] = None, last_xml_id: Optional[str] = None) -> List[XMLFile]:
+        """Get unprocessed XML files with key-value paging support"""
         where_clause = "processed = FALSE OR processing_version < ?"
         params = (processing_version,)
-        order_by = "zip_id, filename"
+        if last_xml_id:
+            where_clause += " AND xml_id > ?"
+            params += (last_xml_id,)
+        order_by = "xml_id"
         limit = max_files
 
         return self.select_dataclass(XMLFile, where_clause=where_clause, params=params, order_by=order_by, limit=limit)

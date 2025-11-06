@@ -115,12 +115,12 @@ class XMLProducer(BaseProducer):
 
         return success, context
 
-    def _get_work_batch(self, offset: int) -> List[Tuple[str, str, str, str, int]]:
-        """Get a batch of XML files to process"""
+    def _get_work_batch(self, last_xml_id: Optional[str] = None) -> List[Tuple[str, str, str, str, int]]:
+        """Get a batch of XML files to process with key-value paging"""
         xml_files = self.db_ops.get_xml_files_to_process(
             processing_version=self.processing_version,
             max_files=self.batch_size,
-            offset=offset
+            last_xml_id=last_xml_id
         )
 
         # Convert XMLFile objects to tuples for processing
@@ -667,6 +667,7 @@ class XMLProcessor:
         thread_pool_manager = ThreadPoolManager(thread_pool_config, self.logger)
 
         total_processed = 0
+        last_xml_id = None  # Initialize paging state
 
         try:
             # Process batches until we reach max_files or run out of files
@@ -675,16 +676,21 @@ class XMLProcessor:
                 remaining_files = None if max_files is None else max_files - total_processed
                 batch_limit = 100 if remaining_files is None else min(remaining_files, 100)
 
-                # Get next batch of files
+                # Get next batch of files with key-value paging
                 xml_files = self.db_ops.get_xml_files_to_process(
                     processing_version=CURRENT_PROCESSING_VERSION,
-                    max_files=batch_limit
+                    max_files=batch_limit,
+                    last_xml_id=last_xml_id
                 )
                 if not xml_files:
                     break
 
                 batch_size = len(xml_files)
-                self.log_info(f"Processing batch of {batch_size} files with {workers} workers")
+                self.log_info(f"Processing batch of {batch_size} files with {workers} workers (last_xml_id: {last_xml_id})")
+
+                # Update paging state after fetching batch
+                if xml_files:
+                    last_xml_id = max(xml_file.xml_id for xml_file in xml_files)
 
                 # Start producer pool
                 thread_pool_manager.start_producer_pool(
