@@ -17,15 +17,9 @@ from typing import Optional, List, Dict, Any
 from models.address import Address
 from models.grant import Grant
 
-def parse_grants(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, known_eins, form_type: str, backfill_entries=None, seen_backfill_keys=None, log_error=None, context=None) -> List[Dict[str, Any]]:
+def parse_grants(root, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, known_eins, form_type: str, backfill_entries=None, seen_backfill_keys=None, log_error=None, context=None) -> List[Dict[str, Any]]:
     grants = []
     try:
-        parser = etree.XMLParser(recover=True)
-        if isinstance(xml_content, bytes):
-            tree = etree.parse(BytesIO(xml_content), parser)
-        else:
-            tree = etree.parse(xml_content, parser)
-        root = tree.getroot()
         grant_xpaths = GRANT_XPATHS.get(form_type, [])
         for xpath in grant_xpaths:
             elements = xpath(root)

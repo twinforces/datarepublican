@@ -160,24 +160,18 @@ class BaseParser:
     def parse_schedule_i(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
         """Parse Schedule I (Grants) - common implementation for 990/990EZ"""
         from parse_schedule_i import parse_grants
-        xml_content = BytesIO(etree.tostring(root))
-        grants_data = parse_grants(xml_content, xml_filename, charity.ein, charity.filer_name, charity.tax_year, set(), self.form_type, context=context)
+        grants_data = parse_grants(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, set(), self.form_type, context=context)
         # parse_grants now adds grants directly to context
-
     def parse_schedule_c(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
         """Parse Schedule C (Political Contributions) - common implementation for 990/990EZ"""
         from parse_schedule_c import parse_contributions
-        xml_content = BytesIO(etree.tostring(root))
-        contributions_data = parse_contributions(xml_content, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
+        contributions_data = parse_contributions(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
         # parse_contributions now adds contributions directly to context
-
     def parse_schedule_l(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
         """Parse Schedule L (Contractors) - common implementation for 990/990EZ/990PF"""
         from parse_contractors import parse_contractors
-        xml_content = BytesIO(etree.tostring(root))
-        contractors_data = parse_contractors(xml_content, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
+        contractors_data = parse_contractors(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
         # parse_contractors now adds contractors directly to context
-
     def parse_address(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
         """Parse address information"""
         try:

@@ -402,8 +402,7 @@ class Parser990EZ(BaseParser):
         total = 0
         # Parse grants from Schedule I and F using the existing parse_schedule_i function
         from parse_schedule_i import parse_grants
-        xml_content = BytesIO(etree.tostring(root))
-        grants_data = parse_grants(xml_content, xml_filename, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), set(), self.form_type, context=context)
+        grants_data = parse_grants(root, xml_filename, context.get('filer_ein', 'Unknown'), context.get('filer_name', 'Unknown'), context.get('tax_year', 'Unknown'), set(), self.form_type, context=context)
         # parse_grants now adds grants directly to context, so we need to calculate total from the grants
         for grant in grants_data:
             total += grant.get('grant_amt', 0)
