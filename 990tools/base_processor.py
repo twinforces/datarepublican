@@ -14,6 +14,7 @@ import io
 import time
 import threading
 import queue
+import traceback
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
@@ -239,7 +240,30 @@ class ThreadPoolManager:
             log_error(self.logger, msg, *args, exc_info=exc_info, **kwargs)
 
 
-class BaseProducer:
+class BaseProcessor:
+    """
+    Base class for all processor implementations.
+
+    Provides common functionality and structure for processors that need to
+    coordinate between producers and consumers in a thread-safe manner.
+    """
+
+    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger = None):
+        """
+        Initialize the base processor.
+
+        Args:
+            db_ops: Database operations instance
+            logger: Optional logger instance
+        """
+        self.db_ops = db_ops
+        self.logger = logger or logging.getLogger(__name__)
+
+        # Install SIGUSR1 handler for thread dumps
+        setup_thread_dump_handler()
+
+
+class BaseProducer(BaseProcessor):
     """
     Base Producer class for operation collection.
 
@@ -252,7 +276,7 @@ class BaseProducer:
     """
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000, thread_pool_config: Optional[ThreadPoolConfig] = None):
-        self.db_ops = db_ops
+        super().__init__(db_ops)
         self.batch_size = batch_size
         self.logger = get_logger(self.__class__.__name__)
         self._profile_seconds = None
@@ -549,7 +573,7 @@ class BaseProducer:
             return []
         return context.save_to_database(self.db_ops)
 
-    def get_progress_scope(self) -> Dict[str, Any]:
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
         """Get the scope of work for progress bar setup - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement get_progress_scope")
 
@@ -716,19 +740,19 @@ def setup_thread_dump_handler():
         pass
 
 
-class BaseConsumer:
+class BaseConsumer(BaseProcessor):
     """
     Base Consumer class for database operations execution.
 
     PRODUCER-CONSUMER PATTERN WARNING:
     This class is responsible for executing database operations.
-    Only consumers may perform database writes. Producers must never write to the database.
+    Only consumers may perform database writes. Producers must never write the database.
 
     This is a superclass for all *_consumer.py classes to provide common functionality.
     """
 
     def __init__(self, db_ops: DatabaseOperations, thread_pool_config: Optional[ThreadPoolConfig] = None):
-        self.db_ops = db_ops
+        super().__init__(db_ops)
         self.logger = logging.getLogger(__name__)
         self._profile_seconds = None
         self._profiler = None

@@ -27,6 +27,11 @@ class ZipProducer(BaseProducer):
         super().__init__(db_ops, batch_size=10)  # Process ZIPs in small batches
         self.zips_dir = zips_dir
 
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
+        """Get the scope of work for progress bar setup"""
+        # For ZIP processing, we don't have a fixed total, so return unknown
+        return {"total": None, "unit": "zips"}
+
     def _get_work_batch(self, offset: int) -> List[Path]:
         """Get a batch of ZIP files to process"""
         # For ZIP processing, we process all files in a directory
@@ -41,6 +46,8 @@ class ZipProducer(BaseProducer):
             ).fetchone()
 
             if not existing_zip or existing_zip[0] != 'processed':
+                # Also check if the file is within the year range if specified
+                # The year filtering should be done at the processor level, not here
                 zip_files.append(zip_path)
 
         # Apply offset and batch size
@@ -50,24 +57,57 @@ class ZipProducer(BaseProducer):
 
         return batch
 
-    def _process_work_batch_to_contexts(self, batch: List[Path]) -> 'PendingDatabaseContext':
-        """Process a batch of ZIP files into PendingDatabaseContext objects"""
+    def _process_work_batch_to_context(self, batch: List[Path]) -> Optional['PendingDatabaseContext']:
+        """Process a batch of ZIP files into a single PendingDatabaseContext object"""
         from pending_database_context import PendingDatabaseContext
 
-        contexts = []
+        if not batch:
+            return None
+
+        # Create a single master context for the batch
+        master_context = PendingDatabaseContext()
 
         for zip_path in batch:
-            # Create context for this ZIP file
-            context = PendingDatabaseContext()
+            # Check if ZIP file already exists in database
+            zip_filename = zip_path.name
+            existing_zip = self.db_ops.execute_query(
+                "SELECT zip_id, status FROM ZipFiles WHERE filename = ?",
+                (zip_filename,)
+            ).fetchone()
+
+            if existing_zip and existing_zip[1] == 'processed':
+                # ZIP file already processed, skip it
+                continue
 
             # Create ZipFile using factory method
             tax_year = int(zip_path.name[:4]) if zip_path.name[:4].isdigit() else 0
             zip_file = ZipFile.create_from_path(str(zip_path), tax_year)
-            context.addObjectToDatabase(zip_file)
 
-            contexts.append(context)
+            # If ZIP file exists but not processed, update it; otherwise add new
+            if existing_zip:
+                # Update existing ZIP file status to processing
+                zip_file.zip_id = existing_zip[0]  # Use existing zip_id
+                # Don't add to context for insert, just update XML files
+            else:
+                # New ZIP file, add to context for insertion
+                zip_file.prep_for_insert()  # Generate zip_id
+                master_context.addObjectToDatabase(zip_file)
 
-        return contexts
+            # Extract XML file listing and sizes in one pass
+            xml_sizes = ZipProcessor._get_all_xml_sizes_static(zip_path)
+            xml_files = list(xml_sizes.keys())
+
+            # Create XML file objects and add to context
+            for xml_filename in xml_files:
+                xml_file = zip_file.create_xml_file(
+                    filename=xml_filename,
+                    internal_path=xml_filename,
+                    file_size=xml_sizes[xml_filename]
+                )
+                xml_file.prep_for_insert()  # Generate xml_id
+                master_context.addObjectToDatabase(xml_file)
+
+        return master_context
 
 
 class ZipConsumer(BaseConsumer):
@@ -109,6 +149,27 @@ class ZipProcessor:
         self.zips_dir = zips_dir
         self.logger = get_logger("zip_processor")
 
+    def log_info(self, message: str, *args, **kwargs):
+        """Log info message"""
+        self.logger.info(message, *args, **kwargs)
+
+    def log_debug(self, message: str, *args, **kwargs):
+        """Log debug message"""
+        self.logger.debug(message, *args, **kwargs)
+
+    def log_error(self, message: str, *args, **kwargs):
+        """Log error message"""
+        self.logger.error(message, *args, **kwargs)
+
+    def log_warning(self, message: str, *args, **kwargs):
+        """Log warning message"""
+        self.logger.warning(message, *args, **kwargs)
+
+    def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
+        self.db_ops = db_ops
+        self.zips_dir = zips_dir
+        self.logger = get_logger("zip_processor")
+
         # Initialize producer and consumer
         self.producer = ZipProducer(db_ops, zips_dir)
         self.consumer = ZipConsumer(db_ops, zips_dir)
@@ -126,19 +187,20 @@ class ZipProcessor:
 
         try:
             # Collect contexts using the new PendingDatabaseContext approach
-            contexts = self.producer.collect_contexts()
+            # But filter by year range first
+            contexts = self._collect_contexts_with_year_filter(start_year, end_year)
 
-            if not contexts:
+            if not contexts or contexts.isEmpty():
                 self.log_info("No ZIP files to process")
                 return []
 
-            self.log_info(f"Collected {len(contexts)} ZIP processing contexts")
+            self.log_info(f"Collected ZIP processing context")
 
             # Execute contexts using consumer
             total_processed = self.consumer.execute_contexts_batch(contexts)
 
             self.log_info(f"ZIP file processing complete: {total_processed} operations processed")
-            return [Path(ctx._operations[0].data["zip_path"]) for ctx in contexts if ctx._operations]
+            return []  # Return empty list since we can't extract paths from single context
 
         except Exception as e:
             self.log_error(f"ZIP processing failed: {e}", exc_info=True)
@@ -173,6 +235,26 @@ class ZipProcessor:
         finally:
             # Signal completion
             result_queue.put(None)
+
+    def _collect_contexts_with_year_filter(self, start_year: int, end_year: int) -> Optional['PendingDatabaseContext']:
+        """Collect ZIP files filtered by year range and create a PendingDatabaseContext"""
+        # Get all ZIP files from the directory
+        zip_files = []
+        for zip_path in Path(self.zips_dir).glob("*.zip"):
+            # Extract year from first 4 characters of filename
+            filename_year_str = zip_path.name[:4]
+            if filename_year_str.isdigit():
+                filename_year = int(filename_year_str)
+                # Check if year is within range
+                if start_year <= filename_year <= end_year:
+                    zip_files.append(zip_path)
+
+        # If no files match the filter, return None
+        if not zip_files:
+            return None
+
+        # Use producer to process the filtered batch into a context
+        return self.producer._process_work_batch_to_context(zip_files)
 
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, progress_bar=None):
         """Wrapper for consumer thread execution"""
@@ -250,36 +332,20 @@ class ZipProcessor:
             )
             context.addObjectToDatabase(xml_file)
 
-        # Add ZIP status update operation
-        from database_operations import DatabaseOperation, DatabaseOperationType
-        # Note: We need the zip_id, but we don't have it yet since PDC hasn't executed
-        # This is a limitation - for now we'll handle status updates separately
-        # In a full PDC refactor, this would be handled by PDC as well
-
         # Execute the context operations directly
         context.save_to_database(self.db_ops)
 
-        # Get the zip_id from the first operation (INSERT_ZIP_FILE)
-        zip_id = None
-        for op in operations:
-            if hasattr(op, 'data') and 'zip_id' in str(op.data):
-                # This is a hack - in a proper refactor, PDC would return IDs
-                # For now, query the database to get the zip_id
-                result = self.db_ops.execute_query(
-                    "SELECT zip_id FROM ZipFiles WHERE filename = ? ORDER BY zip_id DESC LIMIT 1",
-                    (zip_filename,)
-                ).fetchone()
-                if result:
-                    zip_id = result[0]
-                break
+        # Get the zip_id from the database after PDC execution
+        result = self.db_ops.execute_query(
+            "SELECT zip_id FROM ZipFiles WHERE filename = ? ORDER BY zip_id DESC LIMIT 1",
+            (zip_filename,)
+        ).fetchone()
+        zip_id = result[0] if result else None
 
         if zip_id:
-            # Update ZIP status (this should eventually be handled by PDC too)
-            self.db_ops.update_zip_status(zip_id, 'processed')
-            print(f"DEBUG: Updated ZIP {zip_filename} status to 'processed'")
-            print(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
+            self.log_info(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
         else:
-            print(f"WARNING: Could not determine zip_id for {zip_filename}")
+            self.log_warning(f"Could not determine zip_id for {zip_filename}")
 
     def _get_xml_files_from_zip(self, zip_path: Path) -> List[str]:
         """Get XML files from ZIP"""
@@ -288,7 +354,8 @@ class ZipProcessor:
             xml_files = [f for f in zip_ref.namelist() if f.endswith('.xml')]
         return xml_files
 
-    def _get_all_xml_sizes(self, zip_path: Path) -> dict:
+    @staticmethod
+    def _get_all_xml_sizes_static(zip_path: Path) -> dict:
         """Get all XML file sizes from ZIP in one pass, handling corrupt files gracefully"""
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:

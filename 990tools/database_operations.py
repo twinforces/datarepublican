@@ -211,10 +211,12 @@ class DatabaseOperations:
         except Exception:
             pass  # Ignore if not supported
         try:
-            self.db_conn.execute("SET checkpoint_threshold = '1000MB'")  # Increase checkpoint threshold for better performance
+            self.db_conn.execute("SET checkpoint_threshold = '256MB'")  # WAL size doesn't matter in grok benchmark. 
         except Exception:
             pass  # Ignore if not supported
         self.db_conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
+        if global_config.log_sql:
+            self.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
 
         # Note: DuckDB doesn't have a built-in query_timeout setting in this version
         # The timeout protection will be handled through enhanced error handling in execute_query
@@ -346,10 +348,8 @@ class DatabaseOperations:
         """Get or create a thread-local database connection"""
         if not hasattr(DatabaseOperations._local, 'db_conn'):
             # Create a new connection for this thread
-            if global_config.log_sql:
-                DatabaseOperations._local.db_conn = LoggingDuckDBConnection(self.db_path, config=self._connection_config)
-            else:
-                DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=self._connection_config)
+            
+            DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=self._connection_config)
             # Apply the same settings as the main connection
             DatabaseOperations._local.db_conn.execute("SET enable_progress_bar = false")
             DatabaseOperations._local.db_conn.execute("SET enable_object_cache = true")
@@ -363,10 +363,13 @@ class DatabaseOperations:
             except Exception:
                 pass
             try:
-                DatabaseOperations._local.db_conn.execute("SET checkpoint_threshold = '1000MB'")
+                DatabaseOperations._local.db_conn.execute("SET checkpoint_threshold = '256MB'")
             except Exception:
                 pass
             DatabaseOperations._local.db_conn.execute("SET preserve_insertion_order = false")
+            if global_config.log_sql:
+                DatabaseOperations._local.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
+
             # Note: DuckDB doesn't have a built-in query_timeout setting in this version
             # The timeout protection will be handled through enhanced error handling in execute_query
             pass
@@ -885,7 +888,7 @@ class DatabaseOperations:
         for obj in objects:
             if not isinstance(obj, BaseModel):
                 raise ValueError("All objects must be BaseModel instances")
-            if type(obj).__name__ != obj_type:
+            if type(obj).__name__.lower() != obj_type.lower():
                 raise ValueError(f"All objects must be of type {obj_type}, got {type(obj).__name__}")
 
         return self.bulk_insert(objects)
@@ -999,6 +1002,7 @@ class DatabaseOperations:
 
             batch_start = time.perf_counter()
             conn.executemany(insert_sql, batch_params)  # type: ignore
+            self.commit() # flush quickly
             batch_elapsed = time.perf_counter() - batch_start
             rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
             self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
@@ -1028,8 +1032,8 @@ class DatabaseOperations:
         # Return the client-generated IDs
         return [str(getattr(obj, id_field)) for obj in objects]
 
-    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', conn=None) -> int:
-        """Generic bulk update method for database operations"""
+    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 50000, conn=None) -> int:
+        """Generic bulk update method for database operations with batched processing"""
         if conn is None:
             conn = self.db_conn
 
@@ -1053,10 +1057,19 @@ class DatabaseOperations:
             params.append(row_params)
 
         try:
-            # Execute bulk update using executemany for proper batching
-            conn.executemany(sql, params)  # type: ignore
+            # Execute bulk update in batches of batch_size using executemany
+            total_processed = 0
+            for i in range(0, len(params), batch_size):
+                batch_params = params[i:i + batch_size]
+                batch_start = time.perf_counter()
+                conn.executemany(sql, batch_params)  # type: ignore
+                batch_elapsed = time.perf_counter() - batch_start
+                rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
+                self.logger.debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
+                total_processed += len(batch_params)
+
             # Do not commit here - let caller handle transaction
-            return len(updates)
+            return total_processed
         except Exception as e:
             # Do not rollback here - let caller handle transaction
             raise RuntimeError(f"Bulk update failed for table {table_name}: {str(e)}") from e

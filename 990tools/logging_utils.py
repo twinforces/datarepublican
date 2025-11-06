@@ -117,7 +117,7 @@ def set_progress_description(pbar, desc: str):
         pbar.set_description(desc)
 
 def get_logger(name: str) -> logging.Logger:
-    """Get a configured logger"""
+    """Get a configured logger with level based on global_config"""
     logger = logging.getLogger(name)
     # Ensure logger has a handler if it doesn't have one
     if not logger.handlers:
@@ -125,10 +125,15 @@ def get_logger(name: str) -> logging.Logger:
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-        # Set level to NOTSET so it inherits from root logger, allowing global control
-        logger.setLevel(logging.NOTSET)
-        # Disable propagation to prevent duplicate messages when root logger also has handlers
-        logger.propagate = False
+        # Set explicit level based on global_config
+        if global_config.is_verbose():
+            logger.setLevel(logging.DEBUG)
+        elif global_config.is_quiet():
+            logger.setLevel(logging.ERROR)
+        else:
+            logger.setLevel(logging.WARNING)
+        # Enable propagation for inheritance from root if needed
+        logger.propagate = True
     return logger
 
 def create_stub_log_error(logger: logging.Logger) -> Callable:

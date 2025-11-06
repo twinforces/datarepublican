@@ -28,7 +28,7 @@ INTEGRATION:
 from typing import Dict, List, Any, Optional
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
-
+from datetime import datetime
 
 class PendingDatabaseContext:
     """
@@ -64,7 +64,8 @@ class PendingDatabaseContext:
             'political_contribution': [],
             'address': [],
             'geocoding': [],  # For geocoding records
-            'zipfile': []  # For ZIP file records
+            'zipfile': [],  # For ZIP file records
+            'xmlfile': []   # For XML file records
         }
         self._updates: List[Dict[str, Any]] = []  # For future UPDATE operations
         self._operations: List[DatabaseOperation] = []  # For generic database operations
@@ -120,6 +121,16 @@ class PendingDatabaseContext:
             List of objects of the specified type
         """
         return self._objects.get(obj_type, [])
+
+    def getCharity(self) -> Optional[Charity]:
+        """
+        Get the first charity object if available.
+
+        Returns:
+            The first Charity object, or None if no charities exist
+        """
+        charities = self.getObjectsByType('charity')
+        return charities[0] if charities else None
 
     def getAllObjects(self) -> Dict[str, List[Any]]:
         """

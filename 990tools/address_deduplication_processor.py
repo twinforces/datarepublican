@@ -96,19 +96,7 @@ class GeocodingRecordCreator:
             else:
                 # Create geocoding record for API processing
                 log_debug(self.logger, f"DEBUG: Creating geocoding record for address {address.address_id}")
-                geocoding_op = address.create_geocoding_operation()
-
-                # Validate the geocoding operation was created properly
-                if not geocoding_op or not geocoding_op.data:
-                    log_debug(self.logger, f"DEBUG: Failed to create geocoding operation for address {address.address_id}")
-                    continue
-
-                # Validate operation data integrity
-                if 'geocoding' not in geocoding_op.data or 'address_id' not in geocoding_op.data:
-                    log_debug(self.logger, f"DEBUG: Geocoding operation missing required keys for address {address.address_id}")
-                    continue
-
-                geocoding_obj = geocoding_op.data['geocoding']
+                geocoding_obj = address.create_geocoding()
                 log_debug(self.logger, f"DEBUG: Geocoding record created for address {address.address_id}: normalized_address='{geocoding_obj.normalized_address[:50]}'")
 
                 geocoding_records.append(geocoding_obj)
@@ -170,6 +158,53 @@ class AddressDeduplicationProducer(BaseProducer):
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000, thread_pool_config: Optional[ThreadPoolConfig] = None):
         super().__init__(db_ops, batch_size, thread_pool_config)
         self.last_address_id: Optional[str] = None
+
+    def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
+        """
+        Get the estimated total work scope for address deduplication.
+
+        Args:
+            bytes: If True, return total in bytes instead of addresses
+
+        Returns:
+            Dictionary with 'total' (estimated work scope) and 'unit' ('addrs' or 'bytes')
+        """
+        if bytes:
+            # Estimate total bytes by summing lengths of canonical addresses needing deduplication
+            query = """
+                SELECT SUM(LENGTH(canonical_address)) as total_bytes
+                FROM (
+                    SELECT canonical_address
+                    FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+                )
+            """
+            result = self.db_ops.execute_query(query)
+            row = result.fetchone() if result else None
+            total = int(row[0]) if row and row[0] is not None else 0
+            return {'total': total, 'unit': 'bytes'}
+        else:
+            # Count total master addresses needing deduplication (each canonical address group is 1 unit of work)
+            query = """
+                SELECT COUNT(*) as total_master_addresses
+                FROM (
+                    SELECT 1
+                    FROM Addresses
+                    WHERE canonical_address IS NOT NULL
+                        AND canonical_address != ''
+                    GROUP BY canonical_address
+                    HAVING COUNT(*) > 1
+                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+                )
+            """
+            result = self.db_ops.execute_query(query)
+            row = result.fetchone() if result else None
+            total = int(row[0]) if row and row[0] is not None else 0
+            return {'total': total, 'unit': 'addrs'}
 
     def _get_work_batch(self, last_address_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get a batch of address deduplication work items"""
@@ -364,10 +399,8 @@ class AddressDeduplicationConsumer(BaseConsumer):
                 else:
                     self.log_warning(f"Invalid deduplication operation data: master={master_address_id}, children={len(child_address_ids) if child_address_ids else 0}")
 
-        # Handle geocoding operations (INSERT_GEOCODING, GENERIC_UPDATE)
+        # Handle geocoding operations (GENERIC_UPDATE)
         geocoding_operations = []
-        if DatabaseOperationType.INSERT_GEOCODING.value in operations_by_type:
-            geocoding_operations.extend(operations_by_type[DatabaseOperationType.INSERT_GEOCODING.value])
         if DatabaseOperationType.GENERIC_UPDATE.value in operations_by_type:
             geocoding_operations.extend(operations_by_type[DatabaseOperationType.GENERIC_UPDATE.value])
 
@@ -376,27 +409,7 @@ class AddressDeduplicationConsumer(BaseConsumer):
             try:
                 geocoding_updated = 0
                 for operation in geocoding_operations:
-                    if operation.operation_type == DatabaseOperationType.INSERT_GEOCODING:
-                        self.log_debug(f"DEBUG: Executing bulk INSERT_GEOCODING operation")
-
-                        # Handle bulk geocoding record insertion
-                        geocoding_records = operation.data.get('records', [])
-                        if not geocoding_records:
-                            self.log_error(f"CRITICAL: INSERT_GEOCODING operation missing records: {operation.data}")
-                            continue
-
-                        # Use INSERT_BY_TYPE for geocoding records (single type, no sorting needed)
-                        geocoding_ids = self.db_ops.INSERT_BY_TYPE(geocoding_records, 'Geocoding')
-                        self.log_debug(f"DEBUG: Bulk inserted {len(geocoding_records)} geocoding records, got {len(geocoding_ids)} IDs")
-
-                        # Update geocoding objects with generated IDs for dependent operations
-                        for i, geocoding_obj in enumerate(geocoding_records):
-                            if i < len(geocoding_ids):
-                                geocoding_obj.geocoding_id = geocoding_ids[i]
-
-                        geocoding_updated += len(geocoding_records)
-
-                    elif operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
+                    if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
                         self.log_debug(f"DEBUG: Executing bulk GENERIC_UPDATE operation")
 
                         # Handle bulk address updates
