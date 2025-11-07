@@ -25,12 +25,13 @@ def parse_contributions(root, xml_filename: str, filer_ein: str, filer_name: str
             for elem in elements:
                 # Check if this is a Section527PoliticalOrgGrp element
                 if elem.tag.endswith('Section527PoliticalOrgGrp'):
-                    # Extract for Section527PoliticalOrgGrp
-                    name_elem = elem.xpath("irs:OrganizationBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES)
-                    name_elem2 = elem.xpath("irs:OrganizationBusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES)
-                    ein_elem = elem.xpath("irs:EIN", namespaces=NAMESPACES)
-                    amount_elem = elem.xpath("irs:PaidInternalFundsAmt", namespaces=NAMESPACES)
-                    address_elem = elem.xpath("irs:USAddress", namespaces=NAMESPACES)
+                    # Extract for Section527PoliticalOrgGrp - use find_element for better performance
+                    from xpath_utils import find_element
+                    name_elem = find_element(elem, [etree.XPath("irs:OrganizationBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES)], NAMESPACES)
+                    name_elem2 = find_element(elem, [etree.XPath("irs:OrganizationBusinessName/irs:BusinessNameLine2Txt", namespaces=NAMESPACES)], NAMESPACES)
+                    ein_elem = find_element(elem, [etree.XPath("irs:EIN", namespaces=NAMESPACES)], NAMESPACES)
+                    amount_elem = find_element(elem, [etree.XPath("irs:PaidInternalFundsAmt", namespaces=NAMESPACES)], NAMESPACES)
+                    address_elem = find_element(elem, [etree.XPath("irs:USAddress", namespaces=NAMESPACES)], NAMESPACES)
 
                     recipient_name = name_elem[0].text.strip() if name_elem else "Unknown"
                     if name_elem2:
@@ -62,13 +63,13 @@ def parse_contributions(root, xml_filename: str, filer_ein: str, filer_name: str
                                     )
                                     context.addObjectToDatabase(contribution_obj)
 
-                                    # Create Address if USAddress is present
+                                    # Create Address if USAddress is present - use find_element for better performance
                                     if address_elem:
-                                         addr_line1 = address_elem[0].xpath("irs:AddressLine1Txt", namespaces=NAMESPACES)
-                                         addr_line2 = address_elem[0].xpath("irs:AddressLine2Txt", namespaces=NAMESPACES)
-                                         city = address_elem[0].xpath("irs:CityNm", namespaces=NAMESPACES)
-                                         state = address_elem[0].xpath("irs:StateAbbreviationCd", namespaces=NAMESPACES)
-                                         zip_code = address_elem[0].xpath("irs:ZIPCd", namespaces=NAMESPACES)
+                                         addr_line1 = find_element(address_elem, [etree.XPath("irs:AddressLine1Txt", namespaces=NAMESPACES)], NAMESPACES)
+                                         addr_line2 = find_element(address_elem, [etree.XPath("irs:AddressLine2Txt", namespaces=NAMESPACES)], NAMESPACES)
+                                         city = find_element(address_elem, [etree.XPath("irs:CityNm", namespaces=NAMESPACES)], NAMESPACES)
+                                         state = find_element(address_elem, [etree.XPath("irs:StateAbbreviationCd", namespaces=NAMESPACES)], NAMESPACES)
+                                         zip_code = find_element(address_elem, [etree.XPath("irs:ZIPCd", namespaces=NAMESPACES)], NAMESPACES)
 
                                          address_obj = contribution_obj.build_address(
                                              address_line1=addr_line1[0].text.strip() if addr_line1 else None,
@@ -81,10 +82,10 @@ def parse_contributions(root, xml_filename: str, filer_ein: str, filer_name: str
                         except (ValueError, TypeError):
                             pass
                 elif elem.tag.endswith('NoncharitableExemptOrgSchGrp'):
-                    # Extract for NoncharitableExemptOrgSchGrp with ExemptOrganizationTypeCd=527
-                    name_elem = elem.xpath("irs:BusinessNameLine1Txt", namespaces=NAMESPACES)
-                    amount_elem = elem.xpath("irs:AmountTxt", namespaces=NAMESPACES)
-                    address_elem = elem.xpath("irs:USAddressGrp", namespaces=NAMESPACES)
+                    # Extract for NoncharitableExemptOrgSchGrp with ExemptOrganizationTypeCd=527 - use find_element for better performance
+                    name_elem = find_element(elem, [etree.XPath("irs:BusinessNameLine1Txt", namespaces=NAMESPACES)], NAMESPACES)
+                    amount_elem = find_element(elem, [etree.XPath("irs:AmountTxt", namespaces=NAMESPACES)], NAMESPACES)
+                    address_elem = find_element(elem, [etree.XPath("irs:USAddressGrp", namespaces=NAMESPACES)], NAMESPACES)
 
                     recipient_name = name_elem[0].text.strip() if name_elem else "Unknown"
                     recipient_ein = "Unknown"  # No EIN in this structure
@@ -112,13 +113,13 @@ def parse_contributions(root, xml_filename: str, filer_ein: str, filer_name: str
                                     )
                                     context.addObjectToDatabase(contribution_obj)
 
-                                    # Create Address if USAddressGrp is present
+                                    # Create Address if USAddressGrp is present - use find_element for better performance
                                     if address_elem:
-                                         addr_line1 = address_elem[0].xpath("irs:AddressLine1Txt", namespaces=NAMESPACES)
-                                         addr_line2 = address_elem[0].xpath("irs:AddressLine2Txt", namespaces=NAMESPACES)
-                                         city = address_elem[0].xpath("irs:CityNm", namespaces=NAMESPACES)
-                                         state = address_elem[0].xpath("irs:StateAbbreviationCd", namespaces=NAMESPACES)
-                                         zip_code = address_elem[0].xpath("irs:ZIPCd", namespaces=NAMESPACES)
+                                         addr_line1 = find_element(address_elem, [etree.XPath("irs:AddressLine1Txt", namespaces=NAMESPACES)], NAMESPACES)
+                                         addr_line2 = find_element(address_elem, [etree.XPath("irs:AddressLine2Txt", namespaces=NAMESPACES)], NAMESPACES)
+                                         city = find_element(address_elem, [etree.XPath("irs:CityNm", namespaces=NAMESPACES)], NAMESPACES)
+                                         state = find_element(address_elem, [etree.XPath("irs:StateAbbreviationCd", namespaces=NAMESPACES)], NAMESPACES)
+                                         zip_code = find_element(address_elem, [etree.XPath("irs:ZIPCd", namespaces=NAMESPACES)], NAMESPACES)
 
                                          address_obj = Address.create_for_political_contribution(
                                              political_contribution=contribution_obj,
@@ -132,10 +133,10 @@ def parse_contributions(root, xml_filename: str, filer_ein: str, filer_name: str
                         except (ValueError, TypeError):
                             pass
                 else:
-                    # Existing logic for PoliticalCampaignActyGrp
-                    amount_elem = elem.xpath(SCHEDULE_C_AMOUNT_XPATHS[0].path, namespaces=NAMESPACES)
-                    recipient_elem = elem.xpath(SCHEDULE_C_RECIPIENT_XPATHS[0].path, namespaces=NAMESPACES)
-                    ein_elem = elem.xpath(SCHEDULE_C_EIN_XPATHS[0].path, namespaces=NAMESPACES)
+                    # Existing logic for PoliticalCampaignActyGrp - use find_element for better performance
+                    amount_elem = find_element(elem, SCHEDULE_C_AMOUNT_XPATHS, NAMESPACES)
+                    recipient_elem = find_element(elem, SCHEDULE_C_RECIPIENT_XPATHS, NAMESPACES)
+                    ein_elem = find_element(elem, SCHEDULE_C_EIN_XPATHS, NAMESPACES)
                     recipient_name = recipient_elem[0].text.strip() if recipient_elem else "Unknown"
                     recipient_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
                     if recipient_ein == "Unknown":

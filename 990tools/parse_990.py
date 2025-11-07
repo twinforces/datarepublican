@@ -21,15 +21,46 @@ class Parser990(BaseParser):
         self.verbose = False  # Add verbose attribute
 
     def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
-        """Parse organization type for Form 990"""
-        from parse_utils import parse_string_field
-        elem = parse_string_field(root, self.XPATHS, "org_type", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
+        """Parse organization type for Form 990 using XPath union for better performance"""
+        # Single XPath union to get all organization type elements at once
+        org_type_union_xpath = etree.XPath("""
+            .//irs:IRS990/irs:Organization501cInd |
+            .//irs:IRS990/irs:Organization501c3Ind |
+            .//irs:IRS990/irs:Organization4947a1NotPFInd |
+            .//irs:IRS990/irs:Organization4947a1TrtdPFInd |
+            .//IRS990/Organization501cInd |
+            .//IRS990/Organization501c3Ind |
+            .//IRS990/Organization4947a1NotPFInd |
+            .//IRS990/Organization4947a1TrtdPFInd
+        """, namespaces=namespaces)
+
+        # Get all org type elements in one query
+        org_elements = org_type_union_xpath(root)
+
+        # Find the first checked element (with "X" or attribute)
+        elem = None
+        for el in org_elements:
+            tag_name = el.tag.split('}')[-1]  # Remove namespace prefix
+            if tag_name == "Organization501cInd":
+                type_num = el.get("organization501cTypeTxt")
+                if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
+                    elem = el
+                    break
+                elif el.text and "X" in el.text.upper():
+                    elem = el
+                    break
+            elif tag_name in ("Organization501c3Ind", "Organization4947a1NotPFInd", "Organization4947a1TrtdPFInd"):
+                if el.text and "X" in el.text.upper():
+                    elem = el
+                    break
+
         if elem is not None:
+            tag_name = elem.tag.split('}')[-1]
             if self.verbose and not global_config.is_quiet() and log_error is not None:
                 log_error("Found org_type element: tag={}, text={}, attrib={} for EIN {} in {}",
                            elem.tag, elem.text, elem.attrib, context.get('filer_ein', 'Unknown'), xml_filename,
                            ein=context.get('filer_ein', 'Unknown'))
-            if elem.tag.endswith("Organization501cInd"):
+            if tag_name == "Organization501cInd":
                 type_num = elem.get("organization501cTypeTxt")
                 if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
                     org_type = f"501(c)({type_num})"
@@ -37,9 +68,9 @@ class Parser990(BaseParser):
                     org_type = "501(c)(3)"
                 else:
                     org_type = "501(c)(3)"
-            elif elem.tag.endswith("Organization501c3Ind"):
+            elif tag_name == "Organization501c3Ind":
                 org_type = "501(c)(3)"
-            elif elem.tag.endswith("Organization4947a1NotPFInd") or elem.tag.endswith("Organization4947a1TrtdPFInd"):
+            elif tag_name in ("Organization4947a1NotPFInd", "Organization4947a1TrtdPFInd"):
                 org_type = "4947(a)(1)"
             else:
                 org_type = "Unknown"

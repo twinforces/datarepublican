@@ -86,7 +86,8 @@ CURRENT_PROCESSING_VERSION = 3
 MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
-CONSUMER_BATCH_SIZE = 50  # Reduced from 100 to trigger more frequent GC and memory cleanup
+CONSUMER_BATCH_SIZE = 100  # Change: Optimized to 50 for batching performance and to minimize merge overhead
+MONITOR_INTERVAL_SECONDS = 30  # Change: Added constant to reduce psutil memory monitoring and QueueStatusDisplay updates to every 30 seconds
 
 # Address processing constants
 ADDRESS_BATCH_SIZE = 1000

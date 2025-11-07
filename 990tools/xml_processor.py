@@ -6,6 +6,9 @@ This module handles the parsing and processing of IRS 990 XML files,
 extracting data into dataclasses and storing in the database.
 """
 
+import time
+import queue_status_display
+
 import zipfile
 import logging
 import threading
@@ -14,6 +17,7 @@ import signal
 from io import BytesIO
 from typing import Optional, List, Tuple, Dict, Any
 from lxml import etree  # type: ignore
+import psutil
 
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
@@ -25,8 +29,11 @@ import parse_990pf
 from logging_utils import log_info, log_error, log_debug, log_warning, dump_traceback, get_logger
 from typing import Optional, List, Tuple
 from config import global_config
-from constants import CURRENT_PROCESSING_VERSION
+from constants import CURRENT_PROCESSING_VERSION, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS
 from datetime import datetime
+
+from queue_status_display import QueueStatusDisplay
+from collections import deque
 
 # Import XPath configurations from xpaths.py
 from xpaths import COMMON_XPATHS, XPATHS_990, XPATHS_990EZ, XPATHS_990PF, tostring
@@ -54,6 +61,7 @@ class XMLProducer(BaseProducer):
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
         super().__init__(db_ops, batch_size=100)  # XML processing uses smaller batches
         self.processing_version = processing_version
+        self.last_monitor_time = time.time()  # Change: Added for timed monitoring every 30 seconds
 
     def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, PendingDatabaseContext]:
         """
@@ -224,6 +232,22 @@ class XMLProducer(BaseProducer):
             tree = etree.parse(BytesIO(xml_content), parser)
             root = tree.getroot()
 
+            # Change: Perform memory monitoring only every 30 seconds using wall clock check
+            current_time = time.time()
+            if current_time - self.last_monitor_time >= MONITOR_INTERVAL_SECONDS:
+                # Memory monitoring after parsing
+                process = psutil.Process()
+                memory_gb_after = process.memory_info().rss / (1024 ** 3)
+                if memory_gb_after > 1.5:  # Alert if over 1.5GB for single file
+                    log_warning(self.logger, f"High memory after parsing {filename}: {memory_gb_after:.2f}GB")
+
+                # Log XML content size and memory impact
+                xml_size_mb = len(xml_content) / (1024 ** 2)
+                log_debug(self.logger, f"XML PARSE MONITOR: {filename} size: {xml_size_mb:.2f}MB, "
+                            f"Memory after: {memory_gb_after:.2f}GB")
+
+                self.last_monitor_time = current_time  # Update last monitor time
+
             # Extract basic metadata
             form_type = self._extract_form_type(root)
             tax_year = self._extract_tax_year(root)
@@ -259,6 +283,9 @@ class XMLProducer(BaseProducer):
                 if not global_config.is_quiet():
                     log_info(self.logger, f"Unsupported form type {form_type} in {filename}")
                 return False
+
+            # Explicit cleanup after parsing
+            del root, tree
 
             # Log grant collection results
             counts = context.getObjectCounts()
@@ -609,6 +636,12 @@ class XMLProcessor:
         self.processing_version = processing_version
         self.logger = get_logger(self.__class__.__name__)
 
+        # Atomic counter for available items in result queue
+        self._available_items = 0
+        self._available_items_lock = threading.Lock()
+        self._sentinel_count = 0
+        self._sentinel_lock = threading.Lock()
+
     def log_info(self, msg: str, *args, **kwargs):
         """Log info message"""
         log_info(self.logger, msg, *args, **kwargs)
@@ -617,25 +650,31 @@ class XMLProcessor:
         """Log error message"""
         log_error(self.logger, msg, *args, **kwargs)
 
-    def process_xml_files(self, max_files: Optional[int] = None, workers: int = 4) -> int:
+    def process_xml_files(self, max_files: Optional[int] = None, workers: int = 4, timeout_event: Optional[threading.Event] = None, collect_xpath_stats: bool = False) -> int:
         """
         Process XML files using parallel producer-consumer pattern.
 
         Args:
             max_files: Maximum number of files to process (for testing)
             workers: Number of worker threads for parallel processing
+            timeout_event: Optional event to signal timeout for profiling
 
         Returns:
             Number of XML files processed
         """
-        return self._process_xml_files_parallel(max_files, workers)
+        return self._process_xml_files_parallel(max_files, workers, timeout_event, collect_xpath_stats)
 
-    def _process_xml_files_parallel(self, max_files: Optional[int] = None, workers: int = 4) -> int:
+    def _process_xml_files_parallel(self, max_files: Optional[int] = None, workers: int = 4, timeout_event: Optional[threading.Event] = None, collect_xpath_stats: bool = False) -> int:
         """
         Process XML files using parallel producer-consumer pattern.
 
         This method implements the threading and coordination logic directly,
         eliminating the artificial processor/strategy split.
+
+        Args:
+            max_files: Maximum number of files to process
+            workers: Number of worker threads
+            timeout_event: Optional event to signal timeout for profiling
         """
         from constants import CURRENT_PROCESSING_VERSION
         from logging_utils import start_progress_reporting
@@ -669,8 +708,22 @@ class XMLProcessor:
         from base_processor import ThreadPoolManager
         thread_pool_manager = ThreadPoolManager(thread_pool_config, self.logger)
 
+        # Initialize queue status display for result_queue (estimated ~2KB per PendingDatabaseContext)
+        queue_display = QueueStatusDisplay(
+            tracking_queue=thread_pool_manager.result_queue,
+            update_interval=MONITOR_INTERVAL_SECONDS,  # Change: Reduced QueueStatusDisplay updates to every 30 seconds
+            estimated_size_per_item_mb=0.002
+        )
+        queue_display.start()
+
+        # Reset counters for this processing run
+        self._available_items = 0
+        self._sentinel_count = 0
+
         total_processed = 0
         last_xml_id = None  # Initialize paging state
+
+        # Control queue removed - backpressure eliminated entirely
 
         try:
             # Process batches until we reach max_files or run out of files
@@ -695,16 +748,16 @@ class XMLProcessor:
                 if xml_files:
                     last_xml_id = max(xml_file.xml_id for xml_file in xml_files)
 
-                # Start producer pool
+                # Start producer pool with atomic counters
                 thread_pool_manager.start_producer_pool(
                     xml_files,
-                    lambda *args: self._xml_producer_worker(*args, shutdown_event)
+                    lambda *args: self._xml_producer_worker(*args, shutdown_event, timeout_event, collect_xpath_stats)
                 )
 
-                # Start single consumer thread
+                # Start single consumer thread with atomic counters
                 consumer_thread = threading.Thread(
                     target=self._xml_consumer_worker,
-                    args=(thread_pool_manager.result_queue, consumer, pbar, shutdown_event, thread_pool_manager)
+                    args=(thread_pool_manager.result_queue, consumer, pbar, shutdown_event, thread_pool_manager, timeout_event)
                 )
                 consumer_thread.daemon = False
                 consumer_thread.start()
@@ -724,13 +777,16 @@ class XMLProcessor:
             if pbar:
                 pbar.close()
 
+            # Stop queue status display
+            queue_display.stop()
+
             # Clean up ZIP cache with proper reference counting
             XMLProducer.cleanup_zip_cache()
 
         log_info(self.logger, f"XML processing complete: {total_processed} files processed")
         return total_processed
 
-    def _xml_producer_worker(self, xml_files, work_queue, result_queue, producer_id, num_producers, shutdown_event):
+    def _xml_producer_worker(self, xml_files, work_queue, result_queue, producer_id, num_producers, shutdown_event, timeout_event=None, collect_xpath_stats=False):
         """Producer worker function for thread pool"""
         processed = 0
         total_bytes = 0
@@ -739,48 +795,63 @@ class XMLProcessor:
         from constants import CURRENT_PROCESSING_VERSION
         producer = XMLProducer(self.db_ops, CURRENT_PROCESSING_VERSION)
 
-        for i in range(producer_id, len(xml_files), num_producers):
-            if shutdown_event.is_set():
-                break
+        # Set thread name to identify producer thread 0 for xpath stats collection
+        if collect_xpath_stats and producer_id == 0:
+            threading.current_thread().name = "XPathStatsProducer"
+        elif collect_xpath_stats:
+            threading.current_thread().name = f"Producer-{producer_id}"
 
-            xml_file = xml_files[i]
-            xml_id = xml_file.xml_id
-            zip_id = xml_file.zip_id
-            zip_path = self.db_ops.get_zip_file_path(zip_id)
-            if not zip_path:
-                continue
+        try:
+            for i in range(producer_id, len(xml_files), num_producers):
+                if shutdown_event.is_set() or (timeout_event and timeout_event.is_set()):
+                    break
 
-            filename = xml_file.filename
-            internal_path = xml_file.internal_path
-            file_size = xml_file.file_size
+                # Backpressure logic removed entirely - consumer is the bottleneck, not producers
 
-            try:
-                # Parse XML and collect context
-                success, context = producer.process_single_xml_for_operations(
-                    xml_id, zip_id, filename, internal_path, file_size
-                )
+                xml_file = xml_files[i]
+                xml_id = xml_file.xml_id
+                zip_id = xml_file.zip_id
+                zip_path = self.db_ops.get_zip_file_path(zip_id)
+                if not zip_path:
+                    continue
 
-                # Send context to consumer if successful
-                if success:
-                    result_queue.put(context)
+                filename = xml_file.filename
+                internal_path = xml_file.internal_path
+                file_size = xml_file.file_size
 
-                processed += 1
+                try:
+                    # Parse XML and collect context
+                    success, context = producer.process_single_xml_for_operations(
+                        xml_id, zip_id, filename, internal_path, file_size
+                    )
 
-                # Track progress
-                if global_config.progress == "bytes" and file_size:
-                    total_bytes += file_size
+                    # Send context to consumer if successful
+                    if success:
+                        result_queue.put(context)
+                        # Increment available items counter
+                        with self._available_items_lock:
+                            self._available_items += 1
 
-                if processed % 50 == 0:
-                    progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
-                    self.log_info(f"Producer {producer_id}: {progress_info} queued")
+                    processed += 1
 
-            except Exception as e:
-                self.log_error(f"Producer {producer_id} error on {filename}: {e}")
+                    # Track progress
+                    if global_config.progress == "bytes" and file_size:
+                        total_bytes += file_size
 
-        # Send sentinel
-        result_queue.put(None)
+                    if processed % 50 == 0:
+                        progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
+                        self.log_info(f"Producer {producer_id}: {progress_info} queued")
 
-    def _xml_consumer_worker(self, operations_queue, consumer, pbar, shutdown_event, thread_pool_manager):
+                except Exception as e:
+                    self.log_error(f"Producer {producer_id} error on {filename}: {e}")
+        finally:
+            # Ensure sentinel is always sent, even if thread exits early due to exception or shutdown
+            result_queue.put(None)
+            # Increment sentinel counter
+            with self._sentinel_lock:
+                self._sentinel_count += 1
+
+    def _xml_consumer_worker(self, operations_queue, consumer, pbar, shutdown_event, thread_pool_manager, timeout_event):
         """Consumer worker function"""
         batch_contexts = []
         processed_xml_count = 0
@@ -788,50 +859,182 @@ class XMLProcessor:
         sentinels_received = 0
         num_producers = len(thread_pool_manager.producer_threads) if thread_pool_manager else 1
 
+        # Consumer performance tracking (for monitoring only, no backpressure)
+        consumer_performance = {
+            'objects_processed': 0,
+            'batches_processed': 0,
+            'avg_objects_per_batch': 0.0,
+            'avg_processing_time': 0.0,
+            'last_batch_time': time.time(),
+            'last_batch_objects': 0
+        }
+
+        # DEBUG: Track queue depth and batch fetching capability
+        max_queue_depth_seen = 0
+        total_items_fetched = 0
+        batch_fetch_attempts = 0
+        successful_batch_fetches = 0
+        
         while sentinels_received < num_producers:
+            # Check for profiling timeout and exit cleanly if set
+            if timeout_event and timeout_event.is_set():
+                break
+        
+            # Monitor queue depth for debugging (no backpressure actions)
+            current_size = operations_queue.qsize()
+            max_queue_depth_seen = max(max_queue_depth_seen, current_size)
             try:
-                item = operations_queue.get(timeout=1.0)
-                if item is None:
-                    sentinels_received += 1
+                # DEBUG: Attempt batch fetching up to 100 items without sleeping
+                batch_fetched = []
+                batch_fetch_attempts += 1
+        
+                # Use atomic counter to determine how many items to fetch
+                with self._available_items_lock:
+                    available_count = self._available_items
+
+                # If no items available, check if all producers are done
+                if available_count == 0:
+                    with self._sentinel_lock:
+                        if self._sentinel_count >= num_producers:
+                            # All producers done, wait for sentinel
+                            try:
+                                item = operations_queue.get(timeout=1.0)
+                                if item is None:
+                                    sentinels_received += 1
+                                else:
+                                    batch_fetched.append(item)
+                                    with self._available_items_lock:
+                                        self._available_items -= 1
+                            except queue.Empty:
+                                pass
                     continue
 
-                if isinstance(item, PendingDatabaseContext):
-                    batch_contexts.append(item)
+                # Fetch up to CONSUMER_BATCH_SIZE items or available count, whichever is smaller
+                items_to_fetch = min(CONSUMER_BATCH_SIZE, available_count)
+                for _ in range(items_to_fetch):
+                    try:
+                        item = operations_queue.get_nowait()
+                        if item is None:
+                            sentinels_received += 1
+                            break
+                        batch_fetched.append(item)
+                    except queue.Empty:
+                        break
 
-                if len(batch_contexts) >= 100:
-                    # Execute batch
-                    batch_size = len(batch_contexts)
-                    for context in batch_contexts:
-                        context.save_to_database(consumer.db_ops)
-                    batch_contexts = []
-                    if batch_size > 0:
-                        progress_context = PendingDatabaseContext()
-                        progress_op = DatabaseOperation(
-                            DatabaseOperationType.PROGRESS_UPDATE,
-                            {"count": batch_size}
+                # Decrement the atomic counter by how many we actually fetched
+                if batch_fetched:
+                    with self._available_items_lock:
+                        self._available_items -= len(batch_fetched)
+        
+                # Process the batch
+                if batch_fetched:
+                    successful_batch_fetches += 1
+                    total_items_fetched += len(batch_fetched)
+        
+                    # Add non-sentinel items to batch_contexts
+                    for item in batch_fetched:
+                        if isinstance(item, PendingDatabaseContext):
+                            batch_contexts.append(item)
+        
+                # If we got sentinels, continue to next iteration
+                if sentinels_received >= num_producers:
+                    continue
+        
+                if len(batch_contexts) >= CONSUMER_BATCH_SIZE:
+                    try:
+                        # Track batch processing performance
+                        batch_start_time = time.time()
+                        batch_objects = sum(context.getTotalObjectCount() for context in batch_contexts)
+
+                        # Merge all contexts into a single giant PendingDatabaseContext
+                        merged_context = PendingDatabaseContext.merge(batch_contexts)
+
+                        # Execute merged batch
+                        batch_size = len(batch_contexts)
+                        merged_context.save_to_database(consumer.db_ops)
+
+                        # Explicitly clear merged context to free memory immediately
+                        merged_context.clear()
+                        del merged_context
+
+                        # Clear batch contexts list
+                        del batch_contexts[:]
+                        batch_contexts = []
+
+                        # Update performance metrics
+                        batch_time = time.time() - batch_start_time
+                        consumer_performance['objects_processed'] += batch_objects
+                        consumer_performance['batches_processed'] += 1
+                        consumer_performance['avg_objects_per_batch'] = (
+                            (consumer_performance['avg_objects_per_batch'] * (consumer_performance['batches_processed'] - 1) +
+                             batch_objects) / consumer_performance['batches_processed']
                         )
-                        progress_context.addOperationToDatabase(progress_op)
-                        progress_context.save_to_database(consumer.db_ops)
-
-                operations_queue.task_done()
-
+                        consumer_performance['avg_processing_time'] = (
+                            (consumer_performance['avg_processing_time'] * (consumer_performance['batches_processed'] - 1) +
+                             batch_time) / consumer_performance['batches_processed']
+                        )
+                        consumer_performance['last_batch_time'] = time.time()
+                        consumer_performance['last_batch_objects'] = batch_objects
+                    except Exception as e:
+                        self.log_error(f"Consumer batch processing error: {e}")
+                        # Continue processing without crashing - don't clear batch_contexts on error
+                        continue
+        
+                # Mark all fetched items as done
+                for _ in batch_fetched:
+                    operations_queue.task_done()
+        
             except queue.Empty:
-                if shutdown_event.is_set():
+                if shutdown_event.is_set() or (timeout_event and timeout_event.is_set()):
                     break
 
         # Final batch
         if batch_contexts:
-            batch_size = len(batch_contexts)
-            for context in batch_contexts:
-                context.save_to_database(consumer.db_ops)
-            if batch_size > 0:
-                progress_context = PendingDatabaseContext()
-                progress_op = DatabaseOperation(
-                    DatabaseOperationType.PROGRESS_UPDATE,
-                    {"count": batch_size}
-                )
-                progress_context.addOperationToDatabase(progress_op)
-                progress_context.save_to_database(consumer.db_ops)
+            try:
+                batch_size = len(batch_contexts)
+                final_batch_objects = sum(context.getTotalObjectCount() for context in batch_contexts)
+
+                # Merge all remaining contexts into a single giant PendingDatabaseContext
+                merged_context = PendingDatabaseContext.merge(batch_contexts)  # Change: merge() is already efficient; batch size reduced to 50 to minimize overhead
+
+                merged_context.save_to_database(consumer.db_ops)
+
+                # Explicitly clear final merged context to free memory immediately
+                merged_context.clear()
+                del merged_context
+
+                # Clear batch contexts list
+                del batch_contexts[:]
+                batch_contexts = []
+            except Exception as e:
+                self.log_error(f"Consumer final batch processing error: {e}")
+                # Don't clear batch_contexts on error to avoid losing data
+
+        # DEBUG: Log final batch fetching statistics
+        self.log_info(f"DEBUG: Consumer batch fetching stats - Max queue depth: {max_queue_depth_seen}, "
+                     f"Total items fetched: {total_items_fetched}, Batch fetch attempts: {batch_fetch_attempts}, "
+                     f"Successful batch fetches: {successful_batch_fetches}")
+
+    def _interruptible_sleep(self, duration: float, timeout_event: Optional[threading.Event] = None):
+        """
+        Sleep for the specified duration, but interrupt if timeout_event is set.
+
+        Args:
+            duration: Time to sleep in seconds
+            timeout_event: Optional event to check for interruption
+        """
+        if timeout_event is None:
+            time.sleep(duration)
+            return
+
+        # Sleep in small increments, checking for timeout event
+        start_time = time.time()
+        while time.time() - start_time < duration:
+            if timeout_event.is_set():
+                break
+            remaining = duration - (time.time() - start_time)
+            sleep_time = min(0.1, remaining)  # Sleep in 0.1s increments or remaining time
+            time.sleep(sleep_time)
 
     def _wait_for_completion(self, thread_pool_manager, consumer_thread):
         """Wait for producer and consumer threads to complete"""

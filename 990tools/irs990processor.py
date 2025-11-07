@@ -445,7 +445,8 @@ class IRS990Processor:
 
         # Set up timeout alarm
         signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(self.profile_seconds)
+        if self.profile_seconds is not None:
+            signal.alarm(self.profile_seconds)
 
         # Temporarily disable profiling flag to prevent recursion
         original_profile_seconds = self.profile_seconds
@@ -456,13 +457,14 @@ class IRS990Processor:
         profiler.enable()
         start_time = time.time()
 
+        result = None
         try:
             # Run the actual processing with timeout handling
             result = self.xml_processor.process_xml_files(self.max_files, self.workers, timeout_event=timeout_event, collect_xpath_stats=self.collect_xpath_stats)
         except KeyboardInterrupt:
             self.log_info("Profiling interrupted by timeout")
-            # Signal producers to stop
-            self.xml_processor.shutdown_event.set()
+            # Signal producers to stop - XMLProcessor doesn't have shutdown_event, use timeout_event instead
+            timeout_event.set()
             result = None
         finally:
             # Restore profiling flag
@@ -479,7 +481,7 @@ class IRS990Processor:
             self.log_info(f"XML processing profiling complete. Time: {execution_time:.2f}s")
 
             # Generate profiling report
-            self._generate_profiling_report("xml_processing", execution_time, result or 0, profiler)
+            self._generate_profiling_report("xml_processing", execution_time, result if result is not None else 0, profiler)
 
         return result
 
@@ -560,8 +562,8 @@ class IRS990Processor:
 
     def _process_xml_files_parallel(self, xml_files: List[Tuple]):
         """Process XML files using producer-consumer pattern for threading safety"""
-        # Use the parallel processing strategy instead of inline implementation
-        self.xml_processing_strategy.execute(self.max_files)
+        # This method is deprecated - XML processing is now handled by xml_processor.process_xml_files()
+        pass
 
 
 

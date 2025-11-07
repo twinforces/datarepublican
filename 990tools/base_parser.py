@@ -111,7 +111,28 @@ class BaseParser:
         return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
     def parse_conferences(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-        """Parse conference expenses from ConferencesMeetingsGrp/TotalAmt"""
+        """Parse conference expenses using XPath union for better performance"""
+        # Single XPath union to get all conference expense elements at once
+        conferences_union_xpath = etree.XPath("""
+            .//irs:IRS990/irs:ConferencesMeetingsGrp/irs:TotalAmt |
+            .//irs:IRS990EZ/irs:ConferencesMeetingsGrp/irs:TotalAmt |
+            .//ConferencesMeetingsGrp/TotalAmt |
+            .//irs:ConferencesMeetings/irs:TotalAmt |
+            .//ConferencesMeetings/TotalAmt
+        """, namespaces=namespaces)
+
+        # Get all conference elements in one query
+        conference_elements = conferences_union_xpath(root)
+
+        # Return the first valid element's text as integer
+        for elem in conference_elements:
+            if elem.text and elem.text.strip():
+                try:
+                    return int(elem.text.strip())
+                except ValueError:
+                    continue
+
+        # Fallback to original method if union fails
         try:
             return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
         except KeyError:
@@ -119,8 +140,30 @@ class BaseParser:
             return 0
 
     def parse_receipt(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-        """Parse receipt amount"""
+        """Parse receipt amount using XPath union for better performance"""
+        # Single XPath union to get all receipt elements at once
+        receipt_union_xpath = etree.XPath("""
+            .//irs:TotalRevenueAmt |
+            .//irs:IRS990EZ/irs:TotalRevenueAmt |
+            .//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:TotalRevenueRevAndExpnssAmt |
+            .//irs:AnalysisOfRevenueAndExpenses/irs:TotalRevenueRevAndExpnssAmt |
+            .//TotalRevenueAmt
+        """, namespaces=namespaces)
+
+        # Get all receipt elements in one query
+        receipt_elements = receipt_union_xpath(root)
+
+        # Return the first valid element's text as integer
+        for elem in receipt_elements:
+            if elem.text and elem.text.strip():
+                try:
+                    return int(elem.text.strip())
+                except ValueError:
+                    continue
+
+        # Fallback to original method if union fails
         return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
+
 
     def parse_govt_grants(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
         """Parse government grants"""
@@ -131,19 +174,101 @@ class BaseParser:
         return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
     def parse_total_exp(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-        """Parse total expenses"""
+        """Parse total expenses using XPath union for better performance"""
+        # Single XPath union to get all total expenses elements at once
+        total_exp_union_xpath = etree.XPath("""
+            .//irs:IRS990/irs:TotalFunctionalExpensesGrp/irs:TotalAmt |
+            .//irs:IRS990/irs:TotalExpensesAmt |
+            .//irs:IRS990EZ/irs:TotalExpensesAmt |
+            .//irs:IRS990PF/irs:AnalysisOfRevenueAndExpenses/irs:TotalExpensesRevAndExpnssAmt |
+            .//irs:AnalysisOfRevenueAndExpenses/irs:TotalExpensesRevAndExpnssAmt |
+            .//TotalFunctionalExpensesGrp/TotalAmt |
+            .//TotalExpensesAmt
+        """, namespaces=namespaces)
+
+        # Get all total expenses elements in one query
+        exp_elements = total_exp_union_xpath(root)
+
+        # Return the first valid element's text as integer
+        for elem in exp_elements:
+            if elem.text and elem.text.strip():
+                try:
+                    return int(elem.text.strip())
+                except ValueError:
+                    continue
+
+        # Fallback to original method if union fails
         return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
     def parse_prog_exp(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-        """Parse program expenses"""
+        """Parse program expenses using XPath union for better performance"""
+        # Single XPath union to get all program expenses elements at once
+        prog_exp_union_xpath = etree.XPath("""
+            .//irs:IRS990/irs:TotalProgramServiceExpensesAmt |
+            .//irs:IRS990EZ/irs:TotalProgramServiceExpensesAmt |
+            .//irs:ProgramServiceExpensesAmt |
+            .//TotalProgramServiceExpensesAmt
+        """, namespaces=namespaces)
+
+        # Get all program expenses elements in one query
+        prog_elements = prog_exp_union_xpath(root)
+
+        # Return the first valid element's text as integer
+        for elem in prog_elements:
+            if elem.text and elem.text.strip():
+                try:
+                    return int(elem.text.strip())
+                except ValueError:
+                    continue
+
+        # Fallback to original method if union fails
         return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
     def parse_total_assets(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-        """Parse total assets"""
+        """Parse total assets using XPath union for better performance"""
+        # Single XPath union to get all total assets elements at once
+        total_assets_union_xpath = etree.XPath("""
+            .//irs:IRS990/irs:TotalAssetsEOYAmt |
+            .//irs:IRS990EZ/irs:TotalAssetsEOYAmt |
+            .//irs:IRS990PF/irs:Form990PFBalanceSheetsGrp/irs:TotalAssetsEOYAmt |
+            .//irs:Form990PFBalanceSheetsGrp/irs:TotalAssetsEOYAmt |
+            .//TotalAssetsEOYAmt
+        """, namespaces=namespaces)
+
+        # Get all total assets elements in one query
+        assets_elements = total_assets_union_xpath(root)
+
+        # Return the first valid element's text as integer
+        for elem in assets_elements:
+            if elem.text and elem.text.strip():
+                try:
+                    return int(elem.text.strip())
+                except ValueError:
+                    continue
+
+        # Fallback to original method if union fails
         return parse_int_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose)
 
     def parse_foreign_office(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=None):
-        """Parse foreign office indicator"""
+        """Parse foreign office indicator using XPath union for better performance"""
+        # Single XPath union to get all foreign office elements at once
+        foreign_office_union_xpath = etree.XPath("""
+            .//irs:IRS990/irs:ForeignOfficeInd |
+            .//irs:IRS990EZ/irs:ForeignOfficeInd |
+            .//irs:IRS990EZ/irs:ForeignOfficeCountryCd |
+            .//ForeignOfficeInd |
+            .//ForeignOfficeCountryCd
+        """, namespaces=namespaces)
+
+        # Get all foreign office elements in one query
+        office_elements = foreign_office_union_xpath(root)
+
+        # Return the first valid element's text
+        for elem in office_elements:
+            if elem.text and elem.text.strip():
+                return elem.text.strip().upper() == 'X'
+
+        # Fallback to original method if union fails
         try:
             elem = parse_string_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
             return elem.strip().upper() == 'X' if elem is not None else False
@@ -158,30 +283,205 @@ class BaseParser:
         return parse_string_field(root, self.XPATHS, field, namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default="Unknown")
 
     def parse_schedule_i(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
-        """Parse Schedule I (Grants) - common implementation for 990/990EZ"""
-        from parse_schedule_i import parse_grants
-        grants_data = parse_grants(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, set(), self.form_type, context=context)
-        # parse_grants now adds grants directly to context
+        """Parse Schedule I (Grants to Organizations) - optimized XPath union for better performance"""
+        # Single XPath union to get all grant elements at once
+        grant_union_xpath = etree.XPath("""
+            .//irs:ReturnData/irs:IRS990/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+            .//irs:IRS990/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+            .//irs:ReturnData/irs:IRS990EZ/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+            .//irs:IRS990EZ/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+            .//irs:ReturnData/irs:IRS990PF/irs:GrantsAndContributionsPaidDuringYearGrp/irs:RecipientName/irs:BusinessName/irs:BusinessNameLine1Txt |
+            .//irs:IRS990PF/irs:GrantsAndContributionsPaidDuringYearGrp/irs:RecipientName/irs:BusinessName/irs:BusinessNameLine1Txt |
+            .//irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+            .//irs:GrantsAndContributionsPaidDuringYearGrp/irs:RecipientName/irs:BusinessName/irs:BusinessNameLine1Txt
+        """, namespaces={'irs': 'http://www.irs.gov/efile'})
+
+        # Get all grant elements in one query
+        grant_elements = grant_union_xpath(root)
+
+        # Process each grant element
+        for grant_elem in grant_elements:
+            # XPath unions for grant data within each grant element
+            name_union_xpath = etree.XPath("""
+                irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+                irs:RecipientBusinessName/irs:BusinessNameLine1 |
+                irs:BusinessName/irs:BusinessNameLine1Txt |
+                irs:BusinessName/irs:BusinessNameLine1 |
+                RecipientBusinessName/BusinessNameLine1Txt |
+                RecipientBusinessName/BusinessNameLine1 |
+                BusinessName/BusinessNameLine1Txt |
+                BusinessName/BusinessNameLine1
+            """, namespaces={'irs': 'http://www.irs.gov/efile'})
+
+            amount_union_xpath = etree.XPath("""
+                irs:AmountOfCashGrant |
+                irs:CashGrantAmt |
+                AmountOfCashGrant |
+                CashGrantAmt
+            """, namespaces={'irs': 'http://www.irs.gov/efile'})
+
+            name_elements = name_union_xpath(grant_elem)
+            amount_elements = amount_union_xpath(grant_elem)
+
+            grant_name = None
+            grant_amount = None
+
+            # Get first valid name
+            for name_elem in name_elements:
+                if name_elem.text and name_elem.text.strip():
+                    grant_name = name_elem.text.strip()
+                    break
+
+            # Get first valid amount
+            for amt_elem in amount_elements:
+                if amt_elem.text and amt_elem.text.strip():
+                    try:
+                        grant_amount = int(amt_elem.text.strip())
+                        break
+                    except ValueError:
+                        continue
+
+            # Create grant if we have valid data
+            if grant_name and grant_amount is not None:
+                from models import Grant
+                grant = Grant(
+                    recipient_name=grant_name,
+                    amount=grant_amount,
+                    tax_year=charity.tax_year,
+                    charity_id=charity.id
+                )
+                context.addObjectToDatabase(grant)
+
+        # Fallback to original method if no grants found via union
+        if not grant_elements:
+            from parse_schedule_i import parse_grants
+            grants_data = parse_grants(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, set(), self.form_type, context=context)
     def parse_schedule_c(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
-        """Parse Schedule C (Political Contributions) - common implementation for 990/990EZ"""
+        """Parse Schedule C (Political Contributions) - optimized to skip if no Schedule C exists"""
+        # Quick check: if no Schedule C element exists, skip entirely
+        schedule_c_check = etree.XPath(".//irs:ScheduleC", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if not schedule_c_check(root):
+            return  # No Schedule C, nothing to parse
+
+        # Only parse if Schedule C actually exists
         from parse_schedule_c import parse_contributions
         contributions_data = parse_contributions(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
         # parse_contributions now adds contributions directly to context
     def parse_schedule_l(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
-        """Parse Schedule L (Contractors) - common implementation for 990/990EZ/990PF"""
-        from parse_contractors import parse_contractors
-        contractors_data = parse_contractors(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
-        # parse_contractors now adds contractors directly to context
+        """Parse Schedule L (Contractors) - optimized XPath union for better performance"""
+        # Single XPath union to get all contractor elements at once
+        contractor_union_xpath = etree.XPath("""
+            .//irs:ReturnData/irs:IRS990/irs:ContractorCompensationGrp |
+            .//irs:IRS990/irs:ContractorCompensationGrp |
+            .//irs:ReturnData/irs:IRS990EZ/irs:ContractorCompensationGrp |
+            .//irs:IRS990EZ/irs:ContractorCompensationGrp |
+            .//irs:ReturnData/irs:IRS990PF/irs:CompensationOfHghstPdCntrctGrp |
+            .//irs:IRS990PF/irs:CompensationOfHghstPdCntrctGrp |
+            .//irs:ContractorCompensationGrp |
+            .//irs:CompensationOfHghstPdCntrctGrp
+        """, namespaces={'irs': 'http://www.irs.gov/efile'})
+
+        # Get all contractor elements in one query
+        contractor_elements = contractor_union_xpath(root)
+
+        # Process each contractor element
+        for contractor_elem in contractor_elements:
+            # Extract contractor data using XPath unions for efficiency
+            name_union_xpath = etree.XPath("""
+                irs:ContractorName/irs:BusinessName/irs:BusinessNameLine1Txt |
+                irs:ContractorName/irs:BusinessNameLine1Txt |
+                irs:BusinessName/irs:BusinessNameLine1Txt |
+                irs:BusinessName/irs:BusinessNameLine1 |
+                ContractorName/BusinessName/BusinessNameLine1Txt |
+                ContractorName/BusinessNameLine1Txt |
+                BusinessName/BusinessNameLine1Txt |
+                BusinessName/BusinessNameLine1
+            """, namespaces={'irs': 'http://www.irs.gov/efile'})
+
+            comp_union_xpath = etree.XPath("""
+                irs:ContractorCompensationAmt |
+                irs:CompensationAmt |
+                ContractorCompensationAmt |
+                CompensationAmt
+            """, namespaces={'irs': 'http://www.irs.gov/efile'})
+
+            name_elements = name_union_xpath(contractor_elem)
+            comp_elements = comp_union_xpath(contractor_elem)
+
+            contractor_name = None
+            contractor_comp = None
+
+            # Get first valid name
+            for name_elem in name_elements:
+                if name_elem.text and name_elem.text.strip():
+                    contractor_name = name_elem.text.strip()
+                    break
+
+            # Get first valid compensation
+            for comp_elem in comp_elements:
+                if comp_elem.text and comp_elem.text.strip():
+                    try:
+                        contractor_comp = int(comp_elem.text.strip())
+                        break
+                    except ValueError:
+                        continue
+
+            # Create contractor if we have valid data
+            if contractor_name and contractor_comp is not None:
+                from models import Contractor
+                contractor = Contractor(
+                    name=contractor_name,
+                    amount=contractor_comp,
+                    tax_year=charity.tax_year,
+                    charity_id=charity.id
+                )
+                context.addObjectToDatabase(contractor)
+
+        # Fallback to original method if no contractors found via union
+        if not contractor_elements:
+            from parse_contractors import parse_contractors
+            contractors_data = parse_contractors(root, xml_filename, charity.ein, charity.filer_name, charity.tax_year, self.form_type, context=context)
     def parse_address(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
-        """Parse address information"""
+        """Parse address information using XPath union for better performance"""
         try:
             namespaces = {'irs': 'http://www.irs.gov/efile'}
-            # Parse address components
-            address_line1 = parse_string_field(root, self.XPATHS, "address_line1", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-            address_line2 = parse_string_field(root, self.XPATHS, "address_line2", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-            city = parse_string_field(root, self.XPATHS, "city", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-            state = parse_string_field(root, self.XPATHS, "state", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
-            zip_code_raw = parse_string_field(root, self.XPATHS, "zip_code", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=verbose, default=None)
+
+            # Single XPath union to get all address components at once
+            address_union_xpath = etree.XPath("""
+                .//irs:Filer/irs:USAddress/irs:AddressLine1Txt |
+                .//irs:Filer/irs:USAddress/irs:AddressLine2Txt |
+                .//irs:Filer/irs:USAddress/irs:CityNm |
+                .//irs:Filer/irs:USAddress/irs:StateAbbreviationCd |
+                .//irs:Filer/irs:USAddress/irs:ZIPCd |
+                .//Filer/USAddress/AddressLine1Txt |
+                .//Filer/USAddress/AddressLine2Txt |
+                .//Filer/USAddress/CityNm |
+                .//Filer/USAddress/StateAbbreviationCd |
+                .//Filer/USAddress/ZIPCd
+            """, namespaces=namespaces)
+
+            # Get all address elements in one query
+            address_elements = address_union_xpath(root)
+
+            # Extract values by tag name
+            address_line1 = None
+            address_line2 = None
+            city = None
+            state = None
+            zip_code_raw = None
+
+            for elem in address_elements:
+                tag_name = elem.tag.split('}')[-1]  # Remove namespace prefix
+                if tag_name in ('AddressLine1Txt', 'AddressLine1'):
+                    address_line1 = elem.text.strip() if elem.text else None
+                elif tag_name in ('AddressLine2Txt', 'AddressLine2'):
+                    address_line2 = elem.text.strip() if elem.text else None
+                elif tag_name == 'CityNm':
+                    city = elem.text.strip() if elem.text else None
+                elif tag_name == 'StateAbbreviationCd':
+                    state = elem.text.strip() if elem.text else None
+                elif tag_name == 'ZIPCd':
+                    zip_code_raw = elem.text.strip() if elem.text else None
 
             # Split ZIP code into zip_code and zip4
             zip_code, zip4 = split_zip_code(zip_code_raw)
@@ -380,11 +680,11 @@ class BaseParser:
             return None
 
     def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, log_error=log_error, xpath_match_stats=None):
-        """Parse grants and political contributions"""
-        # Parse Schedule I (Grants)
+        """Parse grants and political contributions using optimized XPath unions"""
+        # Parse Schedule I (Grants) - already optimized with XPath unions
         self.parse_schedule_i(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
-        # Parse Schedule C (Political Contributions)
+        # Parse Schedule C (Political Contributions) - already optimized to skip if no Schedule C exists
         self.parse_schedule_c(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
 
 

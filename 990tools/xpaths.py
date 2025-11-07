@@ -358,24 +358,15 @@ GRANT_XPATHS = {
 
 GRANT_EIN_XPATHS = [
     etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='RecipientEIN']", namespaces=NAMESPACES),
     etree.XPath("irs:EIN", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='EIN']", namespaces=NAMESPACES),
 ]
 
 GRANT_NAME_XPATHS = [
-    etree.XPath("*[local-name()='RecipientNameBusiness']/*[local-name()='BusinessNameLine1Txt']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='RecipientNameBusiness']/*[local-name()='BusinessNameLine1']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='RecipientBusinessName']/*[local-name()='BusinessNameLine1Txt']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='RecipientBusinessName']/*[local-name()='BusinessNameLine1']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='RecipientNm']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='RecipientName']", namespaces=NAMESPACES),
+    etree.XPath("irs:RecipientNameBusiness | irs:RecipientBusinessName/irs:BusinessNameLine1Txt | irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
 ]
 
 GRANT_AMOUNT_XPATHS = [
-    etree.XPath("*[local-name()='CashGrantAmt']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='Amount']", namespaces=NAMESPACES),
-    etree.XPath("*[local-name()='TotalGrantOrContriPdDurYrAmt']", namespaces=NAMESPACES),
+    etree.XPath("irs:CashGrantAmt | irs:TotalGrantOrContriPdDurYrAmt | irs:GrantOrContributionAmt | irs:Amount", namespaces=NAMESPACES),
 ]
 
 GRANT_FOREIGN_ADDRESS_XPATH = etree.XPath("irs:ForeignAddress", namespaces=NAMESPACES)

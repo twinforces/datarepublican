@@ -25,25 +25,25 @@ def parse_grants(root, xml_filename: str, filer_ein: str, filer_name: str, tax_y
             elements = xpath(root)
             for elem in elements:
                 try:
-                    # Try all EIN xpaths
+                    # Try all EIN xpaths - use find_element for better performance
                     ein_elem = None
                     for ein_xpath in GRANT_EIN_XPATHS:
-                        ein_elem = elem.xpath(ein_xpath.path, namespaces=NAMESPACES)
-                        if ein_elem:
+                        ein_elem = find_element(elem, [ein_xpath], namespaces)
+                        if ein_elem is not None:
                             break
 
-                    # Try all name xpaths
+                    # Try all name xpaths - use find_element for better performance
                     name_elem = None
                     for name_xpath in GRANT_NAME_XPATHS:
-                        name_elem = elem.xpath(name_xpath.path, namespaces=NAMESPACES)
-                        if name_elem:
+                        name_elem = find_element(elem, [name_xpath], namespaces)
+                        if name_elem is not None:
                             break
 
-                    # Try all amount xpaths
+                    # Try all amount xpaths - use find_element for better performance
                     amount_elem = None
                     for amt_xpath in GRANT_AMOUNT_XPATHS:
-                        amount_elem = elem.xpath(amt_xpath.path, namespaces=NAMESPACES)
-                        if amount_elem:
+                        amount_elem = find_element(elem, [amt_xpath], namespaces)
+                        if amount_elem is not None:
                             break
 
                     grantee_name = (name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown")
