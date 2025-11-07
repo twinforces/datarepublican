@@ -33,6 +33,26 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
     Returns:
         The first matching element, or None if no match is found.
     """
+    # Only collect xpath stats in thread 0 (XPathStatsProducer) to avoid race conditions
+    import threading
+    current_thread = threading.current_thread()
+    collect_stats = xpath_match_stats is not None and current_thread.name == "XPathStatsProducer"
+    """
+    Find an element using a list of XPaths, with caching to avoid redundant evaluations.
+
+    Args:
+        root: The root element to evaluate XPaths against.
+        xpaths: List of XPaths (either strings or precompiled etree.XPath objects).
+        namespaces: Dictionary of namespace mappings.
+        xpath_cache: Dictionary to cache XPath results (optional).
+        field: Field name for tracking match statistics (optional).
+        form_type: Form type (e.g., "990", "990EZ", "990PF") for stats tracking (optional).
+        log_error: Logging function to use for error messages (optional).
+        xpath_match_stats: Dictionary to track XPath match statistics (optional).
+
+    Returns:
+        The first matching element, or None if no match is found.
+    """
     # Initialize the XPath cache if not provided
     if xpath_cache is None:
         xpath_cache = {}
@@ -60,11 +80,12 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
 
         # Evaluate the XPath if not in cache
         try:
+            # Skip debug logging for xpath stats testing
             elem = xpath(root)
             if elem:
                 xpath_cache[cache_key] = elem[0]
                 # Only update stats, don't log individual matches
-                if field and form_type and xpath_match_stats is not None:
+                if collect_stats and field and form_type:
                     stats_key = f"{form_type}:{field}:{xpath}"
                     if stats_key not in xpath_match_stats:
                         xpath_match_stats[stats_key] = 0
@@ -79,7 +100,7 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
                 elem = root.xpath(non_ns_xpath, namespaces=None)
                 if elem:
                     xpath_cache[cache_key] = elem[0]
-                    if field and form_type and xpath_match_stats is not None:
+                    if collect_stats and field and form_type:
                         stats_key = f"{form_type}:{field}:{xpath}"
                         if stats_key not in xpath_match_stats:
                             xpath_match_stats[stats_key] = 0

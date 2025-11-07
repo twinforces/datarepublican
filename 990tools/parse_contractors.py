@@ -17,16 +17,10 @@ from models.contractor import Contractor
 from models.address import Address
 from models.charity import Charity
 
-def parse_contractors(xml_content, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, form_type: str, context=None) -> List[Dict[str, Any]]:
+def parse_contractors(root, xml_filename: str, filer_ein: str, filer_name: str, tax_year: int, form_type: str, context=None) -> List[Dict[str, Any]]:
     """Parse contractors from Schedule L"""
     contractors = []
     try:
-        parser = etree.XMLParser(recover=True)
-        if isinstance(xml_content, bytes):
-            tree = etree.parse(BytesIO(xml_content), parser)
-        else:
-            tree = etree.parse(xml_content, parser)
-        root = tree.getroot()
 
         # Select the appropriate XPath dictionary based on form_type
         if form_type == "990":

@@ -43,6 +43,8 @@ class GlobalConfig:
         self.extract: Optional[List[str]] = None
         self.extract_dest: Optional[str] = None
         self.nostats: bool = False
+        self.no_backpressure: bool = False
+        self.collect_xpath_stats: bool = False
 
     @classmethod
     def get_instance(cls):
@@ -67,6 +69,8 @@ class GlobalConfig:
         self.extract = getattr(args, 'extract', self.extract)
         self.extract_dest = getattr(args, 'extract_dest', self.extract_dest)
         self.nostats = getattr(args, 'nostats', self.nostats)
+        self.no_backpressure = getattr(args, 'no_backpressure', self.no_backpressure)
+        self.collect_xpath_stats = getattr(args, 'collect_xpath_stats', self.collect_xpath_stats)
 
     def is_quiet(self) -> bool:
         """Check if quiet mode is enabled"""

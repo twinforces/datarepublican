@@ -609,12 +609,18 @@ class BaseProducer(BaseProcessor):
         # Get worker count from global config
         worker_count = getattr(global_config, 'workers', 1)
 
+        # Determine run mode suffix
+        if global_config.no_backpressure:
+            mode_suffix = 'fast' if worker_count > 4 else 'noback'
+        else:
+            mode_suffix = 'back'
+
         # Create timestamp for filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Generate filenames
-        stats_filename = f"pipeline_profile_{timestamp}_{operation_name}_{worker_count}workers.stats"
-        txt_filename = f"pipeline_profile_{timestamp}_{operation_name}_{worker_count}workers.txt"
+        # Generate filenames with mode suffix
+        stats_filename = f"pipeline_profile_{timestamp}_{operation_name}_{worker_count}workers_{mode_suffix}.stats"
+        txt_filename = f"pipeline_profile_{timestamp}_{operation_name}_{worker_count}workers_{mode_suffix}.txt"
 
         # Generate profiling stats
         s = io.StringIO()
@@ -644,6 +650,7 @@ class BaseProducer(BaseProcessor):
         self.log_info(f"Profiling complete. Results saved to:")
         self.log_info(f"  - {txt_filename} (human-readable report)")
         self.log_info(f"  - {stats_filename} (binary stats for further analysis)")
+        self.log_info(f"  - Mode: {mode_suffix} (backpressure={not global_config.no_backpressure}, workers={worker_count})")
 
         # Print summary to console
         self.log_info("=== Profiling Summary ===")

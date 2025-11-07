@@ -163,6 +163,15 @@ class PendingDatabaseContext:
         """
         return {obj_type: len(objects) for obj_type, objects in self._objects.items()}
 
+    def getTotalObjectCount(self) -> int:
+        """
+        Get total count of all objects in this context.
+
+        Returns:
+            Total number of objects across all types
+        """
+        return sum(len(objects) for objects in self._objects.values())
+
     def save_to_database(self, db_ops: DatabaseOperations) -> List[str]:
         """
         Execute all collected objects and operations directly.

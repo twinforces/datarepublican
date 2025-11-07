@@ -86,6 +86,7 @@ CURRENT_PROCESSING_VERSION = 3
 MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
+CONSUMER_BATCH_SIZE = 50  # Reduced from 100 to trigger more frequent GC and memory cleanup
 
 # Address processing constants
 ADDRESS_BATCH_SIZE = 1000

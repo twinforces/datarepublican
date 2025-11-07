@@ -148,7 +148,7 @@ class DatabaseOperations:
         from uuid7 import generate_uuid_v7
         return generate_uuid_v7()
 
-    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "4GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
+    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "8GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
         """
         Initialize DuckDB connection with performance optimizations.
 
@@ -958,24 +958,32 @@ class DatabaseOperations:
         if missing_prep_types:
             self.logger.warning(f"Objects without prep_for_insert method: {missing_prep_types}")
 
-        # Pre-insert deduplication check for Charities
+        # Pre-insert deduplication check for Charities - batched for performance
         if type(objects[0]).__name__ == 'Charity' and objects:
-            filtered_objects = []
-            original_count = len(objects)
-            skipped = 0
-            for obj in objects:
-                if hasattr(obj, 'xml_name') and obj.xml_name:
-                    count_result = conn.execute("SELECT COUNT(*) FROM Charities WHERE xml_name = ?", (obj.xml_name,)).fetchone()
-                    count = count_result[0] if count_result else 0
-                    if count > 0:
-                        skipped += 1
-                        continue
-                filtered_objects.append(obj)
-            if skipped > 0 and skipped / original_count > 0.1:
-                log_info(self.logger, f"Skipped {skipped} duplicate charities in bulk insert")
-            objects = filtered_objects
-            if not objects:
-                return []
+            # Collect all xml_names for batch query
+            xml_names = [obj.xml_name for obj in objects if hasattr(obj, 'xml_name') and obj.xml_name]
+            if xml_names:
+                # Single query to get counts for all xml_names
+                placeholders = ','.join(['?' for _ in xml_names])
+                query = f"SELECT xml_name, COUNT(*) FROM Charities WHERE xml_name IN ({placeholders}) GROUP BY xml_name"
+                existing_counts = dict(conn.execute(query, tuple(xml_names)).fetchall())
+                
+                # Filter objects based on batch results
+                filtered_objects = []
+                skipped = 0
+                for obj in objects:
+                    if hasattr(obj, 'xml_name') and obj.xml_name:
+                        count = existing_counts.get(obj.xml_name, 0)
+                        if count > 0:
+                            skipped += 1
+                            continue
+                    filtered_objects.append(obj)
+                
+                if skipped > 0:
+                    log_info(self.logger, f"Skipped {skipped} duplicate charities in bulk insert (batch check)")
+                objects = filtered_objects
+                if not objects:
+                    return []
 
         table_name = self._get_table_name(obj_type)
         model_fields = set(obj_type.get_db_field_names())

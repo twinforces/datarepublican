@@ -87,7 +87,7 @@ class IRS990Processor:
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
-                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None, progress: str = "files", extract: Optional[List[str]] = None, extract_dest: Optional[str] = None, nostats: bool = False):
+                 final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None, progress: str = "files", extract: Optional[List[str]] = None, extract_dest: Optional[str] = None, nostats: bool = False, no_backpressure: bool = False, collect_xpath_stats: bool = False):
         # Set global config from parameters (for backward compatibility)
         global_config.db_path = db_path if db_path != DEFAULT_DB_PATH else os.path.join(final_dir, "irs990.duckdb")
         global_config.final_dir = final_dir
@@ -106,6 +106,8 @@ class IRS990Processor:
         global_config.extract = extract
         global_config.extract_dest = extract_dest
         global_config.nostats = nostats
+        global_config.no_backpressure = no_backpressure
+        global_config.collect_xpath_stats = collect_xpath_stats
 
         # Determine database path
         if db_path == DEFAULT_DB_PATH:
@@ -179,6 +181,7 @@ class IRS990Processor:
         self.extract = extract
         self.extract_dest = extract_dest
         self.nostats = nostats
+        self.collect_xpath_stats = collect_xpath_stats
 
     def _init_database(self):
         """Initialize DuckDB database with schema"""
@@ -413,12 +416,134 @@ class IRS990Processor:
         if self.profile_seconds:
             return self._profile_xml_processing()
 
-        return self.xml_processor.process_xml_files(self.max_files, self.workers)
+        # Dynamic worker adjustment based on available memory
+        import psutil
+        available_memory_gb = psutil.virtual_memory().available / (1024**3)
+        dynamic_workers = max(1, min(self.workers, int(available_memory_gb * 2)))  # Rough heuristic: 0.5GB per worker
+        if dynamic_workers < self.workers:
+            self.log_info(f"Reducing workers from {self.workers} to {dynamic_workers} due to low memory ({available_memory_gb:.1f}GB available)")
+
+        return self.xml_processor.process_xml_files(self.max_files, dynamic_workers, collect_xpath_stats=self.collect_xpath_stats)
 
     def _profile_xml_processing(self):
         """Profile XML processing for a specified number of seconds"""
-        # This method is not implemented yet - placeholder for profiling functionality
-        return None
+        import cProfile
+        import pstats
+        import io
+        from datetime import datetime
+        import signal
+        import threading
+
+        self.log_info(f"Starting profiling for {self.profile_seconds} seconds during XML processing")
+
+        # Create a timeout event for clean shutdown
+        timeout_event = threading.Event()
+
+        def timeout_handler(signum, frame):
+            self.log_info(f"Profiling timeout reached after {self.profile_seconds} seconds")
+            timeout_event.set()
+
+        # Set up timeout alarm
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(self.profile_seconds)
+
+        # Temporarily disable profiling flag to prevent recursion
+        original_profile_seconds = self.profile_seconds
+        self.profile_seconds = None
+
+        # Start profiling
+        profiler = cProfile.Profile()
+        profiler.enable()
+        start_time = time.time()
+
+        try:
+            # Run the actual processing with timeout handling
+            result = self.xml_processor.process_xml_files(self.max_files, self.workers, timeout_event=timeout_event, collect_xpath_stats=self.collect_xpath_stats)
+        except KeyboardInterrupt:
+            self.log_info("Profiling interrupted by timeout")
+            # Signal producers to stop
+            self.xml_processor.shutdown_event.set()
+            result = None
+        finally:
+            # Restore profiling flag
+            self.profile_seconds = original_profile_seconds
+
+            # Cancel the alarm
+            signal.alarm(0)
+
+            # Stop profiling
+            profiler.disable()
+            end_time = time.time()
+            execution_time = end_time - start_time
+
+            self.log_info(f"XML processing profiling complete. Time: {execution_time:.2f}s")
+
+            # Generate profiling report
+            self._generate_profiling_report("xml_processing", execution_time, result or 0, profiler)
+
+        return result
+
+    def _generate_profiling_report(self, operation_name: str, execution_time: float, work_items_processed: int, profiler):
+        """
+        Generate profiling report files similar to profile_pipeline.py examples.
+        """
+        # Get worker count from global config
+        worker_count = getattr(global_config, 'workers', 1)
+
+        # Determine run mode suffix
+        if global_config.no_backpressure:
+            mode_suffix = 'fast' if worker_count > 4 else 'noback'
+        else:
+            mode_suffix = 'back'
+
+        # Create timestamp for filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Generate filenames with mode suffix
+        stats_filename = f"pipeline_profile_{timestamp}_{operation_name}_{worker_count}workers_{mode_suffix}.stats"
+        txt_filename = f"pipeline_profile_{timestamp}_{operation_name}_{worker_count}workers_{mode_suffix}.txt"
+
+        # Generate profiling stats
+        s = io.StringIO()
+        ps = pstats.Stats(profiler, stream=s).sort_stats('cumulative')
+        ps.print_stats(50)  # Top 50 functions by cumulative time
+        profiling_output = s.getvalue()
+
+        # Calculate metrics
+        processing_rate = work_items_processed / execution_time if execution_time > 0 else 0
+        throughput = work_items_processed / execution_time * 60  # items per minute
+
+        # Save stats file
+        profiler.dump_stats(stats_filename)
+
+        # Save human-readable report
+        with open(txt_filename, "w") as f:
+            f.write(f"=== IRS 990 {operation_name.title()} Profiling Report ===\n")
+            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            f.write(f"Execution Time: {execution_time:.2f} seconds\n")
+            f.write(f"Work Items Processed: {work_items_processed}\n")
+            f.write(f"Processing Rate: {processing_rate:.2f} items/second\n")
+            f.write(f"Throughput: {throughput:.2f} items/minute\n")
+            f.write(f"Worker Threads: {worker_count}\n\n")
+            f.write("=== Top 50 Functions by Cumulative Time ===\n")
+            f.write(profiling_output)
+
+        self.log_info(f"Profiling complete. Results saved to:")
+        self.log_info(f"  - {txt_filename} (human-readable report)")
+        self.log_info(f"  - {stats_filename} (binary stats for further analysis)")
+        self.log_info(f"  - Mode: {mode_suffix} (backpressure={not global_config.no_backpressure}, workers={worker_count})")
+
+        # Print summary to console
+        self.log_info("=== Profiling Summary ===")
+        self.log_info(f"Execution time: {execution_time:.2f} seconds")
+        self.log_info(f"Work items processed: {work_items_processed}")
+        self.log_info(f"Processing rate: {processing_rate:.2f} items/sec")
+        self.log_info(f"Throughput: {throughput:.2f} items/min")
+        self.log_info("Top 10 most time-consuming functions:")
+        lines = profiling_output.split('\n')
+        for line in lines[:15]:  # First 15 lines contain the top functions
+            if line.strip():
+                self.log_info(line)
 
     def _get_xml_files_to_process(self) -> List[Tuple]:
         """Get list of XML files to process from database"""
@@ -561,6 +686,8 @@ def main():
     parser.add_argument("--extract", nargs='+', help="List of EINs to extract XML files for")
     parser.add_argument("--extract-dest", help="Destination directory for extracted XML files")
     parser.add_argument("--nostats", action="store_true", help="Skip stats report generation after each step")
+    parser.add_argument("--no-backpressure", action="store_true", help="Disable backpressure mechanism for producer threads")
+    parser.add_argument("--collect-xpath-stats", action="store_true", help="Collect XPath performance statistics (only in thread 0 to avoid race conditions)")
 
     args = parser.parse_args()
 
@@ -616,7 +743,9 @@ def main():
         workers=global_config.workers,
         dbUI=global_config.dbUI,
         profile_seconds=global_config.profile_seconds,
-        nostats=global_config.nostats
+        nostats=global_config.nostats,
+        no_backpressure=global_config.no_backpressure,
+        collect_xpath_stats=global_config.collect_xpath_stats
     )
 
     # Handle extract mode
