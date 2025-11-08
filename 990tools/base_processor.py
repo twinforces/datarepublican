@@ -806,6 +806,7 @@ def dump_threads_handler(signum, frame):
         print(f"\n{'='*60}", file=sys.stderr)
         print(f"Stack traces for {len(frames)} threads (PID: {os.getpid()})", file=sys.stderr)
         print(f"Time: {time.ctime()}", file=sys.stderr)
+        print(f"Signal: {signum} (USR1)", file=sys.stderr)
         print(f"{'='*60}\n", file=sys.stderr)
 
         for thread_id, frame in frames.items():
@@ -817,6 +818,7 @@ def dump_threads_handler(signum, frame):
             print("".join(stack_lines), file=sys.stderr)
 
         print(f"{'='*60}\n", file=sys.stderr)
+        print("Thread dump complete. Process continuing...", file=sys.stderr)
         sys.stderr.flush()  # Ensure output in signal context.
     except Exception as e:
         print(f"Error in thread dump: {e}", file=sys.stderr)

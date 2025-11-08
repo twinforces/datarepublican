@@ -243,6 +243,7 @@ class DatabaseOperations:
 
     def _preload_zip_file_cache(self):
         """Preload all zip_id -> file_path mappings and ZipFile objects into the static cache at startup"""
+        import time
         with DatabaseOperations._zip_cache_lock:
             if DatabaseOperations._zip_path_cache:
                 # Already preloaded
@@ -250,16 +251,20 @@ class DatabaseOperations:
 
             try:
                 log_info("Preloading zip path and object cache...")
+                start_time = time.time()
                 # Query all ZipFile records from database
                 zip_files = self.select_dataclass(ZipFile, order_by="zip_id")
-                log_info(f"Loaded {len(zip_files)} ZipFile objects from database")
+                query_time = time.time() - start_time
+                log_info(f"Loaded {len(zip_files)} ZipFile objects from database in {query_time:.3f}s")
 
                 # Populate the cache with zip_id -> file_path mappings and ZipFile objects
+                cache_start = time.time()
                 for zip_file in zip_files:
                     DatabaseOperations._zip_path_cache[zip_file.zip_id] = zip_file.file_path
                     DatabaseOperations._zip_file_cache[zip_file.zip_id] = zip_file
+                cache_time = time.time() - cache_start
 
-                log_info(f"Zip path cache preloaded with {len(DatabaseOperations._zip_path_cache)} entries")
+                log_info(f"Zip path cache preloaded with {len(DatabaseOperations._zip_path_cache)} entries in {cache_time:.3f}s")
                 log_info(f"Zip object cache preloaded with {len(DatabaseOperations._zip_file_cache)} entries")
 
             except Exception as e:
@@ -270,6 +275,7 @@ class DatabaseOperations:
         """Preload table metadata cache from pickled file or build it"""
         import pickle
         import os
+        import time
 
         cache_file = os.path.join(os.path.dirname(__file__), 'table_metadata_cache.pkl')
 
@@ -285,19 +291,26 @@ class DatabaseOperations:
                 log_info(f"Loaded table metadata cache from {cache_file} with {len(DatabaseOperations._table_metadata_cache)} entries")
                 return
 
-            # Build cache from database schema
+            # Build cache from database schema with timing
             log_info("Building table metadata cache...")
             tables = ['ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants', 'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding']
 
+            total_start = time.time()
             for table in tables:
                 try:
+                    table_start = time.time()
                     columns = self._get_table_columns(table)
+                    table_time = time.time() - table_start
                     DatabaseOperations._table_metadata_cache[table] = {
                         'columns': columns,
                         'column_count': len(columns)
                     }
+                    log_info(f"  {table}: {len(columns)} columns in {table_time:.3f}s")
                 except Exception as e:
                     log_warning(f"Could not get metadata for table {table}: {e}")
+
+            total_time = time.time() - total_start
+            log_info(f"Table metadata cache built with {len(DatabaseOperations._table_metadata_cache)} entries in {total_time:.3f}s")
 
             # Save to pickled file for future use
             try:
@@ -306,8 +319,6 @@ class DatabaseOperations:
                 log_info(f"Saved table metadata cache to {cache_file}")
             except Exception as e:
                 log_warning(f"Could not save table metadata cache: {e}")
-
-            log_info(f"Table metadata cache built with {len(DatabaseOperations._table_metadata_cache)} entries")
 
         except Exception as e:
             log_error(f"Failed to preload table metadata cache: {e}")

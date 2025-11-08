@@ -842,6 +842,7 @@ class XMLProcessor(BaseProcessor):
         while True:
             with self._available_items_lock:
                 items_left = self._available_items > 0
+            # Only exit when all producers are done AND no items remain in queue
             if sentinels_received >= num_producers and not items_left:
                 break
 
@@ -871,16 +872,19 @@ class XMLProcessor(BaseProcessor):
                 if available_count == 0:
                     with self._sentinel_lock:
                         if self._sentinel_count >= num_producers:
-                            # All producers done, wait for sentinel
+                            # All producers done, but still check for any remaining items in queue
                             try:
-                                item = operations_queue.get(timeout=1.0)
-                                if item is None:
-                                    sentinels_received += 1
-                                else:
-                                    batch_fetched.append(item)
-                                    with self._available_items_lock:
-                                        self._available_items -= 1
+                                # Try to get any remaining items without timeout first
+                                while True:
+                                    item = operations_queue.get_nowait()
+                                    if item is None:
+                                        sentinels_received += 1
+                                    else:
+                                        batch_fetched.append(item)
+                                        with self._available_items_lock:
+                                            self._available_items -= 1
                             except queue.Empty:
+                                # No more items, safe to exit
                                 pass
                     continue
 

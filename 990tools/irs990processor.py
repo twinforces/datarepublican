@@ -123,8 +123,8 @@ class IRS990Processor(BaseProcessor):
         self.processed_steps = 0
   
         # Setup logging
-        # Log that signal handler is active (USR1 handler is set up in processing_strategy.py)
-        log_info("USR1 signal handler available for stack trace dumps (via processing_strategy.py)")
+        # Log that signal handler is active (USR1 handler is set up in base_processor.py)
+        log_info("USR1 signal handler available for stack trace dumps (via base_processor.py)")
   
         # Initialize components
         self.db_ops = DatabaseOperations(self.db_path, dbUI=global_config.dbUI)

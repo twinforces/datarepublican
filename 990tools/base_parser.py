@@ -15,6 +15,7 @@ from models import Charity, Officer, Grant, Contractor, PoliticalContribution, A
 from typing import Optional, List, Tuple, Dict, Any, Callable
 from logging_utils import log_info, log_error, log_debug, log_warning
 from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES
+from config import global_config
 
 
 class BaseParser:
@@ -89,8 +90,12 @@ class BaseParser:
 
         for elem in elements:
             # Direct element access instead of parse_string_field for better performance
-            name_elem = elem.find("irs:PersonNm", namespaces) or elem.find("PersonNm")
-            comp_elem = elem.find("irs:ReportableCompFromOrgAmt", namespaces) or elem.find("ReportableCompFromOrgAmt")
+            name_elem = elem.find("irs:PersonNm", namespaces)
+            if name_elem is None:
+                name_elem = elem.find("PersonNm")
+            comp_elem = elem.find("irs:ReportableCompFromOrgAmt", namespaces)
+            if comp_elem is None:
+                comp_elem = elem.find("ReportableCompFromOrgAmt")
 
             if name_elem is not None and comp_elem is not None:
                 name_text = name_elem.text.strip()
@@ -477,23 +482,23 @@ class BaseParser:
         for contractor_elem in contractor_groups:
             # Direct element access for name and compensation
             name_elem = contractor_elem.find("irs:ContractorName/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if not name_elem:
+            if name_elem is None:
                 name_elem = contractor_elem.find("ContractorName/BusinessName/BusinessNameLine1Txt")
-            if not name_elem:
+            if name_elem is None:
                 name_elem = contractor_elem.find("irs:ContractorName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if not name_elem:
+            if name_elem is None:
                 name_elem = contractor_elem.find("ContractorName/BusinessNameLine1Txt")
-            if not name_elem:
+            if name_elem is None:
                 name_elem = contractor_elem.find("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if not name_elem:
+            if name_elem is None:
                 name_elem = contractor_elem.find("BusinessName/BusinessNameLine1Txt")
 
             comp_elem = contractor_elem.find("irs:ContractorCompensationAmt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if not comp_elem:
+            if comp_elem is None:
                 comp_elem = contractor_elem.find("ContractorCompensationAmt")
-            if not comp_elem:
+            if comp_elem is None:
                 comp_elem = contractor_elem.find("irs:CompensationAmt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if not comp_elem:
+            if comp_elem is None:
                 comp_elem = contractor_elem.find("CompensationAmt")
 
             if name_elem is not None and comp_elem is not None:
