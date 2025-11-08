@@ -62,7 +62,7 @@ class Charity(BaseModel):
     travel_ptile_value: Optional[float] = None
     updated_at: Optional[str] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate EIN after initialization"""
         if self.ein is None or not self.ein or self.ein == "Unknown":
             raise ValueError(f"Invalid EIN '{self.ein}' for Charity creation")
@@ -91,27 +91,31 @@ class Charity(BaseModel):
                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                      zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         address = Address(
             ein=self.ein,
             name=self.filer_name or "Unknown",
-            address_line1=address_line1,
-            address_line2=address_line2,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-            zip4=zip4,
+            address_line1=address_line1 or "",
+            address_line2=address_line2 or "",
+            city=city or "",
+            state=state or "",
+            zip_code=zip_code or "",
+            zip4=zip4 or "",
             address_type="charity",
             owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
         )
         return address
 
-    def build_grant(self, grant_ein: Optional[str] = None, grant_amt: float = 0.0,
+    def build_grant(self, recipient_ein: Optional[str] = None, grant_amt: float = 0.0,
                     grantee_name: Optional[str] = None) -> Grant:
         """Build a Grant dataclass record owned by this charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         grant = Grant(
             filer_ein=self.ein,
             filer_name=self.filer_name or "Unknown",
-            grant_ein=grant_ein or "",
+            recipient_ein=recipient_ein or "",
             grant_amt=grant_amt,
             tax_year=self.tax_year,
             grantee_name=grantee_name or "",
@@ -121,11 +125,13 @@ class Charity(BaseModel):
 
     def build_contractor(self, name: str = "", amount: float = 0.0, ein: Optional[str] = None) -> Contractor:
         """Build a Contractor dataclass record owned by this charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         contractor = Contractor(
             filer_ein=self.ein,
-            name=name,
+            name=name or "",
             amount=amount,
-            ein=ein,
+            ein=ein or "",
             tax_year=self.tax_year,
             charity_id = self.id
         )
@@ -133,9 +139,11 @@ class Charity(BaseModel):
 
     def build_political_contribution(self, recipient: str = "", amount: float = 0.0) -> PoliticalContribution:
         """Build a PoliticalContribution dataclass record owned by this charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         contribution = PoliticalContribution(
             filer_ein=self.ein,
-            recipient=recipient,
+            recipient=recipient or "",
             amount=amount,
             tax_year=self.tax_year,
             charity_id = self.id
@@ -144,7 +152,7 @@ class Charity(BaseModel):
 
     # get_db_field_names is now inherited from BaseModel and uses dataclass fields
 
-    def prep_for_insert(self):
+    def prep_for_insert(self) -> None:
         """Prepare the record for database insertion"""
         #print(f"#### Charity prep_for_insert: xml_name={self.xml_name} (type: {type(self.xml_name)})")
         super().prep_for_insert()
@@ -161,46 +169,52 @@ class Charity(BaseModel):
     @classmethod
     def create_from_xml(cls, ein: str, tax_year: int, form_type: str, xml_name: str, filer_name: str = "", business_name: str = "", org_type: str = "") -> 'Charity':
         """Factory method to create a Charity from XML metadata"""
-        return cls(
-            ein=ein,
+        charity = cls(
+            ein=ein or "",
             tax_year=tax_year,
-            form_type=form_type,
-            xml_name=xml_name,
-            filer_name=filer_name,
-            org_type=org_type
+            form_type=form_type or "",
+            xml_name=xml_name or "",
+            filer_name=filer_name or "",
+            org_type=org_type or ""
         )
+        charity.id = charity.generate_id()
+        return charity
 
     def create_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                       city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                       zip4: Optional[str] = None, address_type: str = "charity") -> Address:
         """Factory method to create an Address owned by this Charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         return Address.create_for_charity(
             charity=self,
-            address_line1=address_line1,
-            address_line2=address_line2,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-            zip4=zip4,
-            address_type=address_type
+            address_line1=address_line1 or "",
+            address_line2=address_line2 or "",
+            city=city or "",
+            state=state or "",
+            zip_code=zip_code or "",
+            zip4=zip4 or "",
+            address_type=address_type or "charity"
         )
 
     def create_contractor(self, name: str, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                          city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Contractor:
         """Factory method to create a Contractor owned by this Charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         contractor = Contractor(
             filer_ein=self.ein,
-            name=name,
+            name=name or "",
             tax_year=self.tax_year,
             charity_id=self.id
         )
         if address_line1 or city or state or zip_code:
             contractor.address = contractor.create_address(
-                address_line1=address_line1,
-                address_line2=address_line2,
-                city=city,
-                state=state,
-                zip_code=zip_code
+                address_line1=address_line1 or "",
+                address_line2=address_line2 or "",
+                city=city or "",
+                state=state or "",
+                zip_code=zip_code or ""
             )
         return contractor
 
@@ -208,53 +222,59 @@ class Charity(BaseModel):
                       city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> 'Officer':
         """Factory method to create an Officer owned by this Charity"""
         from .officer import Officer
+        if self.id is None:
+            self.id = self.generate_id()
         officer = Officer(
             filer_ein=self.ein,
-            name=name,
-            title=title,
+            name=name or "",
+            title=title or "",
             tax_year=self.tax_year,
             charity_id=self.id
         )
         if address_line1 or city or state or zip_code:
             officer.address = officer.create_address(
-                address_line1=address_line1,
-                address_line2=address_line2,
-                city=city,
-                state=state,
-                zip_code=zip_code
+                address_line1=address_line1 or "",
+                address_line2=address_line2 or "",
+                city=city or "",
+                state=state or "",
+                zip_code=zip_code or ""
             )
         return officer
 
-    def create_grant(self, grantee_name: str, grantee_ein: Optional[str] = None, amount: Optional[float] = None,
+    def create_grant(self, recipient_ein: str, grantee_ein: Optional[str] = None, amount: Optional[float] = None,
                     purpose: Optional[str] = None, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> Grant:
         """Factory method to create a Grant owned by this Charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         grant = Grant(
             filer_ein=self.ein,
-            filer_name=self.filer_name,
-            grant_ein=grantee_ein or "",
+            filer_name=self.filer_name or "",
+            recipient_ein=grantee_ein or "",
             grant_amt=amount or 0.0,
             tax_year=self.tax_year,
-            grantee_name=grantee_name,
+            grantee_name=grantee_name or "",
             charity_id=self.id
         )
         if address_line1 or city or state or zip_code:
             grant.address = grant.create_address(
-                address_line1=address_line1,
-                address_line2=address_line2,
-                city=city,
-                state=state,
-                zip_code=zip_code
+                address_line1=address_line1 or "",
+                address_line2=address_line2 or "",
+                city=city or "",
+                state=state or "",
+                zip_code=zip_code or ""
             )
         return grant
 
     def create_political_contribution(self, recipient_name: str, amount: Optional[float] = None,
                                     recipient_ein: Optional[str] = None) -> PoliticalContribution:
         """Factory method to create a PoliticalContribution owned by this Charity"""
+        if self.id is None:
+            self.id = self.generate_id()
         return PoliticalContribution(
             filer_ein=self.ein,
-            recipient=recipient_name,
-            amount=amount,
+            recipient=recipient_name or "",
+            amount=amount or 0.0,
             tax_year=self.tax_year,
             charity_id=self.id
         )

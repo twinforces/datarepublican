@@ -92,7 +92,7 @@ class BaseParser:
             name_elem = elem.find("irs:PersonNm", namespaces) or elem.find("PersonNm")
             comp_elem = elem.find("irs:ReportableCompFromOrgAmt", namespaces) or elem.find("ReportableCompFromOrgAmt")
 
-            if name_elem is not None and name_elem.text and comp_elem is not None and comp_elem.text:
+            if name_elem is not None and comp_elem is not None:
                 name_text = name_elem.text.strip()
                 try:
                     comp_value = int(float(comp_elem.text.strip().replace(',', '')))
@@ -458,50 +458,66 @@ class BaseParser:
         form_type: Optional[str] = None,
         xpath_match_stats: Optional[Dict[str, int]] = None
     ) -> None:
-        """Parse Schedule L (Contractors) - optimized XPath union for better performance"""
-        from xpaths import CONTRACTOR_UNION_XPATH, CONTRACTOR_NAME_UNION_XPATH, CONTRACTOR_COMP_UNION_XPATH
+        """Parse Schedule L (Contractors) - optimized direct element access for better performance"""
+        # Use direct element access for contractor parsing - much faster than XPath unions
+        # Contractors are typically in the top-level form data, not in separate schedules
 
-        # Get all contractor elements in one query
-        contractor_elements: List[etree._Element] = CONTRACTOR_UNION_XPATH(root)
+        # Pre-resolve charity to avoid repeated getCharity() calls
+        charity_obj = context.getCharity()
+        if not charity_obj:
+            return
 
-        # Process each contractor element
-        for contractor_elem in contractor_elements:
-            name_elements: List[etree._Element] = CONTRACTOR_NAME_UNION_XPATH(contractor_elem)
-            comp_elements: List[etree._Element] = CONTRACTOR_COMP_UNION_XPATH(contractor_elem)
+        # Direct element access for contractor compensation groups
+        contractor_groups = []
+        contractor_groups.extend(root.findall(".//irs:ContractorCompensationGrp", namespaces={'irs': 'http://www.irs.gov/efile'}))
+        contractor_groups.extend(root.findall(".//ContractorCompensationGrp"))
+        contractor_groups.extend(root.findall(".//irs:CompensationOfHghstPdCntrctGrp", namespaces={'irs': 'http://www.irs.gov/efile'}))
+        contractor_groups.extend(root.findall(".//CompensationOfHghstPdCntrctGrp"))
 
-            contractor_name: Optional[str] = None
-            contractor_comp: Optional[int] = None
+        for contractor_elem in contractor_groups:
+            # Direct element access for name and compensation
+            name_elem = contractor_elem.find("irs:ContractorName/irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if not name_elem:
+                name_elem = contractor_elem.find("ContractorName/BusinessName/BusinessNameLine1Txt")
+            if not name_elem:
+                name_elem = contractor_elem.find("irs:ContractorName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if not name_elem:
+                name_elem = contractor_elem.find("ContractorName/BusinessNameLine1Txt")
+            if not name_elem:
+                name_elem = contractor_elem.find("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if not name_elem:
+                name_elem = contractor_elem.find("BusinessName/BusinessNameLine1Txt")
 
-            # Get first valid name
-            for name_elem in name_elements:
-                if name_elem.text and name_elem.text.strip():
-                    contractor_name = name_elem.text.strip()
-                    break
+            comp_elem = contractor_elem.find("irs:ContractorCompensationAmt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if not comp_elem:
+                comp_elem = contractor_elem.find("ContractorCompensationAmt")
+            if not comp_elem:
+                comp_elem = contractor_elem.find("irs:CompensationAmt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if not comp_elem:
+                comp_elem = contractor_elem.find("CompensationAmt")
 
-            # Get first valid compensation
-            for comp_elem in comp_elements:
-                if comp_elem.text and comp_elem.text.strip():
+            if name_elem is not None and comp_elem is not None:
+                name_text = name_elem.text.strip() if name_elem.text else None
+                comp_text = comp_elem.text.strip() if comp_elem.text else None
+
+                if name_text and comp_text:
                     try:
-                        contractor_comp = int(comp_elem.text.strip())
-                        break
-                    except ValueError:
+                        comp_value = int(float(comp_text.replace(',', '')))
+                        if comp_value > 0:
+                            from models import Contractor
+                            contractor = Contractor(
+                                name=name_text,
+                                amount=comp_value,
+                                tax_year=charity_obj.tax_year,
+                                charity_id=charity_obj.id
+                            )
+                            context.addObjectToDatabase(contractor)
+
+                            if not global_config.is_quiet():
+                                log_info("Parsed contractor {0} compensation: ${1} for EIN {2} in {3}",
+                                          name_text, comp_value, charity_obj.ein, xml_filename)
+                    except (ValueError, AttributeError):
                         continue
-
-            # Create contractor if we have valid data
-            if contractor_name and contractor_comp is not None:
-                from models import Contractor
-                contractor = Contractor(
-                    name=contractor_name,
-                    amount=contractor_comp,
-                    tax_year=charity.tax_year if charity else 0,
-                    charity_id=charity.id if charity else None
-                )
-                context.addObjectToDatabase(contractor)
-
-        # Fallback to original method if no contractors found via union
-        if not contractor_elements:
-            from parse_contractors import parse_contractors
-            contractors_data = parse_contractors(root, xml_filename, charity.ein if charity else '', charity.filer_name if charity else '', charity.tax_year if charity else 0, form_type, context=context)
     def parse_address(
         self,
         root: etree._Element,

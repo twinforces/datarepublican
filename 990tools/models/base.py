@@ -18,7 +18,6 @@ class BaseModel(ABC):
 
     # Static cache for table columns to avoid repeated DESCRIBE calls
     _table_columns_cache: Dict[str, List[str]] = {}
-    """Abstract base class for all IRS 990 data models"""
 
     def prep_for_insert(self):
         """Prepare the record for database insertion - base implementation"""

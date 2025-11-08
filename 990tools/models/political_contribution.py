@@ -6,7 +6,7 @@ This module contains the PoliticalContribution dataclass and related business lo
 Political contributions represent payments made to political organizations.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from .base import BaseModel
 from .address import Address
@@ -16,7 +16,7 @@ from .address import Address
 class PoliticalContribution(BaseModel):
     """Represents a political contribution made by a charity"""
 
-    political_id: Optional[int] = None
+    political_id: Optional[int] = field(default=None, init=False)
     filer_ein: str = ""
     recipient: str = ""
     amount: float = 0.0
@@ -35,13 +35,13 @@ class PoliticalContribution(BaseModel):
         """Build an Address dataclass record owned by this political contribution"""
         address = Address(
             ein="",  # Political contributions may not have EINs
-            name=self.recipient,
-            address_line1=address_line1,
-            address_line2=address_line2,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-            zip4=zip4,
+            name=self.recipient or "Unknown Recipient",
+            address_line1=address_line1 or "",
+            address_line2=address_line2 or "",
+            city=city or "",
+            state=state or "",
+            zip_code=zip_code or "",
+            zip4=zip4 or "",
             address_type="politicalcontribution",
             owner_id=self.id  # force creation
         )
@@ -56,9 +56,9 @@ class PoliticalContribution(BaseModel):
     def create_for_charity(cls, charity, recipient: str, amount: float, tax_year: int) -> 'PoliticalContribution':
         """Factory method to create a PoliticalContribution for a specific charity"""
         return cls(
-            filer_ein=charity.ein,
+            filer_ein=charity.ein or "",
             charity_id=charity.id,
-            recipient=recipient,
+            recipient=recipient or "",
             amount=amount,
             tax_year=tax_year
         )
@@ -67,11 +67,11 @@ class PoliticalContribution(BaseModel):
         """Convert to dictionary for database operations"""
         return {
             'political_id': self.political_id,
-            'filer_ein': self.filer_ein,
-            'recipient': self.recipient,
+            'filer_ein': self.filer_ein or "",
+            'recipient': self.recipient or "",
             'amount': self.amount,
-            'charity_id': self.charity_id,
+            'charity_id': self.charity_id or "",
             'tax_year': self.tax_year,
-            'colocator': self.colocator,
-            'created_at': self.created_at
+            'colocator': self.colocator or "",
+            'created_at': self.created_at or ""
         }

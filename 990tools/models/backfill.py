@@ -16,7 +16,7 @@ class Backfill:
     """Represents backfill data for unknown grantee EINs"""
 
     backfill_id: Optional[str] = field(default=None, init=False)
-    grant_ein: str = ""
+    recipient_ein: str = ""
     name: str = ""
     canonical_address: Optional[str] = None
     po_box: Optional[str] = None
@@ -47,7 +47,7 @@ class Backfill:
         """Convert to dictionary for database operations"""
         return {
             'backfill_id': self.backfill_id,
-            'grant_ein': self.grant_ein,
+            'recipient_ein': self.recipient_ein,
             'name': self.name,
             'canonical_address': self.canonical_address,
             'po_box': self.po_box,

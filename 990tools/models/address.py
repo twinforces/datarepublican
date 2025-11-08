@@ -21,6 +21,7 @@ from constants import VALID_STATES, PO_BOX_REGEX, PO_BOX_NUMBER_REGEX, STREET_FI
 from countryCodes import lookupCC
 from .base import BaseModel
 from models.geocoding import Geocoding
+from logging_utils import log_debug
 
 
 @dataclass
@@ -214,11 +215,7 @@ class Address(BaseModel):
         }
 
         # Debug logging: Log census_json creation
-        from logging_utils import log_debug, get_logger
-        logger = get_logger("address")
-        from config import global_config
-        if not global_config.is_quiet():
-            log_debug(logger, f"Address {self.address_id} census_json: street='{census_data['street']}', city='{census_data['city']}', state='{census_data['state']}', zip='{census_data['zip']}'")
+        log_debug(f"Address {self.address_id} census_json: street='{census_data['street']}', city='{census_data['city']}', state='{census_data['state']}', zip='{census_data['zip']}'")
 
         return census_data
 

@@ -21,10 +21,11 @@ class Grant(BaseModel):
     filer_ein: str = ""
     filer_name: str = ""
     grantee_name: str = ""
-    grant_ein: Optional[str] = None
+    recipient_ein: Optional[str] = None
     grant_amt: float = 0.0
     tax_year: int = 0
     colocator: Optional[str] = None
+    filer_colocator: Optional[str] = None
     created_at: Optional[str] = None
 
     def is_large_grant(self) -> bool:
@@ -33,21 +34,21 @@ class Grant(BaseModel):
 
     def is_foreign_grant(self) -> bool:
         """Check if grant is to a foreign recipient"""
-        return bool(self.grant_ein and (self.grant_ein.startswith('99') or self.grant_ein == '999'))
+        return bool(self.recipient_ein and (self.recipient_ein.startswith('99') or self.recipient_ein == '999'))
 
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                      zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this grant"""
         address = Address(
-            ein=self.grant_ein or "",
+            ein=self.recipient_ein or "",
             name=self.grantee_name or "Unknown Grantee",
-            address_line1=address_line1,
-            address_line2=address_line2,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-            zip4=zip4,
+            address_line1=address_line1 or "",
+            address_line2=address_line2 or "",
+            city=city or "",
+            state=state or "",
+            zip_code=zip_code or "",
+            zip4=zip4 or "",
             address_type="grant",
             owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
         )
@@ -66,13 +67,13 @@ class Grant(BaseModel):
         return self.grant_id
 
     @classmethod
-    def create_for_charity(cls, charity, grantee_name: str, grant_ein: Optional[str], grant_amt: float, tax_year: int) -> 'Grant':
+    def create_for_charity(cls, charity, grantee_name: str, recipient_ein: Optional[str], grant_amt: float, tax_year: int) -> 'Grant':
         """Factory method to create a Grant for a specific charity"""
         return cls(
-            filer_ein=charity.ein,
-            filer_name=charity.filer_name,
-            grantee_name=grantee_name,
-            grant_ein=grant_ein,
+            filer_ein=charity.ein or "",
+            filer_name=charity.filer_name or "",
+            grantee_name=grantee_name or "",
+            recipient_ein=recipient_ein or "",
             grant_amt=grant_amt,
             tax_year=tax_year,
             charity_id=charity.id
@@ -83,12 +84,12 @@ class Grant(BaseModel):
         return {
             'grant_id': self.grant_id,
             'charity_id': self.charity_id,
-            'filer_ein': self.filer_ein,
-            'filer_name': self.filer_name,
-            'grantee_name': self.grantee_name,
-            'grant_ein': self.grant_ein,
+            'filer_ein': self.filer_ein or "",
+            'filer_name': self.filer_name or "",
+            'grantee_name': self.grantee_name or "",
+            'recipient_ein': self.recipient_ein or "",
             'grant_amt': self.grant_amt,
             'tax_year': self.tax_year,
-            'colocator': self.colocator,
-            'created_at': self.created_at
+            'colocator': self.colocator or "",
+            'created_at': self.created_at or ""
         }

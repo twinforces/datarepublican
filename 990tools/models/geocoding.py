@@ -66,11 +66,11 @@ class Geocoding(BaseModel):
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {
-            'geocoding_id': self.geocoding_id,
-            'normalized_address': self.normalized_address,
+            'geocoding_id': self.geocoding_id or "",
+            'normalized_address': self.normalized_address or "",
             'latitude': self.latitude,
             'longitude': self.longitude,
-            'geocoding_status': self.geocoding_status,
-            'last_attempt': self.last_attempt,
+            'geocoding_status': self.geocoding_status or "pending",
+            'last_attempt': self.last_attempt or "",
             'attempt_count': self.attempt_count
         }
