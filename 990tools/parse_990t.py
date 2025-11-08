@@ -17,18 +17,26 @@ class Parser990T(BaseParser):
 
     def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
         """Stub implementation - not used"""
+        if log_error is None:
+            log_error = self.log_error
         return "Unknown"
 
     def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
         """Stub implementation - not used"""
+        if log_error is None:
+            log_error = self.log_error
         return 0
 
     def parse_travel(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
         """Stub implementation - not used"""
+        if log_error is None:
+            log_error = self.log_error
         return 0
 
     def parse_conferences(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
         """Stub implementation - not used"""
+        if log_error is None:
+            log_error = self.log_error
         return 0
 
     def get_field_parsers(self):
@@ -45,6 +53,8 @@ class Parser990T(BaseParser):
 
     def parse_form(self, root, xml_filename, xpath_cache, context, log_error=None, xpath_match_stats=None):
         """Stub implementation - Form 990-T is skipped"""
+        if log_error is None:
+            log_error = self.log_error
         # Form 990-T is for Exempt Organization Business Income Tax
         # We don't process these forms, just skip them
         # Add generic update operation to update XmlFiles table

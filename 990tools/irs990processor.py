@@ -19,14 +19,13 @@ import argparse
 import time
 import zipfile
 import threading
-import logging
 import cProfile
 import pstats
 import io
 import signal
 import faulthandler
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime
 from queue import Queue
 from io import BytesIO
@@ -50,18 +49,19 @@ from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
 from export_processor import TSVExporter
 from address_matcher import AddressMatcher
-from address_deduplication_processor import AddressDeduplicationProcessor
+from address_deduplication_processor import AddressDeduplicationProcessor  # type: ignore
 from irsfetch_processor import IRSFetchProcessor
 from officer_deduplication_processor import OfficerDeduplicationProcessor
 from photo_processor import PhotoProcessor
 from extract_processor import ExtractProcessor
-from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 
 # Parsing functions are now handled by base_parser factory method
 
 # Import dataclasses
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution
+from base_processor import BaseProcessor
 
 # Constants
 DEFAULT_DB_PATH = "irs990.duckdb"
@@ -78,13 +78,11 @@ MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
 
-# Import XPath constants from xpaths.py
-from xpaths import XPATHS_990, XPATHS_990EZ, XPATHS_990PF, tostring
 
 
-class IRS990Processor:
+class IRS990Processor(BaseProcessor):
     """Main processor class for IRS 990 data"""
-
+  
     def __init__(self, db_path: str = DEFAULT_DB_PATH, zips_dir: str = DEFAULT_ZIPS_DIR,
                  out_dir: str = DEFAULT_OUT_DIR, anal_dir: str = DEFAULT_ANAL_DIR,
                  final_dir: str = DEFAULT_FINAL_DIR, verbose: bool = False, quiet: bool = False, max_files: Optional[int] = None, log_sql: bool = False, workers: int = MAX_WORKERS, dbUI: bool = False, profile_seconds: Optional[int] = None, progress: str = "files", extract: Optional[List[str]] = None, extract_dest: Optional[str] = None, nostats: bool = False, no_backpressure: bool = False, collect_xpath_stats: bool = False):
@@ -108,7 +106,7 @@ class IRS990Processor:
         global_config.nostats = nostats
         global_config.no_backpressure = no_backpressure
         global_config.collect_xpath_stats = collect_xpath_stats
-
+  
         # Determine database path
         if db_path == DEFAULT_DB_PATH:
             db_path = os.path.join(final_dir, "irs990.duckdb")
@@ -122,23 +120,15 @@ class IRS990Processor:
         self.quiet = quiet
         self.max_files = max_files
         self.log_sql = log_sql
-
+        self.processed_steps = 0
+  
         # Setup logging
-        self.logger = get_logger("irs990")
-        # Set root logger level based on global config - individual loggers inherit from root
-        root_logger = logging.getLogger()
-        if global_config.is_quiet():
-            root_logger.setLevel(logging.ERROR)
-        elif global_config.is_verbose():
-            root_logger.setLevel(logging.DEBUG)
-        else:
-            root_logger.setLevel(logging.WARNING)
-
         # Log that signal handler is active (USR1 handler is set up in processing_strategy.py)
-        self.logger.info("USR1 signal handler available for stack trace dumps (via processing_strategy.py)")
-
+        log_info("USR1 signal handler available for stack trace dumps (via processing_strategy.py)")
+  
         # Initialize components
         self.db_ops = DatabaseOperations(self.db_path, dbUI=global_config.dbUI)
+        super().__init__(self.db_ops)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
         self.xml_processor = XMLProcessor(self.db_ops)
         self.geolocation_processor = GeocodingAPIProcessor(self.db_ops)
@@ -158,13 +148,13 @@ class IRS990Processor:
         self.officer_dedup_processor = OfficerDeduplicationProcessor(self.db_ops)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
-
+  
         # Initialize stats processor
         self.stats_processor = self.db_ops.get_stats_processor()
-
+  
         # Initialize database
         self._init_database()
-
+  
         # Initialize instance variables
         self.zips_dir = zips_dir
         self.out_dir = out_dir
@@ -182,6 +172,10 @@ class IRS990Processor:
         self.extract_dest = extract_dest
         self.nostats = nostats
         self.collect_xpath_stats = collect_xpath_stats
+
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        """Custom metrics for IRS990 processor."""
+        return {'processed_steps': self.processed_steps}
 
     def _init_database(self):
         """Initialize DuckDB database with schema"""
@@ -222,22 +216,6 @@ class IRS990Processor:
         print("\n=== END STACK TRACE DUMP ===", file=sys.stderr)
         sys.stderr.flush()
 
-    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
-        """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
-
-    def log_info(self, msg: str, *args, ein: Optional[str] = None):
-        """Log info with optional EIN context"""
-        log_info(self.logger, msg, *args, ein=ein)
-
-    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
-        """Log debug with optional EIN context"""
-        log_debug(self.logger, msg, *args, ein=ein)
-
-    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
-        """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, *args, ein=ein)
-
         """Recompress ZIP files to standard format using 7z and zip"""
         import glob
         import shutil
@@ -265,8 +243,8 @@ class IRS990Processor:
         def recompress_zip(zip_file):
             """Recompress a single ZIP file using Deflate."""
             base_name = os.path.basename(zip_file)
-            self.log_info(f"Recompressing {zip_file}...")
-            self.log_debug(f"Current working directory: {os.getcwd()}")
+            log_info(f"Recompressing {zip_file}...")
+            log_debug(f"Current working directory: {os.getcwd()}")
 
             # Clean temp directory
             temp_dir = os.path.join(self.zips_dir, "temp")
@@ -280,7 +258,7 @@ class IRS990Processor:
             # Create temp directory
             os.makedirs(temp_dir, exist_ok=True)
             temp_path = temp_dir
-            self.log_debug(f"Using temp directory: {temp_path}")
+            log_debug(f"Using temp directory: {temp_path}")
 
             # Extract with 7z
             try:
@@ -292,18 +270,18 @@ class IRS990Processor:
                 )
             except subprocess.CalledProcessError as e:
                 error_msg = f"Error extracting {zip_file}: {e.stderr}"
-                self.log_error(error_msg)
+                log_error(error_msg)
                 return False
 
             # Count extracted files
             extracted_files = len(list(Path(temp_path).rglob("*.xml")))
-            self.log_info(f"Extracted {extracted_files} files from {zip_file}.")
+            log_info(f"Extracted {extracted_files} files from {zip_file}.")
 
             # Recompress with zip in one go
             temp_zip = os.path.join(temp_path, "temp.zip")
-            self.log_debug(f"Creating temp ZIP: {temp_zip}")
+            log_debug(f"Creating temp ZIP: {temp_zip}")
             os.chdir(temp_path)
-            self.log_debug(f"Changed to directory: {os.getcwd()}")
+            log_debug(f"Changed to directory: {os.getcwd()}")
             try:
                 # Compress all XML files in one zip command
                 subprocess.run(
@@ -314,26 +292,26 @@ class IRS990Processor:
                 )
             except subprocess.CalledProcessError as e:
                 error_msg = f"Error recompressing {zip_file}: {e.stderr}"
-                self.log_error(error_msg)
+                log_error(error_msg)
                 os.chdir(self.zips_dir)
                 return False
 
             # Verify temp.zip exists
             if not os.path.exists(temp_zip):
                 error_msg = f"Error: {temp_zip} was not created for {zip_file}."
-                self.log_error(error_msg)
+                log_error(error_msg)
                 os.chdir(self.zips_dir)
                 return False
 
             # Move to output directory using absolute path
             output_zip = os.path.join(self.zips_dir, "recompressed", base_name)
             os.makedirs(os.path.dirname(output_zip), exist_ok=True)
-            self.log_debug(f"Moving {temp_zip} to {output_zip}")
+            log_debug(f"Moving {temp_zip} to {output_zip}")
             try:
                 shutil.move(temp_zip, output_zip)
             except (OSError, shutil.Error) as e:
                 error_msg = f"Error moving {temp_zip} to {output_zip}: {e}"
-                self.log_error(error_msg)
+                log_error(error_msg)
                 os.chdir(self.zips_dir)
                 return False
 
@@ -341,7 +319,7 @@ class IRS990Processor:
             os.chdir(self.zips_dir)
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-            self.log_info(f"Successfully recompressed {zip_file} to recompressed/{base_name}")
+            log_info(f"Successfully recompressed {zip_file} to recompressed/{base_name}")
             return True
 
         check_tools()
@@ -363,26 +341,26 @@ class IRS990Processor:
                 to_check.append(zip_file)
 
         if not to_check:
-            self.log_info("All ZIP files already have recompressed versions. Skipping recompression.")
+            log_info("All ZIP files already have recompressed versions. Skipping recompression.")
             return True
 
-        self.log_info(f"Found {len(to_check)} ZIP files to check for recompression.")
+        log_info(f"Found {len(to_check)} ZIP files to check for recompression.")
 
         to_recompress = []
         for zip_file in to_check:
-            self.log_debug(f"Checking {zip_file}...")
+            log_debug(f"Checking {zip_file}...")
             needs_recompress, reason = check_compression(zip_file)
             if needs_recompress:
-                self.log_info(f"  {reason}")
+                log_info(f"  {reason}")
                 to_recompress.append(zip_file)
             else:
-                self.log_info(f"  {reason}. Skipping.")
+                log_info(f"  {reason}. Skipping.")
 
         if not to_recompress:
-            self.log_info("No ZIP files need recompression.")
+            log_info("No ZIP files need recompression.")
             return
 
-        self.log_info(f"ZIP files to recompress: {len(to_recompress)}")
+        log_info(f"ZIP files to recompress: {len(to_recompress)}")
 
         # Recompress
         success_count = 0
@@ -390,40 +368,55 @@ class IRS990Processor:
             if recompress_zip(zip_file):
                 success_count += 1
             else:
-                self.log_error(f"Failed to recompress {zip_file}.")
+                log_error(f"Failed to recompress {zip_file}.")
                 return False
 
-        self.log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
+        log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
         return True
 
     # Main processing methods that delegate to modules
 
     def fetch_irs_zips(self, start_year: int, end_year: int):
         """Fetch IRS 990 ZIP files from IRS website and recompress (step 1)"""
-        self.log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting IRS ZIP fetch")
+            return False
+        log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
         return self.irs_fetch_processor.fetch_irs_zips(start_year, end_year)
 
     def process_zip_files(self, start_year: int, end_year: int):
         """Process ZIP files and register XML files (step 3)"""
-        self.log_info(f"Processing ZIP files from {start_year} to {end_year}")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting ZIP processing")
+            return 0
+        log_info(f"Processing ZIP files from {start_year} to {end_year}")
         return self.zip_processor.process_zip_files(start_year, end_year)
 
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
-        self.log_info("Processing XML files and extracting data")
-
+        log_info("Processing XML files and extracting data")
+        self.setup_status_gauges(interval=10.0)
+  
         # Handle profiling if requested
         if self.profile_seconds:
             return self._profile_xml_processing()
-
+  
         # Dynamic worker adjustment based on available memory
         import psutil
         available_memory_gb = psutil.virtual_memory().available / (1024**3)
         dynamic_workers = max(1, min(self.workers, int(available_memory_gb * 2)))  # Rough heuristic: 0.5GB per worker
         if dynamic_workers < self.workers:
-            self.log_info(f"Reducing workers from {self.workers} to {dynamic_workers} due to low memory ({available_memory_gb:.1f}GB available)")
-
-        return self.xml_processor.process_xml_files(self.max_files, dynamic_workers, collect_xpath_stats=self.collect_xpath_stats)
+            log_info(f"Reducing workers from {self.workers} to {dynamic_workers} due to low memory ({available_memory_gb:.1f}GB available)")
+      
+        # The XMLProcessor already leverages key-value paging via XMLProducer inheriting from BaseProducer
+        # XMLProducer._get_work_batch uses last_xml_id for WHERE xml_id > last_xml_id ORDER BY xml_id LIMIT batch_size
+        # This ensures concurrent-safe batching without skips/duplicates
+        if self.exit_processing:
+            log_info("Shutdown requested before starting XML processing")
+            return 0
+        result = self.xml_processor.process_xml_files(self.max_files, dynamic_workers, collect_xpath_stats=self.collect_xpath_stats)
+        self.processed_steps += 1
+        return result
 
     def _profile_xml_processing(self):
         """Profile XML processing for a specified number of seconds"""
@@ -434,13 +427,13 @@ class IRS990Processor:
         import signal
         import threading
 
-        self.log_info(f"Starting profiling for {self.profile_seconds} seconds during XML processing")
+        log_info(f"Starting profiling for {self.profile_seconds} seconds during XML processing")
 
         # Create a timeout event for clean shutdown
         timeout_event = threading.Event()
 
         def timeout_handler(signum, frame):
-            self.log_info(f"Profiling timeout reached after {self.profile_seconds} seconds")
+            log_info(f"Profiling timeout reached after {self.profile_seconds} seconds")
             timeout_event.set()
 
         # Set up timeout alarm
@@ -460,11 +453,10 @@ class IRS990Processor:
         result = None
         try:
             # Run the actual processing with timeout handling
-            result = self.xml_processor.process_xml_files(self.max_files, self.workers, timeout_event=timeout_event, collect_xpath_stats=self.collect_xpath_stats)
+            result = self.xml_processor.process_xml_files(self.max_files, self.workers, collect_xpath_stats=self.collect_xpath_stats)
         except KeyboardInterrupt:
-            self.log_info("Profiling interrupted by timeout")
+            log_info("Profiling interrupted by timeout")
             # Signal producers to stop - XMLProcessor doesn't have shutdown_event, use timeout_event instead
-            timeout_event.set()
             result = None
         finally:
             # Restore profiling flag
@@ -478,7 +470,7 @@ class IRS990Processor:
             end_time = time.time()
             execution_time = end_time - start_time
 
-            self.log_info(f"XML processing profiling complete. Time: {execution_time:.2f}s")
+            log_info(f"XML processing profiling complete. Time: {execution_time:.2f}s")
 
             # Generate profiling report
             self._generate_profiling_report("xml_processing", execution_time, result if result is not None else 0, profiler)
@@ -530,41 +522,71 @@ class IRS990Processor:
             f.write("=== Top 50 Functions by Cumulative Time ===\n")
             f.write(profiling_output)
 
-        self.log_info(f"Profiling complete. Results saved to:")
-        self.log_info(f"  - {txt_filename} (human-readable report)")
-        self.log_info(f"  - {stats_filename} (binary stats for further analysis)")
-        self.log_info(f"  - Mode: {mode_suffix} (backpressure={not global_config.no_backpressure}, workers={worker_count})")
+        log_info(f"Profiling complete. Results saved to:")
+        log_info(f"  - {txt_filename} (human-readable report)")
+        log_info(f"  - {stats_filename} (binary stats for further analysis)")
+        log_info(f"  - Mode: {mode_suffix} (backpressure={not global_config.no_backpressure}, workers={worker_count})")
 
         # Print summary to console
-        self.log_info("=== Profiling Summary ===")
-        self.log_info(f"Execution time: {execution_time:.2f} seconds")
-        self.log_info(f"Work items processed: {work_items_processed}")
-        self.log_info(f"Processing rate: {processing_rate:.2f} items/sec")
-        self.log_info(f"Throughput: {throughput:.2f} items/min")
-        self.log_info("Top 10 most time-consuming functions:")
+        log_info("=== Profiling Summary ===")
+        log_info(f"Execution time: {execution_time:.2f} seconds")
+        log_info(f"Work items processed: {work_items_processed}")
+        log_info(f"Processing rate: {processing_rate:.2f} items/sec")
+        log_info(f"Throughput: {throughput:.2f} items/min")
+        log_info("Top 10 most time-consuming functions:")
         lines = profiling_output.split('\n')
         for line in lines[:15]:  # First 15 lines contain the top functions
             if line.strip():
-                self.log_info(line)
+                log_info(line)
 
-    def _get_xml_files_to_process(self) -> List[Tuple]:
-        """Get list of XML files to process from database"""
+    def _get_xml_files_to_process(self, last_xml_id: Optional[str] = None, batch_size: int = 100) -> Tuple[List[Tuple[str, str, str, str, int]], Optional[str]]:
+        """Get list of XML files to process from database using key-value paging"""
         query = """
-            SELECT xml_id, zip_id, filename, internal_path
+            SELECT xml_id, zip_id, filename, internal_path, file_size
             FROM XmlFiles
             WHERE processed = FALSE
-            ORDER BY xml_id
         """
+        params = (batch_size,)
+        if last_xml_id:
+            query += " AND xml_id > ?"
+            params = (last_xml_id,) + params
+        query += " ORDER BY xml_id LIMIT ?"
+        result = self.db_ops.execute_query(query, params)
+        files = result.fetchall()
         if self.max_files:
-            query += f" LIMIT {self.max_files}"
-        result = self.db_ops.execute_query(query)
-        return result.fetchall()
+            # Apply global max_files limit if set
+            total_available = self.db_ops.get_xml_files_to_process_count(processing_version=CURRENT_PROCESSING_VERSION)
+            if total_available > self.max_files:
+                # For simplicity in this method, limit the batch if needed, but full paging handled in XMLProcessor
+                files = files[:self.max_files]
+        max_pk = max(row[0] for row in files) if files else None
+        return files, max_pk
 
-    def _process_xml_files_parallel(self, xml_files: List[Tuple]):
-        """Process XML files using producer-consumer pattern for threading safety"""
+    def _process_xml_files_parallel(self, initial_files: Optional[List[Tuple]] = None):
+        """Process XML files using producer-consumer pattern for threading safety with key-value paging"""
         # This method is deprecated - XML processing is now handled by xml_processor.process_xml_files()
-        pass
-
+        # Updated to use key-value paging for compatibility, but main path uses XMLProcessor
+        if initial_files:
+            # For backward compatibility, process initial batch
+            self._process_batch(xml_files=initial_files)
+        else:
+            # Use paging to process all
+            last_pk = None
+            while True:
+                files, new_last_pk = self._get_xml_files_to_process(last_pk, batch_size=100)
+                if not files:
+                    break
+                self._process_batch(xml_files=files)
+                last_pk = new_last_pk
+                if self.max_files and len(files) >= self.max_files:
+                    break
+    
+    def _process_batch(self, xml_files: List[Tuple]):
+        """Process a batch of XML files (internal helper)"""
+        # Placeholder for batch processing logic - actual implementation delegated to XMLProcessor
+        for xml_id, zip_id, filename, internal_path, file_size in xml_files:
+            # Simulate processing - in real use, this would extract and parse
+            pass
 
 
 
@@ -574,38 +596,46 @@ class IRS990Processor:
 
 
 
-
     def geolocate_addresses(self):
         """Geolocate addresses using census API (step 7) - Phase 2 only"""
+        if self.exit_processing:
+            log_info("Shutdown requested before starting geocoding")
+            return 0
+        self.setup_status_gauges(interval=10.0)
         # Import here to avoid circular imports
         from geocoding_api_processor import GeocodingAPIProcessor
-
+   
         # Check if censusgeocode is available
         if cg is None:
             if not global_config.is_quiet():
-                log_warning(self.logger, "censusgeocode library not available. Skipping geocoding. "
-                                  "To enable geocoding, install with: pip install censusgeocode")
+                log_warning("censusgeocode library not available. Skipping geocoding. "
+                              "To enable geocoding, install with: pip install censusgeocode")
             return 0
-
+   
         try:
             if not global_config.is_quiet():
-                log_info(self.logger, "Starting geocoding API processing (Phase 2) - geocoding records should be created during address deduplication (Phase 1)")
-
+                log_info("Starting geocoding API processing (Phase 2) - geocoding records should be created during address deduplication (Phase 1)")
+   
             # Create and run the API processor for Phase 2
             api_processor = GeocodingAPIProcessor(self.db_ops)
-            return api_processor.process_pending_geocoding_records()
-
+            result = api_processor.process_pending_geocoding_records()
+            self.processed_steps += 1
+            return result
+   
         except Exception as e:
-            log_error(self.logger, f"Address geocoding failed: {e}", exc_info=True)
+            log_error(f"Address geocoding failed: {e}", exc_info=True)
             return 0
 
     def process_officer_photos(self):
         """Process officer photos using Google Knowledge Graph API (step 8)"""
-        self.log_info("Starting officer deduplication")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting officer processing")
+            return 0
+        log_info("Starting officer deduplication")
         dedup_result = self.officer_dedup_processor.deduplicate_officers()
-        self.log_info(f"Officer deduplication complete. Processed {dedup_result} duplicates.")
-
-        self.log_info("Processing officer photos using Google Knowledge Graph API")
+        log_info(f"Officer deduplication complete. Processed {dedup_result} duplicates.")
+  
+        log_info("Processing officer photos using Google Knowledge Graph API")
         return self.photo_processor.process_officer_photos()
 
     def _geolocate_batch(self, batch: List[Tuple]) -> List[Tuple]:
@@ -615,7 +645,10 @@ class IRS990Processor:
 
     def match_grants_by_address(self):
         """Match grants with unknown EINs by address or colocator (step 9)"""
-        self.log_info("Matching grants with unknown EINs by address/colocator")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting grant matching")
+            return 0
+        log_info("Matching grants with unknown EINs by address/colocator")
         return self.address_matcher.match_grants_by_address()
 
     def _find_charity_by_address(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
@@ -630,7 +663,10 @@ class IRS990Processor:
 
     def calculate_percentiles(self):
         """Calculate percentile rankings by org type and tax year (step 10)"""
-        self.log_info("Calculating percentile rankings")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting percentile calculation")
+            return 0
+        log_info("Calculating percentile rankings")
         return self.percentile_calculator.calculate_percentiles()
 
     def _calculate_percentile(self, value: float, sorted_values: List[float]) -> float:
@@ -640,17 +676,23 @@ class IRS990Processor:
 
     def deduplicate_addresses(self):
         """Deduplicate addresses and create master-child relationships (step 4)"""
-        self.log_info("Deduplicating addresses and creating master-child relationships")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting address deduplication")
+            return 0
+        log_info("Deduplicating addresses and creating master-child relationships")
         return self.address_dedup_processor.deduplicate_addresses()
 
     def export_final_tsvs(self):
         """Export final TSV files (step 11)"""
-        self.log_info("Exporting final TSV files")
+        if self.exit_processing:
+            log_info("Shutdown requested before starting export")
+            return
+        log_info("Exporting final TSV files")
         self.tsv_exporter.export_final_tsvs()
 
     def extract_xml_files(self, eins: List[str], dest_dir: str):
         """Extract XML files for specified EINs (utility function)"""
-        self.log_info(f"Extracting XML files for {len(eins)} EINs to {dest_dir}")
+        log_info(f"Extracting XML files for {len(eins)} EINs to {dest_dir}")
         return self.extract_processor.extract_xml_files(eins, dest_dir)
 
 
@@ -752,18 +794,18 @@ def main():
 
     # Handle extract mode
     if args.extract and args.extract_dest:
-        processor.log_info(f"Extracting XML files for EINs: {args.extract}")
+        log_info(f"Extracting XML files for EINs: {args.extract}")
         result = processor.extract_xml_files(args.extract, args.extract_dest)
-        processor.log_info(f"Extraction complete. Extracted {result} files.")
+        log_info(f"Extraction complete. Extracted {result} files.")
         sys.exit(0)
 
     # Handle profiling mode
     if args.profile:
-        processor.log_info(f"Running profiling for {args.profile} seconds on currently executing step...")
+        log_info(f"Running profiling for {args.profile} seconds on currently executing step...")
         # The profiling is now handled automatically by the base classes when global_config.profile_seconds is set
         # Just run the normal processing and let the base classes handle the profiling
         result = processor.process_xml_files()
-        processor.log_info(f"Profiling complete. Results saved to profile files.")
+        log_info(f"Profiling complete. Results saved to profile files.")
         sys.exit(0)
 
     try:
@@ -772,29 +814,32 @@ def main():
         stop_idx = steps.index(args.stop_step)
 
         for i in range(start_idx, stop_idx + 1):
+            if processor.exit_processing:
+                log_info("Shutdown requested during processing steps")
+                break
             step = steps[i]
-            processor.log_info(f"Starting step: {step}")
+            log_info(f"Starting step: {step}")
             action = step_actions[step]
             if action:
                 action()
-            processor.log_info(f"Completed step: {step}")
-
+            log_info(f"Completed step: {step}")
+ 
             # Optimize database after each major processing step
-            processor.log_info(f"Optimizing database after {step}")
+            log_info(f"Optimizing database after {step}")
             processor.db_ops.optimize_database()
-
+ 
             # Generate stats report after each step (unless --nostats is specified)
             if not global_config.nostats:
                 try:
                     report_file = processor.stats_processor.generate_stats_report(f"after_{step}", f"Completed step: {step}")
-                    processor.log_info(f"Stats report generated: {report_file}")
+                    log_info(f"Stats report generated: {report_file}")
                 except Exception as e:
                     if not processor.quiet:
-                        log_warning(processor.logger, f"Failed to generate stats report for step {step}: {e}")
+                        log_warning(f"Failed to generate stats report for step {step}: {e}")
 
     except Exception as e:
         if not processor.quiet:
-            log_error(processor.logger, f"Processing failed: {e}", exc_info=True)
+            log_error(f"Processing failed: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":

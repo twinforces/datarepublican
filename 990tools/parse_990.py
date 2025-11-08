@@ -1,11 +1,11 @@
-# parse_990.py
+#!/usr/bin/env python3
+
 import sys
 from lxml import etree  # type: ignore
 from io import BytesIO
-import logging
 import re
 from parse_utils import MONEY_PATTERN, parse_float_field, parse_string_field
-from xpaths import XPATHS_990, NAMESPACES
+from xpaths_990 import XPATHS_990, NAMESPACES
 from base_parser import BaseParser
 from constants import TRAVEL_KEYWORDS, CONFERENCE_KEYWORDS
 from typing import Optional, List, Tuple
@@ -13,29 +13,19 @@ from logging_utils import log_error, log_debug, log_info, log_warning
 from config import global_config
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 
+
 class Parser990(BaseParser):
     """Parser for IRS Form 990"""
 
     def __init__(self):
         super().__init__("990", XPATHS_990, NAMESPACES)
-        self.verbose = False  # Add verbose attribute
 
-    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
         """Parse organization type for Form 990 using XPath union for better performance"""
-        # Single XPath union to get all organization type elements at once
-        org_type_union_xpath = etree.XPath("""
-            .//irs:IRS990/irs:Organization501cInd |
-            .//irs:IRS990/irs:Organization501c3Ind |
-            .//irs:IRS990/irs:Organization4947a1NotPFInd |
-            .//irs:IRS990/irs:Organization4947a1TrtdPFInd |
-            .//IRS990/Organization501cInd |
-            .//IRS990/Organization501c3Ind |
-            .//IRS990/Organization4947a1NotPFInd |
-            .//IRS990/Organization4947a1TrtdPFInd
-        """, namespaces=namespaces)
+        from xpaths import ORG_TYPE_UNION_XPATH
 
         # Get all org type elements in one query
-        org_elements = org_type_union_xpath(root)
+        org_elements = ORG_TYPE_UNION_XPATH(root)
 
         # Find the first checked element (with "X" or attribute)
         elem = None
@@ -56,10 +46,8 @@ class Parser990(BaseParser):
 
         if elem is not None:
             tag_name = elem.tag.split('}')[-1]
-            if self.verbose and not global_config.is_quiet() and log_error is not None:
-                log_error("Found org_type element: tag={}, text={}, attrib={} for EIN {} in {}",
-                           elem.tag, elem.text, elem.attrib, context.get('filer_ein', 'Unknown'), xml_filename,
-                           ein=context.get('filer_ein', 'Unknown'))
+            log_info("Found org_type element: tag={0}, text={1!r}, attrib={2!r} for EIN {3} in {4}",
+                       elem.tag, elem.text, elem.attrib, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
             if tag_name == "Organization501cInd":
                 type_num = elem.get("organization501cTypeTxt")
                 if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
@@ -74,39 +62,31 @@ class Parser990(BaseParser):
                 org_type = "4947(a)(1)"
             else:
                 org_type = "Unknown"
-                if not global_config.is_quiet() and log_error is not None:
-                    log_error("Unexpected org_type element tag {} for EIN {} in {}",
-                               elem.tag, context.get('filer_ein', 'Unknown'), xml_filename,
-                               ein=context.get('filer_ein', 'Unknown'))
+                log_error("Unexpected org_type element tag {0} for EIN {1} in {2}",
+                           elem.tag, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
         else:
-            if not global_config.is_quiet() and log_error is not None:
-                log_error("Failed to parse org_type for EIN {} in {}",
-                           context.get('filer_ein', 'Unknown'), xml_filename,
-                           ein=context.get('filer_ein', 'Unknown'))
-            return_data = parse_string_field(root, self.XPATHS, "return_data", namespaces, xml_filename, context, xpath_cache, log_error=log_error, xpath_match_stats=xpath_match_stats, verbose=self.verbose, default=None, return_element=True)
+            log_error("Failed to parse org_type for EIN {0} in {1}",
+                       context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+            return_data = parse_string_field(root, self.XPATHS, "return_data", namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default=None, return_element=True)
             org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
-            if not global_config.is_quiet() and log_error is not None:
-                log_error("Form type: {}, Available org_type tags: {} in {}",
-                           context.get('form_type', 'Unknown'), org_tags, xml_filename,
-                           ein=context.get('filer_ein', 'Unknown'))
+            log_error("Form type: {0}, Available org_type tags: {1!r} in {2}",
+                       context.getCharity().form_type if context.getCharity() else 'Unknown', org_tags, xml_filename)
             org_type = "Unknown"
-        if self.verbose and not global_config.is_quiet() and log_error is not None:
-            log_error("Parsed org_type {} for EIN {} in {}",
-                       org_type, context.get('filer_ein', 'Unknown'), xml_filename,
-                       ein=context.get('filer_ein', 'Unknown'))
+        log_info("Parsed org_type {0} for EIN {1} in {2}",
+                   org_type, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
         return org_type
 
-    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
         """Parse grants to others for Form 990"""
         # Use the schedule parsing methods which add directly to context
         charity = context.getCharity() if hasattr(context, 'getCharity') else None
         if charity:
-            self.parse_schedule_i(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
+            self.parse_schedule_i(root, xml_filename, context, xpath_cache, charity=charity, xpath_match_stats=xpath_match_stats)
         # For foreign grants, we need to parse Schedule F as well
         # But for now, just return 0 since the actual grant objects are added to context
         return 0
 
-    def parse_foreign_expenses(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_foreign_expenses(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
         """Parse foreign expenses for Form 990"""
         # For now, just return 0 since foreign expenses parsing is complex
         # and the actual foreign expense objects would be added to context
@@ -131,18 +111,16 @@ class Parser990(BaseParser):
             ("foreign_office", self.parse_foreign_office)
         ]
 
-    def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, log_error=None, xpath_match_stats=None):
+    def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, form_type=None, xpath_match_stats=None):
         """Parse grants, contractors, and political contributions for Form 990"""
         # Parse Schedule I (Grants)
-        self.parse_schedule_i(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
+        self.parse_schedule_i(root, xml_filename, context, xpath_cache, charity=charity, xpath_match_stats=xpath_match_stats)
 
         # Parse Schedule C (Political Contributions)
-        self.parse_schedule_c(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
+        self.parse_schedule_c(root, xml_filename, context, xpath_cache, charity=charity, form_type=form_type, xpath_match_stats=xpath_match_stats)
 
         # Parse Schedule L (Contractors)
-        self.parse_schedule_l(root, xml_filename, context, xpath_cache, charity=charity, log_error=log_error, xpath_match_stats=xpath_match_stats)
-
-
+        self.parse_schedule_l(root, xml_filename, context, xpath_cache, charity=charity, form_type=form_type, xpath_match_stats=xpath_match_stats)
 
 
 
@@ -155,7 +133,7 @@ class Parser990(BaseParser):
 # Create parser instance
 parser_990 = Parser990()
 
-def parse_990(root, xml_filename, xpath_cache, context, log_error=None, xpath_match_stats=None):
+def parse_990(root, xml_filename, xpath_cache, context, xpath_match_stats=None):
     """Parse Form 990 - now uses context instead of returning tuples"""
     from pending_database_context import PendingDatabaseContext
 
@@ -167,7 +145,7 @@ def parse_990(root, xml_filename, xpath_cache, context, log_error=None, xpath_ma
     if not charity or not charity.ein or charity.ein == "Unknown":
         raise ValueError(f"Invalid charity in context for Form 990 parsing in file {xml_filename}")
 
-    parser_990.parse_form(root, xml_filename, xpath_cache, context)
+    parser_990.parse_form(root, xml_filename, xpath_cache, context, xpath_match_stats=xpath_match_stats)
 
 def main():
     """Main function for testing Form 990 parser"""

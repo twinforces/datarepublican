@@ -160,7 +160,7 @@ class ExportConsumer(BaseConsumer):
             ]
         elif export_type == "grants":
             return [
-                "filer_ein", "filer_name", "grant_ein", "grant_amt", "tax_year",
+                "filer_ein", "filer_name", "recipient_ein", "grant_amt", "tax_year",
                 "filer_colocator", "grantee_colocator"
             ]
         elif export_type == "contractors":

@@ -86,7 +86,7 @@ CURRENT_PROCESSING_VERSION = 3
 MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
-CONSUMER_BATCH_SIZE = 100  # Change: Optimized to 50 for batching performance and to minimize merge overhead
+CONSUMER_BATCH_SIZE = 10000  # No reason not to make this larger only applies with backlog
 MONITOR_INTERVAL_SECONDS = 30  # Change: Added constant to reduce psutil memory monitoring and QueueStatusDisplay updates to every 30 seconds
 
 # Address processing constants
@@ -99,6 +99,12 @@ DEFAULT_ZIPS_DIR = "/Volumes/Data/irs_zips"
 DEFAULT_OUT_DIR = "/Volumes/Data/tsvs"
 DEFAULT_ANAL_DIR = "/Volumes/Data/atsvs"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
+
+# Bulk insert batch size for database operations
+BULK_INSERT_BATCH_SIZE = 100000
+
+# Charity deduplication control
+ENABLE_CHARITY_DEDUP_CHECK = False  # Controlled by command-line parameter
 
 FULL_DB_PATH = f"{DEFAULT_FINAL_DIR}/${DEFAULT_DB_PATH}"
 

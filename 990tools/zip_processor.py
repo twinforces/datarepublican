@@ -13,11 +13,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 # Import producer-consumer pattern classes
-from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
+from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import ZipFile, XMLFile
-from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress, get_logger
+from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress, log_info, log_debug, log_error, log_warning
 from config import global_config
+from pending_database_context import PendingDatabaseContext
 
 
 class ZipProducer(BaseProducer):
@@ -58,7 +59,6 @@ class ZipProducer(BaseProducer):
         return batch
 
     def _process_work_batch_to_context(self, batch: List[Path]) -> Optional['PendingDatabaseContext']:
-        """Process a batch of ZIP files into a single PendingDatabaseContext object"""
         from pending_database_context import PendingDatabaseContext
 
         if not batch:
@@ -147,28 +147,6 @@ class ZipProcessor:
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
         self.db_ops = db_ops
         self.zips_dir = zips_dir
-        self.logger = get_logger("zip_processor")
-
-    def log_info(self, message: str, *args, **kwargs):
-        """Log info message"""
-        self.logger.info(message, *args, **kwargs)
-
-    def log_debug(self, message: str, *args, **kwargs):
-        """Log debug message"""
-        self.logger.debug(message, *args, **kwargs)
-
-    def log_error(self, message: str, *args, **kwargs):
-        """Log error message"""
-        self.logger.error(message, *args, **kwargs)
-
-    def log_warning(self, message: str, *args, **kwargs):
-        """Log warning message"""
-        self.logger.warning(message, *args, **kwargs)
-
-    def __init__(self, db_ops: DatabaseOperations, zips_dir: str):
-        self.db_ops = db_ops
-        self.zips_dir = zips_dir
-        self.logger = get_logger("zip_processor")
 
         # Initialize producer and consumer
         self.producer = ZipProducer(db_ops, zips_dir)
@@ -179,11 +157,11 @@ class ZipProcessor:
             producer_config=PoolConfig(max_workers=2, queue_size=20),  # Process 2 ZIPs at a time
             consumer_config=PoolConfig(max_workers=1, queue_size=10)   # Single consumer for DB safety
         )
-        self.thread_pool_manager = ThreadPoolManager(thread_config, self.logger)
+        self.thread_pool_manager = ThreadPoolManager(thread_config, self)
 
     def process_zip_files(self, start_year: int, end_year: int) -> List[Path]:
         """Process ZIP files and register XML files using producer-consumer pattern with PendingDatabaseContext"""
-        self.log_info(f"Processing ZIP files from {start_year} to {end_year} using producer-consumer pattern with PendingDatabaseContext")
+        log_info(f"Processing ZIP files from {start_year} to {end_year} using producer-consumer pattern with PendingDatabaseContext")
 
         try:
             # Collect contexts using the new PendingDatabaseContext approach
@@ -191,25 +169,25 @@ class ZipProcessor:
             contexts = self._collect_contexts_with_year_filter(start_year, end_year)
 
             if not contexts or contexts.isEmpty():
-                self.log_info("No ZIP files to process")
+                log_info("No ZIP files to process")
                 return []
 
-            self.log_info(f"Collected ZIP processing context")
+            log_info(f"Collected ZIP processing context")
 
             # Execute contexts using consumer
             total_processed = self.consumer.execute_contexts_batch(contexts)
 
-            self.log_info(f"ZIP file processing complete: {total_processed} operations processed")
+            log_info(f"ZIP file processing complete: {total_processed} operations processed")
             return []  # Return empty list since we can't extract paths from single context
 
         except Exception as e:
-            self.log_error(f"ZIP processing failed: {e}", exc_info=True)
+            log_error(f"ZIP processing failed: {e}", exc_info=True)
             return []
 
     def _producer_wrapper(self, zip_files: List[Path], work_queue, result_queue, thread_id: int, num_threads: int):
         """Wrapper for producer thread execution"""
         try:
-            self.log_debug(f"ZIP Producer thread {thread_id} starting")
+            log_debug(f"ZIP Producer thread {thread_id} starting")
 
             # Distribute work items among threads
             for i in range(thread_id, len(zip_files), num_threads):
@@ -228,10 +206,10 @@ class ZipProcessor:
                 # Put operation in result queue for consumer
                 result_queue.put(operation)
 
-                self.log_debug(f"ZIP Producer {thread_id}: queued operation for {zip_path.name}")
+                log_debug(f"ZIP Producer {thread_id}: queued operation for {zip_path.name}")
 
         except Exception as e:
-            self.log_error(f"ZIP Producer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"ZIP Producer thread {thread_id} error: {e}", exc_info=True)
         finally:
             # Signal completion
             result_queue.put(None)
@@ -259,7 +237,7 @@ class ZipProcessor:
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, progress_bar=None):
         """Wrapper for consumer thread execution"""
         try:
-            self.log_debug(f"ZIP Consumer thread {thread_id} starting")
+            log_debug(f"ZIP Consumer thread {thread_id} starting")
             sentinels_received = 0
 
             while True:
@@ -285,7 +263,7 @@ class ZipProcessor:
                     continue
 
         except Exception as e:
-            self.log_error(f"ZIP Consumer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"ZIP Consumer thread {thread_id} error: {e}", exc_info=True)
 
     def _process_single_zip(self, zip_path: Path):
         """Process a single ZIP file"""
@@ -343,9 +321,9 @@ class ZipProcessor:
         zip_id = result[0] if result else None
 
         if zip_id:
-            self.log_info(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
+            log_info(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
         else:
-            self.log_warning(f"Could not determine zip_id for {zip_filename}")
+            log_warning(f"Could not determine zip_id for {zip_filename}")
 
     def _get_xml_files_from_zip(self, zip_path: Path) -> List[str]:
         """Get XML files from ZIP"""
@@ -363,7 +341,7 @@ class ZipProcessor:
                 for info in zip_ref.filelist:
                     if info.filename.endswith('.xml'):
                         xml_sizes[info.filename] = info.file_size
-                print(f"DEBUG: ZIP {zip_path.name} - Extracted {len(xml_sizes)} XML files from ZIP filelist")
+                print(f"DEBUG: ZIP {zip_path.name} - Sized {len(xml_sizes)} XML files from ZIP {zip_path.name}")
                 return xml_sizes
         except zipfile.BadZipFile as e:
             print(f"Corrupt ZIP file {zip_path}: {e}")
@@ -371,4 +349,3 @@ class ZipProcessor:
         except Exception as e:
             print(f"Error reading ZIP file {zip_path}: {e}")
             return {}
-

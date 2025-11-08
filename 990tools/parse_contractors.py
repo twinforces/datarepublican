@@ -10,7 +10,10 @@ import re
 from lxml import etree  # type: ignore
 from io import BytesIO
 import logging
-from xpaths import NAMESPACES, SCHEDULE_L_XPATHS, XPATHS_990, XPATHS_990EZ, XPATHS_990PF
+from xpaths import NAMESPACES, SCHEDULE_L_XPATHS
+from xpaths_990 import XPATHS_990
+from xpaths_990ez import XPATHS_990EZ
+from xpaths_990pf import XPATHS_990PF
 from constants import MONEY_PATTERN, FLOAT_PATTERN
 from typing import Optional, List, Dict, Any
 from models.contractor import Contractor

@@ -4,17 +4,20 @@ from lxml import etree  # type: ignore
 from nameparser import HumanName
 from io import BytesIO
 import logging
-from xpaths import NAMESPACES, XPATHS_990, XPATHS_990PF, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH, COMMON_XPATHS
+from xpaths import NAMESPACES, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH, COMMON_XPATHS
+from xpaths_990 import XPATHS_990
 from xpaths_990ez import XPATHS_990EZ
+from xpaths_990pf import XPATHS_990PF
 from xpaths import SCHEDULE_C_XPATHS, SCHEDULE_C_AMOUNT_XPATHS, SCHEDULE_C_RECIPIENT_XPATHS, SCHEDULE_C_EIN_XPATHS, SCHEDULE_L_XPATHS
 from xpath_utils import find_element
 from constants import MONEY_PATTERN, FLOAT_PATTERN
 from typing import Optional, List, Dict, Any
 from models.address import Address
 from models.political_contribution import PoliticalContribution
+from logging_utils import log_error, log_debug
 
-def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False):
-    elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)
+def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, xpath_match_stats, verbose=False):
+    elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.getCharity().form_type if context.getCharity() else 'Unknown', log_error=log_error, xpath_match_stats=xpath_match_stats)
     if elem is not None:
         text = elem.text.strip() if elem.text else ""
         if text.upper() == "RESTRICTED":
@@ -23,19 +26,18 @@ def parse_int_field(root, xpaths_dict, field, namespaces, xml_filename, context,
         try:
             value = int(text)
             if verbose:
-                log_error(f"Parsed int field {field}: {value} for EIN {context.get('filer_ein')} in {xml_filename}")
+                log_error(f"Parsed int field {field}: {value} for EIN {context.getCharity().ein if context.getCharity() else 'Unknown'} in {xml_filename}")
             return value
         except (ValueError, AttributeError):
-            if log_error:
-                log_error("Invalid int value for field %s: %s in %s", field, text, xml_filename)
+            log_error(f"Invalid int value for field {field}: {text} in {xml_filename}")
     return 0
 
-def parse_string_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, log_error, xpath_match_stats, verbose=False, default=None, return_element=False):
-    elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.get('form_type'), log_error=log_error, xpath_match_stats=xpath_match_stats)
+def parse_string_field(root, xpaths_dict, field, namespaces, xml_filename, context, xpath_cache, xpath_match_stats, verbose=False, default=None, return_element=False):
+    elem = find_element(root, xpaths_dict[field], namespaces, xpath_cache=xpath_cache, field=field, form_type=context.getCharity().form_type if context.getCharity() else 'Unknown', log_error=log_error, xpath_match_stats=xpath_match_stats)
     if elem is not None:
         value = elem.text.strip() if elem.text else default
         if verbose:
-            log_error(f"Parsed string field {field}: {value} for EIN {context.get('filer_ein')} in {xml_filename}")
+            log_error(f"Parsed string field {field}: {value} for EIN {context.getCharity().ein if context.getCharity() else 'Unknown'} in {xml_filename}")
         return elem if return_element else value
     return default
 
@@ -149,7 +151,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
     from logging_utils import log_debug, log_info
 
     if not quiet and logger is not None and log_debug is not None:
-        log_debug(logger, "DEBUG: Starting address extraction for EIN %s in %s", filer_ein, filename)
+        log_debug(logger, f"DEBUG: Starting address extraction for EIN {filer_ein} in {filename}")
 
     # Extract filer name for address
     name_xpaths = COMMON_XPATHS["filer_name_xpaths"]
@@ -161,7 +163,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             if result and result[0].text:
                 filer_name = result[0].text.strip()
                 if not quiet and logger is not None and log_debug is not None:
-                    log_debug(logger, "DEBUG: Found filer name: '%s' for EIN %s", filer_name, filer_ein)
+                    log_debug(logger, f"DEBUG: Found filer name: '{filer_name}' for EIN {filer_ein}")
                 break
         except:
             continue
@@ -183,7 +185,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             if result and result[0].text:
                 address.address_line1 = result[0].text.strip()
                 if not quiet and logger is not None and log_debug is not None:
-                    log_debug(logger, "DEBUG: Found address_line1: '%s' for EIN %s using xpath %s", address.address_line1, filer_ein, xpath.path)
+                    log_debug(logger, f"DEBUG: Found address_line1: '{address.address_line1}' for EIN {filer_ein} using xpath {xpath.path}")
                 break
         except:
             continue
@@ -194,14 +196,14 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
         try:
             us_addresses = root.xpath(".//USAddress", namespaces={})
             if us_addresses and logger is not None and log_debug is not None:
-                log_debug(logger, "DEBUG: Found %d USAddress elements for EIN %s", len(us_addresses), filer_ein)
+                log_debug(logger, f"DEBUG: Found {len(us_addresses)} USAddress elements for EIN {filer_ein}")
                 for i, addr_elem in enumerate(us_addresses[:1]):  # Just log first one
-                    log_debug(logger, "DEBUG: USAddress %d content: %s...", i, ET.tostring(addr_elem, encoding='unicode')[:500])
+                    log_debug(logger, f"DEBUG: USAddress {i} content: {ET.tostring(addr_elem, encoding='unicode')[:500]}...")
             elif logger is not None and log_debug is not None:
-                log_debug(logger, "DEBUG: No USAddress elements found for EIN %s", filer_ein)
+                log_debug(logger, f"DEBUG: No USAddress elements found for EIN {filer_ein}")
         except Exception as e:
             if logger is not None and log_debug is not None:
-                log_debug(logger, "DEBUG: Error checking USAddress structure for EIN %s: %s", filer_ein, str(e))
+                log_debug(logger, f"DEBUG: Error checking USAddress structure for EIN {filer_ein}: {str(e)}")
 
     # Address line 2
     address_line2_xpaths = COMMON_XPATHS["filer_address_line2"]
@@ -252,19 +254,19 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             continue
 
     if not quiet and logger is not None and log_debug is not None:
-        log_debug(logger, "DEBUG: About to call prep_for_insert for EIN %s, address_line1='%s', city='%s', state='%s', zip='%s'", filer_ein, address.address_line1, address.city, address.state, address.zip_code)
+        log_debug(logger, f"DEBUG: About to call prep_for_insert for EIN {filer_ein}, address_line1='{address.address_line1}', city='{address.city}', state='{address.state}', zip='{address.zip_code}'")
 
     address.prep_for_insert()
 
     if not quiet and logger is not None and log_debug is not None:
-        log_debug(logger, "DEBUG: After prep_for_insert for EIN %s: canonical_address='%s', po_box='%s', colocator='%s'", filer_ein, address.canonical_address, address.po_box, address.colocator)
+        log_debug(logger, f"DEBUG: After prep_for_insert for EIN {filer_ein}: canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
 
     if address.canonical_address:
         if not quiet and logger is not None and log_info is not None:
-            log_info(logger, "DEBUG: Created Address object - canonical_address='%s', po_box='%s', colocator='%s'", address.canonical_address, address.po_box, address.colocator)
+            log_info(logger, f"DEBUG: Created Address object - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
         return address
     else:
         if not quiet and logger is not None and log_info is not None:
-            log_info(logger, "DEBUG: No canonical_address created - canonical_address='%s', po_box='%s', colocator='%s'", address.canonical_address, address.po_box, address.colocator)
+            log_info(logger, f"DEBUG: No canonical_address created - canonical_address='{address.canonical_address}', po_box='{address.po_box}', colocator='{address.colocator}'")
         return None
 

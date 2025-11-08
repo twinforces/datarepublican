@@ -13,7 +13,7 @@ import signal
 import sys
 import pickle
 import json
-import xml.etree.ElementTree as ET
+from lxml import etree  # type: ignore
 import threading
 from collections import defaultdict
 import hashlib
@@ -37,21 +37,21 @@ USPS_FIXES = {
 }
 VALID_STATES = {'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'}
 ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'address_line1', 'address_line2', 'city', 'state', 'canonical_address', 'zip_code', 'zip4', 'po_box', 'colocator']
-GRANT_COLUMNS = ['filer_ein', 'filer_name', 'grant_ein', 'grantee_name', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
+GRANT_COLUMNS = ['filer_ein', 'filer_name', 'recipient_ein', 'grantee_name', 'grant_amt', 'tax_year', 'filer_canonical_address', 'grantee_canonical_address']
 DEBUG_ADDRESS_COLUMNS = ['filer_ein', 'filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'raw_zip', 'zip_code', 'status', 'reason']
-DEBUG_GRANT_COLUMNS = ['filer_ein', 'grant_ein', 'filer_name', 'grantee_name', 'xml_filename', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
+DEBUG_GRANT_COLUMNS = ['filer_ein', 'recipient_ein', 'filer_name', 'grantee_name', 'xml_filename', 'grant_address', 'grant_amt', 'tax_year', 'status', 'heuristic_score', 'reason']
 INVALID_EIN_COLUMNS = ['tsv_ein', 'xml_ein', 'filer_name', 'xml_filename', 'reason']
 PO_BOX_COLUMNS = ['po_box', 'zip_code', 'zip4', 'ein', 'org_name', 'colocator']
 CSV_QUOTE_FIELDS = {
     'addresses': ['filer_name', 'canonical_address'],
-    'grants': ['filer_name', 'grant_ein'],
+    'grants': ['filer_name', 'recipient_ein'],
     'debug_address': ['filer_name', 'xml_filename', 'raw_components', 'canonical_address', 'reason'],
-    'debug_grant': ['filer_name', 'xml_filename', 'grantee_name', 'grant_ein', 'grant_address', 'reason'],
+    'debug_grant': ['filer_name', 'xml_filename', 'grantee_name', 'recipient_ein', 'grant_address', 'reason'],
     'invalid_eins': ['tsv_ein', 'xml_ein', 'filer_name', 'xml_filename', 'reason'],
     'po_box_matches': ['org_name']
 }
 EIN_REGEX = re.compile(r'^\d{9}$')
-BACKFILL_COLUMNS = ["grant_ein", "name", "canonical_address", "po_box", "zip_code"]
+BACKFILL_COLUMNS = ["recipient_ein", "name", "canonical_address", "po_box", "zip_code"]
 VALID_EIN_PREFIXES = {
     '01', '02', '03', '04', '05', '06', '11', '13', '14', '16', '20', '21', '22', '23', '24', '25', '26', '27',
     '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49',
@@ -93,7 +93,7 @@ def log_error(msg_format, *args, ein=None, exc_info=False):
     if logger and not quiet:
         try:
             if ein:
-                log_info(logger, msg_format.format(*args), ein=ein, exc_info=exc_info)
+                log_info(logger, msg_format.format(*args) + f" (EIN: {ein})", exc_info=exc_info)
             else:
                 log_info(logger, msg_format.format(*args), exc_info=exc_info)
         except Exception as e:
@@ -266,9 +266,9 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         }
     result = thread_local.result
     try:
-        parser = etree.XMLParser(recover=True)
-        tree = etree.parse(BytesIO(xml_content), parser)
-        root = tree.getroot()
+        parser = etree.XMLParser(recover=True)  # type: ignore
+        tree = etree.parse(BytesIO(xml_content), parser)  # type: ignore
+        root = tree.getroot()  # type: ignore
         xml_ein = None
         from xpaths import COMMON_XPATHS
         for xpath in COMMON_XPATHS["filer_ein"]:
@@ -363,7 +363,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         address_line1 = None
         for xpath in COMMON_XPATHS["filer_address_line1"]:
             try:
-                result = xpath(root)
+                result = xpath(root)  # type: ignore
                 if result and result[0].text:
                     address_line1 = result[0].text.strip()
                     break
@@ -373,7 +373,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         address_line2 = None
         for xpath in COMMON_XPATHS["filer_address_line2"]:
             try:
-                result = xpath(root)
+                result = xpath(root)  # type: ignore
                 if result and result[0].text:
                     address_line2 = result[0].text.strip()
                     break
@@ -383,7 +383,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         city = None
         for xpath in COMMON_XPATHS["filer_city"]:
             try:
-                result = xpath(root)
+                result = xpath(root)  # type: ignore
                 if result and result[0].text:
                     city = result[0].text.strip()
                     break
@@ -393,7 +393,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         state = None
         for xpath in COMMON_XPATHS["filer_state"]:
             try:
-                result = xpath(root)
+                result = xpath(root)  # type: ignore
                 if result and result[0].text:
                     state = result[0].text.strip()
                     break
@@ -403,7 +403,7 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         zip_code = None
         for xpath in COMMON_XPATHS["filer_zip_code"]:
             try:
-                result = xpath(root)
+                result = xpath(root)  # type: ignore
                 if result and result[0].text:
                     zip_code = result[0].text.strip()
                     break
@@ -429,8 +429,8 @@ def parse_filer_address(xml_content, xml_filename: str, row, zip_index, output_d
         zip4 = address.zip4
         colocator = address.colocator
         raw_components_str = ""
-        us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)        
-        address_snippet = tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]
+        us_address = root.find(".//irs:Filer/irs:USAddress", namespaces=NAMESPACES)  # type: ignore
+        address_snippet = tostring(us_address if us_address is not None else root, encoding='unicode', method='xml', pretty_print=True)[:500]  # type: ignore
         if canonical_address:
             if not quiet:
                 log_error(f"parse_filer_address: SUCCESS - Created address entry for EIN {xml_ein}: canonical='{canonical_address}', city='{city}', state='{state}', zip='{zip_code}', zip4='{zip4}', po_box='{po_box}', colocator='{colocator}'")
@@ -526,7 +526,7 @@ def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str
         address_line1 = None
         for xpath in COMMON_XPATHS["recipient_address_line1"]:
             try:
-                result = xpath(grant_element)
+                result = xpath(grant_element)  # type: ignore
                 if result and result[0].text:
                     address_line1 = result[0].text.strip()
                     break
@@ -536,7 +536,7 @@ def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str
         address_line2 = None
         for xpath in COMMON_XPATHS["recipient_address_line2"]:
             try:
-                result = xpath(grant_element)
+                result = xpath(grant_element)  # type: ignore
                 if result and result[0].text:
                     address_line2 = result[0].text.strip()
                     break
@@ -546,7 +546,7 @@ def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str
         city = None
         for xpath in COMMON_XPATHS["recipient_city"]:
             try:
-                result = xpath(grant_element)
+                result = xpath(grant_element)  # type: ignore
                 if result and result[0].text:
                     city = result[0].text.strip()
                     break
@@ -556,7 +556,7 @@ def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str
         state = None
         for xpath in COMMON_XPATHS["recipient_state"]:
             try:
-                result = xpath(grant_element)
+                result = xpath(grant_element)  # type: ignore
                 if result and result[0].text:
                     state = result[0].text.strip()
                     break
@@ -566,7 +566,7 @@ def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str
         zip_code = None
         for xpath in COMMON_XPATHS["recipient_zip_code"]:
             try:
-                result = xpath(grant_element)
+                result = xpath(grant_element)  # type: ignore
                 if result and result[0].text:
                     zip_code = result[0].text.strip()
                     break
@@ -593,7 +593,7 @@ def parse_recipient_address(grant_element, xml_filename: str, recipient_ein: str
         zip4 = address.zip4
         colocator = address.colocator
         raw_components_str = ""
-        address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]
+        address_snippet = etree.tostring(grant_element, encoding='unicode', method='xml', pretty_print=True)[:500]  # type: ignore
         if not canonical_address:
             result['total_address_errors'] += 1
             result['debug_address_entries'].append({

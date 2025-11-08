@@ -27,12 +27,13 @@ except ImportError:
     tqdm = None
 
 # Import logging utilities
-from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 
 # Import producer-consumer pattern classes
-from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
+from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
+from pending_database_context import PendingDatabaseContext
 
 
 class IRSFetchProducer(BaseProducer):
@@ -41,6 +42,8 @@ class IRSFetchProducer(BaseProducer):
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str = "/Volumes/Data/irs_zips"):
         super().__init__(db_ops, batch_size=10)  # Small batches for years
         self.zips_dir = zips_dir
+        self.min_year = 2017
+        self.max_year = 2030
 
         # Ensure zips directory exists
         if not os.path.exists(self.zips_dir):
@@ -71,24 +74,30 @@ class IRSFetchProducer(BaseProducer):
 
         return {"total": total, "unit": unit}
 
-    def _get_work_batch(self, offset: int) -> List[Tuple[int, str]]:
-        """Get a batch of years to process"""
-        # For IRS fetch, we process years sequentially
-        # This is a simple implementation - in practice, you'd get years from a queue or config
-        # For now, return a single year batch
-        return [(2023 + offset, "download")]  # Example: start from 2023
+    def _get_work_batch(self, last_pk: Optional[int] = None) -> Tuple[List[Tuple[int, str]], Optional[int]]:
+        """Get a batch of years to process using key-value paging"""
+        start_year = last_pk + 1 if last_pk is not None else self.min_year
+        batch = []
+        end_year = min(start_year + self.batch_size, self.max_year + 1)
+        for year in range(start_year, end_year):
+            batch.append((year, "download"))
+        if batch:
+            max_pk = max(year for year, _ in batch)
+        else:
+            max_pk = None
+        return batch, max_pk
 
-    def _process_work_batch_to_contexts(self, batch: List[Tuple[int, str]]) -> 'PendingDatabaseContext':
-        """Process a batch of years into PendingDatabaseContext objects"""
+    def _process_work_batch_to_context(self, batch: List[Tuple[int, str]]) -> Optional['PendingDatabaseContext']:
+        """Process a batch of years into a single merged PendingDatabaseContext"""
         from pending_database_context import PendingDatabaseContext
-
+ 
         contexts = []
-
+ 
         for year, operation_type in batch:
             if operation_type == "download":
                 # Create context for this year
                 context = PendingDatabaseContext()
-
+ 
                 # IRS fetch downloads and recompresses ZIP files, but doesn't create database objects
                 # The zip_processor.py will handle creating ZipFile records when it processes the files
                 # So we don't create any objects here - IRS fetch is purely file system operations
@@ -98,10 +107,12 @@ class IRSFetchProducer(BaseProducer):
                     data={"count": 1}  # Count each year processed
                 )
                 context.addOperationToDatabase(progress_op)
-
+ 
                 contexts.append(context)
-
-        return contexts
+ 
+        if not contexts:
+            return None
+        return self.merge_pending_contexts(contexts)
 
 
 class IRSFetchConsumer(BaseConsumer):
@@ -110,24 +121,7 @@ class IRSFetchConsumer(BaseConsumer):
     def __init__(self, db_ops: DatabaseOperations, zips_dir: str = "/Volumes/Data/irs_zips"):
         super().__init__(db_ops)
         self.zips_dir = zips_dir
-
-    def log_info(self, msg: str, *args, ein: Optional[str] = None):
-        """Log info with optional EIN context"""
-        if not global_config.is_quiet():
-            log_info(self.logger, msg, *args, ein=ein)
-
-    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
-        """Log debug with optional EIN context"""
-        if not global_config.is_quiet():
-            log_debug(self.logger, msg, *args, ein=ein)
-
-    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
-        """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
-
-    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
-        """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, *args, ein=ein)
+        self.downloaded_zips = 0
 
     def _process_operations_batch(self, operations_by_type):
         """Process IRS fetch operations using standardized pattern"""
@@ -147,36 +141,49 @@ class IRSFetchConsumer(BaseConsumer):
             # Download and recompress ZIP files for the year
             self._download_and_recompress_year(year, zips_dir)
 
+    def _execute_operations_batch(self, operations):
+        """Execute a batch of operations using the consumer pattern"""
+        # All operations are now handled by the base class execute_operations_batch method
+        # which properly groups and executes operations in dependency order
+        self.execute_operations_batch(operations)
+
     def _download_and_recompress_year(self, year: int, zips_dir: str):
         """Download and recompress ZIP files for a specific year"""
-        self.log_info(f"Processing year {year}")
+        log_info(f"Processing year {year}")
 
         # Download ZIP files
         if not self._download_irs_zips(year, year, zips_dir):
-            self.log_error(f"Failed to download ZIP files for {year}")
+            log_error(f"Failed to download ZIP files for {year}")
             return
 
         # Recompress ZIP files
         if not self._recompress_zips(zips_dir):
-            self.log_error(f"Failed to recompress ZIP files for {year}")
+            log_error(f"Failed to recompress ZIP files for {year}")
             return
 
-        self.log_info(f"Successfully processed year {year}")
+        log_info(f"Successfully processed year {year}")
 
     def _download_irs_zips(self, start_year: int, end_year: int, zips_dir: str):
         """Download IRS 990 ZIP files from IRS website"""
+        downloaded_in_batch = 0
         def download_file(url, dest_folder):
+            nonlocal downloaded_in_batch
+            if self.exit_processing:
+                return
             filename = url.split('/')[-1]
             dest_path = os.path.join(dest_folder, filename)
             if os.path.exists(dest_path):
-                self.log_info(f"Skipping {filename} - already exists")
+                log_info(f"Skipping {filename} - already exists")
                 return
             response = requests.get(url, stream=True)
             response.raise_for_status()
             with open(dest_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
+                    if self.shutdown_event.is_set():
+                        return
                     f.write(chunk)
-            self.log_info(f"Downloaded {filename}")
+            log_info(f"Downloaded {filename}")
+            downloaded_in_batch += 1
 
         # Fetch the page once
         base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
@@ -202,13 +209,14 @@ class IRSFetchConsumer(BaseConsumer):
         # Download files for each year
         for year in range(start_year, end_year + 1):
             if year not in zip_links_by_year:
-                self.log_warning(f"No ZIP files found for {year}")
+                log_warning(f"No ZIP files found for {year}")
                 continue
 
             for link in zip_links_by_year[year]:
                 full_url = f"https://www.irs.gov{link}" if link.startswith('/') else link
                 download_file(full_url, zips_dir)
 
+        self.downloaded_zips += downloaded_in_batch
         return True
 
     def _recompress_zips(self, zips_dir: str):
@@ -235,8 +243,8 @@ class IRSFetchConsumer(BaseConsumer):
         def recompress_zip(zip_file):
             """Recompress a single ZIP file using Deflate."""
             base_name = os.path.basename(zip_file)
-            self.log_info(f"Recompressing {zip_file}...")
-            self.log_debug(f"Current working directory: {os.getcwd()}")
+            log_info(f"Recompressing {zip_file}...")
+            log_debug(f"Current working directory: {os.getcwd()}")
 
             # Clean temp directory
             temp_dir = os.path.join(zips_dir, "temp")
@@ -261,18 +269,18 @@ class IRSFetchConsumer(BaseConsumer):
                 )
             except subprocess.CalledProcessError as e:
                 error_msg = f"Error extracting {zip_file}: {e.stderr}"
-                self.log_error(error_msg)
+                log_error(error_msg)
                 return False
 
             # Count extracted files
             extracted_files = len(list(Path(temp_path).rglob("*.xml")))
-            self.log_info(f"Extracted {extracted_files} files from {zip_file}.")
+            log_info(f"Extracted {extracted_files} files from {zip_file}.")
 
             # Recompress with zip in one go
             temp_zip = os.path.join(temp_path, "temp.zip")
-            self.log_debug(f"Creating temp ZIP: {temp_zip}")
+            log_debug(f"Creating temp ZIP: {temp_zip}")
             os.chdir(temp_path)
-            self.log_debug(f"Changed to directory: {os.getcwd()}")
+            log_debug(f"Changed to directory: {os.getcwd()}")
             try:
                 # Compress all XML files in one zip command
                 subprocess.run(
@@ -283,26 +291,26 @@ class IRSFetchConsumer(BaseConsumer):
                 )
             except subprocess.CalledProcessError as e:
                 error_msg = f"Error recompressing {zip_file}: {e.stderr}"
-                self.log_error(error_msg)
+                log_error(error_msg)
                 os.chdir(zips_dir)
                 return False
 
             # Verify temp.zip exists
             if not os.path.exists(temp_zip):
                 error_msg = f"Error: {temp_zip} was not created for {zip_file}."
-                self.log_error(error_msg)
+                log_error(error_msg)
                 os.chdir(zips_dir)
                 return False
 
             # Move to output directory using absolute path
             output_zip = os.path.join(zips_dir, "recompressed", base_name)
             os.makedirs(os.path.dirname(output_zip), exist_ok=True)
-            self.log_debug(f"Moving {temp_zip} to {output_zip}")
+            log_debug(f"Moving {temp_zip} to {output_zip}")
             try:
                 shutil.move(temp_zip, output_zip)
             except (OSError, shutil.Error) as e:
                 error_msg = f"Error moving {temp_zip} to {output_zip}: {e}"
-                self.log_error(error_msg)
+                log_error(error_msg)
                 os.chdir(zips_dir)
                 return False
 
@@ -310,7 +318,7 @@ class IRSFetchConsumer(BaseConsumer):
             os.chdir(zips_dir)
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-            self.log_info(f"Successfully recompressed {zip_file} to recompressed/{base_name}")
+            log_info(f"Successfully recompressed {zip_file} to recompressed/{base_name}")
             return True
 
         check_tools()
@@ -332,130 +340,115 @@ class IRSFetchConsumer(BaseConsumer):
                 to_check.append(zip_file)
 
         if not to_check:
-            self.log_info("All ZIP files already have recompressed versions. Skipping recompression.")
+            log_info("All ZIP files already have recompressed versions. Skipping recompression.")
             return True
 
-        self.log_info(f"Found {len(to_check)} ZIP files to check for recompression.")
+        log_info(f"Found {len(to_check)} ZIP files to check for recompression.")
 
         to_recompress = []
         for zip_file in to_check:
-            self.log_debug(f"Checking {zip_file}...")
+            log_debug(f"Checking {zip_file}...")
             needs_recompress, reason = check_compression(zip_file)
             if needs_recompress:
-                self.log_info(f"  {reason}")
+                log_info(f"  {reason}")
                 to_recompress.append(zip_file)
             else:
-                self.log_info(f"  {reason}. Skipping.")
+                log_info(f"  {reason}. Skipping.")
 
         if not to_recompress:
-            self.log_info("No ZIP files need recompression.")
+            log_info("No ZIP files need recompression.")
             return True
 
-        self.log_info(f"ZIP files to recompress: {len(to_recompress)}")
-
+        log_info(f"ZIP files to recompress: {len(to_recompress)}")
+ 
         # Recompress
         success_count = 0
         for zip_file in to_recompress:
+            if self.exit_processing:
+                log_info("Shutdown requested during ZIP recompression")
+                return False
             if recompress_zip(zip_file):
                 success_count += 1
             else:
-                self.log_error(f"Failed to recompress {zip_file}.")
+                log_error(f"Failed to recompress {zip_file}.")
                 return False
-
-        self.log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
+ 
+        log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
         return True
 
 
-class IRSFetchProcessor:
+class IRSFetchProcessor(BaseProcessor):
     """Processor for downloading and recompressing IRS ZIP files using producer-consumer pattern"""
-
+  
     def __init__(self, zips_dir: str = "/Volumes/Data/irs_zips", db_path: str = "irs990.db"):
+        self.db_ops = DatabaseOperations(db_path=db_path, read_only=False)
+        super().__init__(self.db_ops)
         self.zips_dir = zips_dir
-        self.db_path = db_path
-
-        # Setup logging
-        self.logger = get_logger("irsfetch")
-        if global_config.is_quiet():
-            self.logger.setLevel(30)  # WARNING level
-        else:
-            self.logger.setLevel(20)  # INFO level
-
-        # Initialize database operations
-        self.db_ops = DatabaseOperations(db_path=self.db_path, read_only=False)
-
+        self.downloaded_zips = 0
+  
         # Initialize producer and consumer
         self.producer = IRSFetchProducer(self.db_ops, zips_dir)
         self.consumer = IRSFetchConsumer(self.db_ops, zips_dir)
-
+  
         # Initialize thread pool manager
         thread_config = ThreadPoolConfig(
             producer_config=PoolConfig(max_workers=2, queue_size=20),  # Download 2 years at a time
             consumer_config=PoolConfig(max_workers=1, queue_size=10)   # Single consumer for file operations
         )
-        self.thread_pool_manager = ThreadPoolManager(thread_config, self.logger)
-
+        self.thread_pool_manager = ThreadPoolManager(thread_config,self)
+  
         # Ensure zips directory exists
         if not os.path.exists(self.zips_dir):
             os.makedirs(self.zips_dir)
 
-    def log_error(self, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False):
-        """Log error with optional EIN context - always shown even in quiet mode"""
-        log_error(self.logger, msg, *args, ein=ein, exc_info=exc_info)
-
-    def log_info(self, msg: str, *args, ein: Optional[str] = None):
-        """Log info with optional EIN context"""
-        if not global_config.is_quiet():
-            log_info(self.logger, msg, *args, ein=ein)
-
-    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
-        """Log debug with optional EIN context"""
-        if not global_config.is_quiet():
-            log_debug(self.logger, msg, *args, ein=ein)
-
-    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
-        """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, *args, ein=ein)
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        """Custom metrics for IRS fetch processor."""
+        return {'downloaded_zips': self.downloaded_zips}
 
     def fetch_irs_zips(self, start_year: int, end_year: int) -> bool:
         """Download and recompress IRS 990 ZIP files from IRS website"""
-        self.log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
-
+        log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
+        self.setup_status_gauges(interval=10.0)
+  
         try:
             # Process each year sequentially
             for year in range(start_year, end_year + 1):
+                if self.exit_processing:
+                    log_info("Shutdown requested during IRS ZIP fetch")
+                    return False
                 success = self._download_and_recompress_year(year, self.zips_dir)
                 if not success:
-                    self.log_error(f"Failed to process year {year}")
+                    log_error(f"Failed to process year {year}")
                     return False
-
-            self.log_info("IRS ZIP file fetch and recompression complete")
+  
+            log_info("IRS ZIP file fetch and recompression complete")
             return True
-
+  
         except Exception as e:
-            self.log_error(f"IRS fetch processing failed: {e}", exc_info=True)
+            log_error(f"IRS fetch processing failed: {e}", exc_info=True)
             return False
 
     def _download_and_recompress_year(self, year: int, zips_dir: str) -> bool:
         """Download and recompress ZIP files for a specific year"""
-        self.log_info(f"Processing year {year}")
+        log_info(f"Processing year {year}")
 
         # Download ZIP files
         if not self.consumer._download_irs_zips(year, year, zips_dir):
-            self.log_error(f"Failed to download ZIP files for {year}")
+            log_error(f"Failed to download ZIP files for {year}")
             return False
 
         # Recompress ZIP files
         if not self.consumer._recompress_zips(zips_dir):
-            self.log_error(f"Failed to recompress ZIP files for {year}")
+            log_error(f"Failed to recompress ZIP files for {year}")
             return False
 
-        self.log_info(f"Successfully processed year {year}")
+        log_info(f"Successfully processed year {year}")
         return True
 
     def _producer_wrapper(self, work_items: List[Tuple[int, str]], work_queue, result_queue, thread_id: int, num_threads: int):
         """Wrapper for producer thread execution"""
         try:
-            self.log_debug(f"Producer thread {thread_id} starting")
+            log_debug(f"Producer thread {thread_id} starting")
 
             # Distribute work items among threads
             for i in range(thread_id, len(work_items), num_threads):
@@ -474,10 +467,10 @@ class IRSFetchProcessor:
                 # Put operation in result queue for consumer
                 result_queue.put(operation)
 
-                self.log_debug(f"Producer {thread_id}: queued operation for year {year}")
+                log_debug(f"Producer {thread_id}: queued operation for year {year}")
 
         except Exception as e:
-            self.log_error(f"Producer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"Producer thread {thread_id} error: {e}", exc_info=True)
         finally:
             # Signal completion
             result_queue.put(None)
@@ -485,7 +478,7 @@ class IRSFetchProcessor:
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int):
         """Wrapper for consumer thread execution"""
         try:
-            self.log_debug(f"Consumer thread {thread_id} starting")
+            log_debug(f"Consumer thread {thread_id} starting")
             sentinels_received = 0
 
             while True:
@@ -504,12 +497,12 @@ class IRSFetchProcessor:
                     result_queue.task_done()
 
                 except queue.Empty:
-                    if self.thread_pool_manager and self.thread_pool_manager.shutdown_event.is_set():
+                    if self.thread_pool_manager and self.thread_pool_manager.exit_processing:
                         break
                     continue
 
         except Exception as e:
-            self.log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
         finally:
             # Signal completion
             pass
@@ -544,13 +537,13 @@ def main():
     try:
         success = processor.fetch_irs_zips(args.start_year, args.end_year)
         if success:
-            processor.log_info("IRS fetch processing completed successfully")
+            log_info("IRS fetch processing completed successfully")
             sys.exit(0)
         else:
-            processor.log_error("IRS fetch processing failed")
+            log_error("IRS fetch processing failed")
             sys.exit(1)
     except Exception as e:
-        processor.log_error(f"IRS fetch processing failed: {e}", exc_info=True)
+        log_error(f"IRS fetch processing failed: {e}", exc_info=True)
         sys.exit(1)
     finally:
         # Cleanup database connection

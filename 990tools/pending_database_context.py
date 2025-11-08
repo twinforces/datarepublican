@@ -56,7 +56,7 @@ class PendingDatabaseContext:
         """Initialize the context with empty collections"""
         self.xml_id = xml_id
         self.xml_content = xml_content
-        self._objects: Dict[str, List[Any]] = {
+        self.objects: Dict[str, List[Any]] = {
             'charity': [],
             'officer': [],
             'grant': [],
@@ -68,7 +68,7 @@ class PendingDatabaseContext:
             'xmlfile': []   # For XML file records
         }
         self._updates: List[Dict[str, Any]] = []  # For future UPDATE operations
-        self._operations: List[DatabaseOperation] = []  # For generic database operations
+        self.operations: List[DatabaseOperation] = []  # For generic database operations
         self.error_message: Optional[str] = None  # Error message for failed processing
 
     def addObjectToDatabase(self, obj: Any) -> None:
@@ -81,8 +81,8 @@ class PendingDatabaseContext:
         obj_type = type(obj).__name__.lower()
 
         # Add to the appropriate list (no special handling for charity)
-        if obj_type in self._objects:
-            self._objects[obj_type].append(obj)
+        if obj_type in self.objects:
+            self.objects[obj_type].append(obj)
         else:
             raise ValueError(f"Unknown object type: {obj_type}")
 
@@ -108,7 +108,7 @@ class PendingDatabaseContext:
         Args:
             operation: The DatabaseOperation to add
         """
-        self._operations.append(operation)
+        self.operations.append(operation)
 
     def getObjectsByType(self, obj_type: str) -> List[Any]:
         """
@@ -120,7 +120,7 @@ class PendingDatabaseContext:
         Returns:
             List of objects of the specified type
         """
-        return self._objects.get(obj_type, [])
+        return self.objects.get(obj_type, [])
 
     def getCharity(self) -> Optional[Charity]:
         """
@@ -139,7 +139,7 @@ class PendingDatabaseContext:
         Returns:
             Dictionary mapping object types to lists of objects
         """
-        return self._objects.copy()
+        return self.objects.copy()
 
     def getUpdates(self) -> List[Dict[str, Any]]:
         """
@@ -152,7 +152,7 @@ class PendingDatabaseContext:
 
     def isEmpty(self) -> bool:
         """Check if this context contains any objects"""
-        return all(not objs for objs in self._objects.values())
+        return all(not objs for objs in self.objects.values())
 
     def getObjectCounts(self) -> Dict[str, int]:
         """
@@ -161,7 +161,7 @@ class PendingDatabaseContext:
         Returns:
             Dictionary mapping object types to counts
         """
-        return {obj_type: len(objects) for obj_type, objects in self._objects.items()}
+        return {obj_type: len(objects) for obj_type, objects in self.objects.items()}
 
     def getTotalObjectCount(self) -> int:
         """
@@ -170,7 +170,7 @@ class PendingDatabaseContext:
         Returns:
             Total number of objects across all types
         """
-        return sum(len(objects) for objects in self._objects.values())
+        return sum(len(objects) for objects in self.objects.values())
 
     def save_to_database(self, db_ops: DatabaseOperations) -> List[str]:
         """
@@ -194,26 +194,24 @@ class PendingDatabaseContext:
         PERFORMANCE: Batches by type for efficient bulk inserts
         """
         from logging_utils import log_info, log_error
-        logger = db_ops.logger if hasattr(db_ops, 'logger') else get_logger(__name__)
-    
         all_ids = []
         conn = db_ops.db_conn
         try:
-            log_info(logger, "Starting transaction for batch")
+            log_info("Starting transaction for batch")
             conn.execute("BEGIN TRANSACTION")
     
             # Execute objects by type (inserts) - use INSERT_BY_TYPE for each type
-            for obj_type, obj_list in self._objects.items():
+            for obj_type, obj_list in self.objects.items():
                 if obj_list:
                     ids = db_ops.INSERT_BY_TYPE(obj_list, obj_type, commit_batches=False)
                     all_ids.extend(ids)
     
-            log_info(logger, "Inserts completed")
+            log_info("Inserts completed")
     
             # Separate DB operations from non-DB operations (like PROGRESS_UPDATE)
             db_operations = []
             non_db_operations = []
-            for operation in self._operations:
+            for operation in self.operations:
                 if operation.operation_type == DatabaseOperationType.PROGRESS_UPDATE:
                     non_db_operations.append(operation)
                 else:
@@ -223,9 +221,9 @@ class PendingDatabaseContext:
             for operation in db_operations:
                 self._execute_operation(db_ops, operation)
     
-            log_info(logger, "DB updates completed, committing")
+            log_info("DB updates completed, committing")
             conn.execute("COMMIT")
-            log_info(logger, "Transaction committed successfully")
+            log_info("Transaction committed successfully")
     
             # Execute non-DB operations after commit (e.g., progress updates)
             for operation in non_db_operations:
@@ -233,19 +231,19 @@ class PendingDatabaseContext:
     
         except Exception as e:
             conn.execute("ROLLBACK")
-            log_error(logger, f"Transaction rolled back due to error: {str(e)}")
+            log_error(f"Transaction rolled back due to error: {str(e)}")
             raise
     
         return all_ids
 
         # Execute objects by type (inserts) - use INSERT_BY_TYPE for each type
-        for obj_type, obj_list in self._objects.items():
+        for obj_type, obj_list in self.objects.items():
             if obj_list:
                 ids = db_ops.INSERT_BY_TYPE(obj_list, obj_type)
                 all_ids.extend(ids)
 
         # Execute all collected operations
-        for operation in self._operations:
+        for operation in self.operations:
             self._execute_operation(db_ops, operation)
 
         return all_ids
@@ -386,11 +384,11 @@ class PendingDatabaseContext:
         # Merge all objects from all contexts
         for context in contexts:
             # Merge all objects
-            for obj_type, objects in context._objects.items():
-                merged._objects[obj_type].extend(objects)
+            for obj_type, objects in context.objects.items():
+                merged.objects[obj_type].extend(objects)
 
             # Merge operations
-            merged._operations.extend(context._operations)
+            merged.operations.extend(context.operations)
 
             # Merge updates
             merged._updates.extend(context._updates)
@@ -399,9 +397,9 @@ class PendingDatabaseContext:
 
     def clear(self) -> None:
         """Clear all objects from this context"""
-        self._objects = {key: [] for key in self._objects.keys()}
+        self.objects = {key: [] for key in self.objects.keys()}
         self._updates = []
-        self._operations = []
+        self.operations = []
         self.xml_id = None
         self.xml_content = None
         self.error_message = None

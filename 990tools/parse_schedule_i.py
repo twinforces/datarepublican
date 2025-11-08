@@ -28,26 +28,26 @@ def parse_grants(root, xml_filename: str, filer_ein: str, filer_name: str, tax_y
                     # Try all EIN xpaths - use find_element for better performance
                     ein_elem = None
                     for ein_xpath in GRANT_EIN_XPATHS:
-                        ein_elem = find_element(elem, [ein_xpath], namespaces)
+                        ein_elem = find_element(elem, [ein_xpath], NAMESPACES)
                         if ein_elem is not None:
                             break
 
                     # Try all name xpaths - use find_element for better performance
                     name_elem = None
                     for name_xpath in GRANT_NAME_XPATHS:
-                        name_elem = find_element(elem, [name_xpath], namespaces)
+                        name_elem = find_element(elem, [name_xpath], NAMESPACES)
                         if name_elem is not None:
                             break
 
                     # Try all amount xpaths - use find_element for better performance
                     amount_elem = None
                     for amt_xpath in GRANT_AMOUNT_XPATHS:
-                        amount_elem = find_element(elem, [amt_xpath], namespaces)
+                        amount_elem = find_element(elem, [amt_xpath], NAMESPACES)
                         if amount_elem is not None:
                             break
 
                     grantee_name = (name_elem[0].text.strip() if name_elem and name_elem[0].text else "Unknown")
-                    grant_ein = ein_elem[0].text.strip() if ein_elem else "Unknown"
+                    NAMESPACES = ein_elem[0].text.strip() if ein_elem else "Unknown"
 
                     grant_amt = 0
                     if amount_elem and amount_elem[0].text:
@@ -61,7 +61,7 @@ def parse_grants(root, xml_filename: str, filer_ein: str, filer_name: str, tax_y
                     grant_data = {
                         'filer_ein': filer_ein,
                         'filer_name': filer_name,
-                        'grant_ein': grant_ein,
+                        'recipient_ein': ein_elem,
                         'grant_amt': grant_amt,
                         'tax_year': tax_year
                     }

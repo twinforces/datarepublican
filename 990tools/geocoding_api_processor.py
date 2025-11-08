@@ -8,7 +8,6 @@ calls, and updates the records with the results. Uses producer-consumer pattern
 for safe batch processing with DuckDB.
 """
 
-import logging
 import time
 from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime
@@ -23,10 +22,10 @@ try:
 except ImportError:
     tqdm = None
 
-from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
+from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models.geocoding import Geocoding
-from logging_utils import log_info, log_error, log_debug, log_warning, get_logger
+from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from constants import GEOCODING_API_BATCH_SIZE
 
@@ -36,7 +35,6 @@ class GeocodingAPIProducer(BaseProducer):
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_API_BATCH_SIZE):
         super().__init__(db_ops, batch_size=batch_size)
-        self.logger = get_logger("geocoding_api_processor")
 
         # API performance tracking for dynamic batch sizing
         self._api_performance_history = []
@@ -52,17 +50,16 @@ class GeocodingAPIProducer(BaseProducer):
             'very_slow': 0.3 # Significantly reduce batch size when API is very slow
         }
 
-    def _get_work_batch(self, last_geocoding_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get a batch of geocoding records needing API calls"""
+    def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Get a batch of geocoding records needing API calls using key-value paging on UUID7 str pks"""
         current_batch_size = self._get_dynamic_batch_size()
 
         where_clause = "geocoding_status IS NULL OR geocoding_status = 'pending'"
-        if last_geocoding_id is not None:
+        params = None
+        if last_pk is not None:
             where_clause += " AND geocoding_id > ?"
-            params = (last_geocoding_id,)
-        else:
-            params = None
-
+            params = (last_pk,)
+ 
         effective_batch_size = min(global_config.max_files, current_batch_size) if global_config.max_files else current_batch_size
         query = f"""
             SELECT geocoding_id, normalized_address, attempt_count
@@ -71,11 +68,11 @@ class GeocodingAPIProducer(BaseProducer):
             ORDER BY geocoding_id
             LIMIT ?
         """
-        if params:
-            params = params + (effective_batch_size,)
-        else:
+        if params is None:
             params = (effective_batch_size,)
-
+        else:
+            params = params + (effective_batch_size,)
+ 
         result = self.db_ops.execute_query(query, params)
         if result:
             rows = result.fetchall()
@@ -87,22 +84,22 @@ class GeocodingAPIProducer(BaseProducer):
                 }
                 for row in rows
             ]
-
+ 
+            max_pk = max(row[0] for row in rows) if rows else None
+ 
             if not global_config.is_quiet():
-                log_debug(self.logger, f"PHASE 2: Retrieved {len(batch_data)} geocoding records from database (last_geocoding_id={last_geocoding_id})")
-                log_debug(self.logger, f"PHASE 2: Dynamic batch size was {effective_batch_size} (base: {self.batch_size}, max_files: {global_config.max_files})")
+                log_debug(f"PHASE 2: Retrieved {len(batch_data)} geocoding records from database (last_pk={last_pk})")
+                log_debug(f"PHASE 2: Dynamic batch size was {effective_batch_size} (base: {self.batch_size}, max_files: {global_config.max_files})")
+ 
+            return batch_data, max_pk
+        return [], None
 
-            return batch_data
-        return []
-
-    def _process_work_batch_to_contexts(self, batch: List[Dict[str, Any]]) -> 'PendingDatabaseContext':
-        """Process a batch of geocoding records into PendingDatabaseContext objects"""
+    def _process_work_batch_to_context(self, batch: List[Dict[str, Any]]) -> Optional['PendingDatabaseContext']:
+        """Process a batch of geocoding records into PendingDatabaseContext object"""
         from pending_database_context import PendingDatabaseContext
 
-        contexts = []
-
         if not batch:
-            return contexts
+            return None
 
         # Create context for geocoding batch
         context = PendingDatabaseContext()
@@ -117,9 +114,7 @@ class GeocodingAPIProducer(BaseProducer):
         )
         context.addOperationToDatabase(operation)
 
-        contexts.append(context)
-
-        return contexts
+        return context
 
     def _get_dynamic_batch_size(self) -> int:
         """Calculate dynamic batch size based on API performance"""
@@ -135,7 +130,7 @@ class GeocodingAPIProducer(BaseProducer):
             if self._api_performance_history:
                 recent = self._api_performance_history[-3:]
                 avg_time = sum(b['avg_time_per_record'] for b in recent) / len(recent)
-            log_debug(self.logger, f"PHASE 2: Dynamic batch sizing - performance: {performance_level}, avg_time_per_record: {avg_time:.2f}s, factor: {factor}, batch_size: {self.batch_size} -> {dynamic_size}")
+            log_debug(f"PHASE 2: Dynamic batch sizing - performance: {performance_level}, avg_time_per_record: {avg_time:.2f}s, factor: {factor}, batch_size: {self.batch_size} -> {dynamic_size}")
 
         return dynamic_size
 
@@ -178,7 +173,6 @@ class GeocodingAPIConsumer(BaseConsumer):
 
     def __init__(self, db_ops: DatabaseOperations):
         super().__init__(db_ops)
-        self.logger = get_logger("geocoding_api_processor")
 
     def _process_operations_batch(self, operations_by_type):
         """Process geocoding API operations"""
@@ -188,7 +182,7 @@ class GeocodingAPIConsumer(BaseConsumer):
                 self._execute_geocoding_operation(operation)
 
 
-class GeocodingAPIProcessor:
+class GeocodingAPIProcessor(BaseProcessor):
     """
     Processor for geocoding API calls using producer-consumer pattern.
 
@@ -198,9 +192,9 @@ class GeocodingAPIProcessor:
     """
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_API_BATCH_SIZE):
+        super().__init__(db_ops)
         self.db_ops = db_ops
         self.batch_size = batch_size
-        self.logger = get_logger("geocoding_api_processor")
 
         # Initialize producer and consumer
         self.producer = GeocodingAPIProducer(db_ops, batch_size)
@@ -211,11 +205,34 @@ class GeocodingAPIProcessor:
             producer_config=PoolConfig(max_workers=4, queue_size=1000),  # Multiple producers for parallel processing
             consumer_config=PoolConfig(max_workers=1, queue_size=1000)   # Single consumer for DB safety
         )
-        self.thread_pool_manager = ThreadPoolManager(thread_config, self.logger)
+        self.thread_pool_manager = ThreadPoolManager(thread_config,self)
+        self.setup_status_gauges(interval=10.0, queues=[self.thread_pool_manager.result_queue])
+
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        try:
+            pending_result = self.db_ops.execute_query(
+                "SELECT COUNT(*) FROM Geocoding WHERE geocoding_status IS NULL OR geocoding_status = 'pending'"
+            )
+            pending = pending_result.fetchone()[0] if pending_result else 0
+
+            success_result = self.db_ops.execute_query(
+                "SELECT COUNT(*) FROM Geocoding WHERE geocoding_status LIKE 'Match%'"
+            )
+            success = success_result.fetchone()[0] if success_result else 0
+
+            return {
+                'outstanding_geocode_requests': pending,
+                'geocoded_addresses': success,
+                **super()._get_custom_metrics()
+            }
+        except Exception as e:
+            log_error(f"Error getting custom metrics: {e}")
+            return super()._get_custom_metrics()
+
 
     def process_pending_geocoding_records(self, progress_bar=None) -> int:
         """
-        Process all pending geocoding records by making API calls using PendingDatabaseContext.
+        Process all pending geocoding records by making API calls using producer-consumer pattern.
 
         Args:
             progress_bar: Optional progress bar to update
@@ -225,41 +242,72 @@ class GeocodingAPIProcessor:
         """
         if cg is None:
             if not global_config.is_quiet():
-                log_warning(self.logger, "censusgeocode library not available. Skipping geocoding API calls. "
+                log_warning("censusgeocode library not available. Skipping geocoding API calls. "
                                 "To enable geocoding, install with: pip install censusgeocode")
             return 0
 
         if not global_config.is_quiet():
-            log_info(self.logger, f"Starting geocoding API processing using PendingDatabaseContext")
+            log_info(f"Starting geocoding API processing")
 
         try:
-            # Collect contexts using the PendingDatabaseContext approach
-            contexts = self.producer.collect_contexts()
+            # Collect all batches using paging
+            batches = []
+            last_pk = None
+            while not self.exit_processing:
+                batch, last_pk = self.producer._get_work_batch(last_pk)
+                if not batch:
+                    break
+                batches.append(batch)
 
-            if not contexts:
+                total_items = sum(len(b) for b in batches)
+                if global_config.max_files and total_items >= global_config.max_files:
+                    excess = total_items - global_config.max_files
+                    if excess > 0:
+                        batches[-1] = batches[-1][:-excess]
+                    break
+
+            if not batches:
                 if not global_config.is_quiet():
-                    log_info(self.logger, "No geocoding records to process")
+                    log_info("No geocoding records to process")
                 return 0
 
-            # Execute contexts using consumer
-            total_processed = self.consumer.execute_contexts_batch(contexts, progress_bar)
+            total_items = sum(len(b) for b in batches)
+
+            if progress_bar is None and tqdm is not None:
+                progress_bar = tqdm.tqdm(total=total_items, desc="Geocoding API calls", unit="addr")
+
+            # Use thread pool for parallel processing
+            num_producers = self.thread_pool_manager.config.producer_config.max_workers
+            self.thread_pool_manager.start_producer_pool(
+                batches, self._producer_wrapper, progress_bar=progress_bar
+            )
+            self.thread_pool_manager.start_consumer_pool(
+                self._consumer_wrapper, num_producers=num_producers, progress_bar=progress_bar
+            )
+
+            self.thread_pool_manager.wait_for_completion()
+
+            if progress_bar is not None:
+                progress_bar.close()
 
             if not global_config.is_quiet():
-                log_info(self.logger, f"Geocoding API processing completed: {total_processed} operations processed")
+                log_info(f"Geocoding API processing completed: {total_items} records processed")
 
-            return total_processed
+            return total_items
 
         except Exception as e:
-            log_error(self.logger, f"Geocoding API processing failed: {e}", exc_info=True)
+            log_error(f"Geocoding API processing failed: {e}", exc_info=True)
             return 0
 
     def _producer_wrapper(self, batches: List[List[Dict[str, Any]]], work_queue, result_queue, thread_id: int, num_threads: int):
         """Wrapper for producer thread execution"""
         try:
-            log_debug(self.logger, f"Geocoding Producer thread {thread_id} starting")
+            log_debug(f"Geocoding Producer thread {thread_id} starting")
 
             # Distribute batches among threads
             for i in range(thread_id, len(batches), num_threads):
+                if self.exit_processing:
+                    break
                 batch = batches[i]
 
                 # Create operation to process geocoding batch
@@ -274,10 +322,10 @@ class GeocodingAPIProcessor:
                 # Put operation in result queue for consumer
                 result_queue.put(operation)
 
-                log_debug(self.logger, f"Geocoding Producer {thread_id}: queued operation for batch of {len(batch)} records")
+                log_debug(f"Geocoding Producer {thread_id}: queued operation for batch of {len(batch)} records")
 
         except Exception as e:
-            log_error(self.logger, f"Geocoding Producer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"Geocoding Producer thread {thread_id} error: {e}", exc_info=True)
         finally:
             # Signal completion
             result_queue.put(None)
@@ -285,12 +333,14 @@ class GeocodingAPIProcessor:
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, progress_bar=None):
         """Wrapper for consumer thread execution"""
         try:
-            log_debug(self.logger, f"Geocoding Consumer thread {thread_id} starting")
+            log_debug(f"Geocoding Consumer thread {thread_id} starting")
             sentinels_received = 0
 
             while True:
                 try:
                     operation = result_queue.get(timeout=1.0)
+                    if self.exit_processing:
+                        break
                     if operation is None:  # Sentinel
                         sentinels_received += 1
                         if sentinels_received >= num_producers:
@@ -308,11 +358,16 @@ class GeocodingAPIProcessor:
 
                     result_queue.task_done()
 
-                except:
+                except queue.Empty:
+                    if self.exit_processing:
+                        break
+                    continue
+                except Exception as inner_e:
+                    log_error(f"Error in consumer loop: {inner_e}")
                     continue
 
         except Exception as e:
-            log_error(self.logger, f"Geocoding Consumer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"Geocoding Consumer thread {thread_id} error: {e}", exc_info=True)
 
     def _execute_geocoding_operation(self, operation):
         """Execute a geocoding operation"""
@@ -326,20 +381,20 @@ class GeocodingAPIProcessor:
 
     def _process_geocoding_batch(self, batch: List[Dict[str, Any]]) -> int:
         """
-        Process a batch of geocoding records with API calls.
-
+        Process a batch of geocoding records with API calls, using PDC for DB writes.
+ 
         Args:
             batch: List of geocoding record dictionaries
-
+ 
         Returns:
             Number of records processed
         """
         if not batch:
             return 0
-
+ 
         if not global_config.is_quiet():
-            log_debug(self.logger, f"PHASE 2: Processing batch of {len(batch)} geocoding records")
-
+            log_debug(f"PHASE 2: Processing batch of {len(batch)} geocoding records")
+ 
         # Process the batch sequentially using batch API calls
         try:
             batch_results = self._batch_geocode_addresses(batch)
@@ -348,7 +403,7 @@ class GeocodingAPIProcessor:
             batch_results = [{'geocoding_record': record, 'api_result': {'status': 'failed', 'error': str(e)},
                             'last_attempt': datetime.now().isoformat(), 'attempt_count': record.get('attempt_count', 0) + 1}
                             for record in batch]
-
+ 
         # Process results into database updates
         updates = []
         address_updates = []  # Track successful geocoding for Address table updates
@@ -362,7 +417,7 @@ class GeocodingAPIProcessor:
                 'longitude': None,
                 'geocoding_status': None
             }
-
+ 
             # Map api_result fields to actual database columns
             if 'latitude' in api_result:
                 update_dict['latitude'] = api_result['latitude']
@@ -370,13 +425,13 @@ class GeocodingAPIProcessor:
                 update_dict['longitude'] = api_result['longitude']
             if 'geocoding_status' in api_result:
                 update_dict['geocoding_status'] = api_result['geocoding_status']
-
+ 
             # Add diagnostic logging
             if not global_config.is_quiet():
-                log_debug(self.logger, f"PHASE 2: Update dict for geocoding_id {update_dict['geocoding_id']}: {update_dict}")
-
+                log_debug(f"PHASE 2: Update dict for geocoding_id {update_dict['geocoding_id']}: {update_dict}")
+ 
             updates.append(update_dict)
-
+ 
             # Track successful geocoding results for Address table updates
             if api_result.get('status') == 'success' and update_dict['latitude'] is not None and update_dict['longitude'] is not None:
                 # Create colocator string for successful geocoding
@@ -385,76 +440,113 @@ class GeocodingAPIProcessor:
                     'geocoding_id': update_dict['geocoding_id'],
                     'colocator': colocator
                 })
-
-        # Execute bulk update for Geocoding table
-        if updates:
-            total_updated = self.db_ops.bulk_update('Geocoding', updates, 'geocoding_id')
-            if not global_config.is_quiet():
-                log_debug(self.logger, f"PHASE 2: Executed {len(updates)} updates, updated {total_updated} records")
-
-        # Update Address table and propagate colocator for successful geocoding
-        if address_updates:
-            for addr_update in address_updates:
-                geocoding_id = addr_update['geocoding_id']
-                colocator = addr_update['colocator']
-
-                # Find the address_id that corresponds to this geocoding_id
-                # We need to query the Addresses table to find the address_id
-                # This is a bit inefficient but necessary since we don't have address_id in the batch
-                address_query = """
-                    SELECT address_id FROM Addresses WHERE geocoding_id = ?
-                """
-                result = self.db_ops.execute_query(address_query, (geocoding_id,))
-                if result:
-                    row = result.fetchone()
-                    if row and row[0]:
-                        address_id = row[0]
-                        # Update the Address table with geocoding_id and colocator, and propagate colocator to owner
-                        self.db_ops.update_address_geocoding(address_id, geocoding_id, colocator)
-                        if not global_config.is_quiet():
-                            log_debug(self.logger, f"PHASE 2: Updated Address {address_id} with geocoding_id {geocoding_id} and colocator {colocator}")
-
-            if not global_config.is_quiet():
-                log_debug(self.logger, f"PHASE 2: Updated {len(address_updates)} addresses with geocoding results and propagated colocator")
-
-        return len(batch) if updates else 0
+ 
+        from pending_database_context import PendingDatabaseContext
+        context = PendingDatabaseContext()
+ 
+        # Add updates to Geocoding table as UPDATE operations
+        for update_dict in updates:
+            operation = DatabaseOperation(
+                operation_type=DatabaseOperationType.UPDATE,
+                data={
+                    'table': 'Geocoding',
+                    'updates': update_dict,
+                    'key_field': 'geocoding_id',
+                    'key_value': update_dict['geocoding_id']
+                }
+            )
+            context.addOperationToDatabase(operation)
+ 
+        # For address updates, since update_address_geocoding is custom, create UPDATE for Address
+        # Assuming update_address_geocoding does UPDATE Address SET geocoding_id=?, colocator=? WHERE address_id=?
+        # But since we have address_id from query, we need to include it.
+        # To preserve logic, we'll query here and add UPDATE operations.
+        for addr_update in address_updates:
+            geocoding_id = addr_update['geocoding_id']
+            colocator = addr_update['colocator']
+ 
+            # Find the address_id
+            address_query = """
+                SELECT address_id FROM Addresses WHERE geocoding_id = ?
+            """
+            result = self.db_ops.execute_query(address_query, (geocoding_id,))
+            if result:
+                row = result.fetchone()
+                if row and row[0]:
+                    address_id = row[0]
+                    # Create UPDATE for Address
+                    addr_update_dict = {
+                        'address_id': address_id,
+                        'geocoding_id': geocoding_id,
+                        'colocator': colocator
+                    }
+                    operation = DatabaseOperation(
+                        operation_type=DatabaseOperationType.UPDATE,
+                        data={
+                            'table': 'Addresses',
+                            'updates': {'geocoding_id': geocoding_id, 'colocator': colocator},
+                            'key_field': 'address_id',
+                            'key_value': address_id
+                        }
+                    )
+                    context.addOperationToDatabase(operation)
+ 
+                    # Note: Propagation to owner would need additional logic; assuming it's handled in db_ops or separate
+                    if not global_config.is_quiet():
+                        log_debug(f"PHASE 2: Prepared Address update for {address_id} with geocoding_id {geocoding_id} and colocator {colocator}")
+ 
+        # Update PDC size gauge before save
+        self.update_pdc_size_gauge(context)
+ 
+        # Execute via PDC
+        ids = context.save_to_database(self.db_ops)
+ 
+        if not global_config.is_quiet():
+            log_debug(f"PHASE 2: Executed PDC with {len(updates)} Geocoding updates and {len(address_updates)} Address updates")
+ 
+        return len(batch) if ids else 0
 
     def _batch_geocode_addresses(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Make a batch geocoding API call for multiple addresses.
-
+        Make a batch geocoding API call for multiple addresses, with exit_processing check.
+ 
         Args:
             batch: List of geocoding record dictionaries
-
+ 
         Returns:
             List of result dictionaries
         """
+        if self.exit_processing:
+            return []
+ 
         start_time = time.time()
-
+ 
         if not cg:
             duration = time.time() - start_time
-            self._update_api_performance(len(batch), duration)
+            self.producer._update_api_performance(len(batch), duration)
             return [{'geocoding_record': record, 'api_result': {'status': 'failed', 'error': 'censusgeocode not available'},
                       'last_attempt': datetime.now().isoformat(), 'attempt_count': record.get('attempt_count', 0) + 1}
                     for record in batch]
-
+ 
         try:
             # Prepare batch addresses for API call
             batch_addresses = []
             record_map = {}  # Map geocoding_id to original record
-
+ 
             for geocoding_record in batch:
+                if self.exit_processing:
+                    break
                 # Use the prebuilt JSON directly from normalized_address field
                 census_json = geocoding_record['normalized_address']
                 if not global_config.is_quiet():
-                    log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - census_json type: {type(census_json)}, value: {census_json}")
-
+                    log_debug(f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - census_json type: {type(census_json)}, value: {census_json}")
+ 
                 if isinstance(census_json, dict):
                     # Set the ID to geocoding_id for easy lookup when results come back
                     api_record = census_json.copy()
                     api_record['id'] = str(geocoding_record['geocoding_id'])  # Ensure string ID
                     if not global_config.is_quiet():
-                        log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - dict path: api_record after copy: {api_record}")
+                        log_debug(f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - dict path: api_record after copy: {api_record}")
                 else:
                     # Parse as JSON (all records should now be proper JSON)
                     try:
@@ -462,10 +554,10 @@ class GeocodingAPIProcessor:
                         api_record = json.loads(census_json)
                         api_record['id'] = str(geocoding_record['geocoding_id'])  # Ensure string ID
                         if not global_config.is_quiet():
-                            log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - JSON parse successful: api_record: {api_record}")
+                            log_debug(f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - JSON parse successful: api_record: {api_record}")
                     except Exception as json_e:
                         if not global_config.is_quiet():
-                            log_error(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - JSON parse failed: {json_e}, creating minimal record")
+                            log_error(f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - JSON parse failed: {json_e}, creating minimal record")
                         # If JSON parsing fails, create a minimal record
                         api_record = {
                             'id': str(geocoding_record['geocoding_id']),  # Ensure string ID
@@ -474,36 +566,41 @@ class GeocodingAPIProcessor:
                             'state': '',
                             'zip': ''
                         }
-
+ 
                 batch_addresses.append(api_record)
                 record_map[geocoding_record['geocoding_id']] = geocoding_record
                 if not global_config.is_quiet():
-                    log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} (type: {type(geocoding_record['geocoding_id'])}) - added to batch_addresses: {api_record}")
-                    log_debug(self.logger, f"DEBUG: record_map keys after addition: {[(k, type(k)) for k in list(record_map.keys())[-3:]]}")
-
+                    log_debug(f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} (type: {type(geocoding_record['geocoding_id'])}) - added to batch_addresses: {api_record}")
+                    log_debug(f"DEBUG: record_map keys after addition: {[(k, type(k)) for k in list(record_map.keys())[-3:]]}")
+ 
+            if self.exit_processing:
+                return []
+ 
             # Make batch API call
             if not global_config.is_quiet():
-                log_debug(self.logger, f"Making batch API call with {len(batch_addresses)} addresses")
+                log_debug(f"Making batch API call with {len(batch_addresses)} addresses")
                 # Log the actual address data being sent to API
                 for addr in batch_addresses:
-                    log_debug(self.logger, f"API call address: id={addr.get('id')}, street='{addr.get('street')}', city='{addr.get('city')}', state='{addr.get('state')}', zip='{addr.get('zip')}'")
+                    log_debug(f"API call address: id={addr.get('id')}, street='{addr.get('street')}', city='{addr.get('city')}', state='{addr.get('state')}', zip='{addr.get('zip')}'")
             api_results = cg.addressbatch(batch_addresses)
             if not global_config.is_quiet():
-                log_debug(self.logger, f"DEBUG: API call completed, api_results: {api_results}")
-
+                log_debug(f"DEBUG: API call completed, api_results: {api_results}")
+ 
             # Track performance
             duration = time.time() - start_time
-            self._update_api_performance(len(batch), duration)
-
+            self.producer._update_api_performance(len(batch), duration)
+ 
             # Process results
             results = []
             if api_results and len(api_results) > 0:
                 if not global_config.is_quiet():
-                    log_debug(self.logger,f"Census API call params {api_results}")
-
+                    log_debug(f"Census API call params {api_results}")
+ 
                 for result in api_results:
+                    if self.exit_processing:
+                        break
                     geocoding_id = result.get('id')
-
+ 
                     # Try multiple lookup strategies to handle type mismatches
                     geocoding_record = record_map.get(geocoding_id)
                     if not geocoding_record:
@@ -517,22 +614,22 @@ class GeocodingAPIProcessor:
                                 geocoding_record = record_map.get(UUID(geocoding_id))
                         except (ValueError, TypeError):
                             pass
-
+ 
                     if not geocoding_record:
                         if not global_config.is_quiet():
-                            log_error(self.logger, f"PHASE 2: CRITICAL ERROR - No geocoding_record found for geocoding_id {geocoding_id} (type: {type(geocoding_id)})")
-                            log_error(self.logger, f"PHASE 2: Available geocoding_ids in record_map: {[(k, type(k)) for k in list(record_map.keys())[:5]]}")
-                            log_error(self.logger, f"PHASE 2: API result being processed: {result}")
+                            log_error(f"PHASE 2: CRITICAL ERROR - No geocoding_record found for geocoding_id {geocoding_id} (type: {type(geocoding_id)})")
+                            log_error(f"PHASE 2: Available geocoding_ids in record_map: {[(k, type(k)) for k in list(record_map.keys())[:5]]}")
+                            log_error(f"PHASE 2: API result being processed: {result}")
                         continue
-
+ 
                     lat = result.get('lat')
                     lon = result.get('lon')
                     match = result.get('match', False)
                     matchtype = result.get('matchtype')
-
+ 
                     if not global_config.is_quiet():
-                        log_debug(self.logger, f"DEBUG: Processing result for geocoding_id {geocoding_id}: lat={lat}, lon={lon}, match={match}, matchtype={matchtype}")
-
+                        log_debug(f"DEBUG: Processing result for geocoding_id {geocoding_id}: lat={lat}, lon={lon}, match={match}, matchtype={matchtype}")
+ 
                     # The census API uses 'match' boolean and 'matchtype' string
                     # We need to determine success based on match and presence of coordinates
                     if match and lat is not None and lon is not None and str(lat).strip() and str(lon).strip():
@@ -540,7 +637,7 @@ class GeocodingAPIProcessor:
                         geocoding_status = 'Match'
                         if matchtype and matchtype != 'Exact':
                             geocoding_status = f'Match:{matchtype}'
-
+ 
                         api_result = {
                             'status': 'success',
                             'latitude': round(float(lat), 4),
@@ -548,7 +645,7 @@ class GeocodingAPIProcessor:
                             'geocoding_status': geocoding_status
                         }
                         if not global_config.is_quiet():
-                            log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_id} - success result: {api_result}")
+                            log_debug(f"DEBUG: geocoding_id {geocoding_id} - success result: {api_result}")
                     else:
                         # No match or invalid result
                         api_result = {
@@ -556,8 +653,8 @@ class GeocodingAPIProcessor:
                             'geocoding_status': 'No_Match'
                         }
                         if not global_config.is_quiet():
-                            log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_id} - failed result: {api_result}")
-
+                            log_debug(f"DEBUG: geocoding_id {geocoding_id} - failed result: {api_result}")
+ 
                     results.append({
                         'geocoding_record': geocoding_record,
                         'api_result': api_result,
@@ -567,75 +664,24 @@ class GeocodingAPIProcessor:
             else:
                 # No results from API
                 if not global_config.is_quiet():
-                    log_debug(self.logger,f"Census API call NO RESULT")
-                    log_debug(self.logger, f"DEBUG: batch_addresses that were sent: {batch_addresses}")
+                    log_debug(f"Census API call NO RESULT")
+                    log_debug(f"DEBUG: batch_addresses that were sent: {batch_addresses}")
                 for geocoding_record in batch:
                     if not global_config.is_quiet():
-                        log_debug(self.logger, f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - no API result, creating failed result")
+                        log_debug(f"DEBUG: geocoding_id {geocoding_record['geocoding_id']} - no API result, creating failed result")
                     results.append({
                         'geocoding_record': geocoding_record,
                         'api_result': {'status': 'failed', 'error': 'no result from API'},
                         'last_attempt': datetime.now().isoformat(),
                         'attempt_count': geocoding_record.get('attempt_count', 0) + 1
                     })
-
+ 
             return results
-
+ 
         except Exception as e:
             # Batch API call failed
             duration = time.time() - start_time
-            self._update_api_performance(len(batch), duration)
+            self.producer._update_api_performance(len(batch), duration)
             return [{'geocoding_record': record, 'api_result': {'status': 'failed', 'error': str(e)},
                       'last_attempt': datetime.now().isoformat(), 'attempt_count': record.get('attempt_count', 0) + 1}
                     for record in batch]
-
-    def _update_api_performance(self, batch_size: int, duration: float):
-        """Update API performance tracking"""
-        self._api_performance_history.append({
-            'batch_size': batch_size,
-            'duration': duration,
-            'avg_time_per_record': duration / batch_size
-        })
-
-        # Keep only recent history
-        if len(self._api_performance_history) > self._performance_window:
-            self._api_performance_history = self._api_performance_history[-self._performance_window:]
-
-    def _get_api_performance_level(self) -> str:
-        """Determine API performance level based on recent history"""
-        if not self._api_performance_history:
-            return 'normal'
-
-        # Calculate average time per record over recent batches
-        recent_batches = self._api_performance_history[-5:]  # Last 5 batches
-        if not recent_batches:
-            return 'normal'
-
-        avg_time_per_record = sum(b['avg_time_per_record'] for b in recent_batches) / len(recent_batches)
-
-        if avg_time_per_record < self._fast_threshold:
-            return 'fast'
-        elif avg_time_per_record > self._slow_threshold:
-            return 'very_slow'
-        elif avg_time_per_record > (self._slow_threshold * 0.7):  # 70% of slow threshold
-            return 'slow'
-        else:
-            return 'normal'
-
-    def _get_dynamic_batch_size(self) -> int:
-        """Calculate dynamic batch size based on API performance"""
-        performance_level = self._get_api_performance_level()
-        factor = self._batch_factors[performance_level]
-
-        dynamic_size = int(self.batch_size * factor)
-        # Cap at 10,000 to comply with census API batch limit
-        dynamic_size = max(5, min(10000, dynamic_size))
-
-        if not global_config.is_quiet():
-            avg_time = 0.0
-            if self._api_performance_history:
-                recent = self._api_performance_history[-3:]
-                avg_time = sum(b['avg_time_per_record'] for b in recent) / len(recent)
-            log_debug(self.logger, f"PHASE 2: Dynamic batch sizing - performance: {performance_level}, avg_time_per_record: {avg_time:.2f}s, factor: {factor}, batch_size: {self.batch_size} -> {dynamic_size}")
-
-        return dynamic_size

@@ -67,7 +67,12 @@ def find_element(root, xpaths, namespaces, xpath_cache=None, field=None, form_ty
     root_id = id(root)
     namespaces_key = tuple(sorted(namespaces.items())) if namespaces else None
 
-    compiled_xpaths = precompile_xpaths(xpaths, namespaces)
+    # XPaths are already pre-compiled in xpaths_*.py files, so use them directly
+    # Only compile if we get strings (which shouldn't happen in normal operation)
+    if xpaths and isinstance(xpaths[0], etree.XPath):
+        compiled_xpaths = xpaths  # Already compiled
+    else:
+        compiled_xpaths = precompile_xpaths(xpaths, namespaces)
 
     for xpath in compiled_xpaths:
         # Check the cache first

@@ -89,13 +89,13 @@ CREATE TABLE Charities (
 -- Grants table - Grant data from charity filings
 CREATE TABLE Grants (
     grant_id UUID DEFAULT uuidv7() PRIMARY KEY,
-    filer_ein CHAR(9) NOT NULL,
+    filer_ein VARCHAR(9) NOT NULL,
     -- Filer EIN (foreign key to Charities with tax_year)
     filer_name VARCHAR NOT NULL,
     -- Grantee EIN (foreign key to Charities)
     grantee_name VARCHAR NOT NULL,
     -- Filer name
-    grant_ein CHAR(9),
+    recipient_ein VARCHAR(9),
     -- Grantee EIN (may be null for foreign)
     grant_amt DOUBLE NOT NULL,
     -- Grant amount
@@ -103,6 +103,8 @@ CREATE TABLE Grants (
     -- Tax year
     colocator VARCHAR,
     -- Grantee colocator data
+    filer_colocator VARCHAR,
+    -- filter colocator data, sus if they match
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein, tax_year) REFERENCES Charities(ein, tax_year) -- DuckDB doesn't support CASCADE
 );
@@ -234,7 +236,7 @@ CREATE TABLE Backfill (
     backfill_id UUID DEFAULT uuidv7() PRIMARY KEY,
     grant_id UUID,
     -- Grant originator
-    grant_ein CHAR(9) NOT NULL,
+    recipient_ein VARCHAR(9) NOT NULL,
     -- Grantee EIN
     name VARCHAR NOT NULL,
     -- Organization name
@@ -245,7 +247,6 @@ CREATE TABLE Backfill (
     zip_code VARCHAR,
     -- ZIP code for uniqueness
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(grant_ein, name, zip_code) -- Prevent duplicates
 );
 -- PipelineProgress table - Track processing pipeline status
 CREATE TABLE PipelineProgress (
@@ -338,9 +339,11 @@ CREATE INDEX idx_charities_form_type ON Charities(form_type);
 CREATE INDEX idx_charities_denominator ON Charities(denominator);
 -- Grants indexes
 CREATE INDEX idx_grants_filer_ein ON Grants(filer_ein);
-CREATE INDEX idx_grants_grant_ein ON Grants(grant_ein);
+CREATE INDEX idx_grants_recipient_ein ON Grants(recipient_ein);
 CREATE INDEX idx_grants_tax_year ON Grants(tax_year);
-CREATE INDEX idx_grants_filer_ein_year ON Grants(filer_ein, tax_year);
+CREATE INDEX idx_grants_colocator ON Grants(colocator);
+CREATE INDEX idx_grants_filer_colocator ON Grants(filer_colocator);
+--CREATE INDEX idx_grants_filer_ein_year ON Grants(filer_ein, tax_year);
 -- Contributions indexes
 CREATE INDEX idx_contributions_filer_ein ON Contributions(filer_ein);
 CREATE INDEX idx_contributions_recipient_ein ON Contributions(recipient_ein);
@@ -363,7 +366,7 @@ CREATE INDEX idx_xmlfiles_ein ON XmlFiles(ein);
 CREATE INDEX idx_xmlfiles_tax_year ON XmlFiles(tax_year);
 CREATE INDEX idx_xmlfiles_processed ON XmlFiles(processed);
 -- Backfill indexes
-CREATE INDEX idx_backfill_grant_ein ON Backfill(grant_ein);
+CREATE INDEX idx_backfill_recipient_ein ON Backfill(recipient_ein);
 CREATE INDEX idx_backfill_zip_code ON Backfill(zip_code);
 -- PipelineProgress indexes
 CREATE INDEX idx_pipeline_step_name ON PipelineProgress(step_name);

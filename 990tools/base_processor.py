@@ -6,7 +6,6 @@ This module contains base classes that provide common functionality
 for all processor implementations in the IRS 990 processing system.
 """
 
-import logging
 import sys
 import cProfile
 import pstats
@@ -14,12 +13,17 @@ import io
 import time
 import threading
 import queue
+import signal
 import traceback
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, Tuple
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
-from logging_utils import log_error, log_info, log_debug, log_warning, get_logger, start_progress_reporting
+from pending_database_context import PendingDatabaseContext
+from logging_utils import log_error, log_info, log_debug, log_warning, start_progress_reporting
 from config import global_config
+import psutil
+import time
+import queue
 
 
 class PoolConfig:
@@ -86,19 +90,18 @@ class ThreadPoolManager:
     and consumers. Ensures thread-safe operations and proper shutdown handling.
     """
 
-    def __init__(self, config: ThreadPoolConfig, logger: logging.Logger = None):
+    def __init__(self, config: ThreadPoolConfig, processor: 'BaseProcessor'):
         """
         Initialize the thread pool manager.
 
         Args:
             config: Thread pool configuration
-            logger: Logger instance for thread operations
+            processor: BaseProcessor instance that owns this manager
         """
         self.config = config
-        self.logger = logger or logging.getLogger(__name__)
+        self.processor = processor
         self.work_queue = queue.Queue(maxsize=config.producer_config.queue_size)
         self.result_queue = queue.Queue()
-        self.shutdown_event = threading.Event()
         self.producer_threads = []
         self.consumer_threads = []
         self._lock = threading.Lock()
@@ -116,7 +119,7 @@ class ThreadPoolManager:
         # Clear producer threads from previous runs to prevent accumulation
         self.producer_threads.clear()
         num_producers = min(self.config.producer_config.max_workers, len(work_items))
-        self.log_info(f"Starting {num_producers} producer threads")
+        log_info(f"Starting {num_producers} producer threads (max_workers={self.config.producer_config.max_workers}, work_items={len(work_items)})")
 
         for i in range(num_producers):
             thread = threading.Thread(
@@ -138,7 +141,7 @@ class ThreadPoolManager:
             **kwargs: Additional keyword arguments for consumer_func
         """
         num_consumers = self.config.consumer_config.max_workers
-        self.log_info(f"Starting {num_consumers} consumer threads")
+        log_info(f"Starting {num_consumers} consumer threads")
 
         for i in range(num_consumers):
             thread = threading.Thread(
@@ -154,23 +157,23 @@ class ThreadPoolManager:
         Wait for all producer and consumer threads to complete.
         """
         # Wait for producers to finish
-        self.log_info("Waiting for producer threads to complete...")
+        log_info("Waiting for producer threads to complete...")
         for i, thread in enumerate(self.producer_threads):
             thread.join()  # Wait indefinitely for producer threads (they are daemon threads)
-            self.log_debug(f"Producer thread {i} completed")
+            log_debug(f"Producer thread {i} completed")
 
         # Wait for consumers to finish
-        self.log_info("Waiting for consumer threads to complete...")
+        log_info("Waiting for consumer threads to complete...")
         for i, thread in enumerate(self.consumer_threads):
             thread.join()  # Wait indefinitely for consumer threads (they are now non-daemon)
-            self.log_debug(f"Consumer thread {i} completed")
+            log_debug(f"Consumer thread {i} completed")
 
     def shutdown(self) -> None:
         """
         Shutdown the thread pool manager and clean up resources.
         """
-        self.log_info("Shutting down thread pool manager")
-        self.shutdown_event.set()
+        log_info("Shutting down thread pool manager")
+        self.processor.exit_processing = True  # Set processor exit flag
 
         # Wait for threads to finish
         self.wait_for_completion()
@@ -180,7 +183,7 @@ class ThreadPoolManager:
         self.consumer_threads.clear()
 
     def _producer_wrapper(self, work_items: List[Any], producer_func: Callable,
-                         thread_id: int, num_threads: int, args: tuple, kwargs: dict) -> None:
+                          thread_id: int, num_threads: int, args: tuple, kwargs: dict) -> None:
         """
         Wrapper for producer thread execution.
 
@@ -193,15 +196,15 @@ class ThreadPoolManager:
             kwargs: Additional keyword arguments
         """
         try:
-            self.log_debug(f"Producer thread {thread_id} starting")
+            log_debug(f"Producer thread {thread_id} starting")
             producer_func(work_items, self.work_queue, self.result_queue,
-                         thread_id, num_threads, *args, **kwargs)
-            self.log_debug(f"Producer thread {thread_id} completed")
+                          thread_id, num_threads, *args, **kwargs)
+            log_debug(f"Producer thread {thread_id} completed")
         except Exception as e:
-            self.log_error(f"Producer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"Producer thread {thread_id} error: {e}", exc_info=True)
 
     def _consumer_wrapper(self, consumer_func: Callable, thread_id: int, num_producers: int,
-                          args: tuple, kwargs: dict) -> None:
+                           args: tuple, kwargs: dict) -> None:
         """
         Wrapper for consumer thread execution.
 
@@ -213,31 +216,11 @@ class ThreadPoolManager:
             **kwargs: Additional keyword arguments
         """
         try:
-            self.log_debug(f"Consumer thread {thread_id} starting")
+            log_debug(f"Consumer thread {thread_id} starting")
             consumer_func(self.result_queue, thread_id, num_producers, *args, **kwargs)
-            self.log_debug(f"Consumer thread {thread_id} completed")
+            log_debug(f"Consumer thread {thread_id} completed")
         except Exception as e:
-            self.log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
-
-    def log_info(self, msg: str, *args, **kwargs):
-        """Log info message"""
-        if self.logger:
-            log_info(self.logger, msg, *args, **kwargs)
-
-    def log_debug(self, msg: str, *args, **kwargs):
-        """Log debug message"""
-        if self.logger:
-            log_debug(self.logger, msg, *args, **kwargs)
-
-    def log_warning(self, msg: str, *args, **kwargs):
-        """Log warning message"""
-        if self.logger:
-            log_warning(self.logger, msg, *args, **kwargs)
-
-    def log_error(self, msg: str, *args, exc_info: bool = False, **kwargs):
-        """Log error message"""
-        if self.logger:
-            log_error(self.logger, msg, *args, exc_info=exc_info, **kwargs)
+            log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
 
 
 class BaseProcessor:
@@ -248,19 +231,100 @@ class BaseProcessor:
     coordinate between producers and consumers in a thread-safe manner.
     """
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger = None):
+    def __init__(self, db_ops: DatabaseOperations):
         """
         Initialize the base processor.
 
         Args:
             db_ops: Database operations instance
-            logger: Optional logger instance
         """
         self.db_ops = db_ops
-        self.logger = logger or logging.getLogger(__name__)
-
+        self.exit_processing = False
+        self.setup_shutdown_handlers()
+        self.monitoring_thread = None
+        self.monitor_interval = 10.0
+        self.monitor_queues = []
+        self.monitor_enable = True
+        self.pdc_objects_count = 0
+        self.pdc_operations_count = 0
+        self.pdc_updates_count = 0
+        
         # Install SIGUSR1 handler for thread dumps
-        setup_thread_dump_handler()
+        setup_thread_dump_handler(self)
+
+    def setup_status_gauges(self, interval: float = 10.0, queues: List[queue.Queue] = None, enable: bool = True):
+        """
+        Setup status monitoring gauges with optional thread.
+        
+        Args:
+            interval: Update interval in seconds
+            queues: List of queues to monitor sizes
+            enable: Whether to start monitoring
+        """
+        self.monitor_interval = interval
+        self.monitor_queues = queues or []
+        self.monitor_enable = enable
+        
+        if enable and not self.monitoring_thread:
+            self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+            self.monitoring_thread.start()
+
+    def _monitoring_loop(self):
+        """Monitoring loop that runs in a daemon thread."""
+        while not self.exit_processing:
+            self._update_gauges()
+            time.sleep(self.monitor_interval)
+
+    def _update_gauges(self):
+        """Update and log status gauges."""
+        try:
+            process = psutil.Process()
+            memory_gb = process.memory_info().rss / (1024 ** 3)
+            
+            queue_sizes = [q.qsize() for q in self.monitor_queues if hasattr(q, 'qsize')]
+            total_queue_size = sum(queue_sizes)
+            
+            custom_metrics = self._get_custom_metrics()
+            
+            status_msg = f"Status Gauges: Memory {memory_gb:.2f}GB, Queue sizes {queue_sizes} (total: {total_queue_size}), Custom: {custom_metrics}"
+            log_info(status_msg)
+        except Exception as e:
+            log_error(f"Error updating status gauges: {e}")
+
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        """Virtual method for subclass-specific custom metrics."""
+        return {
+            'pdc_objects_count': self.pdc_objects_count,
+            'pdc_operations_count': self.pdc_operations_count,
+            'pdc_updates_count': self.pdc_updates_count,
+        }
+
+    def setup_shutdown_handlers(self):
+        def signal_handler(signum, frame):
+            log_error(f"Received signal {signum}, shutting down gracefully...")
+            self.exit_processing = True
+            self.handle_shutdown()
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+    def handle_shutdown(self):
+        """Perform general shutdown cleanup"""
+        self._on_shutdown()
+
+    def _on_shutdown(self):
+        """Virtual method for subclass-specific shutdown actions"""
+        pass
+
+        def merge_pending_contexts(self, contexts: List[PendingDatabaseContext]) -> PendingDatabaseContext:
+            """Generalized method to merge multiple PendingDatabaseContext objects into a single context.
+            This centralizes the merging logic for efficient batch processing across all database-heavy processors.
+            Handles empty and single-context cases directly for optimal performance.
+            """
+            if not contexts:
+                return PendingDatabaseContext()
+            if len(contexts) == 1:
+                return contexts[0]
+            return PendingDatabaseContext.merge(contexts)
 
 
 class BaseProducer(BaseProcessor):
@@ -278,7 +342,6 @@ class BaseProducer(BaseProcessor):
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000, thread_pool_config: Optional[ThreadPoolConfig] = None):
         super().__init__(db_ops)
         self.batch_size = batch_size
-        self.logger = get_logger(self.__class__.__name__)
         self._profile_seconds = None
         self._profiler = None
         self.thread_pool_config = thread_pool_config or ThreadPoolConfig()
@@ -324,11 +387,16 @@ class BaseProducer(BaseProcessor):
         offset = 0
         work_items_processed = 0
 
-        self.log_info(f"Starting to collect contexts (batch_size={self.batch_size})")
+        log_info(f"Starting to collect contexts (batch_size={self.batch_size})")
 
+        last_pk = None
         while True:
-            # Get next batch of work items
-            batch = self._get_work_batch(offset)
+            # Get next batch of work items using key-value paging
+            batch, new_last_pk = self._get_work_batch(last_pk)
+
+            if self.exit_processing:
+                print("Exiting thread")
+                break
 
             if not batch:
                 # No more work to process
@@ -336,25 +404,28 @@ class BaseProducer(BaseProcessor):
 
             # Process this batch into a single context
             context = self._process_work_batch_to_context(batch)
+            if self.exit_processing:
+                print("Exiting thread")
+                break
             if context:
-                # Merge this context into the master context
-                master_context = PendingDatabaseContext.merge([master_context, context])
+                master_context = self.merge_pending_contexts([master_context, context])
 
             # Count work items processed (each batch represents one work item)
             work_items_processed += len(batch)
 
+            # Update last_pk for next batch
+            last_pk = new_last_pk
+
             # Check if we've reached the global limit
             if global_config.max_files and work_items_processed >= global_config.max_files:
-                self.log_info(f"Reached max_files limit: {global_config.max_files} work items")
+                log_info(f"Reached max_files limit: {global_config.max_files} work items")
                 break
-
-            offset += self.batch_size
 
             # Log progress
             if work_items_processed % 100 == 0:
-                self.log_info(f"Collected contexts for {work_items_processed} work items so far")
+                log_info(f"Collected contexts for {work_items_processed} work items so far")
 
-        self.log_info(f"Collected master context with {work_items_processed} work items")
+        log_info(f"Collected master context with {work_items_processed} work items")
         return master_context
 
     def _process_work_batch_to_context(self, batch) -> Optional['PendingDatabaseContext']:
@@ -380,7 +451,7 @@ class BaseProducer(BaseProcessor):
         self._profile_seconds = global_config.profile_seconds
         self._profiler = cProfile.Profile()
 
-        self.log_info(f"Starting profiling for {self._profile_seconds} seconds during context collection")
+        log_info(f"Starting profiling for {self._profile_seconds} seconds during context collection")
 
         # Start profiling
         self._profiler.enable()
@@ -394,14 +465,20 @@ class BaseProducer(BaseProcessor):
         work_items_processed = 0
 
         try:
+            last_pk = None
             while True:
                 # Check if profiling time has elapsed
                 if time.time() - start_time >= self._profile_seconds:
-                    self.log_info(f"Profiling time limit ({self._profile_seconds}s) reached during context collection")
+                    self.exit_processing = True
+                    print("Exiting thread")
                     break
 
-                # Get next batch of work items
-                batch = self._get_work_batch(offset)
+                # Get next batch of work items using key-value paging
+                batch, new_last_pk = self._get_work_batch(last_pk)
+
+                if self.exit_processing:
+                    print("Exiting thread")
+                    break
 
                 if not batch:
                     # No more work to process
@@ -409,23 +486,26 @@ class BaseProducer(BaseProcessor):
 
                 # Process this batch into a single context
                 context = self._process_work_batch_to_context(batch)
+                if self.exit_processing:
+                    print("Exiting thread")
+                    break
                 if context:
-                    # Merge this context into the master context
-                    master_context = PendingDatabaseContext.merge([master_context, context])
+                    master_context = self.merge_pending_contexts([master_context, context])
 
                 # Count work items processed (each batch represents one work item)
                 work_items_processed += len(batch)
 
+                # Update last_pk for next batch
+                last_pk = new_last_pk
+
                 # Check if we've reached the global limit
                 if global_config.max_files and work_items_processed >= global_config.max_files:
-                    self.log_info(f"Reached max_files limit: {global_config.max_files} work items")
+                    log_info(f"Reached max_files limit: {global_config.max_files} work items")
                     break
-
-                offset += self.batch_size
 
                 # Log progress
                 if work_items_processed % 100 == 0:
-                    self.log_info(f"Collected contexts for {work_items_processed} work items so far")
+                    log_info(f"Collected contexts for {work_items_processed} work items so far")
 
         finally:
             # Stop profiling
@@ -433,7 +513,7 @@ class BaseProducer(BaseProcessor):
             end_time = time.time()
             execution_time = end_time - start_time
 
-            self.log_info(f"Context collection profiling complete. Time: {execution_time:.2f}s, Work items: {work_items_processed}")
+            log_info(f"Context collection profiling complete. Time: {execution_time:.2f}s, Work items: {work_items_processed}")
 
             # Generate profiling report
             self._generate_profiling_report("collect_contexts", execution_time, work_items_processed)
@@ -451,7 +531,7 @@ class BaseProducer(BaseProcessor):
             List of PendingDatabaseContext objects for the consumer to execute
         """
         # Initialize thread pool manager
-        self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
+        self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self)
 
         # Override max_workers if specified
         if max_workers is not None:
@@ -463,24 +543,25 @@ class BaseProducer(BaseProcessor):
 
         work_items_processed = 0
 
-        self.log_info(f"Starting parallel context collection (max_workers={self.thread_pool_config.producer_config.max_workers})")
+        log_info(f"Starting parallel context collection (max_workers={self.thread_pool_config.producer_config.max_workers})")
 
         try:
-            # Get all work items first (for parallel distribution)
+            # Get all work items first (for parallel distribution) using key-value paging
             all_work_items = []
-            offset = 0
+            last_pk = None
             while True:
-                batch = self._get_work_batch(offset)
+                batch, new_last_pk = self._get_work_batch(last_pk)
                 if not batch:
                     break
                 all_work_items.extend(batch)
+
+                # Update last_pk for next batch
+                last_pk = new_last_pk
 
                 # Check global limit
                 if global_config.max_files and len(all_work_items) >= global_config.max_files:
                     all_work_items = all_work_items[:global_config.max_files]
                     break
-
-                offset += self.batch_size
 
             if not all_work_items:
                 return master_context
@@ -495,6 +576,9 @@ class BaseProducer(BaseProcessor):
             sentinels_received = 0
             num_producers = len(self.thread_pool_manager.producer_threads)
             while sentinels_received < num_producers:
+                if self.exit_processing:
+                    print("Exiting thread")
+                    break
                 try:
                     result = self.thread_pool_manager.result_queue.get(timeout=1.0)
                     if result is None:  # Sentinel
@@ -503,11 +587,15 @@ class BaseProducer(BaseProcessor):
                         # Each result is a list of contexts from one producer
                         # Merge them into the master context
                         if result:
-                            master_context = PendingDatabaseContext.merge([master_context] + result)
+                            master_context = self.merge_pending_contexts([master_context] + result)
                         work_items_processed += len(result)
                     self.thread_pool_manager.result_queue.task_done()
+                    if self.exit_processing:
+                        print("Exiting thread")
+                        break
                 except queue.Empty:
-                    if self.thread_pool_manager.shutdown_event.is_set():
+                    if self.exit_processing:
+                        print("Exiting thread")
                         break
                     continue
 
@@ -519,11 +607,11 @@ class BaseProducer(BaseProcessor):
             if self.thread_pool_manager:
                 self.thread_pool_manager.shutdown()
 
-        self.log_info(f"Collected master context with {work_items_processed} work items (parallel)")
+        log_info(f"Collected master context with {work_items_processed} work items (parallel)")
         return master_context
 
     def _parallel_work_batch_processor(self, work_items: List[Any], work_queue: queue.Queue,
-                                      result_queue: queue.Queue, thread_id: int, num_threads: int) -> None:
+                                       result_queue: queue.Queue, thread_id: int, num_threads: int) -> None:
         """
         Process work items in parallel using thread pool.
 
@@ -541,28 +629,41 @@ class BaseProducer(BaseProcessor):
 
             # Distribute work items among threads
             for i in range(thread_id, len(work_items), num_threads):
+                if self.exit_processing:
+                    break
+
                 work_item = work_items[i]
 
                 # Process single work item into context and merge into thread context
                 context = self._process_work_batch_to_context([work_item])
+                if self.exit_processing:
+                    print("Exiting thread")
+                    break
                 if context:
                     thread_context = PendingDatabaseContext.merge([thread_context, context])
 
                 # Log progress
                 if (i + 1) % 50 == 0:
-                    self.log_info(f"Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
+                    log_info(f"Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
 
             # Put the single merged context in result queue
             result_queue.put(thread_context)
 
         except Exception as e:
-            self.log_error(f"Parallel work processor {thread_id} error: {e}", exc_info=True)
+            log_error(f"Parallel work processor {thread_id} error: {e}", exc_info=True)
         finally:
             # Signal completion
             result_queue.put(None)
 
-    def _get_work_batch(self, offset: int) -> List[Any]:
-        """Get a batch of work items - to be implemented by subclasses"""
+    def _get_work_batch(self, last_pk: Optional[Any] = None) -> Tuple[List[Any], Optional[Any]]:
+        """Get a batch of work items using key-value paging - to be implemented by subclasses.
+        
+        Args:
+            last_pk: The last primary key from the previous batch (None for first batch)
+        
+        Returns:
+            Tuple of (batch: List of work items, max_pk: The maximum primary key in this batch or None if empty)
+        """
         raise NotImplementedError("Subclasses must implement _get_work_batch")
 
     def _process_work_batch(self, batch: List[Any]) -> List[DatabaseOperation]:
@@ -576,20 +677,6 @@ class BaseProducer(BaseProcessor):
     def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
         """Get the scope of work for progress bar setup - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement get_progress_scope")
-
-    def log_info(self, msg: str, *args, ein: Optional[str] = None):
-        """Log info with optional EIN context"""
-        if not global_config.is_quiet():
-            log_info(self.logger, msg, *args, ein=ein)
-
-    def log_debug(self, msg: str, *args, ein: Optional[str] = None):
-        """Log debug with optional EIN context"""
-        if not global_config.is_quiet():
-            log_debug(self.logger, msg, *args, ein=ein)
-
-    def log_warning(self, msg: str, *args, ein: Optional[str] = None):
-        """Log warning with optional EIN context - always shown even in quiet mode"""
-        log_warning(self.logger, msg, *args, ein=ein)
 
     def _collect_operations_with_profiling(self) -> List[DatabaseOperation]:
         """DEPRECATED: Use PDC-based profiling instead"""
@@ -647,22 +734,22 @@ class BaseProducer(BaseProcessor):
             f.write("=== Top 50 Functions by Cumulative Time ===\n")
             f.write(profiling_output)
 
-        self.log_info(f"Profiling complete. Results saved to:")
-        self.log_info(f"  - {txt_filename} (human-readable report)")
-        self.log_info(f"  - {stats_filename} (binary stats for further analysis)")
-        self.log_info(f"  - Mode: {mode_suffix} (backpressure={not global_config.no_backpressure}, workers={worker_count})")
+        log_info(f"Profiling complete. Results saved to:")
+        log_info(f"  - {txt_filename} (human-readable report)")
+        log_info(f"  - {stats_filename} (binary stats for further analysis)")
+        log_info(f"  - Mode: {mode_suffix} (backpressure={not global_config.no_backpressure}, workers={worker_count})")
 
         # Print summary to console
-        self.log_info("=== Profiling Summary ===")
-        self.log_info(f"Execution time: {execution_time:.2f} seconds")
-        self.log_info(f"Work items processed: {work_items_processed}")
-        self.log_info(f"Processing rate: {processing_rate:.2f} items/sec")
-        self.log_info(f"Throughput: {throughput:.2f} items/min")
-        self.log_info("Top 10 most time-consuming functions:")
+        log_info("=== Profiling Summary ===")
+        log_info(f"Execution time: {execution_time:.2f} seconds")
+        log_info(f"Work items processed: {work_items_processed}")
+        log_info(f"Processing rate: {processing_rate:.2f} items/sec")
+        log_info(f"Throughput: {throughput:.2f} items/min")
+        log_info("Top 10 most time-consuming functions:")
         lines = profiling_output.split('\n')
         for line in lines[:15]:  # First 15 lines contain the top functions
             if line.strip():
-                self.log_info(line)
+                log_info(line)
 
 
 class ProcessorCoordinator:
@@ -674,12 +761,11 @@ class ProcessorCoordinator:
     and ensures all processors work consistently.
     """
 
-    def __init__(self, db_ops: DatabaseOperations, logger: logging.Logger = None):
+    def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
-        self.logger = logger or logging.getLogger(__name__)
 
     def process_with_producer_consumer(self, producer: 'BaseProducer', consumer: 'BaseConsumer',
-                                      max_files: Optional[int] = None, workers: int = 4) -> int:
+                                       max_files: Optional[int] = None, workers: int = 4) -> int:
         """
         Process using producer-consumer pattern with standardized coordination.
 
@@ -700,13 +786,13 @@ class ProcessorCoordinator:
         context = producer.collect_contexts_parallel(max_workers=workers)
 
         if not context or context.isEmpty():
-            producer.log_info("No context to process")
+            log_info("No context to process")
             return 0
 
         # Execute context using consumer
         processed_count = consumer.execute_contexts_batch(context)
 
-        producer.log_info(f"Processing complete: {processed_count} objects inserted")
+        log_info(f"Processing complete: {processed_count} objects inserted")
         return processed_count
 
 
@@ -737,8 +823,17 @@ def dump_threads_handler(signum, frame):
         sys.stderr.flush()
 
 
-def setup_thread_dump_handler():
-    """Setup SIGUSR1 handler for thread stack dumps (available in all processors)"""
+def exit_signal_handler(processor):
+    """Signal handler to set exit_processing flag on SIGINT/SIGTERM"""
+    def handler(signum, frame):
+        log_error(f"Received signal {signum}, shutting down gracefully...")
+        processor.exit_processing = True
+        processor.handle_shutdown()
+    return handler
+
+
+def setup_thread_dump_handler(processor):
+    """Setup signal handlers for thread dumps and exit processing"""
     try:
         import signal
         signal.signal(signal.SIGUSR1, dump_threads_handler)
@@ -760,7 +855,6 @@ class BaseConsumer(BaseProcessor):
 
     def __init__(self, db_ops: DatabaseOperations, thread_pool_config: Optional[ThreadPoolConfig] = None):
         super().__init__(db_ops)
-        self.logger = logging.getLogger(__name__)
         self._profile_seconds = None
         self._profiler = None
         self.thread_pool_config = thread_pool_config or ThreadPoolConfig()
@@ -805,11 +899,36 @@ class BaseConsumer(BaseProcessor):
         if not context:
             return 0
 
+        self.update_pdc_size_gauge(context)
+
         # Execute the context (handles all operations)
         ids = context.save_to_database(self.db_ops)
 
         return len(ids) if ids else 0
     
+    def update_pdc_size_gauge(self, context: 'PendingDatabaseContext') -> None:
+        """
+        Update gauges for PendingDatabaseContext sizes before saving to database.
+        This optional hook computes and logs sizes for visibility into context accumulation.
+        Also updates instance variables for integration with periodic status gauges.
+        """
+        if not context:
+            objects_count = operations_count = updates_count = 0
+        else:
+            objects_count = sum(len(lst) for lst in context.objects.values())
+            operations_count = len(context.operations)
+            updates_count = len(context._updates)
+
+        # Log for immediate visibility before DB write
+        log_info(
+                 f"PendingDatabaseContext before save_to_database(): "
+                 f"objects={objects_count} (total), operations={operations_count}, updates={updates_count}")
+
+        # Update for periodic gauges (shows last batch size; defaults to 0 if no context)
+        self.pdc_objects_count = objects_count
+        self.pdc_operations_count = operations_count
+        self.pdc_updates_count = updates_count
+
     def _execute_tail_operations(self, operations_by_type, processed_count):
         """Execute tail operations (optimize and progress updates)"""
         # Handle OPTIMIZE_DATABASE operations next to last, then progress bar
@@ -824,7 +943,7 @@ class BaseConsumer(BaseProcessor):
             for operation in operations_by_type[DatabaseOperationType.PROGRESS_UPDATE.value]:
                 from logging_utils import update_progress
                 progress_count = operation.data.get("count", 0)
-                self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
+                log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
                 update_progress(n=progress_count)  # Use global progress bar
                 processed_count += 1
         return processed_count
@@ -834,13 +953,13 @@ class BaseConsumer(BaseProcessor):
         if operation.operation_type != DatabaseOperationType.OPTIMIZE_DATABASE:
             return
 
-        log_info(self.logger, "Starting database optimization...")
+        log_info("Starting database optimization...")
         try:
             # Call the optimize_database method from DatabaseOperations
             self.db_ops.optimize_database()
-            log_info(self.logger, "Database optimization completed successfully")
+            log_info("Database optimization completed successfully")
         except Exception as e:
-            log_error(self.logger, f"Database optimization failed: {e}", exc_info=True)
+            log_error(f"Database optimization failed: {e}", exc_info=True)
             raise
 
     def _execute_progress_update_operation(self, operation):
@@ -850,9 +969,8 @@ class BaseConsumer(BaseProcessor):
 
         from logging_utils import update_progress
         progress_count = operation.data.get("count", 0)
-        self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
+        log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
         update_progress(n=progress_count)
-
     
     def execute_operations_parallel(self, operations: List[DatabaseOperation], progress_callback=None) -> int:
         """DEPRECATED: Use PDC-based parallel execution instead"""
@@ -867,8 +985,8 @@ class BaseConsumer(BaseProcessor):
         return self.execute_contexts_batch(context, progress_callback)
 
     def _parallel_operations_processor(self, work_queue: queue.Queue, result_queue: queue.Queue,
-                                      thread_id: int, num_producers: int, operations: List[DatabaseOperation],
-                                      progress_callback=None) -> None:
+                                       thread_id: int, num_producers: int, operations: List[DatabaseOperation],
+                                       progress_callback=None) -> None:
         """DEPRECATED: Use PDC-based parallel processing instead"""
         # Convert operations to PDC and execute
         from pending_database_context import PendingDatabaseContext

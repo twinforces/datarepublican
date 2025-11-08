@@ -9,6 +9,30 @@ import traceback
 from tqdm import tqdm
 from config import global_config
 
+# Hidden singleton logger
+_singleton_logger = None
+
+def _get_singleton_logger():
+    global _singleton_logger
+    if _singleton_logger is None:
+        _singleton_logger = logging.getLogger('990tools')
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        _singleton_logger.addHandler(handler)
+        _singleton_logger.propagate = False
+        update_logging_config()
+    return _singleton_logger
+
+def update_logging_config():
+    logger = _get_singleton_logger()
+    if global_config.is_verbose():
+        logger.setLevel(logging.DEBUG)
+    elif global_config.is_quiet():
+        logger.setLevel(logging.ERROR)
+    else:
+        logger.setLevel(logging.WARNING)
+
 # Global progress bar instance
 _global_progress_bar = None
 
@@ -38,49 +62,57 @@ def get_debug_info():
     }
 
 # Enhanced logging functions with progress reporting integration
-def log_info(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, **kwargs):
+def log_info(msg: str, *args, ein: Optional[str] = None, **kwargs):
     """Log info message with optional EIN context and debug info"""
+    logger = _get_singleton_logger()
     if not logger.isEnabledFor(logging.INFO):
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
+    formatted_msg = msg.format(*args, **kwargs)
     if ein:
-        logger.info(f"{debug_prefix}[EIN:{ein}] {msg}", *args, **kwargs)
+        logger.info(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:
-        logger.info(f"{debug_prefix}{msg}", *args, **kwargs)
+        logger.info(f"{debug_prefix}{formatted_msg}")
 
-def log_error(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, exc_info: bool = False, **kwargs):
+def log_error(msg: str, *args, ein: Optional[str] = None, exc_info: bool = False, **kwargs):
     """Log error message with optional EIN context and debug info - always shown even in quiet mode"""
+    logger = _get_singleton_logger()
     if not logger.isEnabledFor(logging.ERROR):
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
+    formatted_msg = msg.format(*args, **kwargs)
     if ein:
-        logger.error(f"{debug_prefix}[EIN:{ein}] {msg}", *args, exc_info=exc_info, **kwargs)
+        logger.error(f"{debug_prefix}[EIN:{ein}] {formatted_msg}", exc_info=exc_info)
     else:
-        logger.error(f"{debug_prefix}{msg}", *args, exc_info=exc_info, **kwargs)
+        logger.error(f"{debug_prefix}{formatted_msg}", exc_info=exc_info)
 
-def log_debug(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, **kwargs) -> None:
+def log_debug(msg: str, *args, ein: Optional[str] = None, **kwargs) -> None:
     """Log debug message with optional EIN context and debug info"""
+    logger = _get_singleton_logger()
     if not logger.isEnabledFor(logging.DEBUG):
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
+    formatted_msg = msg.format(*args, **kwargs)
     if ein:
-        logger.debug(f"{debug_prefix}[EIN:{ein}] {msg}", *args, **kwargs)
+        logger.debug(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:
-        logger.debug(f"{debug_prefix}{msg}", *args, **kwargs)
+        logger.debug(f"{debug_prefix}{formatted_msg}")
         
-def log_warning(logger: logging.Logger, msg: str, *args, ein: Optional[str] = None, **kwargs):
+def log_warning(msg: str, *args, ein: Optional[str] = None, **kwargs):
     """Log warning message with optional EIN context and debug info - always shown even in quiet mode"""
+    logger = _get_singleton_logger()
     if not logger.isEnabledFor(logging.WARNING):
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
+    formatted_msg = msg.format(*args, **kwargs)
     if ein:
-        logger.warning(f"{debug_prefix}[EIN:{ein}] {msg}", *args, **kwargs)
+        logger.warning(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:
-        logger.warning(f"{debug_prefix}{msg}", *args, **kwargs)
+        logger.warning(f"{debug_prefix}{formatted_msg}")
 
 def start_progress_reporting(total: int, desc: str = "Processing", unit: str = "items"):
     """Start progress reporting with tqdm"""
@@ -117,45 +149,27 @@ def set_progress_description(pbar, desc: str):
         pbar.set_description(desc)
 
 def get_logger(name: str) -> logging.Logger:
-    """Get a configured logger with level based on global_config"""
-    logger = logging.getLogger(name)
-    # Ensure logger has a handler if it doesn't have one
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        # Set explicit level based on global_config
-        if global_config.is_verbose():
-            logger.setLevel(logging.DEBUG)
-        elif global_config.is_quiet():
-            logger.setLevel(logging.ERROR)
-        else:
-            logger.setLevel(logging.WARNING)
-        # Enable propagation for inheritance from root if needed
-        logger.propagate = True
-    return logger
+    """Get the configured singleton logger for legacy compatibility"""
+    return _get_singleton_logger()
 
-def create_stub_log_error(logger: logging.Logger) -> Callable:
+def create_stub_log_error() -> Callable:
     """Factory function to create stub_log_error function"""
     def stub_log_error(msg, *args, ein=None, exc_info=False):
         """Fallback stub that uses proper logging with location info"""
-        effective_logger = logger if logger is not None else get_logger(__name__)
-        log_error(effective_logger, msg, *args, ein=ein, exc_info=exc_info)
+        log_error(msg, *args, ein=ein, exc_info=exc_info)
     return stub_log_error
 
-def create_stub_log_debug(logger: logging.Logger) -> Callable:
+def create_stub_log_debug() -> Callable:
     """Factory function to create stub_log_debug function"""
     def stub_log_debug(msg, *args, ein=None, exc_info=False):
         """Fallback stub that uses proper logging with location info"""
-        effective_logger = logger if logger is not None else get_logger(__name__)
-        log_debug(effective_logger, msg, *args, ein=ein, exc_info=exc_info)
+        log_debug(msg, *args, ein=ein)
     return stub_log_debug
 
-def dump_traceback(logger: logging.Logger, message: str = "Intentional exception for traceback"):
+def dump_traceback(message: str = "Intentional exception for traceback"):
     """Logs the full stack trace without raising an exception"""
     try:
         raise Exception(message)
     except Exception as e:
-        log_error(logger, f"Traceback dump: {message} {e}", exc_info=True)
+        log_error(f"Traceback dump: {message} {e}", exc_info=True)
         pass

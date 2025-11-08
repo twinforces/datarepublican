@@ -7,9 +7,12 @@ for the IRS 990 processor.
 """
 
 import os
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 from mako.template import Template
+from base_processor import BaseProducer
+from pending_database_context import PendingDatabaseContext
+from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 
 
 def escape_newlines(data):
@@ -677,10 +680,10 @@ class StatsProcessor:
     def get_top_grant_recipients(self, limit: int = 10) -> List[Tuple]:
         """Get top grant recipients by total amount"""
         result = self.db_ops.execute_query("""
-            SELECT grant_ein, SUM(grant_amt) as total_grants, COUNT(*) as grant_count
+            SELECT recipient_ein, SUM(grant_amt) as total_grants, COUNT(*) as grant_count
             FROM Grants
-            WHERE grant_ein IS NOT NULL AND grant_ein != ''
-            GROUP BY grant_ein
+            WHERE recipient_ein IS NOT NULL AND recipient_ein != ''
+            GROUP BY recipient_ein
             ORDER BY total_grants DESC
             LIMIT ?
         """, (limit,))
@@ -771,3 +774,103 @@ class StatsProcessor:
             ORDER BY filer_ein, tax_year
         """)
         return result.fetchall()
+
+
+class StatsProducer(BaseProducer):
+    """
+    Producer for stats generation tasks, fetching batches of charities for partial stats computation
+    using key-value paging on the 'id' primary key to ensure concurrent safety.
+    """
+ 
+    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
+        super().__init__(db_ops, batch_size)
+        self.stats_computed = 0
+
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        """Custom metrics for stats producer."""
+        return {'stats_computed': self.stats_computed}
+
+    def _get_work_batch(self, last_pk: Optional[int] = None) -> Tuple[List[Tuple], Optional[int]]:
+        """
+        Get a batch of charities for stats processing using key-value paging on 'id'.
+         
+        Args:
+            last_pk: The last primary key from the previous batch (None for first batch)
+         
+        Returns:
+            Tuple of (batch: List of charity rows, max_pk: The maximum id in this batch or None if empty)
+        """
+        if self.exit_processing:
+            return [], None
+        pk_field = 'id'
+        query = f"""
+            SELECT * FROM Charities
+            WHERE {pk_field} > ?
+            ORDER BY {pk_field} ASC
+            LIMIT ?
+        """
+        params = (last_pk if last_pk is not None else 0, self.batch_size)
+        batch = self.db_ops.execute_query(query, params).fetchall()
+       
+        if batch:
+            max_pk = max(row[0] for row in batch)  # Assuming 'id' is the first column
+        else:
+            max_pk = None
+       
+        return batch, max_pk
+
+    def _process_work_batch_to_context(self, batch: List[Tuple]) -> PendingDatabaseContext:
+        """
+        Process a batch of charities to compute partial stats and add operations to context.
+          
+        For aggregate stats like histograms and group counts, partial results are computed here
+        and can be merged later. For now, adds a progress update operation to track batch processing.
+          
+        Args:
+            batch: List of charity rows from the database
+              
+        Returns:
+            PendingDatabaseContext with operations for partial stats processing
+        """
+        context = PendingDatabaseContext()
+          
+        if batch:
+            for row in batch:
+                if self.shutdown_event.is_set() or self.exit_processing:
+                    break
+            # Add progress update for this batch
+            progress_op = DatabaseOperation(
+                DatabaseOperationType.PROGRESS_UPDATE,
+                data={'count': len(batch)}
+            )
+            context.addOperationToDatabase(progress_op)
+            self.stats_computed += len(batch)
+              
+            # TODO: Compute partial aggregates (e.g., count per tax_year in batch, bin counts for histograms)
+            # These partial results would be added as custom operations to update temporary stats tables
+            # or stored in context.data for merging after collection in collect_contexts
+              
+            # Example partial group by (tax_year counts):
+            # from collections import Counter
+            # partial_tax_year_counts = Counter(row[some_index] for row in batch)  # Adjust index for tax_year
+            # Then add operation to merge these counts
+              
+        return context
+
+    def collect_contexts(self) -> PendingDatabaseContext:
+        """
+        Override to call super and integrate with stats-specific logic if needed.
+        Ensures compatibility with BaseProducer's paging and profiling.
+        """
+        self.setup_status_gauges(interval=10.0)
+        context = super().collect_contexts()
+        # Post-process if needed for stats-specific merging of partial aggregates
+        return context
+
+    def _collect_contexts_with_profiling(self) -> PendingDatabaseContext:
+        """
+        Override to call super for profiling integration.
+        """
+        context = super()._collect_contexts_with_profiling()
+        # Post-process if needed
+        return context

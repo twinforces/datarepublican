@@ -7,13 +7,10 @@ extracting data into dataclasses and storing in the database.
 """
 
 import time
-import queue_status_display
 
 import zipfile
-import logging
 import threading
 import queue
-import signal
 from io import BytesIO
 from typing import Optional, List, Tuple, Dict, Any
 from lxml import etree  # type: ignore
@@ -22,21 +19,23 @@ import psutil
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from pending_database_context import PendingDatabaseContext
-from base_processor import BaseProducer, BaseConsumer
+from base_processor import BaseProcessor, BaseProducer, BaseConsumer
 import parse_990
 import parse_990ez
 import parse_990pf
-from logging_utils import log_info, log_error, log_debug, log_warning, dump_traceback, get_logger
+from logging_utils import log_info, log_error, log_debug, log_warning, dump_traceback
 from typing import Optional, List, Tuple
 from config import global_config
 from constants import CURRENT_PROCESSING_VERSION, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS
 from datetime import datetime
 
-from queue_status_display import QueueStatusDisplay
 from collections import deque
 
 # Import XPath configurations from xpaths.py
-from xpaths import COMMON_XPATHS, XPATHS_990, XPATHS_990EZ, XPATHS_990PF, tostring
+from xpaths import COMMON_XPATHS, tostring
+from xpaths_990 import XPATHS_990
+from xpaths_990ez import XPATHS_990EZ
+from xpaths_990pf import XPATHS_990PF
 
 
 class XMLProducer(BaseProducer):
@@ -45,11 +44,11 @@ class XMLProducer(BaseProducer):
 
     PRODUCER-CONSUMER PATTERN WARNING:
     This class MUST NOT perform any database writes directly.
-    Producers collect DatabaseOperation objects and send them to consumers.
+    Producers collect PendingDatabaseContext objects and send them to consumers.
     Only Consumer classes may execute database operations.
 
     If you need to add database writes here, you are violating the pattern.
-    Instead, create a DatabaseOperation and return it for the consumer to handle.
+    Instead, add objects/operations to the context for the consumer to handle.
     """
 
     # Class-level cache for ZIP file connections to avoid reopening
@@ -58,10 +57,11 @@ class XMLProducer(BaseProducer):
     _zip_cache_lock = threading.Lock()
     _zip_cache_ref_count: Dict[str, int] = {}  # Reference counting for proper cleanup
 
+    # Content cache removed - XML files are loaded once and discarded
+
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
         super().__init__(db_ops, batch_size=100)  # XML processing uses smaller batches
         self.processing_version = processing_version
-        self.last_monitor_time = time.time()  # Change: Added for timed monitoring every 30 seconds
 
     def process_single_xml_for_operations(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, PendingDatabaseContext]:
         """
@@ -132,8 +132,10 @@ class XMLProducer(BaseProducer):
 
         return success, context
 
-    def _get_work_batch(self, last_xml_id: Optional[str] = None) -> List[Tuple[str, str, str, str, int]]:
-        """Get a batch of XML files to process with key-value paging"""
+    def _get_work_batch(self, last_xml_id: Optional[str] = None) -> Tuple[List[Tuple[str, str, str, str, int]], Optional[str]]:
+        """Get a batch of XML files to process with key-value paging using xml_id as primary key"""
+        super()._get_work_batch(last_xml_id)  # Ensure base behavior if needed
+
         xml_files = self.db_ops.get_xml_files_to_process(
             processing_version=self.processing_version,
             max_files=self.batch_size,
@@ -142,6 +144,7 @@ class XMLProducer(BaseProducer):
 
         # Convert XMLFile objects to tuples for processing
         work_items = []
+        max_xml_id = None
         for xml_file in xml_files:
             zip_path = self.db_ops.get_zip_file_path(xml_file.zip_id)
             if zip_path:
@@ -152,19 +155,30 @@ class XMLProducer(BaseProducer):
                     xml_file.internal_path,
                     xml_file.file_size
                 ))
-        return work_items
+                if xml_file.xml_id > max_xml_id:
+                    max_xml_id = xml_file.xml_id
 
-    def _process_work_batch(self, batch: List[Tuple[str, str, str, str, int]]) -> List[str]:
-        """Process a batch of XML files and return all inserted IDs"""
-        all_ids = []
+        return work_items, max_xml_id
+
+    def _process_work_batch_to_context(self, batch: List[Tuple[str, str, str, str, int]]) -> PendingDatabaseContext:
+        """Process a batch of XML files into a single PendingDatabaseContext (no DB writes)"""
+        super()._process_work_batch_to_context(batch)  # Ensure base behavior if needed
+
+        # Create a single context for the batch
+        from pending_database_context import PendingDatabaseContext
+        successful_contexts = []
+
         for xml_id, zip_id, filename, internal_path, file_size in batch:
-            success, context = self.process_single_xml_for_operations(
+            success, single_context = self.process_single_xml_for_operations(
                 xml_id, zip_id, filename, internal_path, file_size
             )
             if success:
-                ids = context.save_to_database(self.db_ops)
-                all_ids.extend(ids)
-        return all_ids
+                successful_contexts.append(single_context)
+
+        if successful_contexts:
+            return self.merge_pending_contexts(successful_contexts)
+        else:
+            return PendingDatabaseContext()
 
     def process_single_xml_with_context(self, xml_id: str, zip_id: str, filename: str, internal_path: str, file_size: int) -> Tuple[bool, PendingDatabaseContext]:
         """
@@ -172,7 +186,7 @@ class XMLProducer(BaseProducer):
 
         Args:
             xml_id: XML file ID
-            zip_id: ZIP file ID containing the XML (UUID string)
+            zip_id: ZIP file ID (UUID string)
             filename: XML filename
             internal_path: Path within ZIP file
             file_size: Size of XML file in bytes
@@ -205,7 +219,7 @@ class XMLProducer(BaseProducer):
         """
         try:
             if not global_config.is_quiet():
-                log_debug(self.logger, f"Processing XML {filename} (ID: {xml_id})")
+                log_debug(f"Processing XML {filename} (ID: {xml_id})")
 
             # Validate zip_id is not a file path
             if zip_id and isinstance(zip_id, str) and ('/' in zip_id or '\\' in zip_id):
@@ -218,35 +232,24 @@ class XMLProducer(BaseProducer):
             zip_path = self.db_ops.get_zip_file_path(zip_id)
             if not zip_path:
                 if not global_config.is_quiet():
-                    log_error(self.logger, f"No ZIP file found for xml_id {xml_id}")
+                    log_error(f"No ZIP file found for xml_id {xml_id}")
                 return False
 
             # Extract XML content from ZIP using cached connection
             xml_content = self._extract_xml_from_zip(zip_path, internal_path)
 
             if not global_config.is_quiet():
-                log_debug(self.logger, f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
+                log_debug(f"Extracted XML content for {filename}, size: {len(xml_content)} bytes")
 
             # Parse XML
             parser = etree.XMLParser(recover=True)
             tree = etree.parse(BytesIO(xml_content), parser)
             root = tree.getroot()
 
-            # Change: Perform memory monitoring only every 30 seconds using wall clock check
-            current_time = time.time()
-            if current_time - self.last_monitor_time >= MONITOR_INTERVAL_SECONDS:
-                # Memory monitoring after parsing
-                process = psutil.Process()
-                memory_gb_after = process.memory_info().rss / (1024 ** 3)
-                if memory_gb_after > 1.5:  # Alert if over 1.5GB for single file
-                    log_warning(self.logger, f"High memory after parsing {filename}: {memory_gb_after:.2f}GB")
-
-                # Log XML content size and memory impact
-                xml_size_mb = len(xml_content) / (1024 ** 2)
-                log_debug(self.logger, f"XML PARSE MONITOR: {filename} size: {xml_size_mb:.2f}MB, "
-                            f"Memory after: {memory_gb_after:.2f}GB")
-
-                self.last_monitor_time = current_time  # Update last monitor time
+            # Check exit_processing flag before continuing with expensive operations
+            if self.exit_processing:
+                log_info(f"Exiting thread due to exit_processing flag")
+                return False
 
             # Extract basic metadata
             form_type = self._extract_form_type(root)
@@ -254,11 +257,11 @@ class XMLProducer(BaseProducer):
             filer_ein = self._extract_filer_ein(root)
 
             if not global_config.is_quiet():
-                log_debug(self.logger, f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
+                log_debug(f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
 
             if not filer_ein or filer_ein == "Unknown":
                 if not global_config.is_quiet():
-                    log_error(self.logger, f"DEBUG: Skipping XML {filename}: invalid EIN {filer_ein} - this will create NULL EIN Charity!")
+                    log_error(f"DEBUG: Skipping XML {filename}: invalid EIN {filer_ein} - this will create NULL EIN Charity!")
                 return False
 
             # Create charity object first
@@ -271,7 +274,7 @@ class XMLProducer(BaseProducer):
             # Force ID generation before adding to context and parsing dependents
             charity.prep_for_insert()
             if not global_config.is_quiet():
-                log_info(self.logger, f"CREATING CHARITY: EIN {filer_ein}, tax_year {tax_year}, form_type {form_type}, xml_name {filename}")
+                log_info(f"CREATING CHARITY: EIN {filer_ein}, tax_year {tax_year}, form_type {form_type}, xml_name {filename}")
             context.addObjectToDatabase(charity)
 
             # Use base parser factory to get the correct parser and parse the form
@@ -281,7 +284,7 @@ class XMLProducer(BaseProducer):
                 parser.parse_form(root, filename, {}, context)
             else:
                 if not global_config.is_quiet():
-                    log_info(self.logger, f"Unsupported form type {form_type} in {filename}")
+                    log_info(f"Unsupported form type {form_type} in {filename}")
                 return False
 
             # Explicit cleanup after parsing
@@ -290,16 +293,16 @@ class XMLProducer(BaseProducer):
             # Log grant collection results
             counts = context.getObjectCounts()
             if not global_config.is_quiet():
-                log_info(self.logger, f"PROCESSING COMPLETE: EIN {filer_ein} in {filename}: {counts['grant']} grants, {counts['contractor']} contractors, {counts['political_contribution']} contributions, {counts['officer']} officers, {counts['address']} addresses",
+                log_info(f"PROCESSING COMPLETE: EIN {filer_ein} in {filename}: {counts['grant']} grants, {counts['contractor']} contractors, {counts['political_contribution']} contributions, {counts['officer']} officers, {counts['address']} addresses",
                           ein=filer_ein)
 
             if not global_config.is_quiet():
-                log_debug(self.logger, f"SUCCESS: Parsed {filename}: charity={filer_ein}, grants={counts['grant']}, officers={counts['officer']}, contractors={counts['contractor']}, contributions={counts['political_contribution']}, addresses={counts['address']}")
+                log_debug(f"SUCCESS: Parsed {filename}: charity={filer_ein}, grants={counts['grant']}, officers={counts['officer']}, contractors={counts['contractor']}, contributions={counts['political_contribution']}, addresses={counts['address']}")
             return True
 
         except etree.XMLSyntaxError as e:
             if not global_config.is_quiet():
-                log_error(self.logger, f"FAILED: XML {filename}: XML syntax error - {e}")
+                log_error(f"FAILED: XML {filename}: XML syntax error - {e}")
             # Store specific error message for XML parsing issues
             import traceback
             error_msg = f"XML Syntax Error: {str(e)}\n\nStack Trace:\n{traceback.format_exc()}"
@@ -307,7 +310,7 @@ class XMLProducer(BaseProducer):
             return False
         except etree.ParseError as e:
             if not global_config.is_quiet():
-                log_error(self.logger, f"FAILED: XML {filename}: XML parse error - {e}")
+                log_error(f"FAILED: XML {filename}: XML parse error - {e}")
             # Store specific error message for XML parsing issues
             import traceback
             error_msg = f"XML Parse Error: {str(e)}\n\nStack Trace:\n{traceback.format_exc()}"
@@ -315,7 +318,7 @@ class XMLProducer(BaseProducer):
             return False
         except zipfile.BadZipFile as e:
             if not global_config.is_quiet():
-                log_error(self.logger, f"FAILED: XML {filename}: Bad ZIP file - {e}")
+                log_error(f"FAILED: XML {filename}: Bad ZIP file - {e}")
             # Store specific error message for ZIP file issues
             import traceback
             error_msg = f"ZIP File Error: {str(e)}\n\nStack Trace:\n{traceback.format_exc()}"
@@ -323,7 +326,7 @@ class XMLProducer(BaseProducer):
             return False
         except ValueError as e:
             if not global_config.is_quiet():
-                log_error(self.logger, f"FAILED: XML {filename}: Value error - {e}")
+                log_error(f"FAILED: XML {filename}: Value error - {e}")
             # Store specific error message for validation issues
             import traceback
             error_msg = f"Validation Error: {str(e)}\n\nStack Trace:\n{traceback.format_exc()}"
@@ -331,7 +334,7 @@ class XMLProducer(BaseProducer):
             return False
         except Exception as e:
             if not global_config.is_quiet():
-                log_error(self.logger, f"FAILED: XML {filename}: Unexpected error - {e}")
+                log_error(f"FAILED: XML {filename}: Unexpected error - {e}")
             # Store error message with stack trace in context for unexpected errors
             import traceback
             error_msg = f"Unexpected Error: {str(e)}\n\nStack Trace:\n{traceback.format_exc()}"
@@ -354,7 +357,7 @@ class XMLProducer(BaseProducer):
                     else:
                         # Log invalid form type but continue processing
                         if not global_config.is_quiet():
-                            log_warning(self.logger, f"Invalid form type '{form_type}' found, treating as Unknown")
+                            log_warning(f"Invalid form type '{form_type}' found, treating as Unknown")
                         return "Unknown"
             except:
                 continue
@@ -381,21 +384,21 @@ class XMLProducer(BaseProducer):
                 if result:
                     raw_ein = result[0].text.strip()
                     if not global_config.is_quiet():
-                        log_info(self.logger, f"TRACE: Found raw EIN: '{raw_ein}' using xpath: {xpath.path}")
+                        log_info(f"TRACE: Found raw EIN: '{raw_ein}' using xpath: {xpath.path}")
                     if raw_ein.isdigit():
                         formatted_ein = f"{int(raw_ein):09d}"
                         if not global_config.is_quiet():
-                            log_info(self.logger, f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
+                            log_info(f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
                         return formatted_ein
                     else:
                         if not global_config.is_quiet():
-                            log_error(self.logger, f"TRACE: Non-digit EIN found: '{raw_ein}', raising exception")
+                            log_error(f"TRACE: Non-digit EIN found: '{raw_ein}', raising exception")
                         raise ValueError(f"Invalid EIN format: '{raw_ein}' - must be numeric")
             except Exception as e:
-                self.logger.debug(f"XPath {xpath.path} failed: {e}")
+                log_debug(f"XPath {xpath.path} failed: {e}")
                 continue
         if not global_config.is_quiet():
-            log_error(self.logger, "TRACE: No EIN found in XML, raising exception")
+            log_error("TRACE: No EIN found in XML, raising exception")
         raise ValueError("No EIN found in XML")
 
 
@@ -405,49 +408,50 @@ class XMLProducer(BaseProducer):
         zip_key = str(zip_path)
         thread_id = threading.get_ident()
 
-        log_debug(self.logger, f"Thread {thread_id}: Requesting ZIP access for {zip_path} (key: {zip_key})")
+        # Extract from ZIP - no content caching since XML files are processed once
+        log_debug(f"Thread {thread_id}: Requesting ZIP access for {zip_path} (key: {zip_key})")
 
         with self._zip_cache_lock:
-            log_debug(self.logger, f"Thread {thread_id}: Acquired ZIP cache lock for {zip_path}")
+            log_debug(f"Thread {thread_id}: Acquired ZIP cache lock for {zip_path}")
             if zip_key not in self._zip_cache:
                 # Open ZIP file and cache the connection with per-ZIP lock
-                log_info(self.logger, f"Thread {thread_id}: Opening new ZIP connection for {zip_path}")
+                log_info(f"Thread {thread_id}: Opening new ZIP connection for {zip_path}")
                 zip_ref = zipfile.ZipFile(zip_path, 'r')
                 zip_lock = threading.Lock()
                 self._zip_cache[zip_key] = (zip_ref, zip_lock)
                 self._zip_cache_ref_count[zip_key] = 1
-                log_info(self.logger, f"Thread {thread_id}: Opened and cached ZIP connection for {zip_path}")
+                log_info(f"Thread {thread_id}: Opened and cached ZIP connection for {zip_path}")
             else:
                 # Increment reference count for existing connection
                 self._zip_cache_ref_count[zip_key] += 1
-                log_debug(self.logger, f"Thread {thread_id}: Using cached ZIP connection for {zip_path} (ref_count: {self._zip_cache_ref_count[zip_key]})")
+                log_debug(f"Thread {thread_id}: Using cached ZIP connection for {zip_path} (ref_count: {self._zip_cache_ref_count[zip_key]})")
 
             zip_ref, zip_lock = self._zip_cache[zip_key]
-            log_debug(self.logger, f"Thread {thread_id}: Retrieved ZIP reference from cache for {zip_path}")
-            log_debug(self.logger, f"Thread {thread_id}: Releasing ZIP cache lock for {zip_path}")
+            log_debug(f"Thread {thread_id}: Retrieved ZIP reference from cache for {zip_path}")
+            log_debug(f"Thread {thread_id}: Releasing ZIP cache lock for {zip_path}")
 
         # Extract XML content from cached connection - NOW PROTECTED BY PER-ZIP LOCK
-        log_debug(self.logger, f"Thread {thread_id}: Starting extraction of {internal_path} from {zip_path} (acquiring per-ZIP lock)")
+        log_debug(f"Thread {thread_id}: Starting extraction of {internal_path} from {zip_path} (acquiring per-ZIP lock)")
         with zip_lock:
-            log_debug(self.logger, f"Thread {thread_id}: Acquired per-ZIP lock for {zip_path}")
+            log_debug(f"Thread {thread_id}: Acquired per-ZIP lock for {zip_path}")
             try:
-                log_debug(self.logger, f"Thread {thread_id}: Opening {internal_path} in ZIP file")
+                log_debug(f"Thread {thread_id}: Opening {internal_path} in ZIP file")
                 with zip_ref.open(internal_path) as xml_file:
-                    log_debug(self.logger, f"Thread {thread_id}: Reading content from {internal_path}")
+                    log_debug(f"Thread {thread_id}: Reading content from {internal_path}")
                     content = xml_file.read()
-                log_debug(self.logger, f"Thread {thread_id}: Successfully extracted {len(content)} bytes from {internal_path}")
+                log_debug(f"Thread {thread_id}: Successfully extracted {len(content)} bytes from {internal_path}")
                 return content
             except zipfile.BadZipFile as e:
-                log_error(self.logger, f"Thread {thread_id}: Bad ZIP file error extracting {internal_path} from {zip_path}: {e}")
+                log_error(f"Thread {thread_id}: Bad ZIP file error extracting {internal_path} from {zip_path}: {e}")
                 raise
             except KeyError as e:
-                log_error(self.logger, f"Thread {thread_id}: File not found in ZIP extracting {internal_path} from {zip_path}: {e}")
+                log_error(f"Thread {thread_id}: File not found in ZIP extracting {internal_path} from {zip_path}: {e}")
                 raise
             except Exception as e:
-                log_error(self.logger, f"Thread {thread_id}: Unexpected error extracting {internal_path} from {zip_path}: {e}")
+                log_error(f"Thread {thread_id}: Unexpected error extracting {internal_path} from {zip_path}: {e}")
                 raise
             finally:
-                log_debug(self.logger, f"Thread {thread_id}: Releasing per-ZIP lock for {zip_path}")
+                log_debug(f"Thread {thread_id}: Releasing per-ZIP lock for {zip_path}")
 
     @classmethod
     def cleanup_zip_cache(cls):
@@ -486,7 +490,6 @@ class XMLProducer(BaseProducer):
 
 
 
-
 class XMLConsumer(BaseConsumer):
     """
     XML Consumer - Handles database operations execution for XML processing.
@@ -495,7 +498,7 @@ class XMLConsumer(BaseConsumer):
     This class is responsible for executing database operations.
     Only consumers may perform database writes. Producers must never write to the database.
 
-    Uses the standardized BaseConsumer._process_operations_batch pattern.
+    Inherits all execution logic from BaseConsumer; no custom overrides needed for XML-specific behavior.
     """
 
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
@@ -516,13 +519,13 @@ class XMLConsumer(BaseConsumer):
         if operation.operation_type != DatabaseOperationType.OPTIMIZE_DATABASE:
             return
 
-        log_info(self.logger, "Starting database optimization...")
+        log_info("Starting database optimization...")
         try:
             # Call the optimize_database method from DatabaseOperations
             self.db_ops.optimize_database()
-            log_info(self.logger, "Database optimization completed successfully")
+            log_info("Database optimization completed successfully")
         except Exception as e:
-            log_error(self.logger, f"Database optimization failed: {e}", exc_info=True)
+            log_error(f"Database optimization failed: {e}", exc_info=True)
             raise
 
     def _execute_progress_update_operation(self, operation):
@@ -534,72 +537,14 @@ class XMLConsumer(BaseConsumer):
 
         from logging_utils import update_progress
         progress_count = operation.data.get("count", 0)
-        self.log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
+        log_debug(f"DEBUG: Processing PROGRESS_UPDATE operation with count={progress_count}")
         update_progress(n=progress_count)
 
     def _process_xml_file_update_operations(self, operations_by_type):
         """Process XML file update operations using bulk_update"""
         # DEPRECATED: XML file updates should be handled by PDC, not individual operations
         # PDC migration complete - operation-based code removed.
-        if DatabaseOperationType.XML_FILE_UPDATE.value not in operations_by_type:
-            return
-
-        xml_updates = operations_by_type[DatabaseOperationType.XML_FILE_UPDATE.value]
-
-        # Collect all updates for bulk operation
-        updates = []
-        update_dict={
-                "xml_id": "A",
-                "processed": False,
-                "processing_version": self.processing_version,
-                "file_size": -1,
-                "processed_at": datetime.now().isoformat() ,
-                "org_type": "None",
-                "form_type": "no-form",
-                "error_message": "whiz"
-        }
-
-        for operation in xml_updates:
-            xml_id = operation.xml_id
-            metadata = operation.data
-            prev_update_dict = update_dict
-            # Prepare update dictionary for bulk_update - include all required fields
-            update_dict = {
-                "xml_id": xml_id,
-                "processed": metadata["processed"] or prev_update_dict["processed"],
-                "processing_version": self.processing_version,
-                "file_size": metadata["file_size"]  or prev_update_dict["file_size"],
-                "processed_at": metadata.get("processed_at", prev_update_dict["processed_at"]) ,
-                "org_type": metadata.get("org_type",  prev_update_dict["processed_at"]),
-                "form_type": metadata.get("form_type",  prev_update_dict["form_type"]),
-                "error_message": metadata.get("error_message")
-            }
-
-            # Set processed_at timestamp if not already set and processing is complete
-            if update_dict["processed"] and update_dict["processed_at"] is None:
-                update_dict["processed_at"] = datetime.now().isoformat()
-
-            if metadata.get("error_message") != "success":
-                # Error case: set error_message and clear success fields
-                ##update_dict["form_type"] = None
-                update_dict["ein"] = None
-                ##update_dict["tax_year"] = None
-            else:
-                # Success case: set success fields and clear error_message
-                update_dict["form_type"] = metadata.get("form_type")
-                update_dict["ein"] = metadata.get("ein")
-                update_dict["tax_year"] = metadata.get("tax_year")
-            prev_update_dict={}
-            updates.append(update_dict)
-
-        # Execute bulk update
-        if updates:
-            try:
-                self.db_ops.bulk_update("XmlFiles", updates, id_column="xml_id")
-                log_debug(self.logger, f"Bulk updated {len(updates)} XML files")
-            except Exception as e:
-                log_error(self.logger, f"Failed to bulk update XML files: {e}")
-                raise
+        pass
 
     # _process_charity_operations method removed - now handled by BaseConsumer.execute_contexts_batch
     # PDC migration complete - operation-based code removed.
@@ -623,48 +568,54 @@ class XMLConsumer(BaseConsumer):
         pass
 
 
-class XMLProcessor:
+class XMLProcessor(BaseProcessor):
     """
     XML Processor - Main entry point for XML processing operations.
-
+    
     This class coordinates XML processing using the producer-consumer pattern.
     It can operate in both single-threaded and multi-threaded modes.
     """
-
+    
     def __init__(self, db_ops: DatabaseOperations, processing_version: int = 1):
-        self.db_ops = db_ops
+        super().__init__(db_ops)
         self.processing_version = processing_version
-        self.logger = get_logger(self.__class__.__name__)
-
-        # Atomic counter for available items in result queue
+        self.total_processed = 0
+        
+        # Atomic counter for available items in result queue (XML-specific coordination)
         self._available_items = 0
         self._available_items_lock = threading.Lock()
         self._sentinel_count = 0
         self._sentinel_lock = threading.Lock()
 
-    def log_info(self, msg: str, *args, **kwargs):
-        """Log info message"""
-        log_info(self.logger, msg, *args, **kwargs)
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        """Custom metrics for XMLProcessor."""
+        return {
+            'zip_cache_size': len(XMLProducer._zip_cache),
+            'parsed_files_count': self.total_processed,
+            'pdc_objects_count': self.pdc_objects_count,
+            'pdc_operations_count': self.pdc_operations_count,
+            'pdc_updates_count': self.pdc_updates_count,
+        }
 
-    def log_error(self, msg: str, *args, **kwargs):
-        """Log error message"""
-        log_error(self.logger, msg, *args, **kwargs)
+    def _on_shutdown(self):
+        """Override for XML-specific shutdown cleanup."""
+        super()._on_shutdown()
+        XMLProducer.cleanup_zip_cache()
 
-    def process_xml_files(self, max_files: Optional[int] = None, workers: int = 4, timeout_event: Optional[threading.Event] = None, collect_xpath_stats: bool = False) -> int:
+    def process_xml_files(self, max_files: Optional[int] = None, workers: int = 4, collect_xpath_stats: bool = False) -> int:
         """
         Process XML files using parallel producer-consumer pattern.
 
         Args:
             max_files: Maximum number of files to process (for testing)
             workers: Number of worker threads for parallel processing
-            timeout_event: Optional event to signal timeout for profiling
 
         Returns:
             Number of XML files processed
         """
-        return self._process_xml_files_parallel(max_files, workers, timeout_event, collect_xpath_stats)
+        return self._process_xml_files_parallel(max_files, workers, collect_xpath_stats)
 
-    def _process_xml_files_parallel(self, max_files: Optional[int] = None, workers: int = 4, timeout_event: Optional[threading.Event] = None, collect_xpath_stats: bool = False) -> int:
+    def _process_xml_files_parallel(self, max_files: Optional[int] = None, workers: int = 4, collect_xpath_stats: bool = False) -> int:
         """
         Process XML files using parallel producer-consumer pattern.
 
@@ -674,21 +625,15 @@ class XMLProcessor:
         Args:
             max_files: Maximum number of files to process
             workers: Number of worker threads
-            timeout_event: Optional event to signal timeout for profiling
         """
         from constants import CURRENT_PROCESSING_VERSION
         from logging_utils import start_progress_reporting
 
-        # Setup signal handlers for graceful shutdown
-        shutdown_event = threading.Event()
-        def interrupt_handler(signum, frame):
-            self.log_error("Received interrupt signal, shutting down gracefully...")
-            shutdown_event.set()
-
-        signal.signal(signal.SIGINT, interrupt_handler)
+        # Use base shutdown event and handlers (already set up in BaseProcessor)
 
         # Get total count for progress bar
         total_files = self.db_ops.get_xml_files_to_process_count(CURRENT_PROCESSING_VERSION) if max_files is None else max_files
+        log_info(f"DEBUG: Total files to process: {total_files}, max_files parameter: {max_files}")
 
         # Setup progress bar
         progress_unit = "file" if global_config.progress == "files" else "B"
@@ -704,21 +649,20 @@ class XMLProcessor:
         producer_config = PoolConfig(max_workers=workers, queue_size=1000, batch_size=100)
         thread_pool_config = ThreadPoolConfig(producer_config=producer_config)
 
+        # DEBUG: Log thread pool configuration
+        log_info(f"DEBUG: Thread pool config - max_workers={producer_config.max_workers}, queue_size={producer_config.queue_size}, batch_size={producer_config.batch_size}")
+
         # Initialize thread pool manager
         from base_processor import ThreadPoolManager
-        thread_pool_manager = ThreadPoolManager(thread_pool_config, self.logger)
+        thread_pool_manager = ThreadPoolManager(thread_pool_config,self)
 
-        # Initialize queue status display for result_queue (estimated ~2KB per PendingDatabaseContext)
-        queue_display = QueueStatusDisplay(
-            tracking_queue=thread_pool_manager.result_queue,
-            update_interval=MONITOR_INTERVAL_SECONDS,  # Change: Reduced QueueStatusDisplay updates to every 30 seconds
-            estimated_size_per_item_mb=0.002
-        )
-        queue_display.start()
+        # Setup status gauges for monitoring
+        self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS, queues=[thread_pool_manager.result_queue])
 
         # Reset counters for this processing run
         self._available_items = 0
         self._sentinel_count = 0
+        self.total_processed = 0
 
         total_processed = 0
         last_xml_id = None  # Initialize paging state
@@ -739,25 +683,32 @@ class XMLProcessor:
                     last_xml_id=last_xml_id
                 )
                 if not xml_files:
+                    log_info(f"DEBUG: No more XML files to process (last_xml_id: {last_xml_id})")
                     break
 
                 batch_size = len(xml_files)
-                self.log_info(f"Processing batch of {batch_size} files with {workers} workers (last_xml_id: {last_xml_id})")
+                log_info(f"Processing batch of {batch_size} files with {workers} workers (last_xml_id: {last_xml_id})")
+
+                # DEBUG: Log ZIP file distribution in batch
+                unique_zips = len(set(xml_file.zip_id for xml_file in xml_files))
+                log_info(f"DEBUG: Batch contains {batch_size} files from {unique_zips} unique ZIP files")
 
                 # Update paging state after fetching batch
                 if xml_files:
                     last_xml_id = max(xml_file.xml_id for xml_file in xml_files)
 
                 # Start producer pool with atomic counters
+                log_info(f"DEBUG: Starting producer pool with {len(xml_files)} files, workers={workers}")
                 thread_pool_manager.start_producer_pool(
                     xml_files,
-                    lambda *args: self._xml_producer_worker(*args, shutdown_event, timeout_event, collect_xpath_stats)
+                    lambda *args: self._xml_producer_worker(*args, collect_xpath_stats)
                 )
+                log_info(f"DEBUG: Producer pool started with {len(thread_pool_manager.producer_threads)} threads")
 
                 # Start single consumer thread with atomic counters
                 consumer_thread = threading.Thread(
                     target=self._xml_consumer_worker,
-                    args=(thread_pool_manager.result_queue, consumer, pbar, shutdown_event, thread_pool_manager, timeout_event)
+                    args=(thread_pool_manager.result_queue, consumer, pbar, thread_pool_manager)
                 )
                 consumer_thread.daemon = False
                 consumer_thread.start()
@@ -777,19 +728,19 @@ class XMLProcessor:
             if pbar:
                 pbar.close()
 
-            # Stop queue status display
-            queue_display.stop()
-
             # Clean up ZIP cache with proper reference counting
             XMLProducer.cleanup_zip_cache()
 
-        log_info(self.logger, f"XML processing complete: {total_processed} files processed")
+        log_info(f"XML processing complete: {total_processed} files processed")
         return total_processed
 
-    def _xml_producer_worker(self, xml_files, work_queue, result_queue, producer_id, num_producers, shutdown_event, timeout_event=None, collect_xpath_stats=False):
+    def _xml_producer_worker(self, xml_files, work_queue, result_queue, producer_id, num_producers, collect_xpath_stats=False):
         """Producer worker function for thread pool"""
         processed = 0
         total_bytes = 0
+
+        # DEBUG: Log thread creation
+        log_info(f"DEBUG: Producer thread {producer_id} starting (num_producers={num_producers}, files={len(xml_files)})")
 
         # Create producer instance for this thread
         from constants import CURRENT_PROCESSING_VERSION
@@ -803,23 +754,27 @@ class XMLProcessor:
 
         try:
             for i in range(producer_id, len(xml_files), num_producers):
-                if shutdown_event.is_set() or (timeout_event and timeout_event.is_set()):
-                    break
-
-                # Backpressure logic removed entirely - consumer is the bottleneck, not producers
-
-                xml_file = xml_files[i]
-                xml_id = xml_file.xml_id
-                zip_id = xml_file.zip_id
-                zip_path = self.db_ops.get_zip_file_path(zip_id)
-                if not zip_path:
-                    continue
-
-                filename = xml_file.filename
-                internal_path = xml_file.internal_path
-                file_size = xml_file.file_size
-
                 try:
+                    if self.exit_processing:
+                        break
+
+                    # Backpressure logic removed entirely - consumer is the bottleneck, not producers
+
+                    xml_file = xml_files[i]
+                    xml_id = xml_file.xml_id
+                    zip_id = xml_file.zip_id
+                    zip_path = self.db_ops.get_zip_file_path(zip_id)
+                    if not zip_path:
+                        log_info(f"DEBUG: Producer {producer_id} skipping {xml_id} - no ZIP path for {zip_id}")
+                        continue
+
+                    filename = xml_file.filename
+                    internal_path = xml_file.internal_path
+                    file_size = xml_file.file_size
+
+                    # DEBUG: Log file assignment to producer
+                    log_info(f"DEBUG: Producer {producer_id} processing file {i+1}/{len(xml_files)}: {filename} (ID: {xml_id})")
+
                     # Parse XML and collect context
                     success, context = producer.process_single_xml_for_operations(
                         xml_id, zip_id, filename, internal_path, file_size
@@ -840,18 +795,27 @@ class XMLProcessor:
 
                     if processed % 50 == 0:
                         progress_info = f"{processed} files" if global_config.progress == "files" else f"{total_bytes} bytes"
-                        self.log_info(f"Producer {producer_id}: {progress_info} queued")
+                        log_info(f"Producer {producer_id}: {progress_info} queued")
 
                 except Exception as e:
-                    self.log_error(f"Producer {producer_id} error on {filename}: {e}")
+                    thread_id = threading.get_ident()
+                    exception_type = type(e).__name__
+                    import traceback
+                    detailed_traceback = traceback.format_exc()
+                    log_error(f"Producer {producer_id} (Thread ID: {thread_id}) failed on {filename}: {exception_type} - {e}")
+                    log_error(f"DETAILED TRACEBACK: Producer {producer_id} (Thread ID: {thread_id}) exception details:\n{detailed_traceback}")
+                    # Continue processing other files in the batch to prevent thread death
         finally:
+            # DEBUG: Log thread completion
+            log_info(f"DEBUG: Producer thread {producer_id} completed (processed {processed} files)")
+
             # Ensure sentinel is always sent, even if thread exits early due to exception or shutdown
             result_queue.put(None)
             # Increment sentinel counter
             with self._sentinel_lock:
                 self._sentinel_count += 1
 
-    def _xml_consumer_worker(self, operations_queue, consumer, pbar, shutdown_event, thread_pool_manager, timeout_event):
+    def _xml_consumer_worker(self, operations_queue, consumer, pbar, thread_pool_manager):
         """Consumer worker function"""
         batch_contexts = []
         processed_xml_count = 0
@@ -875,11 +839,22 @@ class XMLProcessor:
         batch_fetch_attempts = 0
         successful_batch_fetches = 0
         
-        while sentinels_received < num_producers:
-            # Check for profiling timeout and exit cleanly if set
-            if timeout_event and timeout_event.is_set():
+        while True:
+            with self._available_items_lock:
+                items_left = self._available_items > 0
+            if sentinels_received >= num_producers and not items_left:
                 break
-        
+
+            # Check shutdown event before continuing
+            if self.exit_processing:
+                log_info(f"Consumer thread exiting due to exit_processing flag")
+                break
+
+            # Check exit_processing flag before continuing
+            if self.exit_processing:
+                log_info(f"Consumer thread exiting due to exit_processing flag")
+                break
+
             # Monitor queue depth for debugging (no backpressure actions)
             current_size = operations_queue.qsize()
             max_queue_depth_seen = max(max_queue_depth_seen, current_size)
@@ -887,7 +862,7 @@ class XMLProcessor:
                 # DEBUG: Attempt batch fetching up to 100 items without sleeping
                 batch_fetched = []
                 batch_fetch_attempts += 1
-        
+
                 # Use atomic counter to determine how many items to fetch
                 with self._available_items_lock:
                     available_count = self._available_items
@@ -947,7 +922,15 @@ class XMLProcessor:
                         batch_objects = sum(context.getTotalObjectCount() for context in batch_contexts)
 
                         # Merge all contexts into a single giant PendingDatabaseContext
-                        merged_context = PendingDatabaseContext.merge(batch_contexts)
+                        merged_context = self.merge_pending_contexts(batch_contexts)
+
+                        # Update PDC size gauge before save
+                        consumer.update_pdc_size_gauge(merged_context)
+
+                        # Update XMLProcessor's gauge counters from consumer
+                        self.pdc_objects_count = consumer.pdc_objects_count
+                        self.pdc_operations_count = consumer.pdc_operations_count
+                        self.pdc_updates_count = consumer.pdc_updates_count
 
                         # Execute merged batch
                         batch_size = len(batch_contexts)
@@ -976,7 +959,7 @@ class XMLProcessor:
                         consumer_performance['last_batch_time'] = time.time()
                         consumer_performance['last_batch_objects'] = batch_objects
                     except Exception as e:
-                        self.log_error(f"Consumer batch processing error: {e}")
+                        log_error(f"Consumer batch processing error: {e}")
                         # Continue processing without crashing - don't clear batch_contexts on error
                         continue
         
@@ -985,7 +968,7 @@ class XMLProcessor:
                     operations_queue.task_done()
         
             except queue.Empty:
-                if shutdown_event.is_set() or (timeout_event and timeout_event.is_set()):
+                if self.exit_processing:
                     break
 
         # Final batch
@@ -993,48 +976,45 @@ class XMLProcessor:
             try:
                 batch_size = len(batch_contexts)
                 final_batch_objects = sum(context.getTotalObjectCount() for context in batch_contexts)
-
+    
                 # Merge all remaining contexts into a single giant PendingDatabaseContext
-                merged_context = PendingDatabaseContext.merge(batch_contexts)  # Change: merge() is already efficient; batch size reduced to 50 to minimize overhead
+                merged_context = self.merge_pending_contexts(batch_contexts)  # Change: merge() is already efficient; batch size reduced to 50 to minimize overhead
+    
+                # Update PDC size gauge before save
+                consumer.update_pdc_size_gauge(merged_context)
+
+                # Update XMLProcessor's gauge counters from consumer
+                self.pdc_objects_count = consumer.pdc_objects_count
+                self.pdc_operations_count = consumer.pdc_operations_count
+                self.pdc_updates_count = consumer.pdc_updates_count
 
                 merged_context.save_to_database(consumer.db_ops)
-
+    
                 # Explicitly clear final merged context to free memory immediately
                 merged_context.clear()
                 del merged_context
-
+    
                 # Clear batch contexts list
                 del batch_contexts[:]
                 batch_contexts = []
             except Exception as e:
-                self.log_error(f"Consumer final batch processing error: {e}")
+                log_error(f"Consumer final batch processing error: {e}")
                 # Don't clear batch_contexts on error to avoid losing data
-
+    
         # DEBUG: Log final batch fetching statistics
-        self.log_info(f"DEBUG: Consumer batch fetching stats - Max queue depth: {max_queue_depth_seen}, "
-                     f"Total items fetched: {total_items_fetched}, Batch fetch attempts: {batch_fetch_attempts}, "
-                     f"Successful batch fetches: {successful_batch_fetches}")
-
-    def _interruptible_sleep(self, duration: float, timeout_event: Optional[threading.Event] = None):
-        """
-        Sleep for the specified duration, but interrupt if timeout_event is set.
-
-        Args:
-            duration: Time to sleep in seconds
-            timeout_event: Optional event to check for interruption
-        """
-        if timeout_event is None:
-            time.sleep(duration)
-            return
-
-        # Sleep in small increments, checking for timeout event
-        start_time = time.time()
-        while time.time() - start_time < duration:
-            if timeout_event.is_set():
-                break
-            remaining = duration - (time.time() - start_time)
-            sleep_time = min(0.1, remaining)  # Sleep in 0.1s increments or remaining time
-            time.sleep(sleep_time)
+        log_info(f"DEBUG: Consumer batch fetching stats - Max queue depth: {max_queue_depth_seen}, "
+                         f"Total items fetched: {total_items_fetched}, Batch fetch attempts: {batch_fetch_attempts}, "
+                         f"Successful batch fetches: {successful_batch_fetches}")
+    
+    def merge_pending_contexts(self, contexts: List[PendingDatabaseContext]) -> PendingDatabaseContext:
+        merged = PendingDatabaseContext()
+        for ctx in contexts:
+            for obj_type, objs in ctx.objects.items():
+                merged.objects[obj_type].extend(objs)
+            merged.operations.extend(ctx.operations)
+            if ctx.error_message:
+                merged.error_message = ctx.error_message  # Preserve error messages if any
+        return merged
 
     def _wait_for_completion(self, thread_pool_manager, consumer_thread):
         """Wait for producer and consumer threads to complete"""
@@ -1045,4 +1025,3 @@ class XMLProcessor:
         # Wait for consumer
         if consumer_thread and consumer_thread.is_alive():
             consumer_thread.join()
-

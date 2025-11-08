@@ -8,12 +8,11 @@ creating master-child relationships similar to address deduplication.
 Refactored to use producer-consumer pattern with ThreadPoolManager for parallel processing.
 """
 
-import logging
 import uuid
 from typing import List, Tuple, Dict, Set, Any, Optional
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
-from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning
 
 
 class OfficerDeduplicationProducer(BaseProducer):
@@ -21,7 +20,6 @@ class OfficerDeduplicationProducer(BaseProducer):
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
         super().__init__(db_ops, batch_size)
-        self.logger = get_logger("officer_deduplication_producer")
 
     def _get_work_batch(self, offset: int) -> List[Dict[str, Any]]:
         """Get batch of duplicate officer groups for processing"""
@@ -116,7 +114,6 @@ class OfficerDeduplicationConsumer(BaseConsumer):
 
     def __init__(self, db_ops: DatabaseOperations):
         super().__init__(db_ops)
-        self.logger = get_logger("officer_deduplication_consumer")
 
     def _process_operations_batch(self, operations_by_type: Dict[str, List[DatabaseOperation]]) -> int:
         """Process officer deduplication operations"""
@@ -161,7 +158,7 @@ class OfficerDeduplicationConsumer(BaseConsumer):
 
         # Bulk update master officers
         count = self.db_ops.bulk_update('Officers', updates, 'officer_id')
-        log_debug(self.logger, f"Created {count} master officers")
+        log_debug(f"Created {count} master officers")
         return count
 
     def _process_update_child_operations(self, operations: List[Dict[str, Any]]) -> int:
@@ -179,7 +176,7 @@ class OfficerDeduplicationConsumer(BaseConsumer):
 
         # Bulk update child officers
         count = self.db_ops.bulk_update('Officers', updates, 'officer_id')
-        log_debug(self.logger, f"Updated {count} child officers")
+        log_debug(f"Updated {count} child officers")
         return count
 
 
@@ -188,7 +185,6 @@ class OfficerDeduplicationProcessor:
 
     def __init__(self, db_ops: DatabaseOperations, thread_pool_config: Optional[ThreadPoolConfig] = None):
         self.db_ops = db_ops
-        self.logger = get_logger("officer_deduplication")
         self.thread_pool_config = thread_pool_config or ThreadPoolConfig(
             producer_config=PoolConfig(max_workers=2, batch_size=1000),
             consumer_config=PoolConfig(max_workers=1, batch_size=1000)  # Single consumer for DB safety
@@ -196,14 +192,14 @@ class OfficerDeduplicationProcessor:
 
     def deduplicate_officers(self) -> int:
         """Deduplicate officers and create master-child relationships using producer-consumer pattern"""
-        log_info(self.logger, "Starting officer deduplication with producer-consumer pattern")
+        log_info("Starting officer deduplication with producer-consumer pattern")
 
         # Initialize producer and consumer
         producer = OfficerDeduplicationProducer(self.db_ops)
         consumer = OfficerDeduplicationConsumer(self.db_ops)
 
         # Initialize thread pool manager
-        thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self.logger)
+        thread_pool_manager = ThreadPoolManager(self.thread_pool_config)
 
         total_processed = 0
 
@@ -220,10 +216,10 @@ class OfficerDeduplicationProcessor:
             operations = producer.collect_operations()
 
             if not operations:
-                log_info(self.logger, "No duplicate officers found")
+                log_info("No duplicate officers found")
                 return 0
 
-            log_info(self.logger, f"Collected {len(operations)} deduplication operations")
+            log_info(f"Collected {len(operations)} deduplication operations")
 
             # Put operations in work queue for consumer
             for operation in operations:
@@ -249,13 +245,13 @@ class OfficerDeduplicationProcessor:
             # Cleanup
             thread_pool_manager.shutdown()
 
-        log_info(self.logger, f"Officer deduplication complete. Processed {total_processed} officer records.")
+        log_info(f"Officer deduplication complete. Processed {total_processed} officer records.")
         return total_processed
 
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, consumer, progress_callback=None):
         """Wrapper for consumer thread execution"""
         try:
-            log_debug(self.logger, f"Consumer thread {thread_id} starting")
+            log_debug(f"Consumer thread {thread_id} starting")
             sentinels_received = 0
 
             while True:
@@ -281,8 +277,8 @@ class OfficerDeduplicationProcessor:
                     continue
 
         except Exception as e:
-            log_error(self.logger, f"Consumer thread {thread_id} error: {e}", exc_info=True)
+            log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
 
     def _progress_callback(self, count: int):
         """Progress callback for consumer operations"""
-        log_debug(self.logger, f"Processed {count} officer deduplication operations")
+        log_debug(f"Processed {count} officer deduplication operations")

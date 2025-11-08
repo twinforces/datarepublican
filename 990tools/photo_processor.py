@@ -15,7 +15,7 @@ import hashlib
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 
-from logging_utils import get_logger, log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
@@ -141,7 +141,7 @@ class PhotoConsumer(BaseConsumer):
                 with open(cache_file, 'r') as f:
                     return json.load(f)
             except Exception as e:
-                log_debug(self.logger, f"Failed to load cache for {cache_key}: {e}")
+                log_debug(f"Failed to load cache for {cache_key}: {e}")
         return None
 
     def _save_cache(self, cache_dir: str, cache_key: str, data: Dict):
@@ -151,7 +151,7 @@ class PhotoConsumer(BaseConsumer):
             with open(cache_file, 'w') as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            log_warning(self.logger, f"Failed to save cache for {cache_key}: {e}")
+            log_warning(f"Failed to save cache for {cache_key}: {e}")
 
     def _search_knowledge_graph(self, name: str, cache_dir: str) -> Optional[str]:
         """Search Google Knowledge Graph for a person's photo"""
@@ -165,7 +165,7 @@ class PhotoConsumer(BaseConsumer):
         cache_key = self._get_cache_key(name)
         cached_result = self._load_cache(cache_dir, cache_key)
         if cached_result:
-            log_debug(self.logger, f"Using cached result for {name}")
+            log_debug(f"Using cached result for {name}")
             return cached_result.get('photo_url')
 
         # Make API request
@@ -189,19 +189,19 @@ class PhotoConsumer(BaseConsumer):
                 if 'image' in entity and 'contentUrl' in entity['image']:
                     photo_url = entity['image']['contentUrl']
                     cache_data['photo_url'] = photo_url
-                    log_debug(self.logger, f"Found photo for {name}: {photo_url}")
+                    log_debug(f"Found photo for {name}: {photo_url}")
 
             # Cache the result
             self._save_cache(cache_dir, cache_key, cache_data)
             return cache_data['photo_url']
 
         except requests.RequestException as e:
-            log_warning(self.logger, f"API request failed for {name}: {e}")
+            log_warning(f"API request failed for {name}: {e}")
             # Cache empty result to avoid repeated failures
             self._save_cache(cache_dir, cache_key, {'photo_url': None, 'timestamp': time.time(), 'error': str(e)})
             return None
         except Exception as e:
-            log_error(self.logger, f"Unexpected error searching for {name}: {e}")
+            log_error(f"Unexpected error searching for {name}: {e}")
             return None
 
     def _process_operations_batch(self, operations_by_type: Dict[str, List[DatabaseOperation]]) -> int:
@@ -239,7 +239,7 @@ class PhotoConsumer(BaseConsumer):
                         """
                         self.db_ops.execute_query(update_children_query, (photo_url, officer_id))
 
-                        log_debug(self.logger, f"Updated photo for officer {officer_id}: {search_query}")
+                        log_debug(f"Updated photo for officer {officer_id}: {search_query}")
                     else:
                         # Mark as processed even if no photo found
                         update_query = """
@@ -272,10 +272,9 @@ class PhotoProcessor:
         self.cache_dir = cache_dir or os.path.join(global_config.final_dir, "photo_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
 
-        self.logger = get_logger("photo_processor")
         self.api_key = os.getenv('GOOGLE_KNOWLEDGE_GRAPH_API_KEY')
         if not self.api_key:
-            log_warning(self.logger, "GOOGLE_KNOWLEDGE_GRAPH_API_KEY environment variable not set")
+            log_warning("GOOGLE_KNOWLEDGE_GRAPH_API_KEY environment variable not set")
 
         # Thread pool configuration for concurrent processing
         if thread_pool_config is None:
@@ -289,10 +288,10 @@ class PhotoProcessor:
 
     def process_officer_photos(self) -> int:
         """Process all officers and fetch their photos using producer-consumer pattern"""
-        log_info(self.logger, "Starting officer photo processing with ThreadPoolManager")
+        log_info("Starting officer photo processing with ThreadPoolManager")
 
         if not self.api_key:
-            log_warning(self.logger, "No Google Knowledge Graph API key available, skipping photo processing")
+            log_warning("No Google Knowledge Graph API key available, skipping photo processing")
             return 0
 
         # Create producer and consumer instances
@@ -303,10 +302,10 @@ class PhotoProcessor:
         operations = producer.collect_operations_parallel(max_workers=4)
 
         if not operations:
-            log_info(self.logger, "No officers found needing photo processing")
+            log_info("No officers found needing photo processing")
             return 0
 
-        log_info(self.logger, f"Collected {len(operations)} photo search operations")
+        log_info(f"Collected {len(operations)} photo search operations")
 
         # Execute operations using consumer
         processed_count = consumer.execute_operations_parallel(operations)
@@ -319,5 +318,5 @@ class PhotoProcessor:
                           if op.data.get('operation_name') == "search_officer_photo" and
                           op.data.get('photo_found', False))
 
-        log_info(self.logger, f"Photo processing complete. Processed {processed_count} operations, updated {updated_count} officers with photos.")
+        log_info(f"Photo processing complete. Processed {processed_count} operations, updated {updated_count} officers with photos.")
         return updated_count
