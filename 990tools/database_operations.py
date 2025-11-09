@@ -1312,12 +1312,17 @@ class DatabaseOperations:
 
     def optimize_database(self, commit: bool = True):
         """Run database optimization commands"""
+        print(f"DEBUG: optimize_database starting - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
+
         # Analyze tables for better query planning
         for table in ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]:
+            print(f"DEBUG: VACUUM ANALYZE {table}")
             self.execute_query(f"VACUUM ANALYZE {table}")
 
         # Regular checkpoint to ensure data is written and WAL is cleared
+        print(f"DEBUG: About to execute CHECKPOINT - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
         self.db_conn.execute("CHECKPOINT")
+        print(f"DEBUG: CHECKPOINT completed - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
         if commit:
             self.commit()
 

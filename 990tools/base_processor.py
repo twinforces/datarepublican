@@ -320,6 +320,10 @@ class BaseProcessor:
             This centralizes the merging logic for efficient batch processing across all database-heavy processors.
             Handles empty and single-context cases directly for optimal performance.
             """
+            if not hasattr(self, '_merge_call_count'):
+                self._merge_call_count = 0
+            self._merge_call_count += 1
+            log_info(f"Merge call count: {self._merge_call_count}")
             if not contexts:
                 return PendingDatabaseContext()
             if len(contexts) == 1:

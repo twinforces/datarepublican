@@ -826,7 +826,9 @@ def main():
  
             # Optimize database after each major processing step
             log_info(f"Optimizing database after {step}")
+            print(f"DEBUG: About to call optimize_database after {step}")
             processor.db_ops.optimize_database()
+            print(f"DEBUG: optimize_database completed after {step}")
  
             # Generate stats report after each step (unless --nostats is specified)
             if not global_config.nostats:

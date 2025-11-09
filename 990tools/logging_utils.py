@@ -43,7 +43,7 @@ def get_debug_info():
         return {'file': '<unknown>', 'line': 0, 'function': '<unknown>'}
 
     # Traverse up the stack until we're not in a file with 'log' or 'database' in the name
-    words = ['log', 'database'] #, 'base']
+    words = ['log', ] #, 'base']
     while frame:
         filename = frame.f_code.co_filename
         function = frame.f_code.co_name

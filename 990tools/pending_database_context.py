@@ -29,6 +29,7 @@ from typing import Dict, List, Any, Optional
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from datetime import datetime
+import threading
 
 class PendingDatabaseContext:
     """
@@ -207,7 +208,7 @@ class PendingDatabaseContext:
                     all_ids.extend(ids)
     
             log_info("Inserts completed")
-    
+
             # Separate DB operations from non-DB operations (like PROGRESS_UPDATE)
             db_operations = []
             non_db_operations = []
@@ -216,11 +217,11 @@ class PendingDatabaseContext:
                     non_db_operations.append(operation)
                 else:
                     db_operations.append(operation)
-    
+
             # Execute DB operations before commit
             for operation in db_operations:
                 self._execute_operation(db_ops, operation)
-    
+
             log_info("DB updates completed, committing")
             conn.execute("COMMIT")
             log_info("Transaction committed successfully")
@@ -367,7 +368,13 @@ class PendingDatabaseContext:
 
         # Use the first context as the base
         merged = cls(xml_id=contexts[0].xml_id, xml_content=contexts[0].xml_content)
-        merged.error_message = contexts[0].error_message
+
+        # Collect all error messages from contexts that have them
+        error_messages = [ctx.error_message for ctx in contexts if ctx.error_message]
+        if error_messages:
+            merged.error_message = '\n'.join(error_messages)
+        else:
+            merged.error_message = None
 
         # Merge all objects from all contexts
         for context in contexts:
