@@ -482,7 +482,7 @@ class XMLProcessor(BaseProcessor):
         self.work_queue = queue.Queue()
 
         # Initialize QueueStatusDisplay for visual monitoring
-        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=2.0)
+        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=30.0)
 
         # Atomic counter for available items in result queue (XML-specific coordination)
         self._available_items = 0

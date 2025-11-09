@@ -648,7 +648,7 @@ class AddressDeduplicationProcessor:
         # Initialize and start QueueStatusDisplay for visual monitoring
         if not self.thread_pool_manager:
             self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self)
-        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=2.0)
+        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=30.0)
         self.queue_status_display.start()
 
         try:

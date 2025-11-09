@@ -210,7 +210,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         self.setup_status_gauges(interval=10.0, queues=[self.thread_pool_manager.result_queue])
 
         # Initialize QueueStatusDisplay for visual monitoring
-        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=2.0)
+        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=30.0)
 
     def _get_custom_metrics(self) -> Dict[str, Any]:
         try:

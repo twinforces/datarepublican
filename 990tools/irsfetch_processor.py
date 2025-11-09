@@ -418,7 +418,7 @@ class IRSFetchProcessor(BaseProcessor):
         # Note: IRSFetchProcessor doesn't use a result queue, so we'll create a simple queue for monitoring
         import queue
         monitoring_queue = queue.Queue()
-        self.queue_status_display = QueueStatusDisplay(monitoring_queue, update_interval=2.0)
+        self.queue_status_display = QueueStatusDisplay(monitoring_queue, update_interval=30.0)
         self.queue_status_display.start()
 
         try:
