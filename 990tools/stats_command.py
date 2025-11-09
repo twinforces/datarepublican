@@ -37,12 +37,13 @@ def main():
         db_ops = DatabaseOperations(db_path)
 
         # Generate report
-        report_file = db_ops.generate_stats_report(step_name, notes)
+        stats_processor = db_ops.get_stats_processor()
+        report_file = stats_processor.generate_stats_report(step_name, notes)
 
         print(f"Statistics report generated: {report_file}")
 
         # Also print summary to stdout
-        counts = db_ops.get_table_counts()
+        counts = stats_processor.get_table_counts()
         total = sum(counts.values())
         print(f"\nTotal records: {total:,}")
         for table, count in counts.items():

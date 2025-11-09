@@ -833,11 +833,14 @@ def main():
             # Generate stats report after each step (unless --nostats is specified)
             if not global_config.nostats:
                 try:
+                    log_info(f"Generating stats report for step: {step}")
                     report_file = processor.stats_processor.generate_stats_report(f"after_{step}", f"Completed step: {step}")
-                    log_info(f"Stats report generated: {report_file}")
+                    log_info(f"Stats report generated successfully: {report_file}")
                 except Exception as e:
+                    log_error(f"Failed to generate stats report for step {step}: {e}", exc_info=True)
+                    # Don't exit on stats failure - continue processing
                     if not processor.quiet:
-                        log_warning(f"Failed to generate stats report for step {step}: {e}")
+                        log_warning(f"Continuing processing despite stats report failure for step {step}")
 
     except Exception as e:
         if not processor.quiet:

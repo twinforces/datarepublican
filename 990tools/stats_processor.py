@@ -44,66 +44,107 @@ class StatsProcessor:
         from datetime import datetime
         from mako.template import Template
         import os
+        from logging_utils import log_info, log_error, log_warning
 
-        # Get table counts and summaries
-        table_counts = self.get_table_counts()
-        table_summaries = self.get_table_summaries()
-        total_records = sum(table_counts.values())
+        log_info(f"Starting stats report generation for step: {step_name}")
 
-        # Get XmlFiles specific statistics
-        xml_group_counts = self.get_xml_files_group_counts()
-        xml_histogram = self.get_xml_files_histogram()
+        try:
+            # Check if template file exists and is readable
+            template_path = os.path.join(os.path.dirname(__file__), 'stats_template.mako')
+            if not os.path.exists(template_path):
+                log_error(f"Stats template file not found: {template_path}")
+                raise FileNotFoundError(f"Template file missing: {template_path}")
 
-        # Get comprehensive analysis for each major table
-        charities_analysis = self.get_charities_analysis()
-        officers_analysis = self.get_officers_analysis()
-        grants_analysis = self.get_grants_analysis()
-        contractors_analysis = self.get_contractors_analysis()
-        political_contributions_analysis = self.get_political_contributions_analysis()
-        addresses_analysis = self.get_addresses_analysis()
-        addresses_deduplication_analysis = self.get_addresses_deduplication_analysis()
-        addresses_colocator_analysis = self.get_addresses_colocator_analysis()
-        geocoding_status_analysis = self.get_geocoding_status_analysis()
+            if not os.access(template_path, os.R_OK):
+                log_error(f"Stats template file not readable: {template_path}")
+                raise PermissionError(f"Template file not readable: {template_path}")
 
-        # Prepare template data
-        template_data = {
-            'step_name': step_name,
-            'timestamp': datetime.now().isoformat(),
-            'db_path': self.db_ops.db_path,
-            'table_counts': table_counts,
-            'table_summaries': table_summaries,
-            'total_records': total_records,
-            'xml_group_counts': xml_group_counts,
-            'xml_histogram': xml_histogram,
-            'charities_analysis': charities_analysis,
-            'officers_analysis': officers_analysis,
-            'grants_analysis': grants_analysis,
-            'contractors_analysis': contractors_analysis,
-            'political_contributions_analysis': political_contributions_analysis,
-            'addresses_analysis': addresses_analysis,
-            'addresses_deduplication_analysis': addresses_deduplication_analysis,
-            'addresses_colocator_analysis': addresses_colocator_analysis,
-            'geocoding_status_analysis': geocoding_status_analysis,
-            'notes': notes or "No additional notes."
-        }
+            log_info(f"Template file verified: {template_path}")
 
-        # Escape newlines in all string data to prevent markdown confusion
-        template_data = escape_newlines(template_data)
+            # Get table counts and summaries
+            log_info("Getting table counts...")
+            table_counts = self.get_table_counts()
+            log_info(f"Table counts retrieved: {len(table_counts)} tables")
 
-        # Load and render template
-        template_path = os.path.join(os.path.dirname(__file__), 'stats_template.mako')
-        with open(template_path, 'r') as f:
-            template_content = f.read()
+            log_info("Getting table summaries...")
+            table_summaries = self.get_table_summaries()
+            log_info(f"Table summaries retrieved: {len(table_summaries)} tables")
 
-        template = Template(template_content)
-        report_content = template.render(**template_data)
+            total_records = sum(table_counts.values())
+            log_info(f"Total records across all tables: {total_records}")
 
-        # Write report to file
-        report_filename = f"stats_{step_name}.md"
-        with open(report_filename, 'w') as f:
-            f.write(report_content)
+            # Get XmlFiles specific statistics
+            log_info("Getting XML files group counts...")
+            xml_group_counts = self.get_xml_files_group_counts()
+            log_info("Getting XML files histogram...")
+            xml_histogram = self.get_xml_files_histogram()
 
-        return report_filename  # type: ignore
+            # Get comprehensive analysis for each major table
+            log_info("Getting charities analysis...")
+            charities_analysis = self.get_charities_analysis()
+            log_info("Getting officers analysis...")
+            officers_analysis = self.get_officers_analysis()
+            log_info("Getting grants analysis...")
+            grants_analysis = self.get_grants_analysis()
+            log_info("Getting contractors analysis...")
+            contractors_analysis = self.get_contractors_analysis()
+            log_info("Getting political contributions analysis...")
+            political_contributions_analysis = self.get_political_contributions_analysis()
+            log_info("Getting addresses analysis...")
+            addresses_analysis = self.get_addresses_analysis()
+            log_info("Getting addresses deduplication analysis...")
+            addresses_deduplication_analysis = self.get_addresses_deduplication_analysis()
+            log_info("Getting addresses colocator analysis...")
+            addresses_colocator_analysis = self.get_addresses_colocator_analysis()
+            log_info("Getting geocoding status analysis...")
+            geocoding_status_analysis = self.get_geocoding_status_analysis()
+
+            # Prepare template data
+            template_data = {
+                'step_name': step_name,
+                'timestamp': datetime.now().isoformat(),
+                'db_path': self.db_ops.db_path,
+                'table_counts': table_counts,
+                'table_summaries': table_summaries,
+                'total_records': total_records,
+                'xml_group_counts': xml_group_counts,
+                'xml_histogram': xml_histogram,
+                'charities_analysis': charities_analysis,
+                'officers_analysis': officers_analysis,
+                'grants_analysis': grants_analysis,
+                'contractors_analysis': contractors_analysis,
+                'political_contributions_analysis': political_contributions_analysis,
+                'addresses_analysis': addresses_analysis,
+                'addresses_deduplication_analysis': addresses_deduplication_analysis,
+                'addresses_colocator_analysis': addresses_colocator_analysis,
+                'geocoding_status_analysis': geocoding_status_analysis,
+                'notes': notes or "No additional notes."
+            }
+
+            # Escape newlines in all string data to prevent markdown confusion
+            template_data = escape_newlines(template_data)
+
+            # Load and render template
+            log_info("Loading and rendering template...")
+            with open(template_path, 'r') as f:
+                template_content = f.read()
+
+            template = Template(template_content)
+            report_content = template.render(**template_data)
+            log_info("Template rendered successfully")
+
+            # Write report to file
+            report_filename = f"stats_{step_name}.md"
+            log_info(f"Writing report to file: {report_filename}")
+            with open(report_filename, 'w') as f:
+                f.write(report_content)
+
+            log_info(f"Stats report generation completed successfully: {report_filename}")
+            return report_filename  # type: ignore
+
+        except Exception as e:
+            log_error(f"Failed to generate stats report for step {step_name}: {e}", exc_info=True)
+            raise
 
     def get_table_counts(self) -> dict:
         """Get row counts for all tables"""
