@@ -994,7 +994,7 @@ class DatabaseOperations:
         return geocoding_id
 
     # Bulk operations
-    def bulk_insert(self, objects: List[BaseModel], batch_size: Optional[int] = None, commit_batches: bool = True, conn: Optional[duckdb.DuckDBPyConnection] = None, validate_counts: bool = True) -> List[str]:
+    def bulk_insert(self, objects: List[BaseModel], batch_size: Optional[int] = None, commit_batches: bool = True, conn: Optional[duckdb.DuckDBPyConnection] = None, validate_counts: bool = False) -> List[str]:
         """
         High-performance bulk insert with executemany and client-side UUID generation.
 
@@ -1327,7 +1327,9 @@ class DatabaseOperations:
         try:
             self.db_conn.execute("CHECKPOINT")
         except Exception as e:
-            log_error(f"Checkpoint failed: {e}", exc_info=True)
+            log_error(f"Checkpoint failed, forcing: {e}", exc_info=True)
+            self.db_conn.execute("FORCE CHECKPOINT")
+
             pass
         print(f"DEBUG: CHECKPOINT completed - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
         if commit:

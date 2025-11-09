@@ -15,35 +15,27 @@ class Parser990T(BaseParser):
     def __init__(self):
         super().__init__("990T", {}, {})  # No XPaths needed for stub
 
-    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Stub implementation - not used"""
-        if log_error is None:
-            log_error = self.log_error
         return "Unknown"
 
-    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Stub implementation - not used"""
-        if log_error is None:
-            log_error = self.log_error
         return 0
 
-    def parse_travel(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_travel(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Stub implementation - not used"""
-        if log_error is None:
-            log_error = self.log_error
         return 0
 
-    def parse_conferences(self, root, field, namespaces, xml_filename, context, xpath_cache, log_error=None, xpath_match_stats=None):
+    def parse_conferences(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Stub implementation - not used"""
-        if log_error is None:
-            log_error = self.log_error
         return 0
 
     def get_field_parsers(self):
         """Stub implementation - no field parsers needed"""
         return []
 
-    def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, log_error=None, xpath_match_stats=None):
+    def parse_related_entities(self, root, xml_filename, context, xpath_cache, charity=None, form_type=None, xpath_match_stats=None):
         """Stub implementation - no related entities to parse"""
         pass
 
@@ -51,10 +43,8 @@ class Parser990T(BaseParser):
         """Stub implementation - no form-specific fields"""
         return data
 
-    def parse_form(self, root, xml_filename, xpath_cache, context, log_error=None, xpath_match_stats=None):
+    def parse_form(self, root, xml_filename, xpath_cache, context, xpath_match_stats=None, cached_charity=None):
         """Stub implementation - Form 990-T is skipped"""
-        if log_error is None:
-            log_error = self.log_error
         # Form 990-T is for Exempt Organization Business Income Tax
         # We don't process these forms, just skip them
         # Add generic update operation to update XmlFiles table
@@ -84,9 +74,9 @@ class Parser990T(BaseParser):
 parser_990t = Parser990T()
 
 
-def parse_990t(root, xml_filename, xpath_cache, context, log_error=None, xpath_match_stats=None):
+def parse_990t(root, xml_filename, xpath_cache, context, xpath_match_stats=None):
     """Parse Form 990-T - stub implementation that skips processing"""
-    parser_990t.parse_form(root, xml_filename, xpath_cache, context, log_error=log_error, xpath_match_stats=xpath_match_stats)
+    parser_990t.parse_form(root, xml_filename, xpath_cache, context, xpath_match_stats=xpath_match_stats)
 
 
 def main():

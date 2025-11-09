@@ -3,6 +3,7 @@
 import logging
 import inspect
 import os
+import re
 from typing import Optional, Callable
 import sys
 import traceback
@@ -69,7 +70,16 @@ def log_info(msg: str, *args, ein: Optional[str] = None, **kwargs):
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
-    formatted_msg = msg.format(*args, **kwargs)
+    # Handle missing placeholders by replacing them with '[MISSING]'
+    placeholders = re.findall(r'\{(\w+)\}', msg)
+    for placeholder in placeholders:
+        if placeholder not in kwargs:
+            msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
+    try:
+        formatted_msg = msg.format(*args, **kwargs)
+    except KeyError as e:
+        # If still KeyError, log the original message without formatting
+        formatted_msg = msg
     if ein:
         logger.info(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:

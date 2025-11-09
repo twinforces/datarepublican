@@ -43,6 +43,7 @@ DEBUG_TASK_FLOW = False
 class WorkQueueItemType(Enum):
     XML_FILES = "xml_files"
     SENTINEL = "sentinel"
+    RESULT = "result"
 
 
 class WorkQueueItem:
@@ -59,6 +60,10 @@ class WorkQueueItem:
     @classmethod
     def sentinel(cls, producer_id: int):
         return cls(WorkQueueItemType.SENTINEL, producer_id)
+    
+    @classmethod
+    def result(cls, pdc: PendingDatabaseContext):
+        return cls(WorkQueueItemType,pdc)
 
     # Removed wake_feeder method
 
@@ -67,6 +72,9 @@ class WorkQueueItem:
 
     def is_sentinel_for(self, producer_id: int):
         return self.item_type == WorkQueueItemType.SENTINEL and self.data == producer_id
+    
+    def is_sentinel(self):
+        return self.item_type == WorkQueueItemType.SENTINEL # consumer doesn't care
 
     # Removed is_wake_feeder method
 
@@ -470,10 +478,16 @@ class XMLProcessor(BaseProcessor):
         super().__init__(db_ops)
         self.processing_version = processing_version
         self.total_processed = 0
+        self.total_files_to_process = 0
         # Initialize PDC attributes for status gauges
         self.pdc_objects_count = 0
         self.pdc_operations_count = 0
         self.pdc_updates_count = 0
+
+        # Initialize separate PDC gauges
+        self.pdc_objects_gauge = None
+        self.pdc_operations_gauge = None
+        self.pdc_updates_gauge = None
 
         # Result queue for producer-consumer coordination
         self.result_queue = queue.Queue()
@@ -482,7 +496,7 @@ class XMLProcessor(BaseProcessor):
         self.work_queue = queue.Queue()
 
         # Initialize QueueStatusDisplay for visual monitoring
-        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=30.0)
+        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=30.0, custom_metrics_func=self._get_custom_metrics)
 
         # Atomic counter for available items in result queue (XML-specific coordination)
         self._available_items = 0
@@ -503,9 +517,12 @@ class XMLProcessor(BaseProcessor):
             return {
                 'zip_cache_size': len(XMLProducer._zip_cache),
                 'parsed_files_count': self.total_processed,
+                'parsed_files_total': self.total_files_to_process,
                 'pdc_objects_count': self.pdc_objects_count,
                 'pdc_operations_count': self.pdc_operations_count,
+                'pdc_operations_total': 10 * CONSUMER_BATCH_SIZE,
                 'pdc_updates_count': self.pdc_updates_count,
+                'pdc_updates_total': CONSUMER_BATCH_SIZE,
             }
         except AttributeError as e:
             # Handle missing attributes gracefully
@@ -513,12 +530,70 @@ class XMLProcessor(BaseProcessor):
             return {
                 'zip_cache_size': len(XMLProducer._zip_cache),
                 'parsed_files_count': self.total_processed,
+                'parsed_files_total': self.total_files_to_process,
             }
+
+    def _setup_pdc_gauges(self):
+        """Setup separate tqdm gauges for each PDC metric."""
+        try:
+            import tqdm
+            if tqdm:
+                self.pdc_objects_gauge = tqdm.tqdm(
+                    total=100,  # Percentage
+                    desc="PDC Objects",
+                    unit="%",
+                    bar_format='{desc}: {postfix}',
+                    position=3,  # Position below memory gauge
+                    leave=True
+                )
+                self.pdc_operations_gauge = tqdm.tqdm(
+                    total=100,  # Percentage
+                    desc="PDC Operations",
+                    unit="%",
+                    bar_format='{desc}: {postfix}',
+                    position=4,  # Position below objects gauge
+                    leave=True
+                )
+                self.pdc_updates_gauge = tqdm.tqdm(
+                    total=100,  # Percentage
+                    desc="PDC Updates",
+                    unit="%",
+                    bar_format='{desc}: {postfix}',
+                    position=5,  # Position below operations gauge
+                    leave=True
+                )
+        except ImportError:
+            pass
+
+    def _update_pdc_gauges(self):
+        """Update the PDC gauges with current values."""
+        if self.pdc_objects_gauge:
+            postfix = f"Count: {self.pdc_objects_count}"
+            self.pdc_objects_gauge.set_postfix({"info": postfix})
+            self.pdc_objects_gauge.refresh()
+
+        if self.pdc_operations_gauge:
+            postfix = f"Count: {self.pdc_operations_count}"
+            self.pdc_operations_gauge.set_postfix({"info": postfix})
+            self.pdc_operations_gauge.refresh()
+
+        if self.pdc_updates_gauge:
+            postfix = f"Count: {self.pdc_updates_count}"
+            self.pdc_updates_gauge.set_postfix({"info": postfix})
+            self.pdc_updates_gauge.refresh()
 
     def _on_shutdown(self):
         """Override for XML-specific shutdown cleanup."""
         super()._on_shutdown()
         XMLProducer.cleanup_zip_cache()
+
+        # Close PDC gauges
+        if self.pdc_objects_gauge:
+            self.pdc_objects_gauge.close()
+        if self.pdc_operations_gauge:
+            self.pdc_operations_gauge.close()
+        if self.pdc_updates_gauge:
+            self.pdc_updates_gauge.close()
 
     def process_xml_files(self, max_files: Optional[int] = None, workers: int = 4, collect_xpath_stats: bool = False) -> int:
         """
@@ -548,6 +623,7 @@ class XMLProcessor(BaseProcessor):
 
         # Get total count for progress bar
         total_files = self.db_ops.get_xml_files_to_process_count(CURRENT_PROCESSING_VERSION) if max_files is None else max_files
+        self.total_files_to_process = total_files
         log_info(f"DEBUG: Total files to process: {total_files}, max_files parameter: {max_files}")
 
         # Setup progress bar
@@ -593,6 +669,9 @@ class XMLProcessor(BaseProcessor):
 
         # Setup status gauges for monitoring
         self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS, queues=[self.work_queue])
+
+        # Setup separate PDC gauges
+        self._setup_pdc_gauges()
 
         # Start QueueStatusDisplay for visual monitoring
         self.queue_status_display.start()
@@ -675,7 +754,7 @@ class XMLProcessor(BaseProcessor):
                 self.work_queue.task_done()
                 # Send sentinel to result queue to signal completion
                 log_info("Producer {} processed {} items, sending sentinel to consumer".format(producer_id, processed_count))
-                self.result_queue.put(None)
+                self.result_queue.put(item)
                 break
             elif item.item_type == WorkQueueItemType.SENTINEL:
                 # It's a sentinel for another producer, put it back and wait
@@ -701,13 +780,22 @@ class XMLProcessor(BaseProcessor):
                 )
                 # Always put context to result queue, even if processing failed
                 # The consumer will handle failed contexts appropriately
-                self.result_queue.put(context)
+                self.result_queue.put(WorkQueueItem.result(context))
                 processed_count += 1
 
             self.work_queue.task_done()
 
         log_info("PRODUCER THREAD {} COMPLETED".format(producer_id))
+        
+    def _pdc_metrics(self,pdc: PendingDatabaseContext):
 
+        self.pdc_objects_count=pdc.getTotalObjectCount()
+        self.pdc_operations_count = pdc.getOperationsCount()
+        self.pdc_updates_count = pdc.getUpdatesCount()
+
+        # Update PDC gauges with new values
+        self._update_pdc_gauges()
+        
     def _consumer_worker(self, consumer: XMLConsumer, pbar, num_producers: int):
         """Single consumer: Drains result queue and executes PendingDatabaseContexts."""
         log_info("CONSUMER THREAD STARTED")
@@ -717,28 +805,29 @@ class XMLProcessor(BaseProcessor):
         # Process items until all producers are done
         while sentinels_received < num_producers or batch_contexts:
             try:
-                item = self.result_queue.get(timeout=1)
+                item = self.result_queue.get_nowait()
             except queue.Empty:
                 # If we've received all sentinels but still have contexts, process them
                 if sentinels_received >= num_producers and batch_contexts:
                     break
                 continue
 
-            if item is None:
+            if item.is_sentinel():
                 sentinels_received += 1
-                log_info("Received sentinel {}/{}", sentinels_received, num_producers)
+                log_info(f"Received sentinel {sentinels_received}/{num_producers}")
                 self.result_queue.task_done()
                 continue
 
-            batch_contexts.append(item)
+            batch_contexts.append(item.data)
             self.result_queue.task_done()
 
             if len(batch_contexts) >= CONSUMER_BATCH_SIZE:
                 merged = PendingDatabaseContext.merge(batch_contexts)
-                log_info("merged context has {} Stuff", merged.getObjectCounts())
-                log_info("Saving batch of {} contexts to database", len(batch_contexts))
+                log_info(f"merged context has {merged.getObjectCounts()} Stuff")
+                log_info(f"Saving batch of {len(batch_contexts)} contexts to database")
+                self._pdc_metrics(merged)
                 merged.save_to_database(consumer.db_ops)
-                log_info("Successfully saved batch of {} contexts", len(batch_contexts))
+                log_info(f"Successfully saved batch of {len(batch_contexts)} contexts")
                 # Progress updates are handled by operations in the PDC
                 self.total_processed += len(batch_contexts)
                 batch_contexts = []
@@ -746,10 +835,11 @@ class XMLProcessor(BaseProcessor):
         # Process remaining
         if len(batch_contexts):
             merged = PendingDatabaseContext.merge(batch_contexts)
-            log_info("Saving final batch of {} contexts to database", len(batch_contexts))
-            log_info("merged context has {} Stuff", merged.getObjectCounts())
+            log_info(f"Saving final batch of {len(batch_contexts)} contexts to database" )
+            log_info(f"merged context has {merged.getObjectCounts()} Stuff")
+            self._pdc_metrics(merged)
             merged.save_to_database(consumer.db_ops)
-            log_info("Successfully saved final batch of {} contexts", len(batch_contexts))
+            log_info(f"Successfully saved batch of {len(batch_contexts)} contexts")
             # Progress updates are handled by operations in the PDC
             self.total_processed += len(batch_contexts)
 
