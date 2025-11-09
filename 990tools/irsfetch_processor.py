@@ -34,6 +34,7 @@ from config import global_config
 from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from pending_database_context import PendingDatabaseContext
+from queue_status_display import QueueStatusDisplay
 
 
 class IRSFetchProducer(BaseProducer):
@@ -396,7 +397,10 @@ class IRSFetchProcessor(BaseProcessor):
             consumer_config=PoolConfig(max_workers=1, queue_size=10)   # Single consumer for file operations
         )
         self.thread_pool_manager = ThreadPoolManager(thread_config,self)
-  
+
+        # Initialize QueueStatusDisplay for visual monitoring (will be started by fetch_irs_zips)
+        self.queue_status_display = None
+
         # Ensure zips directory exists
         if not os.path.exists(self.zips_dir):
             os.makedirs(self.zips_dir)
@@ -409,7 +413,14 @@ class IRSFetchProcessor(BaseProcessor):
         """Download and recompress IRS 990 ZIP files from IRS website"""
         log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
         self.setup_status_gauges(interval=10.0)
-  
+
+        # Initialize and start QueueStatusDisplay for visual monitoring
+        # Note: IRSFetchProcessor doesn't use a result queue, so we'll create a simple queue for monitoring
+        import queue
+        monitoring_queue = queue.Queue()
+        self.queue_status_display = QueueStatusDisplay(monitoring_queue, update_interval=2.0)
+        self.queue_status_display.start()
+
         try:
             # Process each year sequentially
             for year in range(start_year, end_year + 1):
@@ -422,10 +433,18 @@ class IRSFetchProcessor(BaseProcessor):
                     return False
   
             log_info("IRS ZIP file fetch and recompression complete")
+
+            # Stop QueueStatusDisplay
+            if self.queue_status_display:
+                self.queue_status_display.stop()
+
             return True
-  
+
         except Exception as e:
             log_error(f"IRS fetch processing failed: {e}", exc_info=True)
+            # Stop QueueStatusDisplay on error
+            if self.queue_status_display:
+                self.queue_status_display.stop()
             return False
 
     def _download_and_recompress_year(self, year: int, zips_dir: str) -> bool:

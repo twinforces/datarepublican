@@ -28,6 +28,7 @@ from typing import Optional, List, Tuple
 from config import global_config
 from constants import CURRENT_PROCESSING_VERSION, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS
 from datetime import datetime
+from queue_status_display import QueueStatusDisplay
 
 from collections import deque
 # Import XPath configurations from xpaths.py
@@ -480,6 +481,9 @@ class XMLProcessor(BaseProcessor):
         # Work queue for producer-consumer coordination
         self.work_queue = queue.Queue()
 
+        # Initialize QueueStatusDisplay for visual monitoring
+        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=2.0)
+
         # Atomic counter for available items in result queue (XML-specific coordination)
         self._available_items = 0
         self._available_items_lock = threading.Lock()
@@ -590,6 +594,9 @@ class XMLProcessor(BaseProcessor):
         # Setup status gauges for monitoring
         self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS, queues=[self.work_queue])
 
+        # Start QueueStatusDisplay for visual monitoring
+        self.queue_status_display.start()
+
         # Wait for completion - feeder first, then producers, then consumer
         log_info("Waiting for feeder thread to complete...")
         feeder_thread.join()
@@ -608,6 +615,9 @@ class XMLProcessor(BaseProcessor):
         # Cleanup
         if pbar:
             pbar.close()
+
+        # Stop QueueStatusDisplay
+        self.queue_status_display.stop()
 
         # Clean up ZIP cache with proper reference counting
         XMLProducer.cleanup_zip_cache()

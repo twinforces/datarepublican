@@ -1324,7 +1324,11 @@ class DatabaseOperations:
 
         # Regular checkpoint to ensure data is written and WAL is cleared
         print(f"DEBUG: About to execute CHECKPOINT - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
-        self.db_conn.execute("CHECKPOINT")
+        try:
+            self.db_conn.execute("CHECKPOINT")
+        except Exception as e:
+            log_error(f"Checkpoint failed: {e}", exc_info=True)
+            pass
         print(f"DEBUG: CHECKPOINT completed - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
         if commit:
             self.commit()

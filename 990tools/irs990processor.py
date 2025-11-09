@@ -56,6 +56,7 @@ from photo_processor import PhotoProcessor
 from extract_processor import ExtractProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
+from queue_status_display import QueueStatusDisplay
 
 # Parsing functions are now handled by base_parser factory method
 
@@ -148,6 +149,9 @@ class IRS990Processor(BaseProcessor):
         self.officer_dedup_processor = OfficerDeduplicationProcessor(self.db_ops)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
+
+        # Initialize QueueStatusDisplay for visual monitoring (will be started by individual processors)
+        self.queue_status_display = None
   
         # Initialize stats processor
         self.stats_processor = self.db_ops.get_stats_processor()

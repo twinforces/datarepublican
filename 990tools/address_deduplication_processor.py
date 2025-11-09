@@ -18,6 +18,7 @@ from constants import ADDRESS_BATCH_SIZE, ADDRESS_QUEUE_SIZE
 from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
 from models.address import Address
 from pending_database_context import PendingDatabaseContext
+from queue_status_display import QueueStatusDisplay
 
 
 class GeocodingRecordCreator:
@@ -630,6 +631,9 @@ class AddressDeduplicationProcessor:
         self.consumer = AddressDeduplicationConsumer(db_ops)
         self.thread_pool_manager = None
 
+        # Initialize QueueStatusDisplay for visual monitoring (will be started by individual methods)
+        self.queue_status_display = None
+
     def deduplicate_addresses(self, progress_bar=None) -> int:
         """Deduplicate addresses by creating master-child relationships using PendingDatabaseContext.
  
@@ -640,7 +644,13 @@ class AddressDeduplicationProcessor:
             Number of addresses processed (children updated)
         """
         log_info("Starting address deduplication using PendingDatabaseContext")
- 
+
+        # Initialize and start QueueStatusDisplay for visual monitoring
+        if not self.thread_pool_manager:
+            self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self)
+        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=2.0)
+        self.queue_status_display.start()
+
         try:
             # Collect contexts using the PendingDatabaseContext approach
             contexts = self.producer.collect_contexts()
@@ -657,10 +667,18 @@ class AddressDeduplicationProcessor:
             total_processed = self.consumer.execute_contexts_batch(contexts, progress_bar)
  
             log_info(f"Address deduplication completed: {total_processed} operations processed")
+
+            # Stop QueueStatusDisplay
+            if self.queue_status_display:
+                self.queue_status_display.stop()
+
             return total_processed
- 
+
         except Exception as e:
             log_error(f"Address deduplication failed: {e}", exc_info=True)
+            # Stop QueueStatusDisplay on error
+            if self.queue_status_display:
+                self.queue_status_display.stop()
             return 0
 
     def _producer_worker_threaded(self, work_items: List[Dict[str, Any]], work_queue, result_queue, thread_id: int, num_threads: int) -> None:

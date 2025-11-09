@@ -15,6 +15,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from base_processor import BaseProducer
+from queue_status_display import QueueStatusDisplay
 
 
 class ExtractProcessor(BaseProducer):
@@ -25,6 +26,9 @@ class ExtractProcessor(BaseProducer):
         super().__init__(db_ops, batch_size)
         self.zips_dir = zips_dir
         self.extracted_files = 0
+
+        # Initialize QueueStatusDisplay for visual monitoring (will be started by extract_xml_files)
+        self.queue_status_display = None
 
     def _get_custom_metrics(self) -> Dict[str, Any]:
         """Custom metrics for extract processor."""
@@ -73,7 +77,14 @@ class ExtractProcessor(BaseProducer):
  
         self.eins = eins
         self.setup_status_gauges(interval=10.0)
- 
+
+        # Initialize and start QueueStatusDisplay for visual monitoring
+        # Note: ExtractProcessor doesn't use a result queue, so we'll create a simple queue for monitoring
+        import queue
+        monitoring_queue = queue.Queue()
+        self.queue_status_display = QueueStatusDisplay(monitoring_queue, update_interval=2.0)
+        self.queue_status_display.start()
+
         extracted_count = 0
         last_pk = None
         while True:
@@ -97,6 +108,11 @@ class ExtractProcessor(BaseProducer):
                     self.extracted_files += 1
  
         log_info(f"Extraction complete. Extracted {extracted_count} XML files.")
+
+        # Stop QueueStatusDisplay
+        if self.queue_status_display:
+            self.queue_status_display.stop()
+
         return extracted_count
 
 

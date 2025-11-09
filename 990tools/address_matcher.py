@@ -21,6 +21,7 @@ from database_operations import DatabaseOperations
 from pending_database_context import PendingDatabaseContext
 from logging_utils import log_info, log_debug, log_error, get_logger
 from config import global_config
+from queue_status_display import QueueStatusDisplay
 
 
 class AddressMatcherProducer(BaseProducer):
@@ -194,6 +195,9 @@ class AddressMatcher(BaseProcessor):
         self.thread_pool_manager = ThreadPoolManager(thread_config, self)
         self.setup_status_gauges(interval=10.0, queues=[self.thread_pool_manager.result_queue])
 
+        # Initialize QueueStatusDisplay for visual monitoring
+        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=2.0)
+
     def _get_custom_metrics(self) -> Dict[str, Any]:
         try:
             unmatched_result = self.db_ops.execute_query(
@@ -229,6 +233,9 @@ class AddressMatcher(BaseProcessor):
         if not global_config.is_quiet():
             log_info("Matching grants with unknown EINs by address/colocator")
 
+        # Start QueueStatusDisplay for visual monitoring
+        self.queue_status_display.start()
+
         try:
             # Get total count for progress
             total_result = self.db_ops.execute_query(
@@ -258,10 +265,15 @@ class AddressMatcher(BaseProcessor):
             if not global_config.is_quiet():
                 log_info(f"Grant matching complete: {total_items} grants processed")
 
+            # Stop QueueStatusDisplay
+            self.queue_status_display.stop()
+
             return total_items
 
         except Exception as e:
             log_error(f"Grant matching failed: {e}", exc_info=True)
             if progress_bar is not None:
                 progress_bar.close()
+            # Stop QueueStatusDisplay on error
+            self.queue_status_display.stop()
             return 0

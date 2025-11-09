@@ -28,6 +28,7 @@ from models.geocoding import Geocoding
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from constants import GEOCODING_API_BATCH_SIZE
+from queue_status_display import QueueStatusDisplay
 
 
 class GeocodingAPIProducer(BaseProducer):
@@ -208,6 +209,9 @@ class GeocodingAPIProcessor(BaseProcessor):
         self.thread_pool_manager = ThreadPoolManager(thread_config,self)
         self.setup_status_gauges(interval=10.0, queues=[self.thread_pool_manager.result_queue])
 
+        # Initialize QueueStatusDisplay for visual monitoring
+        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=2.0)
+
     def _get_custom_metrics(self) -> Dict[str, Any]:
         try:
             pending_result = self.db_ops.execute_query(
@@ -248,6 +252,9 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         if not global_config.is_quiet():
             log_info(f"Starting geocoding API processing")
+
+        # Start QueueStatusDisplay for visual monitoring
+        self.queue_status_display.start()
 
         try:
             # Collect all batches using paging
@@ -293,10 +300,15 @@ class GeocodingAPIProcessor(BaseProcessor):
             if not global_config.is_quiet():
                 log_info(f"Geocoding API processing completed: {total_items} records processed")
 
+            # Stop QueueStatusDisplay
+            self.queue_status_display.stop()
+
             return total_items
 
         except Exception as e:
             log_error(f"Geocoding API processing failed: {e}", exc_info=True)
+            # Stop QueueStatusDisplay on error
+            self.queue_status_display.stop()
             return 0
 
     def _producer_wrapper(self, batches: List[List[Dict[str, Any]]], work_queue, result_queue, thread_id: int, num_threads: int):
