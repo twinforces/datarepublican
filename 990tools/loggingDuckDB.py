@@ -19,7 +19,7 @@ class LoggingDuckDBConnection:
         Supports all args/kwargs from duckdb.connect().
         """
         logger = get_logger(__name__)
-        log_debug(logger, f"connecting: {args} {kwargs}")
+        log_debug("connecting: {} {}", args, kwargs)
         print("Using Logging DuckDB")
         self._conn = duckdb.connect(*args, **kwargs)
     
@@ -29,9 +29,9 @@ class LoggingDuckDBConnection:
         Logs the query with placeholders intact (for security); params are not logged.
         """
         logger = get_logger(__name__)
-        log_debug(logger, f"Executing SQL: {query}")
+        log_debug("Executing SQL: {}", query)
         if parameters:
-            log_debug(logger, f"With params: {parameters}")
+            log_debug("With params: {}", parameters)
         return self._conn.execute(query, parameters, **kwargs)
 
     def sql(self, query, parameters=None, **kwargs):
@@ -40,9 +40,9 @@ class LoggingDuckDBConnection:
         Similar to execute(), but returns a DuckDBPyRelation.
         """
         logger = get_logger(__name__)
-        log_debug(logger, f"Executing SQL via sql(): {query}")
+        log_debug("Executing SQL via sql(): {}", query)
         if parameters:
-            log_debug(logger, f"With params: {parameters}")
+            log_debug("With params: {}", parameters)
         return self._conn.sql(query, parameters, **kwargs)
     
     def executemany(self, query, parameters=None, **kwargs):
@@ -51,9 +51,12 @@ class LoggingDuckDBConnection:
         Logs the query with placeholders; reports batch size but not individual params.
         """
         logger = get_logger(__name__)
-        log_debug(logger, f"Executing SQL (bulk): {query}")
+        log_debug("Executing SQL (bulk): {}", query)
         if parameters:
-            log_debug(logger, f"With {len(parameters)} parameter sets")
+            log_debug("With {} parameter sets", len(parameters))
+            if len(parameters) <= 3:  # Only log details for small batches
+                for i, param_set in enumerate(parameters):
+                    log_debug("Param set {}: EIN={}", i, param_set[1] if len(param_set) > 1 else "unknown")
         return self._conn.executemany(query, parameters, **kwargs)
     
     def __getattr__(self, name):

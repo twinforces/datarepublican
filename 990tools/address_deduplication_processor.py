@@ -422,7 +422,7 @@ class AddressDeduplicationProducer(BaseProducer):
  
         # Add geocoding records to context
         for geocoding_record in geocoding_records:
-            if self.exit_processing:
+            if self.producer.exit_processing:
                 break
             context.addObjectToDatabase(geocoding_record)
             log_debug(f"DEBUG: Added geocoding record to context")
@@ -696,7 +696,7 @@ class AddressDeduplicationProcessor:
                 work_item = work_items[i]
 
                 # Process single work item into unified operations (deduplication + geocoding)
-                operations = self.producer._process_unified_work_batch([work_item])
+                operations = self.producer._process_work_batch([work_item])
 
                 # Put operations in result queue for consumer
                 result_queue.put(operations)

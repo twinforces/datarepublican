@@ -77,7 +77,7 @@ class ThreadPoolConfig:
             consumer_config: Configuration for consumer thread pool
             enable_profiling: Whether to enable profiling for thread operations
         """
-        self.producer_config = producer_config or PoolConfig(max_workers=4)
+        self.producer_config = producer_config or PoolConfig()
         self.consumer_config = consumer_config or PoolConfig(max_workers=1)  # Single consumer for DB safety
         self.enable_profiling = enable_profiling
 
@@ -280,24 +280,31 @@ class BaseProcessor:
         try:
             process = psutil.Process()
             memory_gb = process.memory_info().rss / (1024 ** 3)
-            
+
             queue_sizes = [q.qsize() for q in self.monitor_queues if hasattr(q, 'qsize')]
             total_queue_size = sum(queue_sizes)
-            
+
             custom_metrics = self._get_custom_metrics()
-            
-            status_msg = f"Status Gauges: Memory {memory_gb:.2f}GB, Queue sizes {queue_sizes} (total: {total_queue_size}), Custom: {custom_metrics}"
+
+            # Filter out None values from custom_metrics to avoid logging issues
+            filtered_metrics = {k: v for k, v in custom_metrics.items() if v is not None}
+    
+            status_msg = "Status Gauges: Memory {:.2f}GB, Queue sizes {} (total: {}), Custom: {}".format(memory_gb, queue_sizes, total_queue_size, filtered_metrics)
             log_info(status_msg)
         except Exception as e:
             log_error(f"Error updating status gauges: {e}")
 
     def _get_custom_metrics(self) -> Dict[str, Any]:
         """Virtual method for subclass-specific custom metrics."""
-        return {
-            'pdc_objects_count': self.pdc_objects_count,
-            'pdc_operations_count': self.pdc_operations_count,
-            'pdc_updates_count': self.pdc_updates_count,
-        }
+        metrics = {}
+        # Only include attributes that actually exist on this instance
+        if hasattr(self, 'pdc_objects_count'):
+            metrics['pdc_objects_count'] = self.pdc_objects_count
+        if hasattr(self, 'pdc_operations_count'):
+            metrics['pdc_operations_count'] = self.pdc_operations_count
+        if hasattr(self, 'pdc_updates_count'):
+            metrics['pdc_updates_count'] = self.pdc_updates_count
+        return metrics
 
     def setup_shutdown_handlers(self):
         def signal_handler(signum, frame):

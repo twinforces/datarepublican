@@ -30,10 +30,6 @@ class AddressMatcherProducer(BaseProducer):
         super().__init__(db_ops, batch_size=batch_size)
         self.logger = get_logger("address_matcher")
 
-    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
-        super().__init__(db_ops, batch_size=batch_size)
-        self.logger = get_logger("address_matcher")
-
     def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Get a batch of unmatched grants using key-value paging on UUID7 str grant_id pks"""
         where_clause = "recipient_ein IS NULL"
@@ -71,7 +67,7 @@ class AddressMatcherProducer(BaseProducer):
             max_pk = max(row[0] for row in rows) if rows else None
 
             if not global_config.is_quiet():
-                log_debug(self.logger, f"Retrieved {len(batch_data)} unmatched grants from database (last_pk={last_pk})")
+                log_debug(f"Retrieved {len(batch_data)} unmatched grants from database (last_pk={last_pk})")
 
             return batch_data, max_pk
         return [], None
@@ -99,10 +95,6 @@ class AddressMatcherConsumer(BaseConsumer):
     """Consumer for address matching operations"""
 
     def __init__(self, db_ops: DatabaseOperations) -> None:
-        super().__init__(db_ops)
-        self.logger = get_logger("address_matcher")
-
-    def __init__(self, db_ops: DatabaseOperations):
         super().__init__(db_ops)
         self.logger = get_logger("address_matcher")
 
@@ -136,13 +128,13 @@ class AddressMatcherConsumer(BaseConsumer):
                 updates.append({'grant_id': grant_id, 'recipient_ein': matched_ein})
                 matched_count += 1
                 if not global_config.is_quiet():
-                    log_info(self.logger, f"Matched grant {grant_id} to charity {matched_ein}")
+                    log_info(f"Matched grant {grant_id} to charity {matched_ein}")
             else:
                 stub_ein = self._create_stub_charity_for_grant(grant_id, filer_ein, grant_amt, tax_year)
                 if stub_ein:
                     updates.append({'grant_id': grant_id, 'recipient_ein': stub_ein})
                     if not global_config.is_quiet():
-                        log_info(self.logger, f"Created stub charity {stub_ein} for grant {grant_id}")
+                        log_info(f"Created stub charity {stub_ein} for grant {grant_id}")
 
         # Build PDC for updates
         context = PendingDatabaseContext()
@@ -162,7 +154,7 @@ class AddressMatcherConsumer(BaseConsumer):
         ids = context.save_to_database(self.db_ops)
 
         if not global_config.is_quiet():
-            log_debug(self.logger, f"Updated {len(updates)} grants, {matched_count} matched")
+            log_debug(f"Updated {len(updates)} grants, {matched_count} matched")
 
         return
 
@@ -186,11 +178,6 @@ class AddressMatcher(BaseProcessor):
     """Main processor for grant-to-charity address matching using producer-consumer pattern"""
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000) -> None:
-        super().__init__(db_ops)
-        self.batch_size = batch_size
-        self.logger = get_logger("address_matcher")
-
-    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000):
         super().__init__(db_ops)
         self.batch_size = batch_size
         self.logger = get_logger("address_matcher")
@@ -227,7 +214,7 @@ class AddressMatcher(BaseProcessor):
                 **super()._get_custom_metrics()
             }
         except Exception as e:
-            log_error(self.logger, f"Error getting custom metrics: {e}")
+            log_error(f"Error getting custom metrics: {e}")
             return super()._get_custom_metrics()
 
     def match_grants_by_address(self, progress_bar=None) -> int:
@@ -240,7 +227,7 @@ class AddressMatcher(BaseProcessor):
             Number of grants processed
         """
         if not global_config.is_quiet():
-            log_info(self.logger, "Matching grants with unknown EINs by address/colocator")
+            log_info("Matching grants with unknown EINs by address/colocator")
 
         try:
             # Get total count for progress
@@ -251,7 +238,7 @@ class AddressMatcher(BaseProcessor):
 
             if total_items == 0:
                 if not global_config.is_quiet():
-                    log_info(self.logger, "No grants with unknown EINs to match")
+                    log_info("No grants with unknown EINs to match")
                 return 0
 
             if progress_bar is None and tqdm is not None:
@@ -269,12 +256,12 @@ class AddressMatcher(BaseProcessor):
                 progress_bar.close()
 
             if not global_config.is_quiet():
-                log_info(self.logger, f"Grant matching complete: {total_items} grants processed")
+                log_info(f"Grant matching complete: {total_items} grants processed")
 
             return total_items
 
         except Exception as e:
-            log_error(self.logger, f"Grant matching failed: {e}", exc_info=True)
+            log_error(f"Grant matching failed: {e}", exc_info=True)
             if progress_bar is not None:
                 progress_bar.close()
             return 0

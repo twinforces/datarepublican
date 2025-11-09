@@ -20,7 +20,7 @@ class Parser990(BaseParser):
     def __init__(self):
         super().__init__("990", XPATHS_990, NAMESPACES)
 
-    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse organization type for Form 990 using XPath union for better performance"""
         from xpaths import ORG_TYPE_UNION_XPATH
 
@@ -46,13 +46,14 @@ class Parser990(BaseParser):
 
         if elem is not None:
             tag_name = elem.tag.split('}')[-1]
+            ein = charity.ein if charity else 'Unknown'
             log_info("Found org_type element: tag={0}, text={1!r}, attrib={2!r} for EIN {3} in {4}",
-                       elem.tag, elem.text, elem.attrib, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                        elem.tag, elem.text, elem.attrib, ein, xml_filename)
             if tag_name == "Organization501cInd":
                 type_num = elem.get("organization501cTypeTxt")
                 if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
                     org_type = f"501(c)({type_num})"
-                elif elem.text and "X" in elem.text.upper():
+                elif elem.text and "X" in el.text.upper():
                     org_type = "501(c)(3)"
                 else:
                     org_type = "501(c)(3)"
@@ -63,20 +64,23 @@ class Parser990(BaseParser):
             else:
                 org_type = "Unknown"
                 log_error("Unexpected org_type element tag {0} for EIN {1} in {2}",
-                           elem.tag, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                            elem.tag, ein, xml_filename)
         else:
+            ein = charity.ein if charity else 'Unknown'
             log_error("Failed to parse org_type for EIN {0} in {1}",
-                       context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                        ein, xml_filename)
             return_data = parse_string_field(root, self.XPATHS, "return_data", namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default=None, return_element=True)
             org_tags = [child.tag for child in return_data.xpath("*[contains(local-name(), 'Organization')]", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
+            form_type_val = charity.form_type if charity else 'Unknown'
             log_error("Form type: {0}, Available org_type tags: {1!r} in {2}",
-                       context.getCharity().form_type if context.getCharity() else 'Unknown', org_tags, xml_filename)
+                        form_type_val, org_tags, xml_filename)
             org_type = "Unknown"
+        ein = charity.ein if charity else 'Unknown'
         log_info("Parsed org_type {0} for EIN {1} in {2}",
-                   org_type, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                    org_type, ein, xml_filename)
         return org_type
 
-    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse grants to others for Form 990"""
         # Use the schedule parsing methods which add directly to context
         charity = context.getCharity() if hasattr(context, 'getCharity') else None
@@ -86,7 +90,7 @@ class Parser990(BaseParser):
         # But for now, just return 0 since the actual grant objects are added to context
         return 0
 
-    def parse_foreign_expenses(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_foreign_expenses(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse foreign expenses for Form 990"""
         # For now, just return 0 since foreign expenses parsing is complex
         # and the actual foreign expense objects would be added to context
@@ -193,7 +197,7 @@ def main():
         tax_year = xml_file[:4] if xml_file[:4].isdigit() else "Unknown"
     else:
         try:
-            int(tax_year)
+            tax_year = int(tax_year)
         except ValueError:
             tax_year = xml_file[:4] if xml_file[:4].isdigit() else "Unknown"
 

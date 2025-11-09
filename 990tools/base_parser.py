@@ -16,6 +16,7 @@ from typing import Optional, List, Tuple, Dict, Any, Callable
 from logging_utils import log_info, log_error, log_debug, log_warning
 from constants import DEBUG_EINS, ORG_TYPE_SUFFIXES
 from config import global_config
+from pending_database_context import PendingDatabaseContext
 
 
 class BaseParser:
@@ -49,10 +50,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> str:
         """Parse organization type - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement parse_org_type")
@@ -63,10 +65,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> Tuple[int, List[Dict[str, Any]]]:
         """Parse officer compensation - optimized implementation"""
         total: int = 0
@@ -80,11 +83,11 @@ class BaseParser:
 
         # Use XPath union for better performance - get all officer elements at once
         from xpaths import ORG_TYPE_UNION_XPATH
-        officer_xpath = etree.XPath(f".//irs:IRS{form_type}/irs:Form990PartVIISectionAGrp | .//irs:Form990PartVIISectionAGrp", namespaces=namespaces)
+        officer_xpath = etree.XPath(f".//irs:IRS{form_type}/irs:Form990PartVIISectionAGrp | .//irs:Form990PartVIISectionAGrp | .//Form990PartVIISectionAGrp", namespaces=namespaces)
         elements: List[etree._Element] = officer_xpath(root)
 
-        # Pre-resolve charity to avoid repeated getCharity() calls
-        charity = context.getCharity()
+        # Use provided charity or get from context
+        charity = charity or context.getCharity()
         if not charity:
             return total, officer_entries
 
@@ -112,7 +115,8 @@ class BaseParser:
                             "amount": comp_value,
                             "ein": charity.ein,
                             "charity_name": charity.filer_name or 'Unknown',
-                            "tax_year": charity.tax_year
+                            "tax_year": charity.tax_year,
+                            "element": elem  # Store element for address parsing
                         })
                         total += comp_value
 
@@ -130,10 +134,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse grants to others - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement parse_grants_to_others")
@@ -144,10 +149,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse travel expenses from TravelGrp/TotalAmt"""
         xpaths_for_form = self.get_xpaths_for_form(form_type)
@@ -159,10 +165,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse conference expenses using XPath union for better performance"""
         from xpaths import CONFERENCES_UNION_XPATH
@@ -192,10 +199,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse receipt amount using XPath union for better performance"""
         from xpaths import RECEIPT_UNION_XPATH
@@ -221,10 +229,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse government grants"""
         xpaths_for_form = self.get_xpaths_for_form(form_type)
@@ -236,10 +245,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse contributions"""
         xpaths_for_form = self.get_xpaths_for_form(form_type)
@@ -251,10 +261,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse total expenses using XPath union for better performance"""
         from xpaths import TOTAL_EXP_UNION_XPATH
@@ -280,10 +291,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse program expenses using XPath union for better performance"""
         from xpaths import PROG_EXP_UNION_XPATH
@@ -309,10 +321,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> int:
         """Parse total assets using XPath union for better performance"""
         from xpaths import TOTAL_ASSETS_UNION_XPATH
@@ -338,10 +351,11 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> bool:
         """Parse foreign office indicator using XPath union for better performance"""
         from xpaths import FOREIGN_OFFICE_UNION_XPATH
@@ -370,20 +384,22 @@ class BaseParser:
         field: str,
         namespaces: Dict[str, str],
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         form_type: str,
-        xpath_match_stats: Optional[Dict[str, int]] = None
+        xpath_match_stats: Optional[Dict[str, int]] = None,
+        charity: Optional['Charity'] = None
     ) -> str:
         """Parse filer name"""
         xpaths_for_form = self.get_xpaths_for_form(form_type)
-        return parse_string_field(root, xpaths_for_form, field, namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default="Unknown")
+        result = parse_string_field(root, xpaths_for_form, field, namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default="Unknown")
+        return result if result is not None else "Unknown"
 
     def parse_schedule_i(
         self,
         root: etree._Element,
         xml_filename: str,
-        context: Any,
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         charity: Optional[Charity] = None,
         form_type: Optional[str] = None,
@@ -421,23 +437,24 @@ class BaseParser:
             # Create grant if we have valid data
             if grant_name and grant_amount is not None:
                 from models import Grant
-                grant = Grant(
-                    recipient_name=grant_name,
-                    amount=grant_amount,
-                    tax_year=charity.tax_year if charity else 0,
-                    charity_id=charity.id if charity else None
+                grant = Grant.create_for_charity(
+                    charity,
+                    grant_name,
+                    None,  # recipient_ein
+                    grant_amount,
+                    charity.tax_year if charity else 0
                 )
                 context.addObjectToDatabase(grant)
 
         # Fallback to original method if no grants found via union
         if not grant_elements:
             from parse_schedule_i import parse_grants
-            grants_data = parse_grants(root, xml_filename, charity.ein if charity else '', charity.filer_name if charity else '', charity.tax_year if charity else 0, set(), form_type, context=context)
+            grants_data = parse_grants(root, xml_filename, charity.ein if charity else '', charity.filer_name if charity else '', charity.tax_year if charity else 0, set(), form_type or "Unknown", context=context)
     def parse_schedule_c(
         self,
         root: etree._Element,
         xml_filename: str,
-        context: Any,
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         charity: Optional[Charity] = None,
         form_type: Optional[str] = None,
@@ -451,13 +468,13 @@ class BaseParser:
 
         # Only parse if Schedule C actually exists
         from parse_schedule_c import parse_contributions
-        contributions_data = parse_contributions(root, xml_filename, charity.ein if charity else '', charity.filer_name if charity else '', charity.tax_year if charity else 0, form_type, context=context)
+        contributions_data = parse_contributions(root, xml_filename, charity.ein if charity else '', charity.filer_name if charity else '', charity.tax_year if charity else 0, form_type or "Unknown", context=context)
         # parse_contributions now adds contributions directly to context
     def parse_schedule_l(
         self,
         root: etree._Element,
         xml_filename: str,
-        context: Any,
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         charity: Optional[Charity] = None,
         form_type: Optional[str] = None,
@@ -518,6 +535,11 @@ class BaseParser:
                             )
                             context.addObjectToDatabase(contractor)
 
+                            # Parse contractor address if available
+                            contractor_address = self._parse_contractor_address(contractor_elem, charity_obj, xml_filename)
+                            if contractor_address:
+                                context.addObjectToDatabase(contractor_address)
+
                             if not global_config.is_quiet():
                                 log_info("Parsed contractor {0} compensation: ${1} for EIN {2} in {3}",
                                           name_text, comp_value, charity_obj.ein, xml_filename)
@@ -527,7 +549,7 @@ class BaseParser:
         self,
         root: etree._Element,
         xml_filename: str,
-        context: Dict[str, Any],
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         charity: Optional[Charity] = None,
         form_type: Optional[str] = None,
@@ -581,6 +603,142 @@ class BaseParser:
                       charity.ein if charity else 'Unknown', xml_filename, str(e))
             return None
 
+    def _parse_officer_address(self, officer_elem: etree._Element, charity: Charity, xml_filename: str) -> Optional[Address]:
+        """Parse address information from officer element"""
+        try:
+            # Look for address elements within the officer element
+            address_line1_elem = officer_elem.find("irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if address_line1_elem is None:
+                address_line1_elem = officer_elem.find("USAddress/AddressLine1Txt")
+            if address_line1_elem is None:
+                address_line1_elem = officer_elem.find("irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if address_line1_elem is None:
+                address_line1_elem = officer_elem.find("AddressLine1Txt")
+
+            city_elem = officer_elem.find("irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if city_elem is None:
+                city_elem = officer_elem.find("USAddress/CityNm")
+            if city_elem is None:
+                city_elem = officer_elem.find("irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if city_elem is None:
+                city_elem = officer_elem.find("CityNm")
+
+            state_elem = officer_elem.find("irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if state_elem is None:
+                state_elem = officer_elem.find("USAddress/StateAbbreviationCd")
+            if state_elem is None:
+                state_elem = officer_elem.find("irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if state_elem is None:
+                state_elem = officer_elem.find("StateAbbreviationCd")
+
+            zip_elem = officer_elem.find("irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if zip_elem is None:
+                zip_elem = officer_elem.find("USAddress/ZIPCd")
+            if zip_elem is None:
+                zip_elem = officer_elem.find("irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if zip_elem is None:
+                zip_elem = officer_elem.find("ZIPCd")
+
+            # Extract values
+            address_line1 = address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
+            city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
+            state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
+            zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+
+            # Split ZIP code
+            zip_code, zip4 = split_zip_code(zip_code_raw or '')
+
+            # Check if we have at least some address components
+            if any([address_line1, city, state, zip_code]):
+                return charity.build_address(
+                    address_line1=address_line1,
+                    address_line2=None,
+                    city=city,
+                    state=state,
+                    zip_code=zip_code,
+                    zip4=zip4
+                )
+            return None
+        except Exception as e:
+            log_debug("Failed to parse officer address in {0}: {1}", xml_filename, str(e))
+            return None
+
+    def _parse_contractor_address(self, contractor_elem: etree._Element, charity: Charity, xml_filename: str) -> Optional[Address]:
+        """Parse address information from contractor element"""
+        try:
+            # Look for address elements within the contractor element
+            address_line1_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if address_line1_elem is None:
+                address_line1_elem = contractor_elem.find("ContractorAddress/USAddress/AddressLine1Txt")
+            if address_line1_elem is None:
+                address_line1_elem = contractor_elem.find("irs:ContractorAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if address_line1_elem is None:
+                address_line1_elem = contractor_elem.find("ContractorAddress/AddressLine1Txt")
+            if address_line1_elem is None:
+                address_line1_elem = contractor_elem.find("irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if address_line1_elem is None:
+                address_line1_elem = contractor_elem.find("USAddress/AddressLine1Txt")
+
+            city_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if city_elem is None:
+                city_elem = contractor_elem.find("ContractorAddress/USAddress/CityNm")
+            if city_elem is None:
+                city_elem = contractor_elem.find("irs:ContractorAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if city_elem is None:
+                city_elem = contractor_elem.find("ContractorAddress/CityNm")
+            if city_elem is None:
+                city_elem = contractor_elem.find("irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if city_elem is None:
+                city_elem = contractor_elem.find("USAddress/CityNm")
+
+            state_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if state_elem is None:
+                state_elem = contractor_elem.find("ContractorAddress/USAddress/StateAbbreviationCd")
+            if state_elem is None:
+                state_elem = contractor_elem.find("irs:ContractorAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if state_elem is None:
+                state_elem = contractor_elem.find("ContractorAddress/StateAbbreviationCd")
+            if state_elem is None:
+                state_elem = contractor_elem.find("irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if state_elem is None:
+                state_elem = contractor_elem.find("USAddress/StateAbbreviationCd")
+
+            zip_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if zip_elem is None:
+                zip_elem = contractor_elem.find("ContractorAddress/USAddress/ZIPCd")
+            if zip_elem is None:
+                zip_elem = contractor_elem.find("irs:ContractorAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if zip_elem is None:
+                zip_elem = contractor_elem.find("ContractorAddress/ZIPCd")
+            if zip_elem is None:
+                zip_elem = contractor_elem.find("irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if zip_elem is None:
+                zip_elem = contractor_elem.find("USAddress/ZIPCd")
+
+            # Extract values
+            address_line1 = address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
+            city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
+            state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
+            zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+
+            # Split ZIP code
+            zip_code, zip4 = split_zip_code(zip_code_raw or '')
+
+            # Check if we have at least some address components
+            if any([address_line1, city, state, zip_code]):
+                return charity.build_address(
+                    address_line1=address_line1,
+                    address_line2=None,
+                    city=city,
+                    state=state,
+                    zip_code=zip_code,
+                    zip4=zip4
+                )
+            return None
+        except Exception as e:
+            log_debug("Failed to parse contractor address in {0}: {1}", xml_filename, str(e))
+            return None
+
     def calculate_percentage(self, value: Optional[float], denom: Optional[float]) -> float:
         """Calculate percentage safely"""
         if denom == 0 or value is None or denom is None:
@@ -596,7 +754,7 @@ class BaseParser:
         root: etree._Element,
         xml_filename: str,
         xpath_cache: Dict[str, Any],
-        context: Any,
+        context: 'PendingDatabaseContext',
         xpath_match_stats: Optional[Dict[str, int]] = None,
         cached_charity: Optional[Charity] = None
     ) -> None:
@@ -640,19 +798,14 @@ class BaseParser:
             data: Dict[str, Any] = {}
             officer_entries: List[Dict[str, Any]] = []
             for field, func in fields:
-                argcount = func.__code__.co_argcount
-                if argcount == 9:
-                    call_args = (root, field, namespaces, xml_filename, context, xpath_cache, charity.form_type)
-                    call_kwargs = {'xpath_match_stats': xpath_match_stats}
-                else:
-                    call_args = (root, field, namespaces, xml_filename, context, xpath_cache)
-                    call_kwargs = {'xpath_match_stats': xpath_match_stats}
+                call_args = (root, field, namespaces, xml_filename, context, xpath_cache, charity.form_type)
+                call_kwargs = {'xpath_match_stats': xpath_match_stats}
                 if field == "officer_comp":
-                    total, entries = func(*call_args, **call_kwargs)
+                    total, entries = func(*call_args, charity=charity, **call_kwargs)
                     data[field] = total
                     officer_entries.extend(entries)
                 else:
-                    data[field] = func(*call_args, **call_kwargs)
+                    data[field] = func(*call_args, charity=charity, **call_kwargs)
 
             # Update XPathS to use form-appropriate collection for subsequent operations
             self.XPATHS = xpaths_for_form
@@ -730,6 +883,11 @@ class BaseParser:
                 )
                 context.addObjectToDatabase(officer)
 
+                # Parse officer address if available
+                officer_address = self._parse_officer_address(entry["element"], charity, xml_filename)
+                if officer_address:
+                    context.addObjectToDatabase(officer_address)
+
             # Parse Schedule L (Contractors) - part of main form
             self.parse_schedule_l(root, xml_filename, context, xpath_cache, charity=charity, form_type=charity.form_type, xpath_match_stats=xpath_match_stats)
 
@@ -784,7 +942,7 @@ class BaseParser:
         self,
         root: etree._Element,
         xml_filename: str,
-        context: Any,
+        context: 'PendingDatabaseContext',
         xpath_cache: Dict[str, Any],
         charity: Optional[Charity] = None,
         form_type: Optional[str] = None,

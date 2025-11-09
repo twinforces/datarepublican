@@ -198,7 +198,7 @@ def extract_address(root, filename: str, filer_ein: str, quiet: bool = False, lo
             if us_addresses and logger is not None and log_debug is not None:
                 log_debug(logger, f"DEBUG: Found {len(us_addresses)} USAddress elements for EIN {filer_ein}")
                 for i, addr_elem in enumerate(us_addresses[:1]):  # Just log first one
-                    log_debug(logger, f"DEBUG: USAddress {i} content: {ET.tostring(addr_elem, encoding='unicode')[:500]}...")
+                    log_debug(logger, f"DEBUG: USAddress {i} content: {etree.tostring(addr_elem, encoding='unicode')[:500]}...")
             elif logger is not None and log_debug is not None:
                 log_debug(logger, f"DEBUG: No USAddress elements found for EIN {filer_ein}")
         except Exception as e:

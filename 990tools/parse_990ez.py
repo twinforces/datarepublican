@@ -22,13 +22,14 @@ class Parser990EZ(BaseParser):
     def __init__(self):
         super().__init__("990EZ", XPATHS_990EZ, NAMESPACES)
 
-    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_org_type(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse organization type for Form 990EZ"""
         from parse_utils import parse_string_field
         elem = parse_string_field(root, self.XPATHS, "org_type", namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default=None, return_element=True)
         if elem is not None:
+            ein = charity.ein if charity else 'Unknown'
             log_info("Found org_type element: tag={}, text={!r}, attrib={!r} for EIN {} in {}",
-                        elem.tag, elem.text, elem.attrib, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                        elem.tag, elem.text, elem.attrib, ein, xml_filename)
             if elem.tag.endswith("Organization501cInd"):
                 type_num = elem.get("organization501cTypeTxt")
                 if type_num and type_num.isdigit() and 1 <= int(type_num) <= 29:
@@ -47,7 +48,7 @@ class Parser990EZ(BaseParser):
                             org_type = f"501(c)({type_num})"
                         else:
                             org_type = "501(c)(3)"
-                            log_error(f"Unexpected suffix {suffix} for EIN {context.getCharity().ein if context.getCharity() else 'Unknown'} in {xml_filename}, defaulting to 501(c)(3)")
+                            log_error(f"Unexpected suffix {suffix} for EIN {ein} in {xml_filename}, defaulting to 501(c)(3)")
                         break
             elif elem.tag.endswith("TaxExemptStatus") or elem.tag.endswith("ExemptStatusCd"):
                 if elem.text and "501(c)" in elem.text:
@@ -57,12 +58,12 @@ class Parser990EZ(BaseParser):
                     else:
                         org_type = "501(c)(3)"
                         log_error("Invalid 501(c) format in TaxExemptStatus/ExemptStatusCd value {} for EIN {} in {}, defaulting to 501(c)(3)",
-                                   elem.text, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                                   elem.text, ein, xml_filename)
                 elif elem.text and "4947(a)(1)" in elem.text:
                     org_type = "4947(a)(1)"
                 else:
                     org_type = "501(c)(3)"  # Default for 990EZ
-                    log_error(f"Unexpected TaxExemptStatus/ExemptStatusCd value {elem.text} for EIN {context.getCharity().ein if context.getCharity() else 'Unknown'} in {xml_filename}, defaulting to 501(c)(3)")
+                    log_error(f"Unexpected TaxExemptStatus/ExemptStatusCd value {elem.text} for EIN {ein} in {xml_filename}, defaulting to 501(c)(3)")
             elif elem.tag.endswith("Organization4947a1NotPFInd") or elem.tag.endswith("Organization4947a1TrtdPFInd"):
                 org_type = "4947(a)(1)"
             elif elem.tag.endswith("Organization501c3Ind"):
@@ -70,40 +71,43 @@ class Parser990EZ(BaseParser):
             else:
                 org_type = "501(c)(3)"  # Default for 990EZ
                 # Only log error if verbose or debug mode
-                if (context.getCharity().ein if context.getCharity() else 'Unknown' in DEBUG_EINS) and not global_config.is_quiet():
-                    log_error(f"Unexpected org_type tag {elem.tag} for EIN {context.getCharity().ein if context.getCharity() else 'Unknown'} in {xml_filename}, defaulting to 501(c)(3)")
+                if (ein in DEBUG_EINS) and not global_config.is_quiet():
+                    log_error(f"Unexpected org_type tag {elem.tag} for EIN {ein} in {xml_filename}, defaulting to 501(c)(3)")
         else:
+            ein = charity.ein if charity else 'Unknown'
             log_error("Failed to parse org_type for EIN {} in {}",
-                        context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                        ein, xml_filename)
             return_data = parse_string_field(root, self.XPATHS, "return_data", namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default=None, return_element=True)
             all_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None and return_data.xpath is not None else []
             log_error("No org_type tags found, defaulting to 501(c)(3). All ReturnData tags: {!r} in {}",
                        all_tags, xml_filename)
             org_type = "501(c)(3)"  # Default for 990EZ when no org_type tags are found
+        ein = charity.ein if charity else 'Unknown'
         log_info("Parsed org_type {} for EIN {} in {}",
-                    org_type, context.getCharity().ein if context.getCharity() else 'Unknown', xml_filename)
+                    org_type, ein, xml_filename)
         return org_type
 
-    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse grants to others for Form 990EZ"""
         total = 0
         # Parse grants from Schedule I and F using the existing parse_schedule_i function
         from parse_schedule_i import parse_grants
-        grants_data = parse_grants(root, xml_filename, context.getCharity().ein if context.getCharity() else 'Unknown', context.getCharity().filer_name if context.getCharity() else 'Unknown', context.getCharity().tax_year if context.getCharity() else 'Unknown', set(), self.form_type, context=context)
+        grants_data = parse_grants(root, xml_filename, charity.ein if charity else 'Unknown', charity.filer_name if charity else 'Unknown', charity.tax_year if charity else 'Unknown', set(), self.form_type, context=context)
         # parse_grants now adds grants directly to context, so we need to calculate total from the grants
         for grant in grants_data:
             total += grant.get('grant_amt', 0)
-    
-        if total > 5_000_000 or (context.getCharity().ein if context.getCharity() else 'Unknown') in {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "650869895"}:
-            log_warning(f"Non-zero grants_to_others ${total} for EIN {context.getCharity().ein if context.getCharity() else 'Unknown'}, Name {context.getCharity().filer_name if context.getCharity() else 'Unknown'}, TaxYear {context.getCharity().tax_year if context.getCharity() else 'Unknown'}, XML {xml_filename}")
-        elif total == 0 and (context.getCharity().ein if context.getCharity() else 'Unknown') in {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "650869895"}:
+
+        ein = charity.ein if charity else 'Unknown'
+        if total > 5_000_000 or ein in {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "650869895"}:
+            log_warning(f"Non-zero grants_to_others ${total} for EIN {ein}, Name {charity.filer_name if charity else 'Unknown'}, TaxYear {charity.tax_year if charity else 'Unknown'}, XML {xml_filename}")
+        elif total == 0 and ein in {"271414646", "520851555", "471203726", "464284638", "592965108", "486289145", "650869895"}:
             return_data = parse_string_field(root, self.XPATHS, "return_data", namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default=None, return_element=True)
             child_tags = [child.tag for child in return_data.xpath("*", namespaces=namespaces)] if return_data is not None else []
             log_error("Zero grants_to_others for EIN {}, Name {}, File {}. ReturnData children: {!r}",
-                        context.getCharity().ein if context.getCharity() else 'Unknown', context.getCharity().filer_name if context.getCharity() else 'Unknown', xml_filename, child_tags)
+                        ein, charity.filer_name if charity else 'Unknown', xml_filename, child_tags)
         return total
 
-    def parse_travel(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_travel(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse travel expenses for Form 990EZ"""
         from parse_utils import parse_string_field
         total = 0
@@ -149,7 +153,7 @@ class Parser990EZ(BaseParser):
                                 pass
         return total
 
-    def parse_conferences(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None):
+    def parse_conferences(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse conference expenses for Form 990EZ"""
         from parse_utils import parse_string_field
         total = 0
@@ -299,7 +303,7 @@ def main():
         tax_year = xml_file[:4] if xml_file[:4].isdigit() else "Unknown"
     else:
         try:
-            int(tax_year)
+            tax_year = int(tax_year)
         except ValueError:
             tax_year = xml_file[:4] if xml_file[:4].isdigit() else "Unknown"
 

@@ -1226,8 +1226,8 @@ class DatabaseOperations:
 
     def get_xml_files_to_process(self, processing_version: int, max_files: Optional[int] = None, last_xml_id: Optional[str] = None) -> List[XMLFile]:
         """Get unprocessed XML files with key-value paging support"""
-        where_clause = "processed = FALSE OR processing_version < ?"
-        params = (processing_version,)
+        where_clause = "processed = FALSE"
+        params = ()
         if last_xml_id:
             where_clause += " AND xml_id > ?"
             params += (last_xml_id,)
@@ -1235,11 +1235,12 @@ class DatabaseOperations:
         limit = max_files
 
         # DEBUG: Log query details
-        log_info(f"DEBUG: get_xml_files_to_process - processing_version={processing_version}, max_files={max_files}, last_xml_id={last_xml_id}")
-        log_info(f"DEBUG: Query: WHERE {where_clause}, ORDER BY {order_by}, LIMIT {limit}")
+        log_info("DEBUG: get_xml_files_to_process - processing_version={}, max_files={}, last_xml_id={}", processing_version, max_files, last_xml_id)
+        log_info("DEBUG: Query: WHERE {}, ORDER BY {}, LIMIT {}", where_clause, order_by, limit)
+        log_info("DEBUG: Params: {}", params)
 
         result = self.select_dataclass(XMLFile, where_clause=where_clause, params=params, order_by=order_by, limit=limit)
-        log_info(f"DEBUG: Query returned {len(result)} XML files")
+        log_info("DEBUG: Query returned {} XML files", len(result))
         return result
 
     def get_xml_files_to_process_count(self, processing_version: int, mode: str = 'count', max_files: Optional[int] = None) -> Union[int, float]:
@@ -1254,8 +1255,8 @@ class DatabaseOperations:
         Returns:
             int for count mode, float for bytes mode (sum of file_size)
         """
-        base_where = "processed = FALSE OR processing_version < ?"
-        base_params = [processing_version]
+        base_where = "processed = FALSE"
+        base_params = []
 
         # DEBUG: Log count query details
         log_info(f"DEBUG: get_xml_files_to_process_count - processing_version={processing_version}, mode={mode}, max_files={max_files}")
@@ -1295,6 +1296,8 @@ class DatabaseOperations:
         result = self.execute_query(query, tuple(params))
         count = result.fetchone()[0] if result else 0
         log_info(f"DEBUG: get_xml_files_to_process_count returned {count}")
+        log_info(f"DEBUG: Query was: {query}")
+        log_info(f"DEBUG: Params were: {params}")
         return count
 
     # Context-based approach handles this now
@@ -1584,6 +1587,55 @@ class DatabaseOperations:
             self.commit()
 
         return len(child_address_ids)
+
+    def execute_operation(self, operation: DatabaseOperation, conn=None):
+        """Execute a single database operation"""
+        if operation.operation_type == DatabaseOperationType.XML_FILE_UPDATE:
+            self._execute_xml_file_update_operation(operation, conn)
+        elif operation.operation_type == DatabaseOperationType.UPDATE_XML_EIN:
+            self.execute_update_xml_ein_operation(operation, conn)
+        elif operation.operation_type == DatabaseOperationType.OPTIMIZE_DATABASE:
+            self._execute_optimize_operation(operation, conn)
+        else:
+            log_warning("Unknown operation type: {}", operation.operation_type)
+
+    def _execute_xml_file_update_operation(self, operation: DatabaseOperation, conn=None):
+        """Execute XML_FILE_UPDATE operation"""
+        if conn is None:
+            conn = self._get_thread_local_connection()
+
+        xml_id = operation.xml_id
+        metadata = operation.data
+
+        # Update the XML file with metadata
+        update_fields = []
+        params = []
+
+        if 'processed' in metadata:
+            update_fields.append("processed = ?")
+            params.append(metadata['processed'])
+
+        if 'processing_version' in metadata:
+            update_fields.append("processing_version = ?")
+            params.append(metadata['processing_version'])
+
+        if 'error_message' in metadata:
+            update_fields.append("error_message = ?")
+            params.append(metadata['error_message'])
+
+        if 'ein' in metadata:
+            update_fields.append("ein = ?")
+            params.append(metadata['ein'])
+
+        # Always update processed_at
+        update_fields.append("processed_at = ?")
+        params.append(datetime.now().isoformat())
+
+        if update_fields:
+            query = f"UPDATE XmlFiles SET {', '.join(update_fields)} WHERE xml_id = ?"
+            params.append(xml_id)
+            conn.execute(query, tuple(params))
+            conn.commit()
 
     def get_officers_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
         """Get batch of officers for export"""
