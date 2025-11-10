@@ -602,226 +602,179 @@ class AddressDeduplicationConsumer(BaseConsumer):
         return {'total': total, 'unit': 'records'}
 
 
-class AddressDeduplicationProcessor:
-    """Main processor for address deduplication using Producer-Consumer pattern.
+class AddressDeduplicationProcessor(BaseProcessor):
+    """Address deduplication processor using the generalized multi-threaded architecture."""
 
-    def __init__(self, db_ops: DatabaseOperations, batch_size: Optional[int] = None) -> None:
-        self.db_ops: DatabaseOperations = db_ops
-        self.batch_size = batch_size or ADDRESS_BATCH_SIZE
+    def __init__(self, db_ops: DatabaseOperations):
+        super().__init__(db_ops)
+        self.batch_size = 1000
 
-    This processor coordinates producers and consumers to safely deduplicate
-    addresses in batches, following the same pattern as XMLProcessor.
-    """
+    def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Get a batch of address deduplication work items using key-value paging"""
+        effective_batch_size = self.batch_size
 
-    def __init__(self, db_ops: DatabaseOperations, batch_size: Optional[int] = None):
-        self.db_ops = db_ops
-        self.batch_size = batch_size or ADDRESS_BATCH_SIZE
+        if last_pk is None:
+            query = """
+            SELECT canonical_address, MIN(address_id) as group_pk
+            FROM Addresses
+            WHERE master_id IS NULL
+              AND canonical_address IS NOT NULL
+              AND canonical_address != ''
+            GROUP BY canonical_address
+            HAVING COUNT(*) > 1
+            ORDER BY group_pk ASC
+            LIMIT ?
+            """
+            params = (effective_batch_size,)
+        else:
+            query = """
+            SELECT canonical_address, MIN(address_id) as group_pk
+            FROM Addresses
+            WHERE master_id IS NULL
+              AND canonical_address IS NOT NULL
+              AND canonical_address != ''
+            GROUP BY canonical_address
+            HAVING COUNT(*) > 1 AND MIN(address_id) > ?
+            ORDER BY group_pk ASC
+            LIMIT ?
+            """
+            params = (last_pk, effective_batch_size)
 
-        # Throttle batch_size to global_config.max_files if specified (like XML processor does with --max_files)
-        if global_config.max_files and global_config.max_files < self.batch_size:
-            self.batch_size = global_config.max_files
+        cursor = self.db_ops.execute_query(query, params)
+        rows = cursor.fetchall()
 
-        # Create thread pool configuration for address deduplication
-        producer_config = PoolConfig(max_workers=4, queue_size=ADDRESS_QUEUE_SIZE, batch_size=self.batch_size)
-        consumer_config = PoolConfig(max_workers=1, queue_size=ADDRESS_QUEUE_SIZE, batch_size=self.batch_size)  # Single consumer for DB safety
-        self.thread_pool_config = ThreadPoolConfig(producer_config=producer_config, consumer_config=consumer_config)
+        batch: List[Dict[str, Any]] = []
+        max_pk: Optional[str] = None
+        for row in rows:
+            canonical_address = row[0]
+            group_pk = row[1]
 
-        # Create producer and consumer instances
-        self.producer = AddressDeduplicationProducer(db_ops, self.batch_size, self.thread_pool_config)
-        self.consumer = AddressDeduplicationConsumer(db_ops)
-        self.thread_pool_manager = None
+            addresses = self.db_ops.select_dataclass(
+                Address,
+                where_clause="canonical_address = ? AND master_id IS NULL",
+                params=(canonical_address,)
+            )
 
-        # Initialize QueueStatusDisplay for visual monitoring (will be started by individual methods)
-        self.queue_status_display = None
+            if len(addresses) > 1:
+                addresses.sort(key=lambda a: a.address_id)
+                master_address_id = addresses[0].address_id
+                child_address_ids = [a.address_id for a in addresses[1:]]
+                dedup_info = {
+                    "canonical_address": canonical_address,
+                    "master_address_id": master_address_id,
+                    "child_address_ids": child_address_ids
+                }
+                batch.append(dedup_info)
+
+                if max_pk is None or group_pk > max_pk:
+                    max_pk = group_pk
+
+        return batch, max_pk
+
+    def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int] = None, num_producers: int = 4):
+        """Feeder thread: Fetch batches of deduplication work and enqueue WorkUnits."""
+        enqueued = 0
+        last_pk = None
+        while True:
+            batch, new_last_pk = self._get_work_batch(last_pk)
+            if not batch:
+                break
+
+            for item in batch:
+                if self.exit_processing:
+                    break
+                work_queue.put(WorkUnit.work_item(item))
+                enqueued += 1
+                if max_files and enqueued >= max_files:
+                    break
+
+            if self.exit_processing or (max_files and enqueued >= max_files):
+                break
+
+            last_pk = new_last_pk
+
+        # Send sentinels for each producer
+        for i in range(num_producers):
+            work_queue.put(WorkUnit.sentinel(i))
+
+    def _process_work_item(self, work_item: Dict[str, Any]) -> PendingDatabaseContext:
+        """Process a single deduplication work item into a PendingDatabaseContext."""
+        context = PendingDatabaseContext()
+
+        canonical_address = work_item.get("canonical_address", "")
+        master_address_id = work_item.get("master_address_id")
+
+        if canonical_address and master_address_id:
+            # Fetch the master address
+            addresses = self.db_ops.select_dataclass(
+                Address, where_clause="address_id = ?", params=(master_address_id,)
+            )
+            if addresses:
+                master_address = addresses[0]
+                # Create geocoding record
+                geocoding = master_address.create_geocoding()
+                context.addObjectToDatabase(geocoding)
+
+                # Create update operation to link geocoding_id to master address
+                link_update = {
+                    'address_id': master_address_id,
+                    'geocoding_id': geocoding.geocoding_id
+                }
+                link_op = DatabaseOperation(
+                    DatabaseOperationType.GENERIC_UPDATE,
+                    {
+                        'table_name': 'Addresses',
+                        'update_data': link_update,
+                        'id_column': 'address_id'
+                    }
+                )
+                context.addOperationToDatabase(link_op)
+
+        # Add deduplication operation
+        dedup_op = DatabaseOperation(
+            DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH,
+            work_item
+        )
+        context.addOperationToDatabase(dedup_op)
+
+        # Add progress update
+        progress_op = DatabaseOperation(
+            DatabaseOperationType.PROGRESS_UPDATE,
+            {"count": 1}
+        )
+        context.addOperationToDatabase(progress_op)
+
+        return context
+
+    def get_work_count(self, max_files: Optional[int] = None) -> int:
+        """Get the total number of deduplication work items."""
+        query = """
+        SELECT COUNT(*) as total_master_addresses
+        FROM (
+            SELECT 1
+            FROM Addresses
+            WHERE canonical_address IS NOT NULL
+                AND canonical_address != ''
+            GROUP BY canonical_address
+            HAVING COUNT(*) > 1
+                AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
+        )
+        """
+        result = self.db_ops.execute_query(query)
+        row = result.fetchone() if result else None
+        total = int(row[0]) if row and row[0] is not None else 0
+        if max_files:
+            total = min(total, max_files)
+        return total
+
+    def get_progress_config(self, max_files: Optional[int] = None) -> Tuple[int, str, str]:
+        """Get progress bar configuration for address deduplication."""
+        total = self.get_work_count(max_files)
+        return total, 'groups', 'Address deduplication'
 
     def deduplicate_addresses(self, progress_bar=None) -> int:
-        """Deduplicate addresses by creating master-child relationships using PendingDatabaseContext.
- 
-        Args:
-            progress_bar: Optional progress bar to update
- 
-        Returns:
-            Number of addresses processed (children updated)
-        """
-        log_info("Starting address deduplication using PendingDatabaseContext")
-
-        # Initialize and start QueueStatusDisplay for visual monitoring
-        if not self.thread_pool_manager:
-            self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self)
-        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=30.0)
-        self.queue_status_display.start()
-
-        try:
-            # Collect contexts using the PendingDatabaseContext approach
-            contexts = self.producer.collect_contexts()
- 
-            if self.producer.exit_processing:
-                log_info("Shutdown requested after collecting contexts")
-                return 0
- 
-            if not contexts:
-                log_info("No deduplication work found")
-                return 0
- 
-            # Execute contexts using consumer
-            total_processed = self.consumer.execute_contexts_batch(contexts, progress_bar)
- 
-            log_info(f"Address deduplication completed: {total_processed} operations processed")
-
-            # Stop QueueStatusDisplay
-            if self.queue_status_display:
-                self.queue_status_display.stop()
-
-            return total_processed
-
-        except Exception as e:
-            log_error(f"Address deduplication failed: {e}", exc_info=True)
-            # Stop QueueStatusDisplay on error
-            if self.queue_status_display:
-                self.queue_status_display.stop()
-            return 0
-
-    def _producer_worker_threaded(self, work_items: List[Dict[str, Any]], work_queue, result_queue, thread_id: int, num_threads: int) -> None:
-        """Producer worker for ThreadPoolManager: processes work items into operations"""
-        try:
-            # Distribute work items among threads
-            for i in range(thread_id, len(work_items), num_threads):
-                work_item = work_items[i]
-
-                # Process single work item into operations
-                operations = self.producer._process_work_batch([work_item])
-
-                # Put operations in result queue for consumer
-                result_queue.put(operations)
-                log_debug(f"Producer {thread_id}: put {len(operations)} operations in queue, queue size now: {result_queue.qsize()}")
-
-                # Log progress
-                if (i + 1) % 50 == 0:
-                    log_info(f"Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
-
-        except Exception as e:
-            log_error(f"Producer worker {thread_id} failed: {e}", exc_info=True)
-        finally:
-            # Signal completion
-            result_queue.put(None)
-            log_debug(f"Producer {thread_id}: sent sentinel, queue size now: {result_queue.qsize()}")
-
-    def _unified_producer_worker_threaded(self, work_items: List[Dict[str, Any]], work_queue, result_queue, thread_id: int, num_threads: int) -> None:
-        """Unified producer worker for ThreadPoolManager: processes work items into operations"""
-        try:
-            # Distribute work items among threads
-            for i in range(thread_id, len(work_items), num_threads):
-                work_item = work_items[i]
-
-                # Process single work item into unified operations (deduplication + geocoding)
-                operations = self.producer._process_work_batch([work_item])
-
-                # Put operations in result queue for consumer
-                result_queue.put(operations)
-                log_debug(f"Unified Producer {thread_id}: put {len(operations)} operations in queue, queue size now: {result_queue.qsize()}")
-
-                # Log progress
-                if (i + 1) % 50 == 0:
-                    log_info(f"Unified Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
-
-        except Exception as e:
-            log_error(f"Unified Producer worker {thread_id} failed: {e}", exc_info=True)
-        finally:
-            # Signal completion
-            result_queue.put(None)
-            log_debug(f"Unified Producer {thread_id}: sent sentinel, queue size now: {result_queue.qsize()}")
-
-    def _consumer_worker_threaded(self, result_queue, thread_id: int, num_producers: int, progress_bar=None) -> None:
-        """Consumer worker for ThreadPoolManager: executes operations"""
-        try:
-            batch_operations: List[DatabaseOperation] = []
-            total_updated: int = 0
-            sentinels_received: int = 0
-
-            while True:
-                try:
-                    # Get operations from result queue
-                    log_debug(f"DEBUG: Consumer {thread_id}: waiting for operations, queue size: {result_queue.qsize()}")
-                    operations = result_queue.get(timeout=1.0)
-                    log_debug(f"DEBUG: Consumer {thread_id}: got operations from queue, queue size now: {result_queue.qsize()}")
-
-                    if operations is None:  # Sentinel
-                        sentinels_received += 1
-                        log_debug(f"DEBUG: Consumer {thread_id}: received sentinel {sentinels_received}/{num_producers}")
-                        if sentinels_received >= num_producers:
-                            break
-                        continue
-
-                    if isinstance(operations, list):
-                        log_debug(f"DEBUG: Consumer {thread_id}: received {len(operations)} operations")
-
-                        # Log what types of operations we received
-                        op_types = {}
-                        for op in operations:
-                            op_type = op.operation_type.value if hasattr(op, 'operation_type') else str(type(op))
-                            op_types[op_type] = op_types.get(op_type, 0) + 1
-                        log_debug(f"DEBUG: Consumer {thread_id}: operation types: {op_types}")
-
-                        batch_operations.extend(operations)
-
-                        # Process batch when it reaches a reasonable size
-                        if len(batch_operations) >= 50:  # Smaller batch size for address deduplication
-                            log_debug(f"DEBUG: Consumer {thread_id}: processing batch of {len(batch_operations)} operations")
-                            batch_updated = self.consumer.execute_operations_batch(batch_operations)
-                            total_updated += batch_updated
-                            log_debug(f"DEBUG: Consumer {thread_id}: batch processed, updated {batch_updated}, total so far: {total_updated}")
-                            batch_operations = []  # Clear for next batch
-
-                    result_queue.task_done()
-
-                except:
-                    if self.exit_processing:
-                        break
-                    continue
-
-            # Process remaining operations
-            if batch_operations:
-                log_debug(f"DEBUG: Consumer {thread_id}: processing final batch of {len(batch_operations)} operations")
-                batch_updated = self.consumer.execute_operations_batch(batch_operations)
-                total_updated += batch_updated
-                log_debug(f"DEBUG: Consumer {thread_id}: final batch processed, updated {batch_updated}, total: {total_updated}")
-
-            # Put final result in result queue
-            result_queue.put(total_updated)
-            log_debug(f"DEBUG: Consumer {thread_id}: put final result {total_updated} in result queue")
-
-        except Exception as e:
-            log_error(f"Consumer worker {thread_id} failed: {e}", exc_info=True)
-            result_queue.put(0)
-
-    def _geocoding_producer_worker_threaded(self, work_items: List[Address], work_queue, result_queue, thread_id: int, num_threads: int) -> None:
-        """Geocoding producer worker for ThreadPoolManager: processes geocoding work items into context"""
-        try:
-            # Create a single context for this thread's work
-            thread_context = PendingDatabaseContext()
-
-            # Distribute work items among threads
-            for i in range(thread_id, len(work_items), num_threads):
-                work_item = work_items[i]
-
-                log_debug(f"DEBUG: Geocoding Producer {thread_id}: processing work item {i+1}/{len(work_items)} - address_id={work_item.address_id}")
-
-                # Process single work item into geocoding context
-                self.producer._process_geocoding_work_batch_to_context([work_item], thread_context)
-
-                log_debug(f"DEBUG: Geocoding Producer {thread_id}: added geocoding work to context for address {work_item.address_id}")
-
-                # Log progress
-                if (i + 1) % 50 == 0:
-                    log_info(f"Geocoding Producer {thread_id}: processed {i + 1}/{len(work_items)} work items")
-
-            # Put the single merged context in result queue
-            result_queue.put(thread_context)
-            log_debug(f"DEBUG: Geocoding Producer {thread_id}: queued context, queue size now: {result_queue.qsize()}")
-
-        except Exception as e:
-            log_error(f"Geocoding Producer worker {thread_id} failed: {e}", exc_info=True)
-        finally:
-            # Signal completion
-            result_queue.put(None)
-            log_debug(f"DEBUG: Geocoding Producer {thread_id}: sent sentinel, queue size now: {result_queue.qsize()}")
+        """Deduplicate addresses using the multi-threaded architecture."""
+        log_info("Starting address deduplication using multi-threaded architecture")
+        total_processed = self.process_parallel(global_config.max_files)
+        log_info(f"Address deduplication completed: {total_processed} groups processed")
+        return total_processed

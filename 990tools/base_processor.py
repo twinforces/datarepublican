@@ -25,6 +25,13 @@ import psutil
 import time
 import queue
 
+from enum import Enum
+import time
+from pending_database_context import PendingDatabaseContext
+from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS
+from logging_utils import start_progress_reporting
+from queue_status_display import QueueStatusDisplay
+
 
 class PoolConfig:
     """
@@ -223,10 +230,41 @@ class ThreadPoolManager:
             log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
 
 
+from dataclasses import dataclass
+from typing import Any, Optional
+
+@dataclass
+class WorkUnit:
+    type: str  # 'work', 'sentinel', 'result'
+    data: Any = None
+    producer_id: Optional[int] = None
+
+    @classmethod
+    def work_item(cls, data: Any) -> 'WorkUnit':
+        return cls(type='work', data=data)
+
+    @classmethod
+    def sentinel(cls, producer_id: int) -> 'WorkUnit':
+        return cls(type='sentinel', producer_id=producer_id)
+
+    @classmethod
+    def result(cls, data: Any) -> 'WorkUnit':
+        return cls(type='result', data=data)
+
+    def is_work_item(self) -> bool:
+        return self.type == 'work'
+
+    def is_sentinel(self) -> bool:
+        return self.type == 'sentinel'
+
+    def is_sentinel_for(self, producer_id: int) -> bool:
+        return self.is_sentinel() and self.producer_id == producer_id
+
+
 class BaseProcessor:
     """
     Base class for all processor implementations.
-
+    
     Provides common functionality and structure for processors that need to
     coordinate between producers and consumers in a thread-safe manner.
     """
@@ -245,6 +283,11 @@ class BaseProcessor:
         self.monitor_interval = 10.0
         self.monitor_queues = []
         self.monitor_enable = True
+        self.total_processed = 0
+        self.work_queue = None
+        self.result_queue = None
+        self.pbar = None
+        self.queue_status_display = None
         self.pdc_objects_count = 0
         self.pdc_operations_count = 0
         self.pdc_updates_count = 0
@@ -306,6 +349,186 @@ class BaseProcessor:
             metrics['pdc_updates_count'] = self.pdc_updates_count
         return metrics
 
+    def _setup_monitoring(self):
+        """Optional setup for monitoring - subclasses can override."""
+        pass
+
+    def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int], num_producers: int):
+        """Abstract method: Feeder thread logic to fetch work items and put sentinels."""
+        raise NotImplementedError("Subclasses must implement _feed_thread")
+
+    def _process_work_item(self, data: Any) -> PendingDatabaseContext:
+        """Abstract method: Process a single work item into a PendingDatabaseContext."""
+        raise NotImplementedError("Subclasses must implement _process_work_item")
+
+    def get_work_count(self, max_files: Optional[int] = None) -> int:
+        """Abstract method: Get the total number of work items to process."""
+        raise NotImplementedError("Subclasses must implement get_work_count")
+
+    def get_progress_config(self, max_files: Optional[int] = None) -> Tuple[int, str, str]:
+        """
+        Abstract method: Get progress bar configuration (total, unit, desc).
+        Returns:
+            Tuple of (total: int, unit: str, desc: str)
+        """
+        raise NotImplementedError("Subclasses must implement get_progress_config")
+
+    def process_parallel(self, max_files: Optional[int] = None, workers: int = 4) -> int:
+        """
+        Process work items using the generalized multi-threaded producer-consumer architecture.
+        
+        Args:
+            max_files: Maximum number of work items to process
+            workers: Number of producer threads
+            
+        Returns:
+            Number of work items processed
+        """
+        from constants import CURRENT_PROCESSING_VERSION  # If needed by subclass
+
+        self.work_queue = queue.Queue(maxsize=10 * BATCH_SIZE)
+        self.result_queue = queue.Queue()
+
+        # Setup monitoring
+        self._setup_monitoring()
+
+        # Setup progress bar
+        total, unit, desc = self.get_progress_config(max_files)
+        self.pbar = start_progress_reporting(total=total, desc=desc, unit=unit)
+
+        self.total_processed = 0
+
+        # Start feeder thread
+        feeder_thread = threading.Thread(
+            target=self._feed_thread,
+            args=(self.work_queue, max_files, workers)
+        )
+        feeder_thread.daemon = False
+        feeder_thread.start()
+
+        # Start producer threads
+        producer_threads = []
+        for i in range(workers):
+            t = threading.Thread(
+                target=self._producer_worker,
+                args=(i, workers)
+            )
+            t.daemon = False
+            t.start()
+            producer_threads.append(t)
+
+        # Start consumer thread
+        consumer_thread = threading.Thread(
+            target=self._consumer_worker,
+            args=(workers,)
+        )
+        consumer_thread.daemon = False
+        consumer_thread.start()
+
+        # Setup status gauges
+        self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS, queues=[self.work_queue])
+
+        # Wait for completion
+        log_info("Waiting for feeder thread to complete...")
+        feeder_thread.join()
+        log_info("Feeder thread completed")
+
+        log_info("Waiting for producer threads to complete...")
+        for i, t in enumerate(producer_threads):
+            t.join()
+            log_info(f"Producer thread {i} completed")
+        log_info("All producer threads completed")
+
+        log_info("Waiting for consumer thread to complete...")
+        consumer_thread.join()
+        log_info("Consumer thread completed")
+
+        # Cleanup
+        if self.pbar:
+            self.pbar.close()
+
+        if self.queue_status_display:
+            self.queue_status_display.stop()
+
+        log_info(f"Processing complete: {self.total_processed} items processed")
+        return self.total_processed
+
+    def _producer_worker(self, producer_id: int, num_producers: int):
+        """Producer worker thread: Processes work items from work_queue to result_queue."""
+        log_info(f"PRODUCER THREAD {producer_id} STARTED")
+        processed_count = 0
+        while True:
+            item = self.work_queue.get()
+
+            if item.is_sentinel_for(producer_id):
+                self.work_queue.task_done()
+                # Send sentinel to result queue
+                self.result_queue.put(WorkUnit.sentinel(producer_id))
+                log_info(f"Producer {producer_id} processed {processed_count} items, sending sentinel to consumer")
+                break
+            elif item.is_sentinel():
+                # Sentinel for another producer, put back
+                self.work_queue.put(item)
+                self.work_queue.task_done()
+                time.sleep(0.1)  # Avoid busy waiting
+                continue
+
+            # Process work item
+            if item.is_work_item():
+                pdc = self._process_work_item(item.data)
+                self.result_queue.put(WorkUnit.result(pdc))
+                processed_count += 1
+
+            self.work_queue.task_done()
+
+        log_info(f"PRODUCER THREAD {producer_id} COMPLETED")
+
+    def _consumer_worker(self, num_producers: int):
+        """Consumer worker thread: Drains result_queue, batches and executes PDCs."""
+        log_info("CONSUMER THREAD STARTED")
+        batch_contexts = []
+        sentinels_received = 0
+
+        while sentinels_received < num_producers or batch_contexts:
+            try:
+                item = self.result_queue.get_nowait()
+            except queue.Empty:
+                if sentinels_received >= num_producers and batch_contexts:
+                    break
+                time.sleep(0.1)  # Avoid busy loop
+                continue
+
+            if item.is_sentinel():
+                sentinels_received += 1
+                log_info(f"Received sentinel {sentinels_received}/{num_producers}")
+                self.result_queue.task_done()
+                continue
+
+            batch_contexts.append(item.data)
+            self.result_queue.task_done()
+
+            if len(batch_contexts) >= CONSUMER_BATCH_SIZE:
+                merged = PendingDatabaseContext.merge(batch_contexts)
+                log_info(f"Saving batch of {len(batch_contexts)} contexts to database")
+                if hasattr(self, '_pdc_metrics'):
+                    self._pdc_metrics(merged)
+                merged.save_to_database(self.db_ops)
+                log_info(f"Successfully saved batch of {len(batch_contexts)} contexts")
+                self.total_processed += len(batch_contexts)
+                batch_contexts = []
+
+        # Process remaining batch
+        if batch_contexts:
+            merged = PendingDatabaseContext.merge(batch_contexts)
+            log_info(f"Saving final batch of {len(batch_contexts)} contexts to database")
+            if hasattr(self, '_pdc_metrics'):
+                self._pdc_metrics(merged)
+            merged.save_to_database(self.db_ops)
+            log_info(f"Successfully saved final batch of {len(batch_contexts)} contexts")
+            self.total_processed += len(batch_contexts)
+
+        log_info("CONSUMER THREAD COMPLETED")
+
     def setup_shutdown_handlers(self):
         def signal_handler(signum, frame):
             log_error(f"Received signal {signum}, shutting down gracefully...")
@@ -320,7 +543,11 @@ class BaseProcessor:
 
     def _on_shutdown(self):
         """Virtual method for subclass-specific shutdown actions"""
-        pass
+        if self.pbar:
+            self.pbar.close()
+        if self.queue_status_display:
+            self.queue_status_display.stop()
+        super()._on_shutdown()  # If needed, but since virtual, adjust
 
         def merge_pending_contexts(self, contexts: List[PendingDatabaseContext]) -> PendingDatabaseContext:
             """Generalized method to merge multiple PendingDatabaseContext objects into a single context.
