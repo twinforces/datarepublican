@@ -28,7 +28,7 @@ import queue
 from enum import Enum
 import time
 from pending_database_context import PendingDatabaseContext
-from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS
+from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS, OPTIMIZE_THRESHOLD
 from logging_utils import start_progress_reporting
 from queue_status_display import QueueStatusDisplay
 
@@ -291,6 +291,8 @@ class BaseProcessor:
         self.pdc_objects_count = 0
         self.pdc_operations_count = 0
         self.pdc_updates_count = 0
+        self.total_objects_saved = 0
+        self.last_optimize = 0
         
         # Install SIGUSR1 handler for thread dumps
         setup_thread_dump_handler(self)
@@ -509,23 +511,49 @@ class BaseProcessor:
 
             if len(batch_contexts) >= CONSUMER_BATCH_SIZE:
                 merged = PendingDatabaseContext.merge(batch_contexts)
+                potential_total = self.total_objects_saved + merged.getTotalObjectCount()
+                current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
+                optimize_added = False
+                if current_optimize_needed > self.last_optimize:
+                    op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
+                    merged.operations.append(op)
+                    optimize_added = True
+                    log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
+
                 log_info(f"Saving batch of {len(batch_contexts)} contexts to database")
                 if hasattr(self, '_pdc_metrics'):
                     self._pdc_metrics(merged)
                 merged.save_to_database(self.db_ops)
                 log_info(f"Successfully saved batch of {len(batch_contexts)} contexts")
+                self.total_objects_saved += merged.getTotalObjectCount()
                 self.total_processed += len(batch_contexts)
                 batch_contexts = []
+
+                if optimize_added:
+                    self.last_optimize = current_optimize_needed
 
         # Process remaining batch
         if batch_contexts:
             merged = PendingDatabaseContext.merge(batch_contexts)
+            potential_total = self.total_objects_saved + merged.getTotalObjectCount()
+            current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
+            optimize_added = False
+            if current_optimize_needed > self.last_optimize:
+                op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
+                merged.operations.append(op)
+                optimize_added = True
+                log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
+
             log_info(f"Saving final batch of {len(batch_contexts)} contexts to database")
             if hasattr(self, '_pdc_metrics'):
                 self._pdc_metrics(merged)
             merged.save_to_database(self.db_ops)
             log_info(f"Successfully saved final batch of {len(batch_contexts)} contexts")
+            self.total_objects_saved += merged.getTotalObjectCount()
             self.total_processed += len(batch_contexts)
+
+            if optimize_added:
+                self.last_optimize = current_optimize_needed
 
         log_info("CONSUMER THREAD COMPLETED")
 

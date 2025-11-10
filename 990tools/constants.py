@@ -81,6 +81,7 @@ DEBUG_EINS = {
 
 # Processing constants
 CURRENT_PROCESSING_VERSION = 3
+OPTIMIZE_THRESHOLD = 250000
 
 # Threading constants
 MAX_WORKERS = 16
