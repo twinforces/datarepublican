@@ -10,12 +10,13 @@ Now uses Producer-Consumer pattern for safe batch processing with DuckDB.
 
 import os
 import time
+import queue
 from typing import Optional, List, Dict, Any, Tuple
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from constants import ADDRESS_BATCH_SIZE, ADDRESS_QUEUE_SIZE
-from base_processor import BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig
+from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig, WorkUnit
 from models.address import Address
 from pending_database_context import PendingDatabaseContext
 from queue_status_display import QueueStatusDisplay

@@ -84,6 +84,7 @@ class DatabaseOperationType(Enum):
     INSERT_ADDRESS = "insert_address"
     ADDRESS_DEDUPLICATION_BATCH = "address_deduplication_batch"
     PROGRESS_UPDATE = "progress_update"
+    INSERT_GEOCODING = "insert_geocoding"
     UPDATE_GEOCODING = "update_geocoding"
 
 
