@@ -134,4 +134,16 @@ XPATHS_990EZ = {
         etree.XPath("irs:ContractorAddress/irs:USAddress/irs:ZIPCd", namespaces=NAMESPACES),
         etree.XPath("ContractorAddress/USAddress/ZIPCd"),
     ],
+    "grant_ein_xpaths": [
+        etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
+        etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    ],
+    "grant_name_xpaths": [
+        etree.XPath("irs:RecipientNameBusiness", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+    ],
+    "grant_amount_xpaths": [
+        etree.XPath("irs:CashGrantAmt", namespaces=NAMESPACES),
+    ],
 }

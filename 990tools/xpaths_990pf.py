@@ -118,4 +118,18 @@ XPATHS_990PF = {
         etree.XPath(".//irs:IRS990PF/irs:SupplementaryInformationGrp/irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),
         etree.XPath(".//irs:SupplementaryInformationGrp/irs:GrantOrContributionPdDurYrGrp", namespaces=NAMESPACES),
     ],
+    "grant_ein_xpaths": [
+        etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
+        etree.XPath("irs:EIN", namespaces=NAMESPACES),
+    ],
+    "grant_name_xpaths": [
+        etree.XPath("irs:RecipientNameBusiness", namespaces=NAMESPACES),
+        etree.XPath("irs:RecipientBusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+        etree.XPath("irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
+    ],
+    "grant_amount_xpaths": [
+        etree.XPath("irs:TotalGrantOrContriPdDurYrAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:GrantOrContributionAmt", namespaces=NAMESPACES),
+        etree.XPath("irs:Amount", namespaces=NAMESPACES),
+    ],
 }

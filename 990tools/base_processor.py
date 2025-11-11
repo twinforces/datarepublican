@@ -180,7 +180,7 @@ class ThreadPoolManager:
         Shutdown the thread pool manager and clean up resources.
         """
         log_info("Shutting down thread pool manager")
-        self.processor.exit_processing = True  # Set processor exit flag
+        BaseProcessor.exit_processing = True  # Set processor exit flag
 
         # Wait for threads to finish
         self.wait_for_completion()
@@ -264,10 +264,13 @@ class WorkUnit:
 class BaseProcessor:
     """
     Base class for all processor implementations.
-    
+
     Provides common functionality and structure for processors that need to
     coordinate between producers and consumers in a thread-safe manner.
     """
+
+    # Class variable for global access to exit processing flag
+    exit_processing = False
 
     def __init__(self, db_ops: DatabaseOperations):
         """
@@ -277,7 +280,8 @@ class BaseProcessor:
             db_ops: Database operations instance
         """
         self.db_ops = db_ops
-        self.exit_processing = False
+        # Reset class variable for this instance
+        BaseProcessor.exit_processing = False
         self.setup_shutdown_handlers()
         self.monitoring_thread = None
         self.monitor_interval = 10.0
@@ -293,7 +297,10 @@ class BaseProcessor:
         self.pdc_updates_count = 0
         self.total_objects_saved = 0
         self.last_optimize = 0
-        
+        self._profile_seconds = None
+        self._profiler = None
+        self._profile_timer = None
+
         # Install SIGUSR1 handler for thread dumps
         setup_thread_dump_handler(self)
 
@@ -311,12 +318,12 @@ class BaseProcessor:
         self.monitor_enable = enable
         
         if enable and not self.monitoring_thread:
-            self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+            self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True, name='Metrics')
             self.monitoring_thread.start()
 
     def _monitoring_loop(self):
         """Monitoring loop that runs in a daemon thread."""
-        while not self.exit_processing:
+        while not BaseProcessor.exit_processing:
             self._update_gauges()
             time.sleep(self.monitor_interval)
 
@@ -355,6 +362,50 @@ class BaseProcessor:
         """Optional setup for monitoring - subclasses can override."""
         pass
 
+    def _setup_profiling(self, operation_name: str) -> Tuple[cProfile.Profile, float, threading.Timer]:
+        """
+        Centralized profiling setup method.
+
+        Args:
+            operation_name: Name of the operation being profiled
+
+        Returns:
+            Tuple of (profiler, start_time, profile_timer)
+        """
+        if not global_config.profile_seconds:
+            return None, None, None
+
+        self._profile_seconds = global_config.profile_seconds
+        self._profiler = cProfile.Profile()
+        log_info(f"Starting profiling for {self._profile_seconds} seconds during {operation_name}")
+        self._profiler.enable()
+        start_time = time.time()
+        # Start timer to set exit_processing after specified delay
+        self._profile_timer = threading.Timer(self._profile_seconds, self._set_exit_processing)
+        self._profile_timer.start()
+        return self._profiler, start_time, self._profile_timer
+
+    def _teardown_profiling(self, operation_name: str, start_time: float, work_items_processed: int) -> None:
+        """
+        Centralized profiling teardown method.
+
+        Args:
+            operation_name: Name of the operation being profiled
+            start_time: Start time of profiling
+            work_items_processed: Number of work items processed
+        """
+        if not start_time:
+            return
+
+        # Cancel timer if still running
+        if self._profile_timer and self._profile_timer.is_alive():
+            self._profile_timer.cancel()
+        self._profiler.disable()
+        end_time = time.time()
+        execution_time = end_time - start_time
+        log_info(f"{operation_name} profiling complete. Time: {execution_time:.2f}s, Work items: {work_items_processed}")
+        self._generate_profiling_report(operation_name, execution_time, work_items_processed)
+
     def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int], num_producers: int):
         """Abstract method: Feeder thread logic to fetch work items and put sentinels."""
         raise NotImplementedError("Subclasses must implement _feed_thread")
@@ -378,15 +429,21 @@ class BaseProcessor:
     def process_parallel(self, max_files: Optional[int] = None, workers: int = 4) -> int:
         """
         Process work items using the generalized multi-threaded producer-consumer architecture.
-        
+
         Args:
             max_files: Maximum number of work items to process
             workers: Number of producer threads
-            
+
         Returns:
             Number of work items processed
         """
         from constants import CURRENT_PROCESSING_VERSION  # If needed by subclass
+
+        # Name the main thread
+        threading.current_thread().name = 'Main'
+
+        # Setup profiling if enabled
+        self._profiler, start_time, self._profile_timer = self._setup_profiling("process_parallel")
 
         self.work_queue = queue.Queue(maxsize=10 * BATCH_SIZE)
         self.result_queue = queue.Queue()
@@ -413,7 +470,8 @@ class BaseProcessor:
         for i in range(workers):
             t = threading.Thread(
                 target=self._producer_worker,
-                args=(i, workers)
+                args=(i, workers),
+                name=f'Producer-{i+1}'
             )
             t.daemon = False
             t.start()
@@ -422,7 +480,8 @@ class BaseProcessor:
         # Start consumer thread
         consumer_thread = threading.Thread(
             target=self._consumer_worker,
-            args=(workers,)
+            args=(workers,),
+            name='Consumer'
         )
         consumer_thread.daemon = False
         consumer_thread.start()
@@ -452,6 +511,9 @@ class BaseProcessor:
         if self.queue_status_display:
             self.queue_status_display.stop()
 
+        # Stop profiling if enabled
+        self._teardown_profiling("process_parallel", start_time, self.total_processed)
+
         log_info(f"Processing complete: {self.total_processed} items processed")
         return self.total_processed
 
@@ -460,6 +522,10 @@ class BaseProcessor:
         log_info(f"PRODUCER THREAD {producer_id} STARTED")
         processed_count = 0
         while True:
+            # DEADLOCK PREVENTION: Check for exit processing before database operations
+            if BaseProcessor.exit_processing:
+                log_info("Feeder thread exiting due to exit_processing flag")
+                break
             item = self.work_queue.get()
 
             if item.is_sentinel_for(producer_id):
@@ -483,6 +549,10 @@ class BaseProcessor:
 
             self.work_queue.task_done()
 
+            # Check for exit processing
+            if BaseProcessor.exit_processing:
+                break
+
         log_info(f"PRODUCER THREAD {producer_id} COMPLETED")
 
     def _consumer_worker(self, num_producers: int):
@@ -491,7 +561,7 @@ class BaseProcessor:
         batch_contexts = []
         sentinels_received = 0
 
-        while sentinels_received < num_producers or batch_contexts:
+        while (sentinels_received < num_producers or batch_contexts) and not BaseProcessor.exit_processing:
             try:
                 item = self.result_queue.get_nowait()
             except queue.Empty:
@@ -533,7 +603,7 @@ class BaseProcessor:
                     self.last_optimize = current_optimize_needed
 
         # Process remaining batch
-        if batch_contexts:
+        if batch_contexts and not self.exit_processing:
             merged = PendingDatabaseContext.merge(batch_contexts)
             potential_total = self.total_objects_saved + merged.getTotalObjectCount()
             current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
@@ -560,7 +630,7 @@ class BaseProcessor:
     def setup_shutdown_handlers(self):
         def signal_handler(signum, frame):
             log_error(f"Received signal {signum}, shutting down gracefully...")
-            self.exit_processing = True
+            BaseProcessor.exit_processing = True
             self.handle_shutdown()
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
@@ -575,7 +645,6 @@ class BaseProcessor:
             self.pbar.close()
         if self.queue_status_display:
             self.queue_status_display.stop()
-        super()._on_shutdown()  # If needed, but since virtual, adjust
 
         def merge_pending_contexts(self, contexts: List[PendingDatabaseContext]) -> PendingDatabaseContext:
             """Generalized method to merge multiple PendingDatabaseContext objects into a single context.
@@ -612,6 +681,12 @@ class BaseProducer(BaseProcessor):
         self._profiler = None
         self.thread_pool_config = thread_pool_config or ThreadPoolConfig()
         self.thread_pool_manager = None
+        self._profile_timer = None
+
+    def _set_exit_processing(self):
+        """Set exit_processing flag for profiling timeout."""
+        print("PROFILING EXIT")
+        BaseProcessor.exit_processing = True
 
     def collect_operations(self) -> List[DatabaseOperation]:
         """
@@ -636,9 +711,8 @@ class BaseProducer(BaseProcessor):
         Returns:
             List of PendingDatabaseContext objects for the consumer to process
         """
-        # Check if profiling is enabled
-        if global_config.profile_seconds:
-            return self._collect_contexts_with_profiling()
+        # Setup profiling if enabled
+        self._profiler, start_time, self._profile_timer = self._setup_profiling("collect_contexts")
 
         # Setup progress bar
         progress_scope = self.get_progress_scope(bytes=global_config.progress == "bytes")
@@ -660,7 +734,7 @@ class BaseProducer(BaseProcessor):
             # Get next batch of work items using key-value paging
             batch, new_last_pk = self._get_work_batch(last_pk)
 
-            if self.exit_processing:
+            if BaseProcessor.exit_processing:
                 print("Exiting thread")
                 break
 
@@ -687,9 +761,17 @@ class BaseProducer(BaseProcessor):
                 log_info(f"Reached max_files limit: {global_config.max_files} work items")
                 break
 
+            # Check for exit processing
+            if BaseProcessor.exit_processing:
+                print("Exiting thread")
+                break
+
             # Log progress
             if work_items_processed % 100 == 0:
                 log_info(f"Collected contexts for {work_items_processed} work items so far")
+
+        # Stop profiling if enabled
+        self._teardown_profiling("collect_contexts", start_time, work_items_processed)
 
         log_info(f"Collected master context with {work_items_processed} work items")
         return master_context
@@ -710,81 +792,6 @@ class BaseProducer(BaseProcessor):
         # Default implementation - subclasses should override this
         raise NotImplementedError("Subclasses using PendingDatabaseContext must implement _process_work_batch_to_context")
 
-    def _collect_contexts_with_profiling(self) -> 'PendingDatabaseContext':
-        """
-        Collect contexts with profiling enabled for the specified duration.
-        """
-        self._profile_seconds = global_config.profile_seconds
-        self._profiler = cProfile.Profile()
-
-        log_info(f"Starting profiling for {self._profile_seconds} seconds during context collection")
-
-        # Start profiling
-        self._profiler.enable()
-        start_time = time.time()
-
-        # Create a single master context to accumulate all work
-        from pending_database_context import PendingDatabaseContext
-        master_context = PendingDatabaseContext()
-
-        offset = 0
-        work_items_processed = 0
-
-        try:
-            last_pk = None
-            while True:
-                # Check if profiling time has elapsed
-                if time.time() - start_time >= self._profile_seconds:
-                    self.exit_processing = True
-                    print("Exiting thread")
-                    break
-
-                # Get next batch of work items using key-value paging
-                batch, new_last_pk = self._get_work_batch(last_pk)
-
-                if self.exit_processing:
-                    print("Exiting thread")
-                    break
-
-                if not batch:
-                    # No more work to process
-                    break
-
-                # Process this batch into a single context
-                context = self._process_work_batch_to_context(batch)
-                if self.exit_processing:
-                    print("Exiting thread")
-                    break
-                if context:
-                    master_context = self.merge_pending_contexts([master_context, context])
-
-                # Count work items processed (each batch represents one work item)
-                work_items_processed += len(batch)
-
-                # Update last_pk for next batch
-                last_pk = new_last_pk
-
-                # Check if we've reached the global limit
-                if global_config.max_files and work_items_processed >= global_config.max_files:
-                    log_info(f"Reached max_files limit: {global_config.max_files} work items")
-                    break
-
-                # Log progress
-                if work_items_processed % 100 == 0:
-                    log_info(f"Collected contexts for {work_items_processed} work items so far")
-
-        finally:
-            # Stop profiling
-            self._profiler.disable()
-            end_time = time.time()
-            execution_time = end_time - start_time
-
-            log_info(f"Context collection profiling complete. Time: {execution_time:.2f}s, Work items: {work_items_processed}")
-
-            # Generate profiling report
-            self._generate_profiling_report("collect_contexts", execution_time, work_items_processed)
-
-        return master_context
 
     def collect_contexts_parallel(self, max_workers: int = None) -> 'PendingDatabaseContext':
         """
@@ -796,6 +803,9 @@ class BaseProducer(BaseProcessor):
         Returns:
             List of PendingDatabaseContext objects for the consumer to execute
         """
+        # Setup profiling if enabled
+        self._profiler, start_time, self._profile_timer = self._setup_profiling("collect_contexts_parallel")
+
         # Initialize thread pool manager
         self.thread_pool_manager = ThreadPoolManager(self.thread_pool_config, self)
 
@@ -842,25 +852,28 @@ class BaseProducer(BaseProcessor):
             sentinels_received = 0
             num_producers = len(self.thread_pool_manager.producer_threads)
             while sentinels_received < num_producers:
-                if self.exit_processing:
+                if BaseProcessor.exit_processing:
+                    self.thread_pool_manager.shutdown()
                     print("Exiting thread")
                     break
                 try:
                     result = self.thread_pool_manager.result_queue.get(timeout=1.0)
+                    if BaseProcessor.exit_processing:
+                        self.thread_pool_manager.result_queue.task_done()
+                        break
                     if result is None:  # Sentinel
                         sentinels_received += 1
-                    elif isinstance(result, list):
-                        # Each result is a list of contexts from one producer
-                        # Merge them into the master context
-                        if result:
-                            master_context = self.merge_pending_contexts([master_context] + result)
-                        work_items_processed += len(result)
+                    elif isinstance(result, PendingDatabaseContext):
+                        # Each result is a context from one producer
+                        # Merge into the master context
+                        master_context = self.merge_pending_contexts([master_context, result])
+                        work_items_processed += 1  # Each result represents work from one producer
                     self.thread_pool_manager.result_queue.task_done()
-                    if self.exit_processing:
+                    if BaseProcessor.exit_processing:
                         print("Exiting thread")
                         break
                 except queue.Empty:
-                    if self.exit_processing:
+                    if BaseProcessor.exit_processing:
                         print("Exiting thread")
                         break
                     continue
@@ -869,6 +882,9 @@ class BaseProducer(BaseProcessor):
             self.thread_pool_manager.wait_for_completion()
 
         finally:
+            # Stop profiling if enabled
+            self._teardown_profiling("collect_contexts_parallel", start_time, work_items_processed)
+
             # Cleanup
             if self.thread_pool_manager:
                 self.thread_pool_manager.shutdown()
@@ -877,7 +893,7 @@ class BaseProducer(BaseProcessor):
         return master_context
 
     def _parallel_work_batch_processor(self, work_items: List[Any], work_queue: queue.Queue,
-                                       result_queue: queue.Queue, thread_id: int, num_threads: int) -> None:
+                                        result_queue: queue.Queue, thread_id: int, num_threads: int) -> None:
         """
         Process work items in parallel using thread pool.
 
@@ -895,14 +911,14 @@ class BaseProducer(BaseProcessor):
 
             # Distribute work items among threads
             for i in range(thread_id, len(work_items), num_threads):
-                if self.exit_processing:
+                if BaseProcessor.exit_processing:
                     break
 
                 work_item = work_items[i]
 
                 # Process single work item into context and merge into thread context
                 context = self._process_work_batch_to_context([work_item])
-                if self.exit_processing:
+                if BaseProcessor.exit_processing:
                     print("Exiting thread")
                     break
                 if context:
@@ -920,6 +936,7 @@ class BaseProducer(BaseProcessor):
         finally:
             # Signal completion
             result_queue.put(None)
+
 
     def _get_work_batch(self, last_pk: Optional[Any] = None) -> Tuple[List[Any], Optional[Any]]:
         """Get a batch of work items using key-value paging - to be implemented by subclasses.
@@ -944,13 +961,6 @@ class BaseProducer(BaseProcessor):
         """Get the scope of work for progress bar setup - to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement get_progress_scope")
 
-    def _collect_operations_with_profiling(self) -> List[DatabaseOperation]:
-        """DEPRECATED: Use PDC-based profiling instead"""
-        # Convert PDC to operations for backward compatibility
-        context = self._collect_contexts_with_profiling()
-        if not context or context.isEmpty():
-            return []
-        return context.save_to_database(self.db_ops)
 
     def _generate_profiling_report(self, operation_name: str, execution_time: float, work_items_processed: int):
         """

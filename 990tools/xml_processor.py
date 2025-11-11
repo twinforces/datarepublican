@@ -31,7 +31,7 @@ from datetime import datetime
 
 from collections import deque
 # Import XPath configurations from xpaths.py
-from xpaths import COMMON_XPATHS, tostring
+from xpaths import COMMON_XPATHS, tostring, HEADER_UNION_XPATH
 from xpaths_990 import XPATHS_990
 from xpaths_990ez import XPATHS_990EZ
 from xpaths_990pf import XPATHS_990PF
@@ -185,6 +185,7 @@ class XMLProcessor(BaseProcessor):
 
     def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int], num_producers: int):
         """Feeder thread: Fetches XML files and feeds into shared queue."""
+        threading.current_thread().name = 'Feeder'
         from constants import CURRENT_PROCESSING_VERSION, BATCH_SIZE
         total_fed = 0
         last_xml_id = None
@@ -327,15 +328,13 @@ class XMLProcessor(BaseProcessor):
             root = tree.getroot()
 
             # Check exit_processing flag before continuing with expensive operations
-            if self.exit_processing:
+            if BaseProcessor.exit_processing:
                 log_info(f"Exiting thread due to exit_processing flag")
                 print("EXITING PROCESSING")
                 return False
 
-            # Extract basic metadata
-            form_type = self._extract_form_type(root)
-            tax_year = self._extract_tax_year(root)
-            filer_ein = self._extract_filer_ein(root)
+            # Extract basic metadata using batch header extraction
+            form_type, tax_year, filer_ein = self._extract_form_header_batch(root)
 
             if not global_config.is_quiet():
                 log_debug(f"Extracted metadata for {filename}: form_type={form_type}, tax_year={tax_year}, ein={filer_ein}")
@@ -421,6 +420,67 @@ class XMLProcessor(BaseProcessor):
             if not global_config.is_quiet():
                 log_error("FAILED: XML {}: Unexpected error - {}\n{}", filename, str(e), traceback.format_exc())
             return False
+
+    def _extract_form_header_batch(self, root) -> Tuple[str, int, str]:
+        """
+        Extract form header values (form_type, tax_year, filer_ein) in a single XPath evaluation.
+
+        Returns:
+            Tuple of (form_type, tax_year, filer_ein)
+        """
+        # Initialize defaults
+        form_type = "Unknown"
+        tax_year = 0
+        filer_ein = None
+
+        try:
+            # Evaluate the union XPath once to get all header elements
+            header_elements = HEADER_UNION_XPATH(root)
+
+            # Process each element to extract the values
+            for element in header_elements:
+                tag_name = element.tag.split('}')[-1]  # Remove namespace prefix if present
+                text_value = element.text.strip() if element.text else ""
+
+                if tag_name in ("ReturnTypeCd", "ReturnType"):
+                    # Validate against known IRS form types
+                    valid_forms = {"990", "990EZ", "990PF", "990T"}
+                    if text_value in valid_forms:
+                        form_type = text_value
+                    else:
+                        # Log invalid form type but continue processing
+                        if not global_config.is_quiet():
+                            log_warning(f"Invalid form type '{text_value}' found, treating as Unknown")
+                        form_type = "Unknown"
+
+                elif tag_name in ("TaxYr", "TaxYear"):
+                    if text_value and text_value.isdigit():
+                        tax_year = int(text_value)
+
+                elif tag_name == "EIN":
+                    if text_value.isdigit():
+                        formatted_ein = f"{int(text_value):09d}"
+                        if not global_config.is_quiet():
+                            log_info(f"TRACE: Formatted EIN: '{formatted_ein}' (valid 9-digit)")
+                        filer_ein = formatted_ein
+                    else:
+                        if not global_config.is_quiet():
+                            log_error(f"TRACE: Non-digit EIN found: '{text_value}', raising exception")
+                        raise ValueError(f"Invalid EIN format: '{text_value}' - must be numeric")
+
+        except Exception as e:
+            log_debug(f"Header union XPath evaluation failed: {e}")
+            # Fall back to individual extraction if batch fails
+            form_type = self._extract_form_type(root)
+            tax_year = self._extract_tax_year(root)
+            filer_ein = self._extract_filer_ein(root)
+
+        if not filer_ein:
+            if not global_config.is_quiet():
+                log_error("TRACE: No EIN found in XML, raising exception")
+            raise ValueError("No EIN found in XML")
+
+        return form_type, tax_year, filer_ein
 
     def _extract_form_type(self, root) -> str:
         """Extract form type from XML with validation"""

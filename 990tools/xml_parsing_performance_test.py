@@ -30,7 +30,7 @@ from typing import List, Dict, Any, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from pending_database_context import PendingDatabaseContext
-from xml_processor import XMLProducer
+from xml_processor import XMLProcessor
 from database_operations import DatabaseOperations
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
@@ -68,8 +68,8 @@ class XMLParsingPerformanceTest:
         # Use a dummy database path to avoid initialization issues
         self.db_ops = None  # We'll mock all database operations
 
-        # Initialize XML producer with None db_ops (we'll override methods)
-        self.xml_producer = XMLProducer(None, CURRENT_PROCESSING_VERSION)
+        # Initialize XML processor with None db_ops (we'll override methods)
+        self.xml_processor = XMLProcessor(None, CURRENT_PROCESSING_VERSION)
 
         # Track performance metrics
         self.total_files_processed = 0

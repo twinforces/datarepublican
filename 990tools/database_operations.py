@@ -234,10 +234,11 @@ class DatabaseOperations:
         except Exception:
             pass  # Ignore if not supported
         try:
-            self.db_conn.execute("SET checkpoint_threshold = '1GB'")  # WAL size doesn't matter in grok benchmark.
+            self.db_conn.execute("SET checkpoint_threshold = '100MB'")  # WAL size doesn't matter in grok benchmark.
         except Exception:
             pass  # Ignore if not supported
         self.db_conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
+        #self.db_conn.execute("PRAGMA checkpoint_on_close = true") # terminate transactions
         if global_config.log_sql:
             self.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
 
@@ -436,6 +437,8 @@ class DatabaseOperations:
             DatabaseOperations._local.db_conn.execute("SET enable_progress_bar = false")
             DatabaseOperations._local.db_conn.execute("SET enable_object_cache = true")
             DatabaseOperations._local.db_conn.execute("SET max_temp_directory_size = '10GB'")
+            #DatabaseOperations._local.db_conn.execute("PRAGMA checkpoint_on_close = true") # terminate transactions
+
             try:
                 DatabaseOperations._local.db_conn.execute("SET insert_select_parallelism = true")
             except Exception:
@@ -445,7 +448,7 @@ class DatabaseOperations:
             except Exception:
                 pass
             try:
-                DatabaseOperations._local.db_conn.execute("SET checkpoint_threshold = '1GB'")
+                DatabaseOperations._local.db_conn.execute("SET checkpoint_threshold = '100MB'")
             except Exception:
                 pass
             DatabaseOperations._local.db_conn.execute("SET preserve_insertion_order = false")
@@ -1342,12 +1345,25 @@ class DatabaseOperations:
             print(f"DEBUG: VACUUM ANALYZE {table}")
             self.execute_query(f"VACUUM ANALYZE {table}")
 
+        self.commit() # just in case
         # Regular checkpoint to ensure data is written and WAL is cleared
         print(f"DEBUG: About to execute CHECKPOINT - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
         try:
             self.db_conn.execute("CHECKPOINT")
         except Exception as e:
             log_error(f"Checkpoint failed, forcing: {e}", exc_info=True)
+            # Query and log duckdb_locks before forcing checkpoint
+            try:
+                locks_result = self.db_conn.execute("""SELECT * 
+                    FROM duckdb_logs() 
+                    WHERE message ILIKE '%lock%' 
+                    OR message ILIKE '%busy%' 
+                    OR message ILIKE '%checkpoint%'
+                    ORDER BY timestamp DESC 
+                    LIMIT 50;""").fetchall()
+                log_error(f"duckdb_locks state before FORCE CHECKPOINT: {locks_result}")
+            except Exception as locks_e:
+                log_error(f"Failed to query duckdb_logs: {locks_e}")
             self.db_conn.execute("FORCE CHECKPOINT")
 
             pass

@@ -104,6 +104,9 @@ DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 # Bulk insert batch size for database operations
 BULK_INSERT_BATCH_SIZE = 100000
 
+# WAL compaction timeout
+WAL_COMPACTION_TIMEOUT = 30  # seconds
+
 # Charity deduplication control
 ENABLE_CHARITY_DEDUP_CHECK = False  # Controlled by command-line parameter
 

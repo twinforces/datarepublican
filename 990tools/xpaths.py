@@ -234,6 +234,31 @@ GRANT_FOREIGN_ADDRESS_XPATH = etree.XPath("irs:ForeignAddress", namespaces=NAMES
 GRANT_COUNTRY_XPATH = etree.XPath("irs:CountryCd", namespaces=NAMESPACES)
 GRANT_US_ADDRESS_XPATH = etree.XPath("irs:USAddress", namespaces=NAMESPACES)
 
+# Union XPath for grant elements (combines all grant XPath patterns)
+GRANT_UNION_XPATH = etree.XPath("""
+    .//irs:IRS990ScheduleI/irs:RecipientTable |
+    .//irs:IRS990ScheduleF/irs:GrantsToOrgOutsideUSGrp |
+    .//irs:IRS990ScheduleF/irs:GrantsToOrganizationsOutsideUS |
+    .//irs:IRS990ScheduleF/irs:GrantsToOrgsOutsideUS |
+    .//irs:IRS990ScheduleF/irs:ForeignIndividualsGrantsGrp |
+    .//irs:IRS990PF/irs:SupplementaryInformationGrp
+""", namespaces=NAMESPACES)
+
+# Union XPath for grant names within grant elements
+GRANT_NAME_UNION_XPATH = etree.XPath("""
+    irs:RecipientNameBusiness |
+    irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
+    irs:BusinessName/irs:BusinessNameLine1Txt
+""", namespaces=NAMESPACES)
+
+# Union XPath for grant amounts within grant elements
+GRANT_AMOUNT_UNION_XPATH = etree.XPath("""
+    irs:CashGrantAmt |
+    irs:TotalGrantOrContriPdDurYrAmt |
+    irs:GrantOrContributionAmt |
+    irs:Amount
+""", namespaces=NAMESPACES)
+
 # Schedule C (Political Contributions) XPath patterns
 SCHEDULE_C_XPATHS = {
     "990": [
@@ -333,35 +358,6 @@ FOREIGN_OFFICE_UNION_XPATH = etree.XPath("""
     .//ForeignOfficeCountryCd
 """, namespaces=NAMESPACES)
 
-# Grant parsing union XPaths (moved from base_parser.py)
-GRANT_UNION_XPATH = etree.XPath("""
-    .//irs:ReturnData/irs:IRS990/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
-    .//irs:IRS990/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
-    .//irs:ReturnData/irs:IRS990EZ/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
-    .//irs:IRS990EZ/irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
-    .//irs:ReturnData/irs:IRS990PF/irs:GrantsAndContributionsPaidDuringYearGrp/irs:RecipientName/irs:BusinessName/irs:BusinessNameLine1Txt |
-    .//irs:IRS990PF/irs:GrantsAndContributionsPaidDuringYearGrp/irs:RecipientName/irs:BusinessName/irs:BusinessNameLine1Txt |
-    .//irs:RecipientTable/irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
-    .//irs:GrantsAndContributionsPaidDuringYearGrp/irs:RecipientName/irs:BusinessName/irs:BusinessNameLine1Txt
-""", namespaces=NAMESPACES)
-
-GRANT_NAME_UNION_XPATH = etree.XPath("""
-    irs:RecipientBusinessName/irs:BusinessNameLine1Txt |
-    irs:RecipientBusinessName/irs:BusinessNameLine1 |
-    irs:BusinessName/irs:BusinessNameLine1Txt |
-    irs:BusinessName/irs:BusinessNameLine1 |
-    RecipientBusinessName/BusinessNameLine1Txt |
-    RecipientBusinessName/BusinessNameLine1 |
-    BusinessName/BusinessNameLine1Txt |
-    BusinessName/BusinessNameLine1
-""", namespaces=NAMESPACES)
-
-GRANT_AMOUNT_UNION_XPATH = etree.XPath("""
-    irs:AmountOfCashGrant |
-    irs:CashGrantAmt |
-    AmountOfCashGrant |
-    CashGrantAmt
-""", namespaces=NAMESPACES)
 
 # Contractor parsing union XPaths (moved from base_parser.py)
 CONTRACTOR_UNION_XPATH = etree.XPath("""
@@ -417,6 +413,16 @@ ORG_TYPE_UNION_XPATH = etree.XPath("""
     .//IRS990/Organization501c3Ind |
     .//IRS990/Organization4947a1NotPFInd |
     .//IRS990/Organization4947a1TrtdPFInd
+""", namespaces=NAMESPACES)
+
+# Header union XPath combining form_type, tax_year, and filer_ein XPaths
+HEADER_UNION_XPATH = etree.XPath("""
+    .//irs:ReturnHeader/irs:ReturnTypeCd |
+    .//ReturnHeader/ReturnTypeCd |
+    .//irs:ReturnHeader/irs:TaxYr |
+    .//ReturnHeader/TaxYr |
+    .//irs:Filer/irs:EIN |
+    .//Filer/EIN
 """, namespaces=NAMESPACES)
 
 
