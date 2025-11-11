@@ -205,14 +205,15 @@ class PendingDatabaseContext:
         conn = db_ops.db_conn
         try:
             log_info("Starting transaction for batch")
-            conn.execute("BEGIN TRANSACTION")
+            #conn.execute("BEGIN TRANSACTION") just causes problem
     
             # Execute objects by type (inserts) - use INSERT_BY_TYPE for each type
             for obj_type, obj_list in self.objects.items():
                 if obj_list:
                     ids = db_ops.INSERT_BY_TYPE(obj_list, obj_type, commit_batches=True)
                     all_ids.extend(ids)
-    
+            conn.commit()
+   
             log_info("Inserts completed")
 
             # Separate DB operations from non-DB operations (like PROGRESS_UPDATE)
@@ -235,7 +236,6 @@ class PendingDatabaseContext:
             # Execute non-DB operations after commit (e.g., progress updates)
             for operation in non_db_operations:
                 self._execute_operation(db_ops, operation)
-            conn.commit()
 
         except Exception as e:
             conn.execute("ROLLBACK")

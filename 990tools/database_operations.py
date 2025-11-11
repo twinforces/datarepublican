@@ -56,7 +56,7 @@ sys.path.append(os.path.dirname(__file__))
 # Import all dataclasses from models package
 from models import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution
 from models.base import BaseModel
-from constants import VALID_STATES, CURRENT_PROCESSING_VERSION
+from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_TIMEOUT
 from logging_utils import log_error, log_debug, log_info, log_warning
 from loggingDuckDB import LoggingDuckDBConnection
 
@@ -186,6 +186,19 @@ class DatabaseOperations:
 
     def _init_connection(self):
         """Initialize DuckDB connection and schema"""
+        # Set up timer for WAL compaction
+        import threading
+        import time
+
+        def wal_compaction_timer():
+            """Timer function to print and log WAL compaction message"""
+            log_info("Compacting Database WAL")
+            print("Compacting Database WAL")
+
+        # Start the timer just before database connection
+        timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
+        timer.start()
+
         # Connect to DuckDB with performance optimizations
         config: Dict[str, Any] = {
             'memory_limit': self.memory_limit
@@ -203,6 +216,9 @@ class DatabaseOperations:
             self.db_conn = LoggingDuckDBConnection(self.db_path, config=config)
         else:
             self.db_conn = duckdb.connect(self.db_path, config=config)
+
+        # Cancel the WAL compaction timer since connection succeeded
+        timer.cancel()
 
         # Set additional performance settings
         self.db_conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
@@ -1150,6 +1166,7 @@ class DatabaseOperations:
             log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
             insert_time = time.perf_counter() - insert_start
             log_info(f"executemany inserted {len(objects)} rows in {insert_time:.2f}s ({len(objects)/insert_time:.0f} rows/s)")
+        conn.commit()
 
         # COUNT VALIDATION: Check count after insert (optional for performance)
         if validate_counts and count_before is not None:
@@ -1174,6 +1191,7 @@ class DatabaseOperations:
 
         # Log bulk insert completion with counts
         log_info(f"Bulk insert completed: {len(objects)} {obj_type.__name__} records inserted")
+        conn.commit()
 
         # Return the client-generated IDs
         return [str(getattr(obj, id_field)) for obj in objects]
@@ -1213,6 +1231,7 @@ class DatabaseOperations:
                 rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
                 log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
                 total_processed += len(batch_params)
+            self.commit()
 
             # Do not commit here - let caller handle transaction
             return total_processed
@@ -1561,6 +1580,7 @@ class DatabaseOperations:
 
         total_time = time.time() - start_time
         log_debug(f"Total optimized batch processing time: {total_time:.2f}s")
+        self.commit()
 
         return batch_operations, next_last_address_id
 
