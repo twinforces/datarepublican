@@ -48,24 +48,24 @@ class XMLParsingValidator:
         return {
             'sample_990_1.xml': {
                 'charity': 1,   # Always 1 charity object
-                'officer': 9,   # From Form990PartVIISectionAGrp (9 entries)
+                'officer': 10,  # From Form990PartVIISectionAGrp (9 entries) + PrincipalOfficer (1)
                 'grant': 0,     # No grants in this file
                 'contractor': 0, # No contractors
-                'address': 1,   # Charity address (officer addresses not always parsed)
+                'address': 2,   # Charity address + PrincipalOfficer address
             },
             'sample_990_2.xml': {
                 'charity': 1,
-                'officer': 0,   # Officers present but not being parsed in current implementation
+                'officer': 1,   # PrincipalOfficer only
                 'grant': 0,     # No grants
                 'contractor': 0, # No contractors
-                'address': 1,   # Charity address
+                'address': 1,   # Charity address only (no PrincipalOfficer address in XML)
             },
             'sample_990_3.xml': {
                 'charity': 1,
-                'officer': 2,   # Only some officers parsed in current implementation
+                'officer': 3,   # Form990PartVIISectionAGrp (2 entries) + PrincipalOfficer (1)
                 'grant': 0,     # No grants
                 'contractor': 2, # Parsing creates 2 contractor objects from 1 group?
-                'address': 3,   # Charity address + officer/contractor addresses
+                'address': 4,   # Charity address + PrincipalOfficer address + 2 contractor addresses
             },
             'sample_990EZ_1.xml': {
                 'charity': 1,
