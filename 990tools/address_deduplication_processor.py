@@ -18,6 +18,7 @@ from config import global_config
 from constants import ADDRESS_BATCH_SIZE, ADDRESS_QUEUE_SIZE
 from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig, WorkUnit
 from models.address import Address
+from models.dedup_work_item import DedupWorkItem
 from pending_database_context import PendingDatabaseContext
 from queue_status_display import QueueStatusDisplay
 
@@ -178,36 +179,23 @@ class AddressDeduplicationProducer(BaseProducer):
             Dictionary with 'total' (estimated work scope) and 'unit' ('addrs' or 'bytes')
         """
         if bytes:
-            # Estimate total bytes by summing lengths of canonical addresses needing deduplication
+            # For addresses, just count them since they're not dramatically different in size
             query = """
-                SELECT SUM(LENGTH(canonical_address)) as total_bytes
-                FROM (
-                    SELECT canonical_address
-                    FROM Addresses
-                    WHERE canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                    GROUP BY canonical_address
-                    HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-                )
+                SELECT COUNT(*) as total_addresses
+                FROM Addresses
+                WHERE master_id IS NULL
+                    AND canonical_address IS NOT NULL
+                    AND canonical_address != ''
             """
             result = self.db_ops.execute_query(query)
             row = result.fetchone() if result else None
             total = int(row[0]) if row and row[0] is not None else 0
             return {'total': total, 'unit': 'bytes'}
         else:
-            # Count total master addresses needing deduplication (each canonical address group is 1 unit of work)
+            # Count total canonical_addresses from pending_canonicals table (each row is 1 unit of work)
             query = """
-                SELECT COUNT(*) as total_master_addresses
-                FROM (
-                    SELECT 1
-                    FROM Addresses
-                    WHERE canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                    GROUP BY canonical_address
-                    HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-                )
+                SELECT COUNT(*) as total_canonical_addresses
+                FROM pending_canonicals
             """
             result = self.db_ops.execute_query(query)
             row = result.fetchone() if result else None
@@ -215,33 +203,24 @@ class AddressDeduplicationProducer(BaseProducer):
             return {'total': total, 'unit': 'addrs'}
 
     def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Get a batch of address deduplication work items using key-value paging"""
+        """Get a batch of canonical_addresses from pending_canonicals table using key-value paging"""
         # Use min(batch_size, max_files) if max_files is set, otherwise use batch_size
         effective_batch_size = min(self.batch_size, global_config.max_files) if global_config.max_files else self.batch_size
 
         if last_pk is None:
             query = """
-            SELECT canonical_address, MIN(address_id) as group_pk
-            FROM Addresses
-            WHERE master_id IS NULL
-              AND canonical_address IS NOT NULL
-              AND canonical_address != ''
-            GROUP BY canonical_address
-            HAVING COUNT(*) > 1
-            ORDER BY group_pk ASC
+            SELECT canonical_address, root_id
+            FROM pending_canonicals
+            ORDER BY canonical_address ASC
             LIMIT ?
             """
             params = (effective_batch_size,)
         else:
             query = """
-            SELECT canonical_address, MIN(address_id) as group_pk
-            FROM Addresses
-            WHERE master_id IS NULL
-              AND canonical_address IS NOT NULL
-              AND canonical_address != ''
-            GROUP BY canonical_address
-            HAVING COUNT(*) > 1 AND MIN(address_id) > ?
-            ORDER BY group_pk ASC
+            SELECT canonical_address, root_id
+            FROM pending_canonicals
+            WHERE canonical_address > ?
+            ORDER BY canonical_address ASC
             LIMIT ?
             """
             params = (last_pk, effective_batch_size)
@@ -253,27 +232,17 @@ class AddressDeduplicationProducer(BaseProducer):
         max_pk: Optional[str] = None
         for row in rows:
             canonical_address = row[0]
-            group_pk = row[1]
+            root_id = row[1]
 
-            addresses = self.db_ops.select_dataclass(
-                Address,
-                where_clause="canonical_address = ? AND master_id IS NULL",
-                params=(canonical_address,)
-            )
+            # Return canonical_address and root_id from pre-computed table
+            dedup_info = {
+                "canonical_address": canonical_address,
+                "root_id": root_id
+            }
+            batch.append(dedup_info)
 
-            if len(addresses) > 1:
-                addresses.sort(key=lambda a: a.address_id)
-                master_address_id = addresses[0].address_id
-                child_address_ids = [a.address_id for a in addresses[1:]]
-                dedup_info = {
-                    "canonical_address": canonical_address,
-                    "master_address_id": master_address_id,
-                    "child_address_ids": child_address_ids
-                }
-                batch.append(dedup_info)
-
-                if max_pk is None or group_pk > max_pk:
-                    max_pk = group_pk
+            if max_pk is None or canonical_address > max_pk:
+                max_pk = canonical_address
 
         self.last_address_id = max_pk
         return batch, max_pk
@@ -318,48 +287,73 @@ class AddressDeduplicationProducer(BaseProducer):
         return context
 
     def _process_work_batch_to_context(self, batch: List[Dict[str, Any]]) -> Optional[PendingDatabaseContext]:
-        """Process a batch of deduplication work into a single PendingDatabaseContext"""
-        if not batch:
-            return None
+        """Process a batch of canonical_addresses from pending_canonicals into PendingDatabaseContext objects"""
 
-        # Create a single context for this batch
+        # Create a single context for the entire batch
         context = PendingDatabaseContext()
 
-        # Process each deduplication item in the batch
         for dedup_info in batch:
-            # Get the canonical address for geocoding
+            # Get the canonical address and pre-computed root_id
             canonical_address = dedup_info.get("canonical_address", "")
+            root_id = dedup_info.get("root_id")
 
-            # Create deduplication operation
-            dedup_operation = DatabaseOperation(
-                operation_type=DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH,
-                data=dedup_info
-            )
-            context.addOperationToDatabase(dedup_operation)
+            if canonical_address and root_id:
+                # Fetch all addresses with this canonical_address that have master_id IS NULL
+                addresses = self.db_ops.select_dataclass(
+                    Address,
+                    where_clause="canonical_address = ?",
+                    params=(canonical_address, )
+                )
 
-            # Create geocoding operation for the master address
-            if canonical_address:
-                # Get the master address directly from database instead of creating temporary object
-                master_address_id = dedup_info.get("master_address_id")
-                if master_address_id:
-                    # Fetch the actual Address object from database
-                    addresses = self.db_ops.select_dataclass(Address, where_clause="address_id = ?", params=(master_address_id,))
-                    if addresses:
-                        master_address = addresses[0]
-                        # Create geocoding record using factory method
+                if addresses:
+                    # Sort by address_id to ensure consistent master selection
+                    addresses.sort(key=lambda a: a.address_id)
+                    master_address = addresses[0]
+                    master_address_id = master_address.address_id
+
+                    # Verify the root_id matches our expectation
+                    if str(master_address_id) != str(root_id):
+                        log_warning(f"Root ID mismatch for canonical_address '{canonical_address}': expected {root_id}, got {master_address_id}")
+                        # Use the actual minimum address_id as master
+                        master_address_id = root_id
+
+                    # Create geocoding record for the master address (if not already processed - check colocator)
+                    if not master_address.colocator:
                         geocoding = master_address.create_geocoding()
                         context.addObjectToDatabase(geocoding)
 
-        # Create progress update operation for the entire batch
-        work_items_processed = len(batch)
-        self.dedup_groups += work_items_processed
-        progress_op = DatabaseOperation(
-            operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-            data={"count": work_items_processed}
-        )
-        context.addOperationToDatabase(progress_op)
-        log_debug(f"DEBUG: Created PDC context with {work_items_processed} work items")
- 
+                        # Create update to link geocoding_id to master address
+                        link_geocoding_op = DatabaseOperation(
+                            operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                            data={
+                                'table': 'Addresses',
+                                'updates': [{'geocoding_id': geocoding.geocoding_id, 'master_id': master_address_id}],
+                                'id_column': 'address_id'
+                            }
+                        )
+                        context.addOperationToDatabase(link_geocoding_op)
+
+                    # Create deduplication operation for all addresses with this canonical_address
+                    # Set master_id for ALL addresses in the group to the master_address_id
+                    dedup_work_item = DedupWorkItem(
+                        canonical_address=canonical_address,
+                        master_address_id=master_address_id,
+                        child_address_ids=[a.address_id for a in addresses]  # ALL addresses in the group including master
+                    )
+
+                    operation = DatabaseOperation(
+                        operation_type=DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH,
+                        data=dedup_work_item
+                    )
+                    context.addOperationToDatabase(operation)
+
+            # Add progress operation (count each canonical_address processed)
+            progress_op = DatabaseOperation(
+                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                data={"count": 1}
+            )
+            context.addOperationToDatabase(progress_op)
+
         return context
 
     def _get_geocoding_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Address], Optional[str]]:
@@ -476,9 +470,9 @@ class AddressDeduplicationConsumer(BaseConsumer):
         if DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH.value in operations_by_type:
             for operation in operations_by_type[DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH.value]:
                 batch_data = operation.data
-                master_address_id = batch_data.get("master_address_id")
-                child_address_ids = batch_data.get("child_address_ids", [])
-                canonical_address = batch_data.get("canonical_address", "")
+                master_address_id = batch_data.master_address_id
+                child_address_ids = batch_data.child_address_ids
+                canonical_address = batch_data.canonical_address
 
                 if master_address_id and child_address_ids:
                     try:
@@ -544,42 +538,32 @@ class AddressDeduplicationConsumer(BaseConsumer):
             Dictionary with 'total' (estimated work scope) and 'unit' ('addrs' or 'bytes')
         """
         if bytes:
-            # Estimate total bytes by summing lengths of canonical addresses needing deduplication
+            # For addresses, just count them since they're not dramatically different in size
             query = """
-                SELECT SUM(LENGTH(canonical_address)) as total_bytes
-                FROM (
-                    SELECT canonical_address
-                    FROM Addresses
-                    WHERE canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                    GROUP BY canonical_address
-                    HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-                )
+                SELECT COUNT(*) as total_addresses
+                FROM Addresses
+                WHERE master_id IS NULL
+                    AND canonical_address IS NOT NULL
+                    AND canonical_address != ''
             """
             result = self.db_ops.execute_query(query)
             row = result.fetchone() if result else None
             total = int(row[0]) if row and row[0] is not None else 0
-            log_debug(f"DEBUG: get_progress_scope(bytes=True) returning total={total} bytes")
+            log_debug(f"DEBUG: get_progress_scope(bytes=True) returning total={total} addresses")
             return {'total': total, 'unit': 'bytes'}
         else:
-            # Count total master addresses needing deduplication (each canonical address group is 1 unit of work)
+            # Count total canonical_addresses that have unprocessed addresses (each canonical_address is 1 unit of work)
             query = """
-                SELECT COUNT(*) as total_master_addresses
-                FROM (
-                    SELECT 1
-                    FROM Addresses
-                    WHERE canonical_address IS NOT NULL
-                        AND canonical_address != ''
-                    GROUP BY canonical_address
-                    HAVING COUNT(*) > 1
-                        AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-                )
+                SELECT COUNT(DISTINCT canonical_address) as total_canonical_addresses
+                FROM Addresses
+                WHERE master_id IS NULL
+                    AND canonical_address IS NOT NULL
+                    AND canonical_address != ''
             """
             result = self.db_ops.execute_query(query)
             row = result.fetchone() if result else None
             total = int(row[0]) if row and row[0] is not None else 0
-            log_debug(f"DEBUG: get_progress_scope(bytes=False) returning total={total} master addresses")
+            log_debug(f"DEBUG: get_progress_scope(bytes=False) returning total={total} canonical addresses")
             return {'total': total, 'unit': 'addrs'}
 
     def get_geocoding_progress_scope(self) -> Dict[str, Any]:
@@ -609,6 +593,52 @@ class AddressDeduplicationProcessor(BaseProcessor):
     def __init__(self, db_ops: DatabaseOperations):
         super().__init__(db_ops)
         self.batch_size = 1000
+
+    def setup_pending_canonicals(self) -> None:
+        """
+        Setup phase: Create and populate the pending_canonicals table.
+
+        This method creates the pending_canonicals table and populates it with
+        canonical addresses and their root_ids using the optimized GROUP BY approach.
+        """
+        log_info("Starting setup phase: Creating pending_canonicals table")
+        print("Creating Work Table")
+        # Step 1: Drop if exists (safe; no-op if missing)
+        self.db_ops.execute_query("DROP TABLE IF EXISTS pending_canonicals;")
+
+        # Step 2: Create with root_id
+        create_table_sql = """
+        CREATE TABLE pending_canonicals (
+            canonical_address VARCHAR PRIMARY KEY,
+            root_id UUID NOT NULL
+        );
+        """
+        self.db_ops.execute_query(create_table_sql)
+
+        # Step 3: Insert with MIN root selection (uses GROUP BY for dedup + min; index-accelerated)
+        insert_sql = """
+        INSERT INTO pending_canonicals (canonical_address, root_id)
+        SELECT
+            canonical_address,
+            MIN(address_id) AS root_id
+        FROM Addresses
+        WHERE 
+          master_id IS NULL
+          AND LENGTH(canonical_address) > 0
+        GROUP BY canonical_address;
+        """
+        self.db_ops.execute_query(insert_sql)
+
+        # Step 4: Checkpoint and optimize table for queries
+        self.db_ops.execute_query("FORCE CHECKPOINT;")
+        self.db_ops.execute_query("VACUUM ANALYZE pending_canonicals;")
+        print("Work Table Cmomplete")
+
+        # Get count for logging
+        count_result = self.db_ops.execute_query("SELECT COUNT(*) FROM pending_canonicals;")
+        count = count_result.fetchone()[0] if count_result else 0
+
+        log_info(f"Setup phase completed: Created pending_canonicals table with {count} canonical address groups")
 
     def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Get a batch of address deduplication work items using key-value paging"""
@@ -719,6 +749,7 @@ class AddressDeduplicationProcessor(BaseProcessor):
                 # Create update operation to link geocoding_id to master address
                 link_update = {
                     'address_id': master_address_id,
+                    'master_id': master_address_id,
                     'geocoding_id': geocoding.geocoding_id
                 }
                 link_op = DatabaseOperation(
@@ -750,16 +781,11 @@ class AddressDeduplicationProcessor(BaseProcessor):
     def get_work_count(self, max_files: Optional[int] = None) -> int:
         """Get the total number of deduplication work items."""
         query = """
-        SELECT COUNT(*) as total_master_addresses
-        FROM (
-            SELECT 1
-            FROM Addresses
-            WHERE canonical_address IS NOT NULL
-                AND canonical_address != ''
-            GROUP BY canonical_address
-            HAVING COUNT(*) > 1
-                AND SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) > 1
-        )
+        SELECT COUNT(DISTINCT canonical_address) as total_canonical_addresses
+        FROM Addresses
+        WHERE master_id IS NULL
+            AND canonical_address IS NOT NULL
+            AND canonical_address != ''
         """
         result = self.db_ops.execute_query(query)
         row = result.fetchone() if result else None
@@ -774,8 +800,24 @@ class AddressDeduplicationProcessor(BaseProcessor):
         return total, 'groups', 'Address deduplication'
 
     def deduplicate_addresses(self, progress_bar=None) -> int:
-        """Deduplicate addresses using the multi-threaded architecture."""
-        log_info("Starting address deduplication using multi-threaded architecture")
+        """Deduplicate addresses using the new pending_canonicals approach."""
+        log_info("Starting address deduplication using pending_canonicals approach")
+
+        # Phase 1: Setup - Create and populate pending_canonicals table
+        log_info("Phase 1: Setup - Creating pending_canonicals table")
+        self.setup_pending_canonicals()
+
+        # Phase 2: Processing - Use producer-consumer pattern with pending_canonicals
+        log_info("Phase 2: Processing - Deduplicating addresses using pending_canonicals")
         total_processed = self.process_parallel(global_config.max_files)
-        log_info(f"Address deduplication completed: {total_processed} groups processed")
+
+        # Phase 3: Cleanup - Drop temporary table
+        log_info("Phase 3: Cleanup - Dropping pending_canonicals table")
+        try:
+            self.db_ops.execute_query("DROP TABLE IF EXISTS pending_canonicals;")
+            log_info("Successfully dropped pending_canonicals table")
+        except Exception as e:
+            log_warning(f"Failed to drop pending_canonicals table: {e}")
+
+        log_info(f"Address deduplication completed: {total_processed} canonical address groups processed")
         return total_processed

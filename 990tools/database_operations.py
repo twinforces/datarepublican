@@ -56,7 +56,7 @@ sys.path.append(os.path.dirname(__file__))
 # Import all dataclasses from models package
 from models import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution
 from models.base import BaseModel
-from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_TIMEOUT
+from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_TIMEOUT,ENABLE_AUTO_CHECKPOINTS
 from logging_utils import log_error, log_debug, log_info, log_warning
 from loggingDuckDB import LoggingDuckDBConnection
 
@@ -86,6 +86,7 @@ class DatabaseOperationType(Enum):
     PROGRESS_UPDATE = "progress_update"
     INSERT_GEOCODING = "insert_geocoding"
     UPDATE_GEOCODING = "update_geocoding"
+    UPDATE_ADDRESS_GEOCODING = "update_address_geocoding"
 
 
 class DatabaseOperation:
@@ -222,6 +223,7 @@ class DatabaseOperations:
 
         # Set additional performance settings
         self.db_conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
+        self.db_conn.execute("SET threads = 8")  # more threads
         self.db_conn.execute("SET enable_object_cache = true")   # Enable object cache
         self.db_conn.execute("SET max_temp_directory_size = '10GB'")  # Increase temp directory size
         # Note: Some performance settings may not be available in all DuckDB versions
@@ -230,7 +232,7 @@ class DatabaseOperations:
         except Exception:
             pass  # Ignore if not supported
         try:
-            self.db_conn.execute("PRAGMA temp_store = 'memory'")  # Store temporary data in memory
+            self.db_conn.execute("PRAGMA temp_store = '/tmp'")  # Store temporary data in memory
         except Exception:
             pass  # Ignore if not supported
         try:
@@ -444,7 +446,7 @@ class DatabaseOperations:
             except Exception:
                 pass
             try:
-                DatabaseOperations._local.db_conn.execute("PRAGMA temp_store = 'memory'")
+                DatabaseOperations._local.db_conn.execute("PRAGMA temp_store = '/tmp'")
             except Exception:
                 pass
             try:
@@ -717,51 +719,56 @@ class DatabaseOperations:
             params = None
         return self.select_dataclass(Address, where_clause=where_clause, params=params, order_by="address_id", limit=limit)
 
-    def update_address_geocoding(self, address_id: str, geocoding_id: Optional[str] = None, colocator: Optional[str] = None):
-        """Update address with geocoding information and propagate colocator to owner"""
-        # First update the address
+
+    def update_address_geocoding_by_canonical(self, canonical_address: str, geocoding_id: Optional[str] = None, colocator: Optional[str] = None):
+        """Update all addresses with a specific canonical_address with geocoding information and propagate colocator to owners"""
+        if not canonical_address:
+            return
+
+        # Update addresses using canonical_address
         if geocoding_id is not None and colocator is not None:
             self.execute_query("""
                 UPDATE Addresses SET geocoding_id = ?, colocator = ?
-                WHERE address_id = ?
-            """, (geocoding_id, colocator, address_id))
+                WHERE canonical_address = ?
+            """, (geocoding_id, colocator, canonical_address))
         elif geocoding_id is not None:
             self.execute_query("""
                 UPDATE Addresses SET geocoding_id = ?
-                WHERE address_id = ?
-            """, (geocoding_id, address_id))
+                WHERE canonical_address = ?
+            """, (geocoding_id, canonical_address))
         elif colocator is not None:
             self.execute_query("""
                 UPDATE Addresses SET colocator = ?
-                WHERE address_id = ?
-            """, (colocator, address_id))
+                WHERE canonical_address = ?
+            """, (colocator, canonical_address))
 
-        # If colocator was set, also update the owner object
+        # If colocator was set, also update the owner objects for all addresses with this canonical_address
         if colocator is not None:
-            # Get address details to determine owner type and ID
-            address_info = self.execute_query("""
-                SELECT address_type, owner_id FROM Addresses WHERE address_id = ?
-            """, (address_id,)).fetchone()
+            # Get address details for all addresses with this canonical_address
+            address_info_list = self.execute_query("""
+                SELECT address_type, owner_id FROM Addresses WHERE canonical_address = ?
+            """, (canonical_address,)).fetchall()
 
-            if address_info and len(address_info) >= 2:
-                address_type, owner_id = address_info[0], address_info[1]
-                if owner_id:  # Only update if we have an owner_id
-                    if address_type == 'charity':
-                        self.execute_query("""
-                            UPDATE Charities SET colocator = ? WHERE charity_id = ?
-                        """, (colocator, owner_id))
-                    elif address_type == 'grant':
-                        self.execute_query("""
-                            UPDATE Grants SET grantee_colocator = ? WHERE grant_id = ?
-                        """, (colocator, owner_id))
-                    elif address_type == 'contractor':
-                        self.execute_query("""
-                            UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
-                        """, (colocator, owner_id))
-                    elif address_type == 'politicalcontribution':
-                        self.execute_query("""
-                            UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
-                        """, (colocator, owner_id))
+            for address_info in address_info_list:
+                if address_info and len(address_info) >= 2:
+                    address_type, owner_id = address_info[0], address_info[1]
+                    if owner_id:  # Only update if we have an owner_id
+                        if address_type == 'charity':
+                            self.execute_query("""
+                                UPDATE Charities SET colocator = ? WHERE charity_id = ?
+                            """, (colocator, owner_id))
+                        elif address_type == 'grant':
+                            self.execute_query("""
+                                UPDATE Grants SET colocator = ? WHERE grant_id = ?
+                            """, (colocator, owner_id))
+                        elif address_type == 'contractor':
+                            self.execute_query("""
+                                UPDATE Contractors SET colocator = ? WHERE contractor_id = ?
+                            """, (colocator, owner_id))
+                        elif address_type == 'politicalcontribution':
+                            self.execute_query("""
+                                UPDATE PoliticalContributions SET colocator = ? WHERE political_id = ?
+                            """, (colocator, owner_id))
 
         self.commit()
 
@@ -786,7 +793,7 @@ class DatabaseOperations:
                     """, (colocator, owner_id))
                 elif address_type == 'grant':
                     self.execute_query("""
-                        UPDATE Grants SET grantee_colocator = ? WHERE grant_id = ?
+                        UPDATE Grants SET colocator = ? WHERE grant_id = ?
                     """, (colocator, owner_id))
                 elif address_type == 'contractor':
                     self.execute_query("""
@@ -1002,13 +1009,13 @@ class DatabaseOperations:
     # Geocoding operations
     def insert_geocoding_record(self, normalized_address: str,
                                 latitude: Optional[float] = None, longitude: Optional[float] = None,
-                                status: str = 'pending', commit: bool = True) -> str:
+                                status: str = 'pending', canonical_address: str = '', commit: bool = True) -> str:
         """Insert geocoding record. Returns UUID."""
         geocoding_id = self.generate_uuid_v7()
         self.execute_query("""
-            INSERT INTO Geocoding (geocoding_id, normalized_address, latitude, longitude, geocoding_status)
-            VALUES (?, ?, ?, ?, ?)
-        """, (geocoding_id, normalized_address, latitude, longitude, status))
+            INSERT INTO Geocoding (geocoding_id, canonical_address, normalized_address, latitude, longitude, geocoding_status)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (geocoding_id, canonical_address, normalized_address, latitude, longitude, status))
         if commit:
             self.commit()
         return geocoding_id
@@ -1604,11 +1611,13 @@ class DatabaseOperations:
         """
         Execute a batch of address deduplication updates.
 
-        Updates all child addresses to point to the master address.
+        Updates all child addresses to point to the master address, including
+        self-updating the master address itself to ensure no NULL master_id on roots.
+        Also propagates geocoding_id from master to children to avoid redundant geocoding.
 
         Args:
             master_address_id: The address_id of the master address
-            child_address_ids: List of address_ids that should point to the master
+            child_address_ids: List of address_ids that should point to the master (may include master)
 
         Returns:
             Number of addresses updated
@@ -1616,20 +1625,50 @@ class DatabaseOperations:
         if not child_address_ids:
             return 0
 
-        # Update all child addresses to point to the master
-        placeholders = ','.join('?' for _ in child_address_ids)
-        update_query = f"""
+        updated_count = 0
+
+        # Get the master's geocoding_id to propagate to children
+        master_info = self.execute_query("""
+            SELECT geocoding_id, colocator FROM Addresses WHERE address_id = ?
+        """, (master_address_id,)).fetchone()
+
+        master_geocoding_id = master_info[0] if master_info else None
+        master_colocator = master_info[1] if master_info else None
+
+        # Explicitly update the master address to reference itself
+        self.execute_query("""
             UPDATE Addresses
             SET master_id = ?
-            WHERE address_id IN ({placeholders})
-        """
+            WHERE address_id = ?
+        """, (master_address_id, master_address_id))
+        updated_count += 1
 
-        params = [master_address_id] + child_address_ids
-        self.execute_query(update_query, tuple(params))
+        # Update child addresses (excluding master if included, but idempotent)
+        if len(child_address_ids) > 1:  # Only if there are children beyond master
+            child_ids = [aid for aid in child_address_ids if aid != master_address_id]
+            if child_ids:
+                # Build update query that sets master_id and propagates geocoding info
+                placeholders = ','.join('?' for _ in child_ids)
+                update_fields = ["master_id = ?"]
+                params = [master_address_id]
+
+                if master_geocoding_id is not None:
+                    update_fields.append("geocoding_id = ?")
+                    params.append(master_geocoding_id)
+                    
+                update_query = f"""
+                    UPDATE Addresses
+                    SET {', '.join(update_fields)}
+                    WHERE address_id IN ({placeholders})
+                """
+                params.extend(child_ids)
+                self.execute_query(update_query, tuple(params))
+                updated_count += len(child_ids)
+
         if commit:
             self.commit()
 
-        return len(child_address_ids)
+        return updated_count
 
     def execute_operation(self, operation: DatabaseOperation, conn=None):
         """Execute a single database operation"""

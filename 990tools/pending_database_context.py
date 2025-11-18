@@ -272,6 +272,8 @@ class PendingDatabaseContext:
             self._execute_insert_geocoding(db_ops, operation)
         elif op_type == DatabaseOperationType.UPDATE_GEOCODING:
             self._execute_update_geocoding(db_ops, operation)
+        elif op_type == DatabaseOperationType.UPDATE_ADDRESS_GEOCODING:
+            self._execute_update_address_geocoding(db_ops, operation)
         elif op_type == DatabaseOperationType.ADDRESS_DEDUPLICATION_BATCH:
             self._execute_address_deduplication_batch(db_ops, operation)
         # Add other operation types as needed
@@ -318,12 +320,19 @@ class PendingDatabaseContext:
     def _execute_generic_update(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
         """Execute generic update operation"""
         data = operation.data
-        table_name = data.get("table_name")
-        update_data = data.get("update_data", {})
-        id_column = data.get("id_column", "id")
+        table_name = data.get("table") or data.get("table_name")
+        update_data = data.get("updates") or data.get("update_data", {})
+        id_column = data.get("key_field") or data.get("id_column", "id")
+        key_value = data.get("key_value")
 
         if table_name and update_data:
-            db_ops.bulk_update(table_name, [update_data], id_column=id_column)
+            # If we have a key_value, add it to the update data
+            if key_value is not None:
+                update_record = {**update_data, id_column: key_value}
+                db_ops.bulk_update(table_name, [update_record], id_column=id_column)
+            else:
+                # Fallback for old format
+                db_ops.bulk_update(table_name, [update_data], id_column=id_column)
 
     def _execute_insert_geocoding(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
         """Execute geocoding insert operation"""
@@ -339,9 +348,44 @@ class PendingDatabaseContext:
     def _execute_update_geocoding(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
         """Execute geocoding update operation"""
         data = operation.data
-        # This would typically update geocoding records with API results
-        # For now, just log that it was called
-        pass
+        table_name = data.get("table")
+        update_data = data.get("updates", {})
+        key_field = data.get("key_field", "geocoding_id")
+        key_value = data.get("key_value")
+
+        if table_name and update_data and key_value is not None:
+            # Build SET clause from update_data (excluding the key field if present)
+            set_parts = []
+            params = []
+            for field, value in update_data.items():
+                if field != key_field:  # Don't include key field in SET clause
+                    set_parts.append(f"{field} = ?")
+                    params.append(value)
+
+            if set_parts:
+                set_clause = ", ".join(set_parts)
+                sql = f"UPDATE {table_name} SET {set_clause} WHERE {key_field} = ?"
+                params.append(key_value)
+                db_ops.execute_query(sql, tuple(params))
+
+    def _execute_update_address_geocoding(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
+        """Execute address geocoding update operation"""
+        # The operation.data should now contain a Geocoding object
+        geocoding = operation.data
+        if geocoding and hasattr(geocoding, 'canonical_address') and hasattr(geocoding, 'geocoding_id'):
+            # Create colocator from geocoding results
+            colocator = None
+            if geocoding.latitude is not None and geocoding.longitude is not None:
+                colocator = f"LL:{geocoding.latitude}:{geocoding.longitude}"
+
+            if geocoding.canonical_address:
+                try:
+                    db_ops.update_address_geocoding_by_canonical(geocoding.canonical_address, geocoding.geocoding_id, colocator)
+                except Exception as e:
+                    # Log the error but don't fail the entire transaction
+                    from logging_utils import log_error
+                    log_error(f"Failed to update addresses for canonical_address {geocoding.canonical_address}: {e}")
+                    # Continue with the transaction - geocoding record update will still succeed
 
     def _execute_address_deduplication_batch(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
         """Execute address deduplication batch operation"""

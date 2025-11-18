@@ -447,7 +447,9 @@ class IRS990Processor(BaseProcessor):
 
         # Temporarily disable profiling flag to prevent recursion
         original_profile_seconds = self.profile_seconds
+        original_global_profile_seconds = global_config.profile_seconds
         self.profile_seconds = None
+        global_config.profile_seconds = None
 
         # Start profiling
         profiler = cProfile.Profile()
@@ -465,6 +467,7 @@ class IRS990Processor(BaseProcessor):
         finally:
             # Restore profiling flag
             self.profile_seconds = original_profile_seconds
+            global_config.profile_seconds = original_global_profile_seconds
 
             # Cancel the alarm
             signal.alarm(0)
@@ -622,7 +625,7 @@ class IRS990Processor(BaseProcessor):
    
             # Create and run the API processor for Phase 2
             api_processor = GeocodingAPIProcessor(self.db_ops)
-            result = api_processor.process_pending_geocoding_records()
+            result = api_processor.process_pending_geocoding_records(max_files=self.max_files)
             self.processed_steps += 1
             return result
    

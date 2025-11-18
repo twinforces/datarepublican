@@ -536,7 +536,13 @@ class BaseParser:
                             context.addObjectToDatabase(contractor)
 
                             # Parse contractor address if available
-                            contractor_address = self._parse_contractor_address(contractor_elem, charity_obj, xml_filename)
+                            contractor_address = contractor.build_address(
+                                address_line1=self._extract_contractor_address_line1(contractor_elem),
+                                address_line2=self._extract_contractor_address_line2(contractor_elem),
+                                city=self._extract_contractor_city(contractor_elem),
+                                state=self._extract_contractor_state(contractor_elem),
+                                zip_code=self._extract_contractor_zip(contractor_elem)
+                            )
                             if contractor_address:
                                 context.addObjectToDatabase(contractor_address)
 
@@ -603,141 +609,217 @@ class BaseParser:
                       charity.ein if charity else 'Unknown', xml_filename, str(e))
             return None
 
-    def _parse_officer_address(self, officer_elem: etree._Element, charity: Charity, xml_filename: str) -> Optional[Address]:
-        """Parse address information from officer element"""
+    def _extract_officer_address_line1(self, officer_elem: etree._Element) -> Optional[str]:
+        """Extract address line 1 from officer element"""
+        address_line1_elem = officer_elem.find("irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line1_elem is None:
+            address_line1_elem = officer_elem.find("USAddress/AddressLine1Txt")
+        if address_line1_elem is None:
+            address_line1_elem = officer_elem.find("irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line1_elem is None:
+            address_line1_elem = officer_elem.find("AddressLine1Txt")
+        return address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
+
+    def _extract_officer_address_line2(self, officer_elem: etree._Element) -> Optional[str]:
+        """Extract address line 2 from officer element"""
+        address_line2_elem = officer_elem.find("irs:USAddress/irs:AddressLine2Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line2_elem is None:
+            address_line2_elem = officer_elem.find("USAddress/AddressLine2Txt")
+        if address_line2_elem is None:
+            address_line2_elem = officer_elem.find("irs:AddressLine2Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line2_elem is None:
+            address_line2_elem = officer_elem.find("AddressLine2Txt")
+        return address_line2_elem.text.strip() if address_line2_elem is not None and address_line2_elem.text else None
+
+    def _extract_officer_city(self, officer_elem: etree._Element) -> Optional[str]:
+        """Extract city from officer element"""
+        city_elem = officer_elem.find("irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if city_elem is None:
+            city_elem = officer_elem.find("USAddress/CityNm")
+        if city_elem is None:
+            city_elem = officer_elem.find("irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if city_elem is None:
+            city_elem = officer_elem.find("CityNm")
+        return city_elem.text.strip() if city_elem is not None and city_elem.text else None
+
+    def _extract_officer_state(self, officer_elem: etree._Element) -> Optional[str]:
+        """Extract state from officer element"""
+        state_elem = officer_elem.find("irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if state_elem is None:
+            state_elem = officer_elem.find("USAddress/StateAbbreviationCd")
+        if state_elem is None:
+            state_elem = officer_elem.find("irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if state_elem is None:
+            state_elem = officer_elem.find("StateAbbreviationCd")
+        return state_elem.text.strip() if state_elem is not None and state_elem.text else None
+
+    def _extract_officer_zip(self, officer_elem: etree._Element) -> Optional[str]:
+        """Extract ZIP code from officer element"""
+        zip_elem = officer_elem.find("irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if zip_elem is None:
+            zip_elem = officer_elem.find("USAddress/ZIPCd")
+        if zip_elem is None:
+            zip_elem = officer_elem.find("irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if zip_elem is None:
+            zip_elem = officer_elem.find("ZIPCd")
+        zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+        zip_code, _ = split_zip_code(zip_code_raw or '')
+        return zip_code
+
+    def _parse_principal_officer(self, root: etree._Element, charity: Charity, xml_filename: str, context: 'PendingDatabaseContext') -> None:
+        """Parse PrincipalOfficer information and address for 990 forms"""
         try:
-            # Look for address elements within the officer element
-            address_line1_elem = officer_elem.find("irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if address_line1_elem is None:
-                address_line1_elem = officer_elem.find("USAddress/AddressLine1Txt")
-            if address_line1_elem is None:
-                address_line1_elem = officer_elem.find("irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if address_line1_elem is None:
-                address_line1_elem = officer_elem.find("AddressLine1Txt")
+            # Look for PrincipalOfficerNm and associated USAddress
+            principal_officer_elem = root.find(".//irs:IRS990/irs:PrincipalOfficerNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if principal_officer_elem is None:
+                principal_officer_elem = root.find(".//IRS990/PrincipalOfficerNm")
+            if principal_officer_elem is None:
+                return  # No principal officer found
 
-            city_elem = officer_elem.find("irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if city_elem is None:
-                city_elem = officer_elem.find("USAddress/CityNm")
-            if city_elem is None:
-                city_elem = officer_elem.find("irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if city_elem is None:
-                city_elem = officer_elem.find("CityNm")
+            officer_name = principal_officer_elem.text.strip() if principal_officer_elem.text else None
+            if not officer_name:
+                return
 
-            state_elem = officer_elem.find("irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if state_elem is None:
-                state_elem = officer_elem.find("USAddress/StateAbbreviationCd")
-            if state_elem is None:
-                state_elem = officer_elem.find("irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if state_elem is None:
-                state_elem = officer_elem.find("StateAbbreviationCd")
+            # Parse name
+            first_name, last_name = parse_name_fast(officer_name)
 
-            zip_elem = officer_elem.find("irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if zip_elem is None:
-                zip_elem = officer_elem.find("USAddress/ZIPCd")
-            if zip_elem is None:
-                zip_elem = officer_elem.find("irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if zip_elem is None:
-                zip_elem = officer_elem.find("ZIPCd")
+            # Create officer object
+            officer = Officer(
+                first_name=first_name,
+                last_name=last_name,
+                full_name=officer_name,
+                compensation=0,  # Principal officer compensation is not in this field
+                tax_year=charity.tax_year,
+                charity_id=charity.id
+            )
+            context.addObjectToDatabase(officer)
 
-            # Extract values
-            address_line1 = address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
-            city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
-            state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
-            zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+            # Look for the associated USAddress (comes right after PrincipalOfficerNm in the IRS990 element)
+            # Use XPath following-sibling to find the next USAddress
+            address_elem = principal_officer_elem.xpath("following-sibling::irs:USAddress[1]", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if not address_elem:
+                address_elem = principal_officer_elem.xpath("following-sibling::USAddress[1]")
+            if address_elem:
+                address_elem = address_elem[0]
 
-            # Split ZIP code
-            zip_code, zip4 = split_zip_code(zip_code_raw or '')
+            if address_elem is not None:
+                # Extract address components
+                address_line1_elem = address_elem.find("irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if address_line1_elem is None:
+                    address_line1_elem = address_elem.find("AddressLine1Txt")
 
-            # Check if we have at least some address components
-            if any([address_line1, city, state, zip_code]):
-                return charity.build_address(
-                    address_line1=address_line1,
-                    address_line2=None,
-                    city=city,
-                    state=state,
-                    zip_code=zip_code,
-                    zip4=zip4
-                )
-            return None
+                city_elem = address_elem.find("irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if city_elem is None:
+                    city_elem = address_elem.find("CityNm")
+
+                state_elem = address_elem.find("irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if state_elem is None:
+                    state_elem = address_elem.find("StateAbbreviationCd")
+
+                zip_elem = address_elem.find("irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if zip_elem is None:
+                    zip_elem = address_elem.find("ZIPCd")
+
+                # Extract values
+                address_line1 = address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
+                city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
+                state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
+                zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+
+                # Split ZIP code
+                zip_code, zip4 = split_zip_code(zip_code_raw or '')
+
+                # Check if we have at least some address components
+                if any([address_line1, city, state, zip_code]):
+                    address = officer.build_address(
+                        address_line1=address_line1,
+                        address_line2=None,
+                        city=city,
+                        state=state,
+                        zip_code=zip_code,
+                        zip4=zip4
+                    )
+                    context.addObjectToDatabase(address)
+
         except Exception as e:
-            log_debug("Failed to parse officer address in {0}: {1}", xml_filename, str(e))
-            return None
+            log_debug("Failed to parse principal officer in {0}: {1}", xml_filename, str(e))
 
-    def _parse_contractor_address(self, contractor_elem: etree._Element, charity: Charity, xml_filename: str) -> Optional[Address]:
-        """Parse address information from contractor element"""
-        try:
-            # Look for address elements within the contractor element
-            address_line1_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if address_line1_elem is None:
-                address_line1_elem = contractor_elem.find("ContractorAddress/USAddress/AddressLine1Txt")
-            if address_line1_elem is None:
-                address_line1_elem = contractor_elem.find("irs:ContractorAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if address_line1_elem is None:
-                address_line1_elem = contractor_elem.find("ContractorAddress/AddressLine1Txt")
-            if address_line1_elem is None:
-                address_line1_elem = contractor_elem.find("irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if address_line1_elem is None:
-                address_line1_elem = contractor_elem.find("USAddress/AddressLine1Txt")
+    def _extract_contractor_address_line1(self, contractor_elem: etree._Element) -> Optional[str]:
+        """Extract address line 1 from contractor element"""
+        address_line1_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line1_elem is None:
+            address_line1_elem = contractor_elem.find("ContractorAddress/USAddress/AddressLine1Txt")
+        if address_line1_elem is None:
+            address_line1_elem = contractor_elem.find("irs:ContractorAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line1_elem is None:
+            address_line1_elem = contractor_elem.find("ContractorAddress/AddressLine1Txt")
+        if address_line1_elem is None:
+            address_line1_elem = contractor_elem.find("irs:USAddress/irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line1_elem is None:
+            address_line1_elem = contractor_elem.find("USAddress/AddressLine1Txt")
+        return address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
 
-            city_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if city_elem is None:
-                city_elem = contractor_elem.find("ContractorAddress/USAddress/CityNm")
-            if city_elem is None:
-                city_elem = contractor_elem.find("irs:ContractorAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if city_elem is None:
-                city_elem = contractor_elem.find("ContractorAddress/CityNm")
-            if city_elem is None:
-                city_elem = contractor_elem.find("irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if city_elem is None:
-                city_elem = contractor_elem.find("USAddress/CityNm")
+    def _extract_contractor_address_line2(self, contractor_elem: etree._Element) -> Optional[str]:
+        """Extract address line 2 from contractor element"""
+        address_line2_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:AddressLine2Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line2_elem is None:
+            address_line2_elem = contractor_elem.find("ContractorAddress/USAddress/AddressLine2Txt")
+        if address_line2_elem is None:
+            address_line2_elem = contractor_elem.find("irs:ContractorAddress/irs:AddressLine2Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line2_elem is None:
+            address_line2_elem = contractor_elem.find("ContractorAddress/AddressLine2Txt")
+        if address_line2_elem is None:
+            address_line2_elem = contractor_elem.find("irs:USAddress/irs:AddressLine2Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if address_line2_elem is None:
+            address_line2_elem = contractor_elem.find("USAddress/AddressLine2Txt")
+        return address_line2_elem.text.strip() if address_line2_elem is not None and address_line2_elem.text else None
 
-            state_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if state_elem is None:
-                state_elem = contractor_elem.find("ContractorAddress/USAddress/StateAbbreviationCd")
-            if state_elem is None:
-                state_elem = contractor_elem.find("irs:ContractorAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if state_elem is None:
-                state_elem = contractor_elem.find("ContractorAddress/StateAbbreviationCd")
-            if state_elem is None:
-                state_elem = contractor_elem.find("irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if state_elem is None:
-                state_elem = contractor_elem.find("USAddress/StateAbbreviationCd")
+    def _extract_contractor_city(self, contractor_elem: etree._Element) -> Optional[str]:
+        """Extract city from contractor element"""
+        city_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if city_elem is None:
+            city_elem = contractor_elem.find("ContractorAddress/USAddress/CityNm")
+        if city_elem is None:
+            city_elem = contractor_elem.find("irs:ContractorAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if city_elem is None:
+            city_elem = contractor_elem.find("ContractorAddress/CityNm")
+        if city_elem is None:
+            city_elem = contractor_elem.find("irs:USAddress/irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if city_elem is None:
+            city_elem = contractor_elem.find("USAddress/CityNm")
+        return city_elem.text.strip() if city_elem is not None and city_elem.text else None
 
-            zip_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if zip_elem is None:
-                zip_elem = contractor_elem.find("ContractorAddress/USAddress/ZIPCd")
-            if zip_elem is None:
-                zip_elem = contractor_elem.find("irs:ContractorAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if zip_elem is None:
-                zip_elem = contractor_elem.find("ContractorAddress/ZIPCd")
-            if zip_elem is None:
-                zip_elem = contractor_elem.find("irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
-            if zip_elem is None:
-                zip_elem = contractor_elem.find("USAddress/ZIPCd")
+    def _extract_contractor_state(self, contractor_elem: etree._Element) -> Optional[str]:
+        """Extract state from contractor element"""
+        state_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if state_elem is None:
+            state_elem = contractor_elem.find("ContractorAddress/USAddress/StateAbbreviationCd")
+        if state_elem is None:
+            state_elem = contractor_elem.find("irs:ContractorAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if state_elem is None:
+            state_elem = contractor_elem.find("ContractorAddress/StateAbbreviationCd")
+        if state_elem is None:
+            state_elem = contractor_elem.find("irs:USAddress/irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if state_elem is None:
+            state_elem = contractor_elem.find("USAddress/StateAbbreviationCd")
+        return state_elem.text.strip() if state_elem is not None and state_elem.text else None
 
-            # Extract values
-            address_line1 = address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
-            city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
-            state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
-            zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
-
-            # Split ZIP code
-            zip_code, zip4 = split_zip_code(zip_code_raw or '')
-
-            # Check if we have at least some address components
-            if any([address_line1, city, state, zip_code]):
-                return charity.build_address(
-                    address_line1=address_line1,
-                    address_line2=None,
-                    city=city,
-                    state=state,
-                    zip_code=zip_code,
-                    zip4=zip4
-                )
-            return None
-        except Exception as e:
-            log_debug("Failed to parse contractor address in {0}: {1}", xml_filename, str(e))
-            return None
+    def _extract_contractor_zip(self, contractor_elem: etree._Element) -> Optional[str]:
+        """Extract ZIP code from contractor element"""
+        zip_elem = contractor_elem.find("irs:ContractorAddress/irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if zip_elem is None:
+            zip_elem = contractor_elem.find("ContractorAddress/USAddress/ZIPCd")
+        if zip_elem is None:
+            zip_elem = contractor_elem.find("irs:ContractorAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if zip_elem is None:
+            zip_elem = contractor_elem.find("ContractorAddress/ZIPCd")
+        if zip_elem is None:
+            zip_elem = contractor_elem.find("irs:USAddress/irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+        if zip_elem is None:
+            zip_elem = contractor_elem.find("USAddress/ZIPCd")
+        zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+        zip_code, _ = split_zip_code(zip_code_raw or '')
+        return zip_code
 
     def calculate_percentage(self, value: Optional[float], denom: Optional[float]) -> float:
         """Calculate percentage safely"""
@@ -797,6 +879,7 @@ class BaseParser:
             fields = self.get_field_parsers()
             data: Dict[str, Any] = {}
             officer_entries: List[Dict[str, Any]] = []
+
             for field, func in fields:
                 call_args = (root, field, namespaces, xml_filename, context, xpath_cache, charity.form_type)
                 call_kwargs = {'xpath_match_stats': xpath_match_stats}
@@ -871,6 +954,10 @@ class BaseParser:
             charity.domestic_misrep_flag = data.get("domestic_misrep_flag", False)
             charity.xml_name = xml_filename
 
+            # Parse PrincipalOfficer if present (990 forms)
+            if charity.form_type == "990":
+                self._parse_principal_officer(root, charity, xml_filename, context)
+
             # Create and add officers to context
             for entry in officer_entries:
                 officer = Officer(
@@ -884,7 +971,13 @@ class BaseParser:
                 context.addObjectToDatabase(officer)
 
                 # Parse officer address if available
-                officer_address = self._parse_officer_address(entry["element"], charity, xml_filename)
+                officer_address = officer.build_address(
+                    address_line1=self._extract_officer_address_line1(entry["element"]),
+                    address_line2=self._extract_officer_address_line2(entry["element"]),
+                    city=self._extract_officer_city(entry["element"]),
+                    state=self._extract_officer_state(entry["element"]),
+                    zip_code=self._extract_officer_zip(entry["element"])
+                )
                 if officer_address:
                     context.addObjectToDatabase(officer_address)
 
@@ -937,6 +1030,7 @@ class BaseParser:
             return Parser990T()
         else:
             return None
+
 
     def parse_related_entities(
         self,

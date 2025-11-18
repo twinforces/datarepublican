@@ -166,8 +166,10 @@ CREATE TABLE Addresses (
 -- Geocoding table - Cached geocoding results
 CREATE TABLE Geocoding (
     geocoding_id UUID DEFAULT uuidv7() PRIMARY KEY,
+    canonical_address VARCHAR,
+    -- Canonical address this geocoding represents
     normalized_address VARCHAR NOT NULL,
-    -- Normalized address string
+    -- Normalized address string for API calls
     latitude DOUBLE,
     -- Latitude coordinate
     longitude DOUBLE,
@@ -248,6 +250,14 @@ CREATE TABLE Backfill (
     -- ZIP code for uniqueness
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 );
+-- PendingCanonicals table - Pre-computed canonical address groups for deduplication
+CREATE TABLE PendingCanonicals (
+    canonical_address VARCHAR PRIMARY KEY,
+    -- Canonical address string (primary key)
+    root_id UUID NOT NULL,
+    -- Root address ID (smallest address_id for this canonical group)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- When this canonical group was created
+);
 -- PipelineProgress table - Track processing pipeline status
 CREATE TABLE PipelineProgress (
     progress_id UUID DEFAULT uuidv7() PRIMARY KEY,
@@ -287,6 +297,8 @@ CREATE TABLE Officers (
     tax_year INTEGER NOT NULL,
     photo_url VARCHAR,
     -- URL to officer photo from Google Knowledge Graph API
+    colocator VARCHAR,
+    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (charity_id) REFERENCES Charities(charity_id) -- DuckDB doesn't support CASCADE
 );
@@ -355,8 +367,11 @@ CREATE INDEX idx_addresses_type ON Addresses(address_type);
 CREATE INDEX idx_addresses_geocoding ON Addresses(geocoding_id);
 CREATE INDEX idx_addresses_master_id ON Addresses(master_id);
 CREATE INDEX idx_addresses_canonical ON Addresses(canonical_address);
+CREATE INDEX idx_dedup_canon_groups ON Addresses (canonical_address, address_id);
+create index idx_addresses_colocator on Addresses (colocator);
 -- Geocoding indexes
 CREATE INDEX idx_geocoding_status ON Geocoding(geocoding_status);
+CREATE INDEX idx_geocoding_canonical ON Geocoding(canonical_address);
 -- ZipFiles indexes
 CREATE INDEX idx_zipfiles_tax_year ON ZipFiles(tax_year);
 CREATE INDEX idx_zipfiles_status ON ZipFiles(status);
@@ -378,6 +393,7 @@ CREATE INDEX idx_officers_tax_year ON Officers(tax_year);
 CREATE INDEX idx_officers_master_id ON Officers(master_id);
 CREATE INDEX idx_officers_name ON Officers(last_name, first_name);
 CREATE INDEX idx_officers_full_name ON Officers(full_name);
+CREATE INDEX idx_officers_colocator ON Officers(colocator);
 -- Contractors indexes
 CREATE INDEX idx_contractors_filer_ein ON Contractors(filer_ein);
 CREATE INDEX idx_contractors_tax_year ON Contractors(tax_year);

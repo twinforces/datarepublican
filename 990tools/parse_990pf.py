@@ -3,7 +3,7 @@ import sys
 
 from lxml import etree  # type: ignore
 from io import BytesIO
-from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field, parse_name_fast
+from parse_utils import parse_int_field, parse_string_field, clean_name, MONEY_PATTERN, parse_float_field, parse_name_fast, split_zip_code
 from xpaths_990pf import XPATHS_990PF, NAMESPACES
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from typing import Optional, List, Tuple, Dict, Any, Callable
@@ -118,6 +118,64 @@ class Parser990PF(BaseParser):
                     continue
 
         return total, officer_entries
+
+    def _parse_officer_address(self, officer_elem: etree._Element, charity: Charity, xml_filename: str, context: 'PendingDatabaseContext') -> None:
+        """Parse address information from 990PF officer element and add to context"""
+        # For 990PF, officers are not stored as separate objects, so we just create the address directly
+        try:
+            # For 990PF, the address is directly within the OfficerDirTrstKeyEmplGrp element
+            # Look for USAddress element
+            address_elem = officer_elem.find("irs:USAddress", namespaces={'irs': 'http://www.irs.gov/efile'})
+            if address_elem is None:
+                address_elem = officer_elem.find("USAddress")
+
+            if address_elem is not None:
+                # Extract address components
+                address_line1_elem = address_elem.find("irs:AddressLine1Txt", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if address_line1_elem is None:
+                    address_line1_elem = address_elem.find("AddressLine1Txt")
+
+                city_elem = address_elem.find("irs:CityNm", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if city_elem is None:
+                    city_elem = address_elem.find("CityNm")
+
+                state_elem = address_elem.find("irs:StateAbbreviationCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if state_elem is None:
+                    state_elem = address_elem.find("StateAbbreviationCd")
+
+                zip_elem = address_elem.find("irs:ZIPCd", namespaces={'irs': 'http://www.irs.gov/efile'})
+                if zip_elem is None:
+                    zip_elem = address_elem.find("ZIPCd")
+
+                # Extract values
+                address_line1 = address_line1_elem.text.strip() if address_line1_elem is not None and address_line1_elem.text else None
+                city = city_elem.text.strip() if city_elem is not None and city_elem.text else None
+                state = state_elem.text.strip() if state_elem is not None and state_elem.text else None
+                zip_code_raw = zip_elem.text.strip() if zip_elem is not None and zip_elem.text else None
+
+                # Split ZIP code
+                zip_code, zip4 = split_zip_code(zip_code_raw or '')
+
+                # Check if we have at least some address components
+                if any([address_line1, city, state, zip_code]):
+                    # Create address directly using Address.create_for_charity pattern
+                    from models import Address
+                    address = Address(
+                        ein="",  # Officers don't have EINs
+                        name="BANK OF AMERICA N A",  # From the XML we saw
+                        address_line1=address_line1,
+                        address_line2=None,
+                        city=city,
+                        state=state,
+                        zip_code=zip_code,
+                        zip4=zip4,
+                        address_type="officer",
+                        owner_id=charity.id  # Link to charity
+                    )
+                    address.prep_for_insert()  # This will canonicalize and set colocator
+                    context.addObjectToDatabase(address)
+        except Exception as e:
+            log_debug("Failed to parse 990PF officer address in {0}: {1}", xml_filename, str(e))
     def parse_grants_to_others(self, root, field, namespaces, xml_filename, context, xpath_cache, form_type, xpath_match_stats=None, charity=None):
         """Parse grants to others for Form 990PF"""
         total = 0

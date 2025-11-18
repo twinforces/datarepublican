@@ -54,6 +54,7 @@ def parse_name_fast(name):
     Fast name parsing with fallback to HumanName for complex names.
     Handles most IRS officer names (simple "First Last" format) with regex,
     falls back to HumanName for complex names (>2 parts).
+    Strips trailing "N A" or "NA" suffixes from organizational names.
     """
     if not name:
         return 'Unknown', 'Unknown'
@@ -65,6 +66,9 @@ def parse_name_fast(name):
     if letters_only == 'NA':
         return 'Not', 'Applicable'
 
+    # Strip trailing "N A" or "NA" suffixes (e.g., "Bank of America N A" -> "Bank of America")
+    cleaned = re.sub(r'\s+(?:N\s+A|NA)\s*$', '', cleaned)
+
     parts = SPLIT_NAME_PATTERN.split(cleaned)
 
     if len(parts) <= 2:
@@ -73,7 +77,8 @@ def parse_name_fast(name):
         last = parts[-1] if len(parts) > 1 else 'Unknown'
         return first, last
     else:
-        # Complex names: use HumanName for accuracy
+        # For names with >2 parts after stripping suffixes, use HumanName for accuracy
+        # This handles complex names like "Dr. Jane Doe Jr." or organizational names
         hn = HumanName(cleaned)
         first = hn.first or 'Unknown'
         last = hn.last or 'Unknown'
