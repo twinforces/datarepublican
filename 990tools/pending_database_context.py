@@ -226,19 +226,10 @@ class PendingDatabaseContext:
                     db_operations.append(operation)
 
             # Execute DB operations before commit
-            # Process all operations individually to avoid conflicts
-
             for operation in db_operations:
-                try:
-                    self._execute_operation(db_ops, operation)
-                    # Commit after each operation to avoid conflicts
-                    conn.commit()
-                except Exception as e:
-                    log_error(f"Failed to execute operation {operation.operation_type}: {e}")
-                    # Continue with other operations
-                    continue
+                self._execute_operation(db_ops, operation)
 
-            log_info("All DB operations completed and committed individually")
+            log_info("All DB operations completed")
     
             # Execute non-DB operations after commit (e.g., progress updates)
             for operation in non_db_operations:

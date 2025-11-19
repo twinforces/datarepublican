@@ -1232,25 +1232,18 @@ class DatabaseOperations:
             params.append(row_params)
 
         try:
-            # If commit_batches is False, execute individual updates to avoid transaction conflicts
-            if not commit_batches:
-                # Execute individual updates
-                for row_params in params:
-                    conn.execute(sql, row_params)
-                total_processed = len(params)
-            else:
-                # Execute bulk update in batches of batch_size using executemany
-                total_processed = 0
-                for i in range(0, len(params), batch_size):
-                    batch_params = params[i:i + batch_size]
-                    batch_start = time.perf_counter()
-                    conn.executemany(sql, batch_params)  # type: ignore
-                    if commit_batches:
-                        conn.commit()
-                    batch_elapsed = time.perf_counter() - batch_start
-                    rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
-                    log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
-                    total_processed += len(batch_params)
+            # Execute bulk update in batches of batch_size using executemany
+            total_processed = 0
+            for i in range(0, len(params), batch_size):
+                batch_params = params[i:i + batch_size]
+                batch_start = time.perf_counter()
+                conn.executemany(sql, batch_params)  # type: ignore
+                if commit_batches:
+                    conn.commit()
+                batch_elapsed = time.perf_counter() - batch_start
+                rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
+                log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
+                total_processed += len(batch_params)
 
             if commit:
                 self.commit()
