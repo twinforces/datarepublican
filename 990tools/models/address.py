@@ -152,7 +152,7 @@ class Address(BaseModel):
                           city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                           zip4: Optional[str] = None, address_type: str = "charity") -> 'Address':
         """Factory method to create an Address for a specific charity"""
-        return cls(
+        result = cls(
             ein=charity.ein,
             name=charity.filer_name,
             address_line1=address_line1,
@@ -164,6 +164,7 @@ class Address(BaseModel):
             address_type=address_type,
             owner_id=charity.charity_id
         )
+        if result.colocator: charity.colocator = result.colocator
 
     @classmethod
     def create_foreign_address(cls, country_code: str, address_type: str = "filer", owner_id: Optional[str] = None) -> 'Address':
@@ -229,6 +230,7 @@ class Address(BaseModel):
 
         # Create Geocoding object
         geocoding = Geocoding(
+            canonical_address=self.canonical_address or "",
             normalized_address=json.dumps(census_json),  # Store as proper JSON string
             geocoding_status='pending'
         )

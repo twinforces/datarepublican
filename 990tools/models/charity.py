@@ -88,8 +88,8 @@ class Charity(BaseModel):
         return bool(self.grift_ratio and self.grift_ratio > 10)
 
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
-                     city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
-                     zip4: Optional[str] = None) -> Address:
+                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
+                      zip4: Optional[str] = None) -> Address:
         """Build an Address dataclass record owned by this charity"""
         if self.id is None:
             self.id = self.generate_id()
@@ -105,6 +105,8 @@ class Charity(BaseModel):
             address_type="charity",
             owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
         )
+        address.prep_for_insert()
+        if address.colocator: self.colocator = address.colocator
         return address
 
     def build_grant(self, recipient_ein: Optional[str] = None, grant_amt: float = 0.0,
@@ -209,7 +211,7 @@ class Charity(BaseModel):
             charity_id=self.id
         )
         if address_line1 or city or state or zip_code:
-            contractor.address = contractor.create_address(
+            contractor.address = contractor.build_address(
                 address_line1=address_line1 or "",
                 address_line2=address_line2 or "",
                 city=city or "",
@@ -219,7 +221,7 @@ class Charity(BaseModel):
         return contractor
 
     def create_officer(self, name: str, title: str, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
-                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> 'Officer':
+                       city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> 'Officer':
         """Factory method to create an Officer owned by this Charity"""
         from .officer import Officer
         if self.id is None:
@@ -232,7 +234,7 @@ class Charity(BaseModel):
             charity_id=self.id
         )
         if address_line1 or city or state or zip_code:
-            officer.address = officer.create_address(
+            officer.address = officer.build_address(
                 address_line1=address_line1 or "",
                 address_line2=address_line2 or "",
                 city=city or "",
@@ -257,7 +259,7 @@ class Charity(BaseModel):
             charity_id=self.id
         )
         if address_line1 or city or state or zip_code:
-            grant.address = grant.create_address(
+            grant.address = grant.build_address(
                 address_line1=address_line1 or "",
                 address_line2=address_line2 or "",
                 city=city or "",

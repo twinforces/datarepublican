@@ -18,6 +18,7 @@ class Grant(BaseModel):
     """Represents a charitable grant from one organization to another"""
 
     grant_id: Optional[str] = field(default=None, init=False)
+    charity_id: Optional[str] = None
     filer_ein: str = ""
     filer_name: str = ""
     grantee_name: str = ""
@@ -52,6 +53,9 @@ class Grant(BaseModel):
             address_type="grant",
             owner_id=self.id  # This ensures owner_id is always set since self.id creates the primary key if needed
         )
+        address.prep_for_insert()
+        if address.colocator: self.colocator = address.colocator
+
         return address
 
     def prep_for_insert(self):

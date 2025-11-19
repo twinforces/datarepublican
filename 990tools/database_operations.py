@@ -1150,7 +1150,7 @@ class DatabaseOperations:
         build_time = time.perf_counter() - build_start
         log_debug(f"Built {len(objects)} param rows in {build_time:.2f}s")
 
-        # Batched executemany for maximum performance - IDs already generated client-side
+        # Batched executemany for inserts - IDs already generated client-side
         insert_start = time.perf_counter()
         for i in range(0, len(objects), batch_size):
             batch_params = param_rows[i:i + batch_size]
@@ -1176,6 +1176,7 @@ class DatabaseOperations:
             log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
             insert_time = time.perf_counter() - insert_start
             log_info(f"executemany inserted {len(objects)} rows in {insert_time:.2f}s ({len(objects)/insert_time:.0f} rows/s)")
+        total_processed = len(objects)
         conn.commit()
 
         # COUNT VALIDATION: Check count after insert (optional for performance)
@@ -1206,7 +1207,7 @@ class DatabaseOperations:
         # Return the client-generated IDs
         return [str(getattr(obj, id_field)) for obj in objects]
 
-    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 50000, conn=None) -> int:
+    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 50000, conn=None, commit: bool = True, commit_batches: bool = False) -> int:
         """Generic bulk update method for database operations with batched processing"""
         if conn is None:
             conn = self.db_conn
@@ -1231,17 +1232,28 @@ class DatabaseOperations:
             params.append(row_params)
 
         try:
-            # Execute bulk update in batches of batch_size using executemany
-            total_processed = 0
-            for i in range(0, len(params), batch_size):
-                batch_params = params[i:i + batch_size]
-                batch_start = time.perf_counter()
-                conn.executemany(sql, batch_params)  # type: ignore
-                batch_elapsed = time.perf_counter() - batch_start
-                rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
-                log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
-                total_processed += len(batch_params)
-            self.commit()
+            # If commit_batches is False, execute individual updates to avoid transaction conflicts
+            if not commit_batches:
+                # Execute individual updates
+                for row_params in params:
+                    conn.execute(sql, row_params)
+                total_processed = len(params)
+            else:
+                # Execute bulk update in batches of batch_size using executemany
+                total_processed = 0
+                for i in range(0, len(params), batch_size):
+                    batch_params = params[i:i + batch_size]
+                    batch_start = time.perf_counter()
+                    conn.executemany(sql, batch_params)  # type: ignore
+                    if commit_batches:
+                        conn.commit()
+                    batch_elapsed = time.perf_counter() - batch_start
+                    rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
+                    log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
+                    total_processed += len(batch_params)
+
+            if commit:
+                self.commit()
 
             # Do not commit here - let caller handle transaction
             return total_processed
@@ -1607,13 +1619,15 @@ class DatabaseOperations:
 
         return batch_operations, next_last_address_id
 
-    def execute_address_deduplication_batch(self, master_address_id: str, child_address_ids: List[str], commit: bool = True) -> int:
+    def execute_address_deduplication_batch(self, master_address_id: str, child_address_ids: List[str], commit: bool = True, conn=None) -> int:
         """
         Execute a batch of address deduplication updates.
 
         Updates all child addresses to point to the master address, including
         self-updating the master address itself to ensure no NULL master_id on roots.
         Also propagates geocoding_id from master to children to avoid redundant geocoding.
+
+        Uses bulk_update to prevent write-write conflicts within transactions.
 
         Args:
             master_address_id: The address_id of the master address
@@ -1625,45 +1639,46 @@ class DatabaseOperations:
         if not child_address_ids:
             return 0
 
-        updated_count = 0
-
-        # Get the master's geocoding_id to propagate to children
+        # Get the master's geocoding_id, colocator, and current master_id to propagate to children
         master_info = self.execute_query("""
-            SELECT geocoding_id, colocator FROM Addresses WHERE address_id = ?
+            SELECT geocoding_id, colocator, master_id FROM Addresses WHERE address_id = ?
         """, (master_address_id,)).fetchone()
 
         master_geocoding_id = master_info[0] if master_info else None
         master_colocator = master_info[1] if master_info else None
+        master_current_master_id = master_info[2] if master_info else None
 
-        # Explicitly update the master address to reference itself
-        self.execute_query("""
-            UPDATE Addresses
-            SET master_id = ?
-            WHERE address_id = ?
-        """, (master_address_id, master_address_id))
-        updated_count += 1
+        # Build bulk update data - each address gets updated exactly once
+        updates = []
 
-        # Update child addresses (excluding master if included, but idempotent)
-        if len(child_address_ids) > 1:  # Only if there are children beyond master
-            child_ids = [aid for aid in child_address_ids if aid != master_address_id]
-            if child_ids:
-                # Build update query that sets master_id and propagates geocoding info
-                placeholders = ','.join('?' for _ in child_ids)
-                update_fields = ["master_id = ?"]
-                params = [master_address_id]
+        # Check if master address already has correct master_id (may have been set by geocoding operation)
+        if master_current_master_id != master_address_id:
+            # Master address update only if not already set correctly
+            master_update = {
+                'address_id': master_address_id,
+                'master_id': master_address_id
+            }
+            updates.append(master_update)
 
+        # Child address updates
+        for child_id in child_address_ids:
+            if child_id != master_address_id:  # Avoid duplicate update for master
+                child_update = {
+                    'address_id': child_id,
+                    'master_id': master_address_id
+                }
                 if master_geocoding_id is not None:
-                    update_fields.append("geocoding_id = ?")
-                    params.append(master_geocoding_id)
-                    
-                update_query = f"""
-                    UPDATE Addresses
-                    SET {', '.join(update_fields)}
-                    WHERE address_id IN ({placeholders})
-                """
-                params.extend(child_ids)
-                self.execute_query(update_query, tuple(params))
-                updated_count += len(child_ids)
+                    child_update['geocoding_id'] = master_geocoding_id
+                updates.append(child_update)
+
+        # Deduplicate updates by address_id to prevent conflicts if same address appears multiple times
+        updates_by_id = {}
+        for update in updates:
+            updates_by_id[update['address_id']] = update
+        deduplicated_updates = list(updates_by_id.values())
+
+        # Execute bulk update to prevent write-write conflicts
+        updated_count = self.bulk_update('Addresses', deduplicated_updates, id_column='address_id', commit=False, conn=conn)
 
         if commit:
             self.commit()

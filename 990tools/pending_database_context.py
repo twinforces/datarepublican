@@ -226,12 +226,19 @@ class PendingDatabaseContext:
                     db_operations.append(operation)
 
             # Execute DB operations before commit
-            for operation in db_operations:
-                self._execute_operation(db_ops, operation)
+            # Process all operations individually to avoid conflicts
 
-            log_info("DB updates completed, committing")
-            conn.commit()
-            log_info("Transaction committed successfully")
+            for operation in db_operations:
+                try:
+                    self._execute_operation(db_ops, operation)
+                    # Commit after each operation to avoid conflicts
+                    conn.commit()
+                except Exception as e:
+                    log_error(f"Failed to execute operation {operation.operation_type}: {e}")
+                    # Continue with other operations
+                    continue
+
+            log_info("All DB operations completed and committed individually")
     
             # Execute non-DB operations after commit (e.g., progress updates)
             for operation in non_db_operations:
@@ -394,7 +401,9 @@ class PendingDatabaseContext:
         child_address_ids = data.get("child_address_ids", [])
 
         if master_address_id and child_address_ids:
-            db_ops.execute_address_deduplication_batch(master_address_id, child_address_ids, commit=False)
+            # Use the same connection as the PDC transaction
+            conn = db_ops.db_conn
+            db_ops.execute_address_deduplication_batch(master_address_id, child_address_ids, commit=False, conn=conn)
 
     @classmethod
     def merge(cls, contexts: List['PendingDatabaseContext']) -> 'PendingDatabaseContext':

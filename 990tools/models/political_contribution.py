@@ -45,6 +45,8 @@ class PoliticalContribution(BaseModel):
             address_type="politicalcontribution",
             owner_id=self.id  # force creation
         )
+        address.prep_for_insert()
+        if address.colocator: self.colocator = address.colocator
         return address
 
     def prep_for_insert(self):

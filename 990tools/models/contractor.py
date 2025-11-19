@@ -49,6 +49,8 @@ class Contractor(BaseModel):
             address_type="contractor",
             owner_id=str(self.contractor_id) if self.contractor_id is not None else None  # Convert to string
         )
+        address.prep_for_insert()
+        if address.colocator: self.colocator = address.colocator
         return address
 
     def prep_for_insert(self):

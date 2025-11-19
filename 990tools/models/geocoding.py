@@ -17,6 +17,7 @@ class Geocoding(BaseModel):
     """Represents cached geocoding results for an address"""
 
     geocoding_id: Optional[str] = field(default=None, init=False)
+    canonical_address: str = ""
     normalized_address: str = ""
     latitude: Optional[float] = None
     longitude: Optional[float] = None
@@ -60,13 +61,14 @@ class Geocoding(BaseModel):
     @classmethod
     def get_db_field_names(cls):
         """Get database field names for this model"""
-        return ['geocoding_id', 'normalized_address', 'latitude', 'longitude',
+        return ['geocoding_id', 'canonical_address', 'normalized_address', 'latitude', 'longitude',
                 'geocoding_status', 'last_attempt', 'attempt_count']
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
         return {
             'geocoding_id': self.geocoding_id or "",
+            'canonical_address': self.canonical_address or "",
             'normalized_address': self.normalized_address or "",
             'latitude': self.latitude,
             'longitude': self.longitude,

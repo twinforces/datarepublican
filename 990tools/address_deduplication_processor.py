@@ -334,11 +334,11 @@ class AddressDeduplicationProducer(BaseProducer):
                         context.addOperationToDatabase(link_geocoding_op)
 
                     # Create deduplication operation for all addresses with this canonical_address
-                    # Set master_id for ALL addresses in the group to the master_address_id
+                    # Set master_id for child addresses only (master is handled by geocoding update)
                     dedup_work_item = DedupWorkItem(
                         canonical_address=canonical_address,
                         master_address_id=master_address_id,
-                        child_address_ids=[a.address_id for a in addresses]  # ALL addresses in the group including master
+                        child_address_ids=[a.address_id for a in addresses if a.address_id != master_address_id]  # Exclude master
                     )
 
                     operation = DatabaseOperation(
