@@ -198,7 +198,7 @@ class DatabaseOperations:
         conn.execute("SET threads = 4")  # more threads
         conn.execute("SET memory_limit = '6GB'")
         conn.execute("SET enable_object_cache = true")   # Enable object cache
-        conn.execute("SET max_temp_directory_size = '10GB'")  # Increase temp directory size
+        #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
         
         try:
             conn.execute("SET insert_select_parallelism = true")  # Enable parallel insert-select operations
@@ -464,6 +464,11 @@ class DatabaseOperations:
         except (duckdb.CatalogException, duckdb.BinderException, duckdb.SyntaxException,
                 duckdb.ConstraintException, duckdb.DataError) as e:
             # Handle query-specific errors (syntax, constraint violations, table not found, etc.)
+            error_str = str(e).lower()
+            if "out of memory" in error_str or "failed to offload data block" in error_str:
+                log_error(f"Out of memory error detected: {str(e)}")
+                log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
+                sys.exit(-1)
             error_msg = f"Query execution failed: {str(e)}"
             if "timeout" in str(e).lower() or "interrupt" in str(e).lower():
                 error_msg = f"Query timed out or was interrupted: {str(e)}"
@@ -471,6 +476,11 @@ class DatabaseOperations:
             raise RuntimeError(error_msg) from e
         except duckdb.ConnectionException as e:
             # Handle connection-related errors
+            error_str = str(e).lower()
+            if "out of memory" in error_str or "failed to offload data block" in error_str:
+                log_error(f"Out of memory error detected: {str(e)}")
+                log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
+                sys.exit(-1)
             error_msg = f"Database connection error: {str(e)}"
             log_error(error_msg)
             raise RuntimeError(error_msg) from e
