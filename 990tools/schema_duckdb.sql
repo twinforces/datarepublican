@@ -153,7 +153,7 @@ CREATE TABLE Addresses (
     -- Standardized address built from components
     address_type VARCHAR NOT NULL,
     -- Address type
-    geocoding_id VARCHAR,
+    geocoding_id UUID,
     -- Reference to geocoding cache
     latitude DOUBLE,
     -- Latitude coordinate
@@ -342,6 +342,12 @@ CREATE TABLE PoliticalContributions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein) REFERENCES Charities(ein) -- DuckDB doesn't support CASCADE
 );
+CREATE TABLE _meta_clustering (
+    table_name VARCHAR,
+    clustered_column VARCHAR,
+    clustered_at TIMESTAMP,
+    PRIMARY KEY (table_name)
+);
 -- Indexes for performance optimization
 -- Charities indexes
 CREATE INDEX idx_charities_ein ON Charities(ein);
@@ -369,6 +375,12 @@ CREATE INDEX idx_addresses_master_id ON Addresses(master_id);
 CREATE INDEX idx_addresses_canonical ON Addresses(canonical_address);
 CREATE INDEX idx_dedup_canon_groups ON Addresses (canonical_address, address_id);
 create index idx_addresses_colocator on Addresses (colocator);
+CREATE INDEX idx_addresses_canonical_covering ON Addresses(
+    canonical_address,
+    address_id,
+    master_id,
+    geocoding_id
+);
 -- Geocoding indexes
 CREATE INDEX idx_geocoding_status ON Geocoding(geocoding_status);
 CREATE INDEX idx_geocoding_canonical ON Geocoding(canonical_address);

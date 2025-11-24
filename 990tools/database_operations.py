@@ -82,7 +82,6 @@ class DatabaseOperationType(Enum):
     INSERT_BY_TYPE = "insert_by_type"
     INSERT_CHARITY = "insert_charity"
     INSERT_ADDRESS = "insert_address"
-    ADDRESS_DEDUPLICATION_BATCH = "address_deduplication_batch"
     PROGRESS_UPDATE = "progress_update"
     INSERT_GEOCODING = "insert_geocoding"
     UPDATE_GEOCODING = "update_geocoding"
@@ -139,7 +138,7 @@ class DatabaseOperations:
 
     # SQL logging is now read directly from global_config
 
-    # Thread-local storage for database connections
+    # Thread-local storage for database connections and write permissions
     _local = threading.local()
 
     # Static cache for zip_id -> file_path mapping - preloaded at startup
@@ -156,7 +155,15 @@ class DatabaseOperations:
         from uuid7 import generate_uuid_v7
         return generate_uuid_v7()
 
-    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "8GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
+    def set_allow_write(self, allow: bool) -> None:
+        """Set thread-local write permission flag"""
+        DatabaseOperations._local.allow_write = allow
+
+    def get_allow_write(self) -> bool:
+        """Get thread-local write permission flag (default False)"""
+        return getattr(DatabaseOperations._local, 'allow_write', False)
+
+    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "6GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
         """
         Initialize DuckDB connection with performance optimizations.
 
@@ -181,9 +188,62 @@ class DatabaseOperations:
         self.threads = threads
         self.dbUI = dbUI
         self.query_timeout = query_timeout
+        self.main_thread_id = threading.get_ident()
         self._init_connection()
         self._preload_zip_file_cache()
         self._preload_table_metadata_cache()
+        
+    def config_connection(self, conn):
+        conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
+        conn.execute("SET threads = 4")  # more threads
+        conn.execute("SET memory_limit = '6GB'")
+        conn.execute("SET enable_object_cache = true")   # Enable object cache
+        conn.execute("SET max_temp_directory_size = '10GB'")  # Increase temp directory size
+        
+        try:
+            conn.execute("SET insert_select_parallelism = true")  # Enable parallel insert-select operations
+        except Exception:
+            pass  # Ignore if not supported
+        try:
+            conn.execute("PRAGMA temp_store = '/tmp'")  # Store temporary data in memory
+        except Exception:
+            pass  # Ignore if not supported
+        try:
+            conn.execute("SET checkpoint_threshold = '500MB'")  # WAL size doesn't matter in grok benchmark.
+            conn.execute("PRAGMA checkpoint_threshold='500MB'")   # or '500MB'
+            conn.execute("PRAGMA wal_autocheckpoint='500MB'")    # same thing, older name
+
+        except Exception as e:
+            print(f"exception setting checkpoint_threshold {e}")
+            pass  # Ignore if not supported
+        conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
+        conn.execute("PRAGMA force_checkpoint;")
+        conn.execute("SET enable_logging = true")
+        conn.execute("SET logging_level = 'DEBUG'")
+
+    def _apply_performance_settings(self, conn):
+        """Apply performance settings to a database connection"""
+        self.config_connection(conn)
+
+    def _get_conn(self, allow_write=True) -> duckdb.DuckDBPyConnection:
+        """
+        Get appropriate database connection based on thread context.
+
+        Returns main connection from main thread, thread-local connection from worker threads.
+        Thread-local connections have identical settings to main connection.
+        Optionally makes thread-local connections read-only unless allow_write=True.
+
+        Args:
+            allow_write: Whether to allow write operations on thread-local connections
+
+        Returns:
+            DuckDB connection object
+        """
+        if threading.get_ident() == self.main_thread_id:
+            return self.db_conn
+        else:
+            return self._get_thread_local_connection(allow_write)
+
 
     def _init_connection(self):
         """Initialize DuckDB connection and schema"""
@@ -202,7 +262,7 @@ class DatabaseOperations:
 
         # Connect to DuckDB with performance optimizations
         config: Dict[str, Any] = {
-            'memory_limit': self.memory_limit
+            'memory_limit': '6GB'
         }
         if self.threads is not None and self.threads != 'auto':
             config['threads'] = self.threads
@@ -221,26 +281,7 @@ class DatabaseOperations:
         # Cancel the WAL compaction timer since connection succeeded
         timer.cancel()
 
-        # Set additional performance settings
-        self.db_conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
-        self.db_conn.execute("SET threads = 8")  # more threads
-        self.db_conn.execute("SET enable_object_cache = true")   # Enable object cache
-        self.db_conn.execute("SET max_temp_directory_size = '10GB'")  # Increase temp directory size
-        # Note: Some performance settings may not be available in all DuckDB versions
-        try:
-            self.db_conn.execute("SET insert_select_parallelism = true")  # Enable parallel insert-select operations
-        except Exception:
-            pass  # Ignore if not supported
-        try:
-            self.db_conn.execute("PRAGMA temp_store = '/tmp'")  # Store temporary data in memory
-        except Exception:
-            pass  # Ignore if not supported
-        try:
-            self.db_conn.execute("SET checkpoint_threshold = '100MB'")  # WAL size doesn't matter in grok benchmark.
-        except Exception:
-            pass  # Ignore if not supported
-        self.db_conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
-        #self.db_conn.execute("PRAGMA checkpoint_on_close = true") # terminate transactions
+        self._apply_performance_settings(self.db_conn)
         if global_config.log_sql:
             self.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
 
@@ -383,6 +424,16 @@ class DatabaseOperations:
         Raises:
             RuntimeError: For query execution failures with detailed error messages
         """
+        # Check write permission for write operations
+        query_upper = query.strip().upper()
+        is_write = query_upper in ['CREATE', 'DROP', 'INSERT', 'UPDATE', 'DELETE', 'ALTER']
+        
+        if is_write and not self.allow_write:
+            thread_name = threading.current_thread().name
+            if 'producer' in thread_name.lower() or 'Thread-' in thread_name:
+                raise RuntimeError(f"Write operation '{query_upper}' called from {thread_name} without write permission")
+            # ← Add this: allow main thread
+            log_debug(f"Allowing write '{query_upper}' from main thread")
         if conn is None:
             conn = self._get_thread_local_connection()
 
@@ -424,38 +475,29 @@ class DatabaseOperations:
             log_error(error_msg)
             raise RuntimeError(error_msg) from e
         except Exception as e:
+            # Check for out-of-memory errors specifically
+            error_str = str(e).lower()
+            if "out of memory" in error_str or "failed to offload data block" in error_str:
+                log_error(f"Out of memory error detected: {str(e)}")
+                log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
+                sys.exit(-1)
             # Handle any other unexpected errors
             error_msg = f"Unexpected database error: {str(e)}"
             log_error(error_msg)
             raise RuntimeError(error_msg) from e
 
-    def _get_thread_local_connection(self) -> duckdb.DuckDBPyConnection:
+    def _get_thread_local_connection(self, allow_write=True) -> duckdb.DuckDBPyConnection:
         """Get or create a thread-local database connection"""
         if not hasattr(DatabaseOperations._local, 'db_conn'):
             # Create a new connection for this thread
-            
-            DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=self._connection_config)
-            # Apply the same settings as the main connection
-            DatabaseOperations._local.db_conn.execute("SET enable_progress_bar = false")
-            DatabaseOperations._local.db_conn.execute("SET enable_object_cache = true")
-            DatabaseOperations._local.db_conn.execute("SET max_temp_directory_size = '10GB'")
-            #DatabaseOperations._local.db_conn.execute("PRAGMA checkpoint_on_close = true") # terminate transactions
-
-            try:
-                DatabaseOperations._local.db_conn.execute("SET insert_select_parallelism = true")
-            except Exception:
-                pass
-            try:
-                DatabaseOperations._local.db_conn.execute("PRAGMA temp_store = '/tmp'")
-            except Exception:
-                pass
-            try:
-                DatabaseOperations._local.db_conn.execute("SET checkpoint_threshold = '100MB'")
-            except Exception:
-                pass
-            DatabaseOperations._local.db_conn.execute("SET preserve_insertion_order = false")
-            if global_config.log_sql:
-                DatabaseOperations._local.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
+            config = self._connection_config.copy()
+            if not allow_write:
+                config['read_only'] = True
+            else:
+                config.pop('read_only', None)  # Remove read_only to allow writes
+            DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=config)
+            # Apply the same performance settings as the main connection
+            self._apply_performance_settings(DatabaseOperations._local.db_conn)
 
             # Note: DuckDB doesn't have a built-in query_timeout setting in this version
             # The timeout protection will be handled through enhanced error handling in execute_query
@@ -542,14 +584,14 @@ class DatabaseOperations:
         if table_name in DatabaseOperations._table_metadata_cache:
             return DatabaseOperations._table_metadata_cache[table_name]['columns']
 
-        # Fallback to database query
+        # Fallback to database query - use thread-local connection for thread safety
         if conn is None:
-            conn = self.db_conn
+            conn = self._get_conn()
         try:
             result = conn.execute(f"DESCRIBE {table_name}")
             columns = [row[0] for row in result.fetchall()]
 
-            # Cache the result
+            # Cache the result (thread-safe since dict operations are atomic for simple cases)
             DatabaseOperations._table_metadata_cache[table_name] = {
                 'columns': columns,
                 'column_count': len(columns)
@@ -591,16 +633,26 @@ class DatabaseOperations:
         else:
             return class_name + 's'
 
-    def commit(self):
+    def begin_transaction(self,conn=None):
+        if conn is None:
+            conn = self._get_conn(allow_write=True)
+        conn.execute("BEGIN TRANSACTION;")
+        
+    def commit(self, conn=None ):
         """Commit current transaction"""
-        self.db_conn.commit()
+        if conn is None:
+            conn = self._get_conn(allow_write=True)
+
+        conn.commit()
 
     def close(self):
         """Explicitly close the database connection"""
         if hasattr(self, 'db_conn') and self.db_conn:
+            self.db_conn.commit()
             self.db_conn.close()
         # Close thread-local connections
         if hasattr(DatabaseOperations._local, 'db_conn'):
+            DatabaseOperations._local.db_conn.commit()
             DatabaseOperations._local.db_conn.close()
             delattr(DatabaseOperations._local, 'db_conn')
 
@@ -702,7 +754,7 @@ class DatabaseOperations:
     def execute_update_xml_ein_operation(self, operation: DatabaseOperation, conn=None):
         """Execute UPDATE_XML_EIN operation"""
         if conn is None:
-            conn = self.db_conn
+            conn = self._get_conn(allow_write=True)
         xml_id = operation.xml_id
         data = operation.data
         ein = data.get("ein") if data else None
@@ -1000,7 +1052,7 @@ class DatabaseOperations:
         """
         for obj in objects:
             if not isinstance(obj, BaseModel):
-                raise ValueError("All objects must be BaseModel instances")
+                raise ValueError(f"All objects must be BaseModel instances {obj}")
             if type(obj).__name__.lower() != obj_type.lower():
                 raise ValueError(f"All objects must be of type {obj_type}, got {type(obj).__name__}")
 
@@ -1045,24 +1097,28 @@ class DatabaseOperations:
         THREADING: Uses thread-local connections for DuckDB writer safety
         VALIDATION: Count validation ensures all rows were inserted successfully
         """
+        # Check write permission
+        if not self.get_allow_write():
+            raise RuntimeError("bulk_insert called from thread without write permission (producer thread?)")
+
         if not objects:
             return []
         obj_type = type(objects[0])
         if len({type(obj) for obj in objects}) > 1:
             raise ValueError("Uniform types only.")
 
-        # Use default batch size from constants if not specified
+        # Use smaller default batch size to prevent out-of-memory errors
         if batch_size is None:
             from constants import BULK_INSERT_BATCH_SIZE
-            batch_size = BULK_INSERT_BATCH_SIZE if BULK_INSERT_BATCH_SIZE is not None else 50000
+            batch_size = BULK_INSERT_BATCH_SIZE if BULK_INSERT_BATCH_SIZE is not None else 10000  # Reduced from 50000
             if not isinstance(batch_size, int):
-                batch_size = 50000
+                batch_size = 10000
 
         # Validation moved to pending_database_context.py
 
         # Use thread-local connection for proper multi-threading support
         if conn is None:
-            conn = self._get_thread_local_connection()
+            conn = self._get_conn(allow_write=self.get_allow_write())
 
         # Prep all objects for insert - call prep_for_insert if method exists
         prep_start = time.perf_counter()
@@ -1168,7 +1224,16 @@ class DatabaseOperations:
             # SQL logging handled by execute_query method
 
             batch_start = time.perf_counter()
-            conn.executemany(insert_sql, batch_params)  # type: ignore
+            try:
+                conn.executemany(insert_sql, batch_params)  # type: ignore
+            except Exception as e:
+                # Check for out-of-memory errors specifically
+                error_str = str(e).lower()
+                if "out of memory" in error_str or "failed to offload data block" in error_str:
+                    log_error(f"Out of memory error detected in bulk_insert: {str(e)}")
+                    log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
+                    sys.exit(-1)
+                raise
             if commit_batches:
                 conn.commit()
             batch_elapsed = time.perf_counter() - batch_start
@@ -1207,10 +1272,14 @@ class DatabaseOperations:
         # Return the client-generated IDs
         return [str(getattr(obj, id_field)) for obj in objects]
 
-    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 50000, conn=None, commit: bool = True, commit_batches: bool = False) -> int:
+    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 100, conn=None, commit: bool = True, commit_batches: bool = False) -> int:
         """Generic bulk update method for database operations with batched processing"""
+        # Check write permission
+        if not self.get_allow_write():
+            raise RuntimeError("bulk_update called from thread without write permission (producer thread?)")
+
         if conn is None:
-            conn = self.db_conn
+            conn = self._get_conn(allow_write=True)
 
         if not updates:
             return 0
@@ -1237,7 +1306,16 @@ class DatabaseOperations:
             for i in range(0, len(params), batch_size):
                 batch_params = params[i:i + batch_size]
                 batch_start = time.perf_counter()
-                conn.executemany(sql, batch_params)  # type: ignore
+                try:
+                    conn.executemany(sql, batch_params)  # type: ignore
+                except Exception as e:
+                    # Check for out-of-memory errors specifically
+                    error_str = str(e).lower()
+                    if "out of memory" in error_str or "failed to offload data block" in error_str:
+                        log_error(f"Out of memory error detected in bulk_update: {str(e)}")
+                        log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
+                        sys.exit(-1)
+                    raise
                 if commit_batches:
                     conn.commit()
                 batch_elapsed = time.perf_counter() - batch_start
@@ -1245,8 +1323,8 @@ class DatabaseOperations:
                 log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
                 total_processed += len(batch_params)
 
-            if commit:
-                self.commit()
+            #if commit:
+            conn.commit()
 
             # Do not commit here - let caller handle transaction
             return total_processed
@@ -1686,13 +1764,15 @@ class DatabaseOperations:
             self.execute_update_xml_ein_operation(operation, conn)
         elif operation.operation_type == DatabaseOperationType.OPTIMIZE_DATABASE:
             self._execute_optimize_operation(operation, conn)
+        elif operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
+            self._execute_generic_update_operation(operation, conn)
         else:
             log_warning("Unknown operation type: {}", operation.operation_type)
 
     def _execute_xml_file_update_operation(self, operation: DatabaseOperation, conn=None):
         """Execute XML_FILE_UPDATE operation"""
         if conn is None:
-            conn = self._get_thread_local_connection()
+            conn = self._get_conn(allow_write=True)
 
         xml_id = operation.xml_id
         metadata = operation.data
@@ -1727,6 +1807,86 @@ class DatabaseOperations:
             conn.execute(query, tuple(params))
             conn.commit()
 
+    def _execute_generic_update_operation(self, operation: DatabaseOperation, conn=None):
+        """Execute GENERIC_UPDATE operation"""
+        if conn is None:
+            conn = self._get_conn(allow_write=True)
+
+        data = operation.data
+        if not data or 'table' not in data:
+            log_error("GENERIC_UPDATE operation missing required data: table")
+            return
+
+        table_name = data['table']
+
+        # Check if this is a WHERE clause update (optimization for address deduplication)
+        where_clause = data.get('where_clause')
+        if where_clause:
+            # WHERE clause update - direct query execution
+            set_clause = data.get('set_clause', '')
+            params = data.get('params', [])
+            param_sets = data.get('param_sets', [])  # Batched parameter sets
+
+            if not set_clause:
+                log_error("GENERIC_UPDATE with where_clause missing set_clause")
+                return
+
+            query = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause}"
+            updated_count = 0
+            try:
+                if param_sets:
+                    # Batched execution with multiple parameter sets - limit to small batches for updates
+                    from constants import BULK_UPDATE_BATCH_SIZE
+                    batch_size = BULK_UPDATE_BATCH_SIZE if BULK_UPDATE_BATCH_SIZE is not None else 10
+                    if not isinstance(batch_size, int):
+                        batch_size = 10
+
+                    total_updated_count = 0
+                    for i in range(0, len(param_sets), batch_size):
+                        batch_params = param_sets[i:i + batch_size]
+                        conn.executemany(query, batch_params)
+                        # Estimate rows updated for this batch
+                        batch_updated_count = len(batch_params) * 5  # Conservative estimate of 5 rows per canonical group
+                        total_updated_count += batch_updated_count
+                        log_debug(f"Executed batched WHERE UPDATE batch {i//batch_size + 1}: {len(batch_params)} operations, ~{batch_updated_count} rows updated in {table_name}")
+
+                    updated_count = total_updated_count
+                    log_debug(f"Executed total batched WHERE UPDATE: {len(param_sets)} operations, ~{updated_count} rows updated in {table_name}")
+                else:
+                    # Single parameter set
+                    result = conn.execute(query, tuple(params))
+                    updated_count = result.rowcount if hasattr(result, 'rowcount') else 0
+                    log_debug(f"Executed WHERE UPDATE: {updated_count} rows updated in {table_name}")
+            except Exception as e:
+                # Check for out-of-memory errors specifically
+                error_str = str(e).lower()
+                if "out of memory" in error_str or "failed to offload data block" in error_str:
+                    log_error(f"Out of memory error detected in generic update operation: {str(e)}")
+                    log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
+                    sys.exit(-1)
+                log_error(f"Failed to execute WHERE UPDATE for table {table_name}: {e}", exc_info=True)
+                raise
+        else:
+            # Traditional bulk update by ID
+            if 'updates' not in data:
+                log_error("GENERIC_UPDATE operation missing required data: updates")
+                return
+
+            updates = data['updates']
+            id_column = data.get('id_column', 'id')
+
+            if not updates:
+                log_debug(f"No updates to perform for table {table_name}")
+                return
+
+            updated_count = 0
+            try:
+                updated_count = self.bulk_update(table_name, updates, id_column=id_column, conn=conn, commit=False)
+                log_debug(f"Executed GENERIC_UPDATE: {updated_count} rows updated in {table_name}")
+            except Exception as e:
+                log_error(f"Failed to execute GENERIC_UPDATE for table {table_name}: {e}", exc_info=True)
+                raise
+
     def get_officers_for_export_batch(self, offset: int, limit: int) -> List[Tuple]:
         """Get batch of officers for export"""
         query = """
@@ -1737,3 +1897,37 @@ class DatabaseOperations:
         """
         result = self.execute_query(query, (limit, offset))
         return result.fetchall() if result else []
+    
+    def _flush_and_checkpoint(self, conn, updated_so_far: int) -> int:
+        """Safely commit + FORCE CHECKPOINT + restart transaction — the ONLY way that works mid-batch"""
+        try:
+            conn.commit()                                   # End current huge transaction
+            conn.execute("PRAGMA force_checkpoint")        # The magic command that never hangs or complains
+            conn.execute("BEGIN TRANSACTION")               # Fresh start
+            log_info(f"✓ FORCE CHECKPOINT completed after ~{updated_so_far:,} address updates — memory/WAL reset")
+            return 0  # reset counter
+        except Exception as e:
+            log_warning(f"Flush/checkpoint failed (continuing): {e}")
+            try:
+                conn.execute("BEGIN TRANSACTION")
+            except:
+                pass
+            return 0
+
+    def _intermediate_commit_and_checkpoint(self, conn, updated_so_far: int) -> int:
+        """Commit + force checkpoint + restart transaction — the only sequence that actually frees memory on macOS"""
+        try:
+            print("Doing intermediate checkpoint")
+            conn.commit()                                # Ends current transaction cleanly
+            conn.execute("CHECKPOINT")                   # Normal CHECKPOINT now works (no active tx)
+            conn.execute("BEGIN TRANSACTION")            # Start fresh
+            log_info(f"INTERMEDIATE CHECKPOINT after ~{updated_so_far:,} address updates — memory/WAL freed")
+            return 0
+        except Exception as e:
+            log_warning(f"Intermediate checkpoint failed (continuing anyway): {e}")
+            try:
+                conn.execute("BEGIN TRANSACTION")
+            except:
+                pass
+            return 0
+        

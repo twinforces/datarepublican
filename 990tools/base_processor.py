@@ -22,6 +22,7 @@ from pending_database_context import PendingDatabaseContext
 from logging_utils import log_error, log_info, log_debug, log_warning, start_progress_reporting
 from config import global_config
 import psutil
+import gc
 import time
 import queue
 
@@ -108,7 +109,7 @@ class ThreadPoolManager:
         self.config = config
         self.processor = processor
         self.work_queue = queue.Queue(maxsize=config.producer_config.queue_size)
-        self.result_queue = queue.Queue()
+        self.result_queue = queue.Queue(15_000) # maxsize = config.producer_config.queue_size * self.config.producer_config.max_workers )
         self.producer_threads = []
         self.consumer_threads = []
         self._lock = threading.Lock()
@@ -250,6 +251,10 @@ class WorkUnit:
     @classmethod
     def result(cls, data: Any) -> 'WorkUnit':
         return cls(type='result', data=data)
+
+    @classmethod
+    def batch(cls, data: List[Any]) -> 'WorkUnit':
+        return cls(type='batch', data=data)
 
     def is_work_item(self) -> bool:
         return self.type == 'work'
@@ -408,11 +413,17 @@ class BaseProcessor:
 
     def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int], num_producers: int):
         """Abstract method: Feeder thread logic to fetch work items and put sentinels."""
+        # Feeder thread: allow reads but not writes
+        self.db_ops.set_allow_write(False)
         raise NotImplementedError("Subclasses must implement _feed_thread")
 
     def _process_work_item(self, data: Any) -> PendingDatabaseContext:
         """Abstract method: Process a single work item into a PendingDatabaseContext."""
         raise NotImplementedError("Subclasses must implement _process_work_item")
+
+    def _process_batch(self, batch: List[Any]) -> PendingDatabaseContext:
+        """Abstract method: Process a batch of work items into a PendingDatabaseContext."""
+        raise NotImplementedError("Subclasses must implement _process_batch")
 
     def get_work_count(self, max_files: Optional[int] = None) -> int:
         """Abstract method: Get the total number of work items to process."""
@@ -447,6 +458,8 @@ class BaseProcessor:
 
         self.work_queue = queue.Queue(maxsize=10 * BATCH_SIZE)
         self.result_queue = queue.Queue()
+        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=5.0)
+        self.queue_status_display.start()
 
         # Setup monitoring
         self._setup_monitoring()
@@ -515,6 +528,8 @@ class BaseProcessor:
         self._teardown_profiling("process_parallel", start_time, self.total_processed)
 
         log_info(f"Processing complete: {self.total_processed} items processed")
+        if hasattr(self, 'queue_status_display'):
+            self.queue_status_display.stop()
         return self.total_processed
 
     def _producer_worker(self, producer_id: int, num_producers: int):
@@ -537,13 +552,16 @@ class BaseProcessor:
             elif item.is_sentinel():
                 # Sentinel for another producer, put back
                 self.work_queue.put(item)
-                self.work_queue.task_done()
+                # Do not call task_done() for items that are put back
                 time.sleep(0.1)  # Avoid busy waiting
                 continue
 
-            # Process work item
-            if item.is_work_item():
+            if item.type == 'work':
                 pdc = self._process_work_item(item.data)
+                self.result_queue.put(WorkUnit.result(pdc))
+                processed_count += 1
+            elif item.type == 'batch':
+                pdc = self._process_batch(item.data)
                 self.result_queue.put(WorkUnit.result(pdc))
                 processed_count += 1
 
@@ -557,6 +575,8 @@ class BaseProcessor:
 
     def _consumer_worker(self, num_producers: int):
         """Consumer worker thread: Drains result_queue, batches and executes PDCs."""
+        # Consumer thread: allow writes
+        self.db_ops.set_allow_write(True)
         log_info("CONSUMER THREAD STARTED")
         batch_contexts = []
         sentinels_received = 0
@@ -594,10 +614,13 @@ class BaseProcessor:
                 if hasattr(self, '_pdc_metrics'):
                     self._pdc_metrics(merged)
                 merged.save_to_database(self.db_ops)
-                log_info(f"Successfully saved batch of {len(batch_contexts)} contexts")
+                #self.db_ops.db_conn.execute("CHECKPOINT")
+                log_info(f"Successfully saved batch of {len(batch_contexts)} contexts + checkpointed")
                 self.total_objects_saved += merged.getTotalObjectCount()
                 self.total_processed += len(batch_contexts)
                 batch_contexts = []
+                merged = None
+                gc.collect()
 
                 if optimize_added:
                     self.last_optimize = current_optimize_needed
@@ -618,7 +641,9 @@ class BaseProcessor:
             if hasattr(self, '_pdc_metrics'):
                 self._pdc_metrics(merged)
             merged.save_to_database(self.db_ops)
-            log_info(f"Successfully saved final batch of {len(batch_contexts)} contexts")
+            #gc.collect()
+            #self.db_ops.db_conn.execute("CHECKPOINT")
+            log_info(f"Successfully saved final batch of {len(batch_contexts)} contexts + checkpointed")
             self.total_objects_saved += merged.getTotalObjectCount()
             self.total_processed += len(batch_contexts)
 

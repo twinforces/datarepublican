@@ -88,12 +88,13 @@ ENABLE_AUTO_CHECKPOINTS = False
 MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
-CONSUMER_BATCH_SIZE = 100  # No reason not to make this larger only applies with backlog
+CONSUMER_BATCH_SIZE = 10  # No reason not to make this larger only applies with backlog
 MONITOR_INTERVAL_SECONDS = 30  # Change: Added constant to reduce psutil memory monitoring and QueueStatusDisplay updates to every 30 seconds
 
 # Address processing constants
 ADDRESS_BATCH_SIZE = 1000
 ADDRESS_QUEUE_SIZE = 1000
+FEED_BATCH_SIZE = 500
 
 # Database constants
 DEFAULT_DB_PATH = "irs990.duckdb"
@@ -104,6 +105,9 @@ DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 
 # Bulk insert batch size for database operations
 BULK_INSERT_BATCH_SIZE = 100000
+
+# Bulk update batch size for database operations (smaller for updates)
+BULK_UPDATE_BATCH_SIZE = 10
 
 # WAL compaction timeout
 WAL_COMPACTION_TIMEOUT = 30  # seconds
