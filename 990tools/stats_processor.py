@@ -595,61 +595,106 @@ class StatsProcessor:
         """Get analysis for Address colocator field"""
         analysis = {}
 
-        # Distinct colocator values
-        result = self.db_ops.execute_query("""
-            SELECT COUNT(DISTINCT colocator) as distinct_colocators
-            FROM Addresses
-            WHERE colocator IS NOT NULL AND colocator != ''
-        """).fetchone()
-        distinct_colocators = result[0] if result else 0
-        analysis['distinct_colocators'] = distinct_colocators
+        try:
+            # Distinct colocator values
+            result = self.db_ops.execute_query("""
+                SELECT COUNT(DISTINCT colocator) as distinct_colocators
+                FROM Addresses
+                WHERE colocator IS NOT NULL AND colocator != ''
+            """).fetchone()
+            distinct_colocators = result[0] if result else 0
+            analysis['distinct_colocators'] = distinct_colocators
 
-        # Count with 'PO%' prefix
-        result = self.db_ops.execute_query("""
-            SELECT COUNT(*) as po_count
-            FROM Addresses
-            WHERE colocator LIKE 'PO%'
-        """).fetchone()
-        po_count = result[0] if result else 0
-        analysis['po_count'] = po_count
+            # Count with 'PO%' prefix (Post Office)
+            result = self.db_ops.execute_query("""
+                SELECT COUNT(*) as po_count
+                FROM Addresses
+                WHERE colocator LIKE 'PO%'
+            """).fetchone()
+            po_count = result[0] if result else 0
+            analysis['po_count'] = po_count
 
-        # Count with 'FA%' prefix
-        result = self.db_ops.execute_query("""
-            SELECT COUNT(*) as fa_count
-            FROM Addresses
-            WHERE colocator LIKE 'FA%'
-        """).fetchone()
-        fa_count = result[0] if result else 0
-        analysis['fa_count'] = fa_count
+            # Count with 'FA%' prefix (Foreign Address)
+            result = self.db_ops.execute_query("""
+                SELECT COUNT(*) as fa_count
+                FROM Addresses
+                WHERE colocator LIKE 'FA%'
+            """).fetchone()
+            fa_count = result[0] if result else 0
+            analysis['fa_count'] = fa_count
 
-        # Count with 'LL%' prefix
-        result = self.db_ops.execute_query("""
-            SELECT COUNT(*) as ll_count
-            FROM Addresses
-            WHERE colocator LIKE 'LL%'
-        """).fetchone()
-        ll_count = result[0] if result else 0
-        analysis['ll_count'] = ll_count
+            # Count with 'LL%' prefix (Latitude/Longitude)
+            result = self.db_ops.execute_query("""
+                SELECT COUNT(*) as ll_count
+                FROM Addresses
+                WHERE colocator LIKE 'LL%'
+            """).fetchone()
+            ll_count = result[0] if result else 0
+            analysis['ll_count'] = ll_count
 
-        # Neither (total with colocator - PO - FA - LL)
-        result = self.db_ops.execute_query("""
-            SELECT COUNT(*) as total_with_colocator
-            FROM Addresses
-            WHERE colocator IS NOT NULL AND colocator != ''
-        """).fetchone()
-        total_with_colocator = result[0] if result else 0
-        neither_count = total_with_colocator - po_count - fa_count - ll_count
-        analysis['neither_count'] = neither_count
+            # Count with institution codes (STJUDE:, MET:, etc.)
+            result = self.db_ops.execute_query("""
+                SELECT COUNT(*) as institution_count
+                FROM Addresses
+                WHERE colocator LIKE '%:%' AND colocator NOT LIKE 'PO:%' AND colocator NOT LIKE 'FA:%' AND colocator NOT LIKE 'LL:%'
+            """).fetchone()
+            institution_count = result[0] if result else 0
+            analysis['institution_count'] = institution_count
 
-        # Add address type breakdown for colocator
-        result = self.db_ops.execute_query("""
-            SELECT address_type, COUNT(*) as count
-            FROM Addresses
-            WHERE colocator IS NOT NULL AND colocator != ''
-            GROUP BY address_type
-            ORDER BY count DESC
-        """).fetchall()
-        analysis['colocator_by_address_type'] = result
+            # Total with colocator
+            result = self.db_ops.execute_query("""
+                SELECT COUNT(*) as total_with_colocator
+                FROM Addresses
+                WHERE colocator IS NOT NULL AND colocator != ''
+            """).fetchone()
+            total_with_colocator = result[0] if result else 0
+            analysis['total_with_colocator'] = total_with_colocator
+
+            # Neither (addresses with colocator but not matching any known pattern)
+            neither_count = total_with_colocator - po_count - fa_count - ll_count - institution_count
+            analysis['neither_count'] = neither_count
+
+            # Add address type breakdown for colocator
+            result = self.db_ops.execute_query("""
+                SELECT address_type, COUNT(*) as count
+                FROM Addresses
+                WHERE colocator IS NOT NULL AND colocator != ''
+                GROUP BY address_type
+                ORDER BY count DESC
+            """).fetchall()
+            analysis['colocator_by_address_type'] = result or []
+
+            # Top colocator patterns for analysis
+            result = self.db_ops.execute_query("""
+                SELECT
+                    CASE
+                        WHEN colocator LIKE 'PO%' THEN 'Post Office'
+                        WHEN colocator LIKE 'FA%' THEN 'Foreign Address'
+                        WHEN colocator LIKE 'LL%' THEN 'Geocoded (Lat/Long)'
+                        WHEN colocator LIKE '%:%' THEN 'Institution Code'
+                        ELSE 'Other'
+                    END as colocator_type,
+                    COUNT(*) as count
+                FROM Addresses
+                WHERE colocator IS NOT NULL AND colocator != ''
+                GROUP BY colocator_type
+                ORDER BY count DESC
+            """).fetchall()
+            analysis['colocator_type_breakdown'] = result or []
+
+        except Exception as e:
+            # If any query fails, set default values to prevent template errors
+            analysis.update({
+                'distinct_colocators': 0,
+                'po_count': 0,
+                'fa_count': 0,
+                'll_count': 0,
+                'institution_count': 0,
+                'total_with_colocator': 0,
+                'neither_count': 0,
+                'colocator_by_address_type': [],
+                'colocator_type_breakdown': []
+            })
 
         return analysis
 

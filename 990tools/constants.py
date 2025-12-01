@@ -34,7 +34,7 @@ STATE_NAME_TO_ABBREV = {
 # Regular expressions for parsing
 MONEY_PATTERN = re.compile(r'[^\d.]+')
 FLOAT_PATTERN = re.compile(r'-?\d*\.?\d+')
-PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s+)([-\w\d]+)', re.IGNORECASE)
+PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s*)([-\w\d]*)', re.IGNORECASE)
 PO_BOX_NUMBER_REGEX = re.compile(r'[-\w\d]+')
 
 # Organization type suffixes for different form types
@@ -122,6 +122,7 @@ GEOCODING_BATCH_SIZE = 1000  # Batch size for geocoding operations
 GEOCODING_API_BATCH_SIZE = 10000  # Maximum addresses per census API call (as per census docs) - updated to comply with actual API limits
 GEOCODING_FAST_WORKERS = 8  # Workers for fast local geocoding record creation
 GEOCODING_API_WORKERS = 4   # Workers for slow census API calls
+GEOCODING_MAX_UPDATES_PER_BATCH = 10000  # Maximum estimated updates per batch to prevent commit hangs
 
 # Address abbreviation expansions
 STREET_FIXES = {

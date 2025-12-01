@@ -324,14 +324,18 @@ class QueueStatusDisplay:
                     self._pdc_operations_peak = max(self._pdc_operations_peak, current_count)
 
                     # Set total and current for progress bar
-                    self._pdc_operations_gauge.total = total_count
-                    self._pdc_operations_gauge.n = current_count
-                    # Calculate percentage for display
                     if total_count > 0:
+                        self._pdc_operations_gauge.total = total_count
                         percentage = (current_count / total_count) * 100
                         self._pdc_operations_gauge.n = int(percentage)
                     else:
-                        self._pdc_operations_gauge.n = 0
+                        # No total available, use FLUSH_EVERY_N_ROWS as denominator for percentage
+                        from pending_database_context import PendingDatabaseContext
+                        flush_threshold = PendingDatabaseContext._updated_counter  # This might not be accessible
+                        # For now, use a reasonable default
+                        self._pdc_operations_gauge.total = 10000  # FLUSH_EVERY_N_ROWS
+                        percentage = min((current_count / 10000) * 100, 100)
+                        self._pdc_operations_gauge.n = int(percentage)
 
                     # Create postfix with PDC operations details
                     postfix = f"Count {current_count} · Peak {self._pdc_operations_peak}"
@@ -357,14 +361,15 @@ class QueueStatusDisplay:
                     self._pdc_updates_peak = max(self._pdc_updates_peak, current_count)
 
                     # Set total and current for progress bar
-                    self._pdc_updates_gauge.total = total_count
-                    self._pdc_updates_gauge.n = current_count
-                    # Calculate percentage for display
                     if total_count > 0:
+                        self._pdc_updates_gauge.total = total_count
                         percentage = (current_count / total_count) * 100
                         self._pdc_updates_gauge.n = int(percentage)
                     else:
-                        self._pdc_updates_gauge.n = 0
+                        # No total available, use FLUSH_EVERY_N_ROWS as denominator for percentage
+                        self._pdc_updates_gauge.total = 10000  # FLUSH_EVERY_N_ROWS
+                        percentage = min((current_count / 10000) * 100, 100)
+                        self._pdc_updates_gauge.n = int(percentage)
 
                     # Create postfix with PDC updates details
                     postfix = f"Count {current_count} · Peak {self._pdc_updates_peak}"

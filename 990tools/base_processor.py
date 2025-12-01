@@ -29,7 +29,7 @@ import queue
 from enum import Enum
 import time
 from pending_database_context import PendingDatabaseContext
-from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS, OPTIMIZE_THRESHOLD
+from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS, OPTIMIZE_THRESHOLD, GEOCODING_MAX_UPDATES_PER_BATCH
 from logging_utils import start_progress_reporting
 from queue_status_display import QueueStatusDisplay
 
@@ -363,6 +363,30 @@ class BaseProcessor:
             metrics['pdc_updates_count'] = self.pdc_updates_count
         return metrics
 
+    def update_pdc_size_gauge(self, context: 'PendingDatabaseContext') -> None:
+        """
+        Update gauges for PendingDatabaseContext sizes before saving to database.
+        This optional hook computes and logs sizes for visibility into context accumulation.
+        Also updates instance variables for integration with periodic status gauges.
+        """
+        if not context:
+            objects_count = operations_count = updates_count = 0
+        else:
+            objects_count = sum(len(lst) for lst in context.objects.values())
+            operations_count = len(context.operations)
+            updates_count = len(context._updates)
+
+        # Log for immediate visibility before DB write
+        log_info(
+                  f"PendingDatabaseContext before save_to_database(): "
+                  f"objects={objects_count} (total), operations={operations_count}, updates={updates_count}")
+
+        # Update for periodic gauges (shows last batch size; defaults to 0 if no context)
+        self.pdc_objects_count = objects_count
+        self.pdc_operations_count = operations_count
+        self.pdc_updates_count = updates_count
+
+
     def _setup_monitoring(self):
         """Optional setup for monitoring - subclasses can override."""
         pass
@@ -458,7 +482,7 @@ class BaseProcessor:
 
         self.work_queue = queue.Queue(maxsize=10 * BATCH_SIZE)
         self.result_queue = queue.Queue()
-        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=5.0)
+        self.queue_status_display = QueueStatusDisplay(self.work_queue, update_interval=30.0, custom_metrics_func=self._get_custom_metrics)
         self.queue_status_display.start()
 
         # Setup monitoring
@@ -466,6 +490,9 @@ class BaseProcessor:
 
         # Setup progress bar
         total, unit, desc = self.get_progress_config(max_files)
+        if total == 0:
+            log_info("No work to do - exiting")
+            sys.exit(1)
         self.pbar = start_progress_reporting(total=total, desc=desc, unit=unit)
 
         self.total_processed = 0
@@ -574,18 +601,51 @@ class BaseProcessor:
         log_info(f"PRODUCER THREAD {producer_id} COMPLETED")
 
     def _consumer_worker(self, num_producers: int):
-        """Consumer worker thread: Drains result_queue, batches and executes PDCs."""
+        """Consumer worker thread: Drains result_queue, batches and executes PDCs with size-based preflight merging."""
         # Consumer thread: allow writes
         self.db_ops.set_allow_write(True)
         log_info("CONSUMER THREAD STARTED")
-        batch_contexts = []
+        current_batch = []
+        current_estimated = 0
         sentinels_received = 0
 
-        while (sentinels_received < num_producers or batch_contexts) and not BaseProcessor.exit_processing:
+        def save_current_batch():
+            nonlocal current_batch, current_estimated
+            if not current_batch:
+                return
+
+            merged = PendingDatabaseContext.merge(current_batch)
+            potential_total = self.total_objects_saved + merged.getTotalObjectCount()
+            current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
+            optimize_added = False
+            if current_optimize_needed > self.last_optimize:
+                op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
+                merged.operations.append(op)
+                optimize_added = True
+                log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
+
+            log_info(f"Saving batch of {len(current_batch)} contexts to database (estimated_updates: {merged.estimated_updates})")
+            self.update_pdc_size_gauge(merged)
+            merged.save_to_database(self.db_ops)
+            #self.db_ops.db_conn.execute("CHECKPOINT")
+            log_info(f"Successfully saved batch of {len(current_batch)} contexts + checkpointed")
+            self.total_objects_saved += merged.getTotalObjectCount()
+            self.total_processed += len(current_batch)
+
+            current_batch = []
+            current_estimated = 0
+            merged = None
+            gc.collect()
+
+            if optimize_added:
+                self.last_optimize = current_optimize_needed
+
+        while sentinels_received < num_producers or current_batch:
             try:
                 item = self.result_queue.get_nowait()
             except queue.Empty:
-                if sentinels_received >= num_producers and batch_contexts:
+                if sentinels_received >= num_producers and current_batch:
+                    save_current_batch()
                     break
                 time.sleep(0.1)  # Avoid busy loop
                 continue
@@ -596,59 +656,21 @@ class BaseProcessor:
                 self.result_queue.task_done()
                 continue
 
-            batch_contexts.append(item.data)
+            context = item.data
             self.result_queue.task_done()
 
-            if len(batch_contexts) >= CONSUMER_BATCH_SIZE:
-                merged = PendingDatabaseContext.merge(batch_contexts)
-                potential_total = self.total_objects_saved + merged.getTotalObjectCount()
-                current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
-                optimize_added = False
-                if current_optimize_needed > self.last_optimize:
-                    op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
-                    merged.operations.append(op)
-                    optimize_added = True
-                    log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
+            # Preflight: check if adding this context would exceed the size limit
+            if current_estimated + context.estimated_updates > GEOCODING_MAX_UPDATES_PER_BATCH and current_batch:
+                # Save current batch before adding this large context
+                save_current_batch()
 
-                log_info(f"Saving batch of {len(batch_contexts)} contexts to database")
-                if hasattr(self, '_pdc_metrics'):
-                    self._pdc_metrics(merged)
-                merged.save_to_database(self.db_ops)
-                #self.db_ops.db_conn.execute("CHECKPOINT")
-                log_info(f"Successfully saved batch of {len(batch_contexts)} contexts + checkpointed")
-                self.total_objects_saved += merged.getTotalObjectCount()
-                self.total_processed += len(batch_contexts)
-                batch_contexts = []
-                merged = None
-                gc.collect()
+            # Add context to current batch
+            current_batch.append(context)
+            current_estimated += context.estimated_updates
 
-                if optimize_added:
-                    self.last_optimize = current_optimize_needed
-
-        # Process remaining batch
-        if batch_contexts and not self.exit_processing:
-            merged = PendingDatabaseContext.merge(batch_contexts)
-            potential_total = self.total_objects_saved + merged.getTotalObjectCount()
-            current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
-            optimize_added = False
-            if current_optimize_needed > self.last_optimize:
-                op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
-                merged.operations.append(op)
-                optimize_added = True
-                log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
-
-            log_info(f"Saving final batch of {len(batch_contexts)} contexts to database")
-            if hasattr(self, '_pdc_metrics'):
-                self._pdc_metrics(merged)
-            merged.save_to_database(self.db_ops)
-            #gc.collect()
-            #self.db_ops.db_conn.execute("CHECKPOINT")
-            log_info(f"Successfully saved final batch of {len(batch_contexts)} contexts + checkpointed")
-            self.total_objects_saved += merged.getTotalObjectCount()
-            self.total_processed += len(batch_contexts)
-
-            if optimize_added:
-                self.last_optimize = current_optimize_needed
+            # Save if batch size reached
+            if len(current_batch) >= CONSUMER_BATCH_SIZE:
+                save_current_batch()
 
         log_info("CONSUMER THREAD COMPLETED")
 
@@ -1208,29 +1230,6 @@ class BaseConsumer(BaseProcessor):
         ids = context.save_to_database(self.db_ops)
 
         return len(ids) if ids else 0
-    
-    def update_pdc_size_gauge(self, context: 'PendingDatabaseContext') -> None:
-        """
-        Update gauges for PendingDatabaseContext sizes before saving to database.
-        This optional hook computes and logs sizes for visibility into context accumulation.
-        Also updates instance variables for integration with periodic status gauges.
-        """
-        if not context:
-            objects_count = operations_count = updates_count = 0
-        else:
-            objects_count = sum(len(lst) for lst in context.objects.values())
-            operations_count = len(context.operations)
-            updates_count = len(context._updates)
-
-        # Log for immediate visibility before DB write
-        log_info(
-                 f"PendingDatabaseContext before save_to_database(): "
-                 f"objects={objects_count} (total), operations={operations_count}, updates={updates_count}")
-
-        # Update for periodic gauges (shows last batch size; defaults to 0 if no context)
-        self.pdc_objects_count = objects_count
-        self.pdc_operations_count = operations_count
-        self.pdc_updates_count = updates_count
 
     def _execute_tail_operations(self, operations_by_type, processed_count):
         """Execute tail operations (optimize and progress updates)"""

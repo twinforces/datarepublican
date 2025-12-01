@@ -280,11 +280,19 @@ ${'###'} Address Colocator Analysis
 
 | Category | Count |
 |----------|-------|
-| Distinct colocator values | ${addresses_colocator_analysis['distinct_colocators']} |
-| With 'PO%' prefix | ${addresses_colocator_analysis['po_count']} |
-| With 'FA%' prefix | ${addresses_colocator_analysis['fa_count']} |
-| With 'LL%' prefix | ${addresses_colocator_analysis['ll_count']} |
-| Neither (error) | ${addresses_colocator_analysis['neither_count']} |
+| Distinct colocator values | ${addresses_colocator_analysis.get('distinct_colocators', 0)} |
+| Post Office (PO%) | ${addresses_colocator_analysis.get('po_count', 0)} |
+| Foreign Address (FA%) | ${addresses_colocator_analysis.get('fa_count', 0)} |
+| Geocoded (LL%) | ${addresses_colocator_analysis.get('ll_count', 0)} |
+| Institution Codes | ${addresses_colocator_analysis.get('institution_count', 0)} |
+| Other/Unknown | ${addresses_colocator_analysis.get('neither_count', 0)} |
+
+${'####'} Colocator Type Breakdown
+| Type | Count |
+|------|-------|
+% for colocator_type, count in addresses_colocator_analysis.get('colocator_type_breakdown', []):
+| ${colocator_type} | ${count} |
+% endfor
 
 ${'####'} Colocator by Address Type
 | Address Type | Count |

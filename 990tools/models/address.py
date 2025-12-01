@@ -76,10 +76,14 @@ class Address(BaseModel):
         if self.address_line1 and "PO BOX" in self.address_line1.upper():
             match = PO_BOX_REGEX.search(self.address_line1.upper())
             if match:
-                po_box_str = match.group(1)
-                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                if number_match:
-                    return number_match.group(0)
+                po_box_str = match.group(1).strip() if match.group(1) else ""
+                if po_box_str:
+                    number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                    if number_match:
+                        return number_match.group(0)
+                else:
+                    # No specific box number, but it's still a PO Box
+                    return "POBOX"
         return None
 
     def canonicalize_address(self):
@@ -109,10 +113,15 @@ class Address(BaseModel):
         if self.address_line1:
             match = PO_BOX_REGEX.search(self.address_line1.upper())
             if match:
-                po_box_str = match.group(1)
-                number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                if number_match:
-                    self.po_box = number_match.group(0)
+                po_box_str = match.group(1).strip() if match.group(1) else ""
+                # If we have a box number, use it; otherwise treat as generic PO Box
+                if po_box_str:
+                    number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                    if number_match:
+                        self.po_box = number_match.group(0)
+                else:
+                    # No specific box number, but it's still a PO Box address
+                    self.po_box = "POBOX"  # Generic PO Box identifier
 
         # Validate state
         if self.state and self.state.upper() not in VALID_STATES:
@@ -125,12 +134,20 @@ class Address(BaseModel):
 
         # Set colocator for PO Boxes
         if self.po_box:
-            self.colocator = f"PO:{self.po_box}:{self.zip_code}"
+            if self.po_box == "POBOX":
+                # Generic PO Box without specific number
+                self.colocator = f"PO:BOX:{self.zip_code}"
+            else:
+                # Specific PO Box number
+                self.colocator = f"PO:{self.po_box}:{self.zip_code}"
 
         # Build canonical address with comma-separated components
         canonical_parts = []
         if self.po_box:
-            canonical_parts.append(f"PO Box {self.po_box}")
+            if self.po_box == "POBOX":
+                canonical_parts.append("PO Box")
+            else:
+                canonical_parts.append(f"PO Box {self.po_box}")
         if self.address_line1:
             canonical_parts.append(self.address_line1)
         if self.address_line2:

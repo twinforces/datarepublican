@@ -179,6 +179,8 @@ CREATE TABLE Geocoding (
     -- Last geocoding attempt
     attempt_count INTEGER DEFAULT 0,
     -- Number of attempts
+    address_count INTEGER DEFAULT 0,
+    -- Number of addresses affected
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -28,7 +28,7 @@ INTEGRATION:
 from typing import Dict, List, Any, Optional
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
-from logging_utils import log_info, log_error, log_warning
+from logging_utils import log_info, log_error, log_warning, log_debug
 from datetime import datetime
 import threading
 
@@ -73,6 +73,7 @@ class PendingDatabaseContext:
         self._updates: List[Dict[str, Any]] = []  # For future UPDATE operations
         self.operations: List[DatabaseOperation] = []  # For generic database operations
         self.error_message: Optional[str] = None  # Error message for failed processing
+        self.estimated_updates: int = 0  # Estimated number of database updates this context will perform
 
     def addObjectToDatabase(self, obj: Any) -> None:
         """
@@ -86,6 +87,8 @@ class PendingDatabaseContext:
         # Add to the appropriate list (no special handling for charity)
         if obj_type in self.objects:
             self.objects[obj_type].append(obj)
+            # Increment estimated updates (rough estimate for size-based batching)
+            self.estimated_updates += 1
         else:
             raise ValueError(f"Unknown object type: {obj_type}")
 
@@ -112,6 +115,8 @@ class PendingDatabaseContext:
             operation: The DatabaseOperation to add
         """
         self.operations.append(operation)
+        # Increment estimated updates (rough estimate for size-based batching)
+        self.estimated_updates += 1
 
     def getObjectsByType(self, obj_type: str) -> List[Any]:
         """
@@ -251,7 +256,10 @@ class PendingDatabaseContext:
                     PendingDatabaseContext._updated_counter += rows_this_op
 
                     if PendingDatabaseContext._updated_counter >= FLUSH_EVERY_N_ROWS:
-                        PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(conn, PendingDatabaseContext._updated_counter)
+                        PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(conn, PendingDatabaseContext._updated_counter, db_ops)
+                        # Get a fresh connection after recycling
+                        conn = db_ops._get_thread_local_connection()
+                        conn.execute("BEGIN TRANSACTION")
                         PendingDatabaseContext._updated_counter = 0
 
             # Final commit
@@ -266,11 +274,17 @@ class PendingDatabaseContext:
             log_error(f"Failed to save context to database: {e}", exc_info=True)
             raise
 
-        # Final safe checkpoint
+        # Final checkpoint with macOS workaround
         try:
-            conn.execute("CHECKPOINT")
-        except:
-            pass
+            # Recycle connection first to enable reliable checkpointing on macOS
+            db_ops.recycle_connection()
+            # Then attempt CHECKPOINT for WAL flushing
+            fresh_conn = db_ops._get_thread_local_connection()
+            fresh_conn.execute("CHECKPOINT")
+            log_info("Final checkpoint completed successfully")
+        except Exception as e:
+            log_warning(f"Final checkpoint failed: {e}")
+            # Continue anyway - data is still committed
 
         return ids
 
@@ -431,42 +445,58 @@ class PendingDatabaseContext:
                     # Log the error but don't fail the entire transaction
                     log_error(f"Failed to update addresses for canonical_address {geocoding.canonical_address}: {e}")
                     # Continue with the transaction - geocoding record update will still succeed
-    def _intermediate_commit_and_checkpoint(self, conn, updated_so_far: int) -> int:
+    def _intermediate_commit_and_checkpoint(self, conn, updated_so_far: int, db_ops: DatabaseOperations) -> int:
         """
-        Commit the current transaction, run a clean checkpoint, and start a new transaction.
-        This is the ONLY sequence that reliably frees DuckDB memory + WAL on macOS during huge UPDATE batches.
+        Commit the current transaction, recycle connection to enable checkpointing, then checkpoint for WAL flushing.
+
+        On macOS, DuckDB has known issues where CHECKPOINT doesn't work reliably.
+        The solution is to recycle the connection first (to work around macOS issues),
+        then attempt CHECKPOINT (for performance benefits from WAL flushing).
         """
         try:
-            print("doing intermediate checkpoint")
+            log_debug("Performing intermediate commit and checkpoint...")
             conn.commit()                               # Ends the huge transaction
-            #conn.execute("FORCE CHECKPOINT")                  # Normal CHECKPOINT now works (no active tx)
-            conn.execute("BEGIN TRANSACTION")           # Fresh transaction for the next operations
-            log_info(f"INTERMEDIATE CHECKPOINT after ~{updated_so_far:,} address updates — memory/WAL reclaimed")
+
+            # Recycle connection first to work around macOS CHECKPOINT reliability issues
+            db_ops.recycle_connection()
+
+            # Now attempt CHECKPOINT for WAL flushing and performance benefits
+            try:
+                # Get the fresh connection after recycling
+                fresh_conn = db_ops._get_thread_local_connection()
+                fresh_conn.execute("CHECKPOINT")
+                log_debug("Intermediate checkpoint succeeded after connection recycling")
+            except Exception as checkpoint_e:
+                log_warning(f"Checkpoint failed even after recycling: {checkpoint_e}")
+                # Continue anyway - the recycling itself provides WAL cleanup
+
+            log_info(f"INTERMEDIATE COMMIT + CHECKPOINT after ~{updated_so_far:,} address updates — memory/WAL reclaimed")
             return 0                                        # reset the counter
+
         except Exception as e:
-                    # Log connection state for debugging
-                    current_thread_id = threading.get_ident()
-                    log_warning(f"Intermediate checkpoint failed on thread {current_thread_id} (continuing anyway): {e}")
+            # Log connection state for debugging
+            current_thread_id = threading.get_ident()
+            log_warning(f"Intermediate commit/checkpoint failed on thread {current_thread_id} (continuing anyway): {e}")
 
-                    # Log recent queries from duckdb_logs
-                    try:
-                        logs = conn.execute("""
-                            SELECT timestamp, message, log_level, type
-                            FROM duckdb_logs 
-                            WHERE type = 'QueryLog' 
-                            ORDER BY timestamp DESC 
-                            LIMIT 10
-                        """).fetchall()
-                        log_warning("Recent queries from duckdb_logs:")
-                        for log_entry in logs:
-                            log_warning(str(log_entry))
-                    except Exception as log_e:
-                        log_warning(f"Failed to query duckdb_logs: {log_e}")
+            # Log recent queries from duckdb_logs
+            try:
+                logs = conn.execute("""
+                    SELECT timestamp, message, log_level, type
+                    FROM duckdb_logs()
+                    WHERE type = 'QueryLog'
+                    ORDER BY timestamp DESC
+                    LIMIT 10
+                """).fetchall()
+                log_warning("Recent queries from duckdb_logs:")
+                for log_entry in logs:
+                    log_warning(str(log_entry))
+            except Exception as log_e:
+                log_warning(f"Failed to query duckdb_logs: {log_e}")
 
-                    try:
-                        conn.execute("BEGIN TRANSACTION")       # at least try to restart the tx
-                    except:
-                        pass            
+            try:
+                conn.execute("BEGIN TRANSACTION")       # at least try to restart the tx
+            except:
+                pass
         return 0
 
     @classmethod
@@ -514,6 +544,9 @@ class PendingDatabaseContext:
         generic_update_groups = {}  # Key: (table, set_clause, where_clause), Value: list of param sets
 
         for context in contexts:
+            # Sum estimated updates
+            merged.estimated_updates += context.estimated_updates
+
             for operation in context.operations:
                 if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
                     data = operation.data
@@ -569,3 +602,4 @@ class PendingDatabaseContext:
         self.xml_id = None
         self.xml_content = None
         self.error_message = None
+        self.estimated_updates = 0

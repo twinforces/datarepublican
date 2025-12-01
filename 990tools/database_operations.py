@@ -199,7 +199,7 @@ class DatabaseOperations:
         conn.execute("SET memory_limit = '6GB'")
         conn.execute("SET enable_object_cache = true")   # Enable object cache
         #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
-        
+
         try:
             conn.execute("SET insert_select_parallelism = true")  # Enable parallel insert-select operations
         except Exception:
@@ -654,6 +654,43 @@ class DatabaseOperations:
             conn = self._get_conn(allow_write=True)
 
         conn.commit()
+
+
+    def recycle_connection(self) -> None:
+        """
+        Recycle the database connection to work around macOS DuckDB CHECKPOINT issues.
+
+        On macOS, DuckDB has known issues with CHECKPOINT not working reliably.
+        The only reliable solution is to close and reopen the connection, which
+        forces a checkpoint and clears the WAL.
+
+        This method closes the current connection and creates a new one with
+        identical settings, effectively recycling the connection.
+        """
+        log_info("Recycling database connection to work around macOS DuckDB CHECKPOINT issues...")
+
+        try:
+            # Close the main connection
+            if hasattr(self, 'db_conn') and self.db_conn:
+                self.db_conn.commit()
+                self.db_conn.close()
+                log_debug("Closed main database connection")
+        except Exception as e:
+            log_warning(f"Error closing main connection during recycle: {e}")
+
+        try:
+            # Close thread-local connections
+            if hasattr(DatabaseOperations._local, 'db_conn'):
+                DatabaseOperations._local.db_conn.commit()
+                DatabaseOperations._local.db_conn.close()
+                delattr(DatabaseOperations._local, 'db_conn')
+                log_debug("Closed thread-local database connection")
+        except Exception as e:
+            log_warning(f"Error closing thread-local connection during recycle: {e}")
+
+        # Reinitialize the connection with the same settings
+        self._init_connection()
+        log_info("Database connection recycled successfully")
 
     def close(self):
         """Explicitly close the database connection"""
@@ -1437,37 +1474,38 @@ class DatabaseOperations:
         return StatsProcessor(self)
 
     def optimize_database(self, commit: bool = True):
-        """Run database optimization commands"""
-        print(f"DEBUG: optimize_database starting - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
+        """Run database optimization commands with macOS-compatible checkpointing"""
+        log_info("Starting database optimization...")
 
         # Analyze tables for better query planning
-        for table in ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]:
-            print(f"DEBUG: VACUUM ANALYZE {table}")
-            self.execute_query(f"VACUUM ANALYZE {table}")
-
-        self.commit() # just in case
-        # Regular checkpoint to ensure data is written and WAL is cleared
-        print(f"DEBUG: About to execute CHECKPOINT - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
-        try:
-            self.db_conn.execute("CHECKPOINT")
-        except Exception as e:
-            log_error(f"Checkpoint failed, forcing: {e}", exc_info=True)
-            # Query and log duckdb_locks before forcing checkpoint
+        tables_to_optimize = ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]
+        for table in tables_to_optimize:
+            log_debug(f"Optimizing table: {table}")
             try:
-                locks_result = self.db_conn.execute("""SELECT * 
-                    FROM duckdb_logs() 
-                    WHERE message ILIKE '%lock%' 
-                    OR message ILIKE '%busy%' 
-                    OR message ILIKE '%checkpoint%'
-                    ORDER BY timestamp DESC 
-                    LIMIT 50;""").fetchall()
-                log_error(f"duckdb_locks state before FORCE CHECKPOINT: {locks_result}")
-            except Exception as locks_e:
-                log_error(f"Failed to query duckdb_logs: {locks_e}")
-            self.db_conn.execute("FORCE CHECKPOINT")
+                self.execute_query(f"VACUUM ANALYZE {table}")
+                log_debug(f"Successfully optimized {table}")
+            except Exception as e:
+                log_warning(f"Failed to optimize {table}: {e}")
 
-            pass
-        print(f"DEBUG: CHECKPOINT completed - conn={id(self.db_conn)}, thread={threading.current_thread().name}")
+        # Ensure any pending changes are committed before checkpoint
+        if commit:
+            self.commit()
+
+        # On macOS, recycle connection first to work around CHECKPOINT reliability issues
+        # This enables CHECKPOINT to work properly for WAL flushing and performance
+        log_info("Recycling connection to enable reliable checkpointing...")
+        self.recycle_connection()
+
+        # Now attempt CHECKPOINT for WAL flushing and performance benefits
+        log_info("Performing database checkpoint for WAL cleanup...")
+        try:
+            conn = self._get_conn()
+            conn.execute("CHECKPOINT")
+            log_info("Database checkpoint completed successfully")
+        except Exception as e:
+            log_warning(f"Checkpoint failed even after connection recycling: {e}")
+            # Continue anyway - the recycling itself provides some WAL cleanup
+
         if commit:
             self.commit()
 
