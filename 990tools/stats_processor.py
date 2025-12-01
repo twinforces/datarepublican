@@ -641,6 +641,19 @@ class StatsProcessor:
             institution_count = result[0] if result else 0
             analysis['institution_count'] = institution_count
 
+            # Top 10 institution prefixes
+            result = self.db_ops.execute_query("""
+                SELECT
+                    SUBSTRING(colocator, 1, POSITION(':' IN colocator)) as prefix,
+                    COUNT(*) as count
+                FROM Addresses
+                WHERE colocator LIKE '%:%' AND colocator NOT LIKE 'PO:%' AND colocator NOT LIKE 'FA:%' AND colocator NOT LIKE 'LL:%'
+                GROUP BY prefix
+                ORDER BY count DESC
+                LIMIT 10
+            """).fetchall()
+            analysis['top_institution_prefixes'] = result or []
+
             # Total with colocator
             result = self.db_ops.execute_query("""
                 SELECT COUNT(*) as total_with_colocator

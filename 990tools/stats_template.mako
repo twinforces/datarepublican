@@ -301,6 +301,13 @@ ${'####'} Colocator by Address Type
 | ${address_type} | ${count} |
 % endfor
 
+${'####'} Top 10 Institution Prefixes
+| Prefix | Count |
+|--------|-------|
+% for prefix, count in addresses_colocator_analysis.get('top_institution_prefixes', []):
+| ${prefix} | ${count} |
+% endfor
+
 ${'###'} Geocoding Status Analysis
 
 | Geocoding Status | Count |
