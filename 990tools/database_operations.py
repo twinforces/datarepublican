@@ -389,7 +389,7 @@ class DatabaseOperations:
         """Initialize database schema if not already present"""
         # Check if schema is already initialized
         try:
-            result = self.db_conn.execute("SELECT table_name FROM duckdb_tables() WHERE table_name='ZipFiles'").fetchone()
+            result = self.db_conn.execute("SELECT table_name FROM duckdb_tables() WHERE table_name='Charities'").fetchone()
             if result:
                 return  # Schema already exists
         except duckdb.CatalogException:

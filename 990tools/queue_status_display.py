@@ -34,6 +34,19 @@ class QueueStatusDisplay:
         self._pdc_updates_peak = 0
         self._zip_cache_gauge = None
         self._zip_cache_peak = 0
+        self._outstanding_geocode_gauge = None
+        self._outstanding_geocode_peak = 0
+        self._geocoded_addresses_gauge = None
+        self._geocoded_addresses_peak = 0
+        # API call gauges
+        self._census_calls_gauge = None
+        self._photon_calls_gauge = None
+        self._librestreet_calls_gauge = None
+        self._nominatim_calls_gauge = None
+        self._opencage_calls_gauge = None
+        self._grok_calls_gauge = None
+        self._google_maps_calls_gauge = None
+        self._name_search_calls_gauge = None
         self._process = psutil.Process()
 
         # Initialize tqdm progress bar for queue status
@@ -98,6 +111,89 @@ class QueueStatusDisplay:
                 position=6,  # Position below PDC updates gauge
                 leave=True
             )
+            # Initialize Outstanding Geocode Requests gauge
+            self._outstanding_geocode_gauge = tqdm(
+                total=100,  # Percentage
+                desc="Outstanding Geocode",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=7,  # Position below zip cache gauge
+                leave=True
+            )
+            # Initialize Outstanding API Calls gauge
+            self._geocoded_addresses_gauge = tqdm(
+                total=100,  # Percentage
+                desc="Outstanding API Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=8,  # Position below outstanding geocode gauge
+                leave=True
+            )
+            # Initialize API call gauges
+            self._census_calls_gauge = tqdm(
+                total=100,
+                desc="Census Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=9,
+                leave=True
+            )
+            self._grok_calls_gauge = tqdm(
+                total=100,
+                desc="Grok Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=13,
+                leave=True
+            )
+            self._photon_calls_gauge = tqdm(
+                total=100,
+                desc="Photon Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=10,
+                leave=True
+            )
+            self._librestreet_calls_gauge = tqdm(
+                total=100,
+                desc="LibreStreet Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=11,
+                leave=True
+            )
+            self._nominatim_calls_gauge = tqdm(
+                total=100,
+                desc="Nominatim Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=12,
+                leave=True
+            )
+            self._opencage_calls_gauge = tqdm(
+                total=100,
+                desc="OpenCage Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=13,
+                leave=True
+            )
+            self._google_maps_calls_gauge = tqdm(
+                total=100,
+                desc="Google Maps Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=14,
+                leave=True
+            )
+            self._name_search_calls_gauge = tqdm(
+                total=100,
+                desc="Name Search Calls",
+                unit="%",
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {postfix}',
+                position=15,
+                leave=True
+            )
             self._display_thread = threading.Thread(target=self._display_loop, daemon=True)
             self._display_thread.start()
 
@@ -118,6 +214,26 @@ class QueueStatusDisplay:
                 self._pdc_updates_gauge.close()
             if self._zip_cache_gauge:
                 self._zip_cache_gauge.close()
+            if self._outstanding_geocode_gauge:
+                self._outstanding_geocode_gauge.close()
+            if self._geocoded_addresses_gauge:
+                self._geocoded_addresses_gauge.close()
+            if self._census_calls_gauge:
+                self._census_calls_gauge.close()
+            if self._photon_calls_gauge:
+                self._photon_calls_gauge.close()
+            if self._librestreet_calls_gauge:
+                self._librestreet_calls_gauge.close()
+            if self._nominatim_calls_gauge:
+                self._nominatim_calls_gauge.close()
+            if self._grok_calls_gauge:
+                self._grok_calls_gauge.close()
+            if self._opencage_calls_gauge:
+                self._opencage_calls_gauge.close()
+            if self._google_maps_calls_gauge:
+                self._google_maps_calls_gauge.close()
+            if self._name_search_calls_gauge:
+                self._name_search_calls_gauge.close()
 
     def _display_loop(self):
         """Main display loop for updating queue status"""
@@ -129,6 +245,16 @@ class QueueStatusDisplay:
                 self._update_pdc_operations_display()
                 self._update_pdc_updates_display()
                 self._update_zip_cache_display()
+                self._update_outstanding_geocode_display()
+                self._update_geocoded_addresses_display()
+                self._update_census_calls_display()
+                self._update_photon_calls_display()
+                self._update_librestreet_calls_display()
+                self._update_nominatim_calls_display()
+                self._update_opencage_calls_display()
+                self._update_grok_calls_display()
+                self._update_google_maps_calls_display()
+                self._update_name_search_calls_display()
                 time.sleep(self.update_interval)
             except Exception as e:
                 # Don't let display errors crash the main process
@@ -411,6 +537,212 @@ class QueueStatusDisplay:
 
         except Exception as e:
             # Don't let zip cache monitoring errors crash the process
+            pass
+
+    def _update_outstanding_geocode_display(self):
+        """Update the outstanding geocode requests display"""
+        if not self._outstanding_geocode_gauge:
+            return
+
+        try:
+            # Get current outstanding geocode requests count from custom metrics
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'outstanding_geocode_requests' in custom_metrics:
+                    current_count = custom_metrics['outstanding_geocode_requests']
+                    self._outstanding_geocode_peak = max(self._outstanding_geocode_peak, current_count)
+
+                    # For outstanding requests, use a reasonable total for percentage display
+                    # Since we don't know the total, use a fixed denominator
+                    total_requests = 10000  # Arbitrary large number for percentage calculation
+                    percentage = min((current_count / total_requests) * 100, 100)
+                    self._outstanding_geocode_gauge.n = int(percentage)
+                    self._outstanding_geocode_gauge.total = 100
+
+                    # Create postfix with outstanding geocode details
+                    postfix = f"Count {current_count} · Peak {self._outstanding_geocode_peak}"
+                    self._outstanding_geocode_gauge.set_postfix({"info": postfix})
+                    self._outstanding_geocode_gauge.refresh()
+
+        except Exception as e:
+            # Don't let outstanding geocode monitoring errors crash the process
+            pass
+
+    def _update_geocoded_addresses_display(self):
+        """Update the outstanding API calls display"""
+        if not self._geocoded_addresses_gauge:
+            return
+
+        try:
+            # Get current outstanding geocode requests count from custom metrics
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'outstanding_geocode_requests' in custom_metrics:
+                    current_records = custom_metrics['outstanding_geocode_requests']
+                    self._geocoded_addresses_peak = max(self._geocoded_addresses_peak, current_records)
+
+                    # Calculate API calls (assuming ~1000 records per API call)
+                    api_calls = (current_records + 999) // 1000  # Round up division
+                    self._geocoded_addresses_peak = max(self._geocoded_addresses_peak, api_calls)
+
+                    # For API calls, use a reasonable total for percentage display
+                    total_calls = 100  # Expect up to 100 API calls
+                    percentage = min((api_calls / total_calls) * 100, 100)
+                    self._geocoded_addresses_gauge.n = int(percentage)
+                    self._geocoded_addresses_gauge.total = 100
+
+                    # Create postfix with API calls details
+                    postfix = f"Calls {api_calls} · Records {current_records:,}"
+                    self._geocoded_addresses_gauge.set_postfix({"info": postfix})
+                    self._geocoded_addresses_gauge.refresh()
+
+        except Exception as e:
+            # Don't let outstanding geocode monitoring errors crash the process
+            pass
+
+    def _update_census_calls_display(self):
+        """Update the Census calls display"""
+        if not self._census_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'census_calls' in custom_metrics:
+                    count = custom_metrics['census_calls']
+                    self._census_calls_gauge.n = 0
+                    self._census_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._census_calls_gauge.set_postfix({"info": postfix})
+                    self._census_calls_gauge.refresh()
+        except Exception as e:
+            pass
+
+    def _update_photon_calls_display(self):
+        """Update the Photon calls display"""
+        if not self._photon_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'photon_calls' in custom_metrics:
+                    count = custom_metrics['photon_calls']
+                    self._photon_calls_gauge.n = 0
+                    self._photon_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._photon_calls_gauge.set_postfix({"info": postfix})
+                    self._photon_calls_gauge.refresh()
+        except Exception as e:
+            pass
+        
+    def _update_grok_calls_display(self):
+        """Update the Grok calls display"""
+        if not self._grok_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'grok_calls' in custom_metrics:
+                    count = custom_metrics['photon_calls']
+                    self._grok_calls_gauge.n = 0
+                    self._grok_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._grok_calls_gauge.set_postfix({"info": postfix})
+                    self._grok_calls_gauge.refresh()
+        except Exception as e:
+            pass
+
+
+    def _update_librestreet_calls_display(self):
+        """Update the LibreStreet calls display"""
+        if not self._librestreet_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'librestreet_calls' in custom_metrics:
+                    count = custom_metrics['librestreet_calls']
+                    self._librestreet_calls_gauge.n = 0
+                    self._librestreet_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._librestreet_calls_gauge.set_postfix({"info": postfix})
+                    self._librestreet_calls_gauge.refresh()
+        except Exception as e:
+            pass
+
+    def _update_nominatim_calls_display(self):
+        """Update the Nominatim calls display"""
+        if not self._nominatim_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'nominatim_calls' in custom_metrics:
+                    count = custom_metrics['nominatim_calls']
+                    self._nominatim_calls_gauge.n = 0
+                    self._nominatim_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._nominatim_calls_gauge.set_postfix({"info": postfix})
+                    self._nominatim_calls_gauge.refresh()
+        except Exception as e:
+            pass
+
+    def _update_opencage_calls_display(self):
+        """Update the OpenCage calls display"""
+        if not self._opencage_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'opencage_calls' in custom_metrics:
+                    count = custom_metrics['opencage_calls']
+                    self._opencage_calls_gauge.n = 0
+                    self._opencage_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._opencage_calls_gauge.set_postfix({"info": postfix})
+                    self._opencage_calls_gauge.refresh()
+        except Exception as e:
+            pass
+
+    def _update_google_maps_calls_display(self):
+        """Update the Google Maps calls display"""
+        if not self._google_maps_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'google_maps_calls' in custom_metrics:
+                    count = custom_metrics['google_maps_calls']
+                    self._google_maps_calls_gauge.n = 0
+                    self._google_maps_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._google_maps_calls_gauge.set_postfix({"info": postfix})
+                    self._google_maps_calls_gauge.refresh()
+        except Exception as e:
+            pass
+
+    def _update_name_search_calls_display(self):
+        """Update the Name Search calls display"""
+        if not self._name_search_calls_gauge:
+            return
+
+        try:
+            if self.custom_metrics_func:
+                custom_metrics = self.custom_metrics_func()
+                if custom_metrics and 'name_search_calls' in custom_metrics:
+                    count = custom_metrics['name_search_calls']
+                    self._name_search_calls_gauge.n = 0
+                    self._name_search_calls_gauge.total = 100
+                    postfix = f"Count {count}"
+                    self._name_search_calls_gauge.set_postfix({"info": postfix})
+                    self._name_search_calls_gauge.refresh()
+        except Exception as e:
             pass
 
     def _get_utilization_level(self, current_size: int) -> str:

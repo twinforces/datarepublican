@@ -647,7 +647,7 @@ class BaseProcessor:
                 if sentinels_received >= num_producers and current_batch:
                     save_current_batch()
                     break
-                time.sleep(0.1)  # Avoid busy loop
+                time.sleep(1.1)  # Avoid busy loop
                 continue
 
             if item.is_sentinel():

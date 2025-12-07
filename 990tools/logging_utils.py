@@ -92,7 +92,16 @@ def log_error(msg: str, *args, ein: Optional[str] = None, exc_info: bool = False
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
-    formatted_msg = msg.format(*args, **kwargs)
+    # Handle missing placeholders by replacing them with '[MISSING]'
+    placeholders = re.findall(r'\{(\w+)\}', msg)
+    for placeholder in placeholders:
+        if placeholder not in kwargs:
+            msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
+    try:
+        formatted_msg = msg.format(*args, **kwargs)
+    except KeyError as e:
+        # If still KeyError, log the original message without formatting
+        formatted_msg = msg
     if ein:
         logger.error(f"{debug_prefix}[EIN:{ein}] {formatted_msg}", exc_info=exc_info)
     else:
@@ -105,7 +114,16 @@ def log_debug(msg: str, *args, ein: Optional[str] = None, **kwargs) -> None:
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
-    formatted_msg = msg.format(*args, **kwargs)
+    # Handle missing placeholders by replacing them with '[MISSING]'
+    placeholders = re.findall(r'\{(\w+)\}', msg)
+    for placeholder in placeholders:
+        if placeholder not in kwargs:
+            msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
+    try:
+        formatted_msg = msg.format(*args, **kwargs)
+    except KeyError as e:
+        # If still KeyError, log the original message without formatting
+        formatted_msg = msg
     if ein:
         logger.debug(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:
@@ -118,7 +136,16 @@ def log_warning(msg: str, *args, ein: Optional[str] = None, **kwargs):
         return
     debug_info = get_debug_info()
     debug_prefix = f"[{debug_info['file']}:{debug_info['line']}:{debug_info['function']}] "
-    formatted_msg = msg.format(*args, **kwargs)
+    # Handle missing placeholders by replacing them with '[MISSING]'
+    placeholders = re.findall(r'\{(\w+)\}', msg)
+    for placeholder in placeholders:
+        if placeholder not in kwargs:
+            msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
+    try:
+        formatted_msg = msg.format(*args, **kwargs)
+    except KeyError as e:
+        # If still KeyError, log the original message without formatting
+        formatted_msg = msg
     if ein:
         logger.warning(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:

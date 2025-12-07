@@ -181,6 +181,8 @@ CREATE TABLE Geocoding (
     -- Number of attempts
     address_count INTEGER DEFAULT 0,
     -- Number of addresses affected
+    matched_address VARCHAR,
+    -- Matched address returned by geocoding API
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
