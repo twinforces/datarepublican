@@ -10,8 +10,11 @@ import json
 import re
 import os
 import sys
+import openai
+import random
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+from openai import OpenAI
 
 try:
     import censusgeocode as cg
@@ -52,6 +55,8 @@ class GeocodingAPIProcessor(BaseProcessor):
         self.google_maps_calls = 0
         self.name_search_calls = 0
         self.grok_calls = 0
+        self.grok_client = None
+        #self._initialize_grok_client()
         if cg is None and not global_config.is_quiet():
             log_warning("censusgeocode library not available. Install with: pip install censusgeocode")
 
@@ -312,8 +317,8 @@ class GeocodingAPIProcessor(BaseProcessor):
         fallbacks = [
             ("Grok", self._geocode_with_grok),
             ("Photon", self._geocode_with_photon),
-            ("LibreStreet", self._geocode_with_librestreet),
-            ("Nominatim", self._geocode_with_nominatim),
+            #("LibreStreet", self._geocode_with_librestreet),
+            #("Nominatim", self._geocode_with_nominatim),
             #("OpenCage", self._geocode_with_opencage),
             #("Google_Maps", self._geocode_with_google_maps),
             #("Name_Search", lambda _: self._geocode_with_name_search(gid, canonical)),
@@ -323,7 +328,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         for name, func in fallbacks:
             try:
-                res = func(canonical)
+                res = func(canonical, normalized)
                 if res and res.get('match'):
                     lat, lon = float(res['lat']), float(res['lon'])
                     status = f"Match:{name.replace('_', ' ')}"
@@ -340,46 +345,113 @@ class GeocodingAPIProcessor(BaseProcessor):
         context.addOperationToDatabase(DatabaseOperation(operation_type=DatabaseOperationType.PROGRESS_UPDATE, data={'count': work_item.get('address_count', 0)}))
         return context
 
-    def _geocode_with_grok(self, address_str):
-        """Fallback to Grok API for hard cases."""
-        api_key = os.getenv('XAI_API_KEY')  # Your credits key
-        self.grok_calls += 1
-        if not api_key:
+    def _geocode_with_grok(self, normalized_address: dict, canonical_address: str):
+        """FINAL PRODUCTION VERSION — structured input, retries, 300s timeout"""
+        if not os.getenv("X_API_KEY"):
             return None
-        try:
-            import requests
-            prompt = f"Give me the lat/long for '{address_str}'. Respond ONLY with 'lat: X, long: Y' or 'No match'."
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": "grok-4-latest",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 50
-                },
-                timeout=10
-            )
-            data = response.json()
-            reply = data['choices'][0]['message']['content'].strip()
-            if 'lat:' in reply and 'long:' in reply:
-                lat_match = re.search(r'lat:\s*([\d.-]+)', reply)
-                lon_match = re.search(r'long:\s*([\d.-]+)', reply)
-                if lat_match and lon_match:
-                    return {
-                        'match': True,
-                        'matchtype': 'Grok',
-                        'lat': float(lat_match.group(1)),
-                        'lon': float(lon_match.group(1)),
-                        'formatted_address': address_str
-                    }
-        except Exception as e:
-            log_debug(f"Grok fallback failed: {e}")
-        return None
 
-    def _geocode_with_google_maps(self, address_str):
+        self.grok_calls += 1
+
+        if not self.grok_client:
+            self.grok_client = OpenAI(api_key=os.environ["X_API_KEY"], base_url="https://api.x.ai/v1")
+
+
+        # Extract clean data
+        street = normalized_address.get("street", "")
+        city = normalized_address.get("city", "").strip()
+        state = normalized_address.get("state", "").strip()
+        zip_code = normalized_address.get("zip", "").strip()
+
+        entity = re.sub(r'(?i)^c/?o\s+', '', street, flags=re.IGNORECASE).strip()
+
+        structured_input = {
+            "nonprofit_name": entity,
+            "city": city,
+            "state": state,
+            "zip_code": zip_code
+        }
+
+        prompt = f"""
+You are a forensic 990 nonprofit address resolver.
+
+Input (structured):
+{json.dumps(structured_input, indent=2)}
+
+Find the real physical headquarters.
+
+Return ONLY valid JSON:
+{{"lat": XX.XXXXX, "long": -XX.XXXXX, "matched_address": "Full street address, City, State ZIP"}}
+or
+{{"lat": null, "long": null, "matched_address": null}}
+"""
+
+        for attempt in range(3):
+            start = time.time()
+            try:
+                response = self.grok_client.chat.completions.create(
+                    model="grok-4-latest",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=80,
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                    timeout=300  # 5 minutes
+                )
+                elapsed = time.time() - start
+
+                result = json.loads(response.choices[0].message.content)
+                lat = result.get("lat")
+                lon = result.get("long")
+                matched = result.get("matched_address")
+
+                if lat is not None and lon is not None and matched:
+                    return {
+                        "status": "SUCCESS",
+                        "time_ms": round(elapsed * 1000, 1),
+                        "attempt": attempt + 1,
+                        "call": self.grok_calls,
+                        "lat": round(float(lat), 5),
+                        "lon": round(float(lon), 5),
+                        "matched_address": matched
+                    }
+                else:
+                    return {"status": "NO MATCH", "time_ms": round(elapsed * 1000, 1), "attempt": attempt + 1, "call": self.grok_calls}
+
+            except Exception as e:
+                elapsed = time.time() - start
+                if attempt < 2:
+                    wait = (2 ** attempt) + random.random()
+                    print(f"  → Retry {attempt + 2}/3 in {wait:.1f}s... ({e})")
+                    time.sleep(wait)
+                else:
+                    return {"status": "ERROR", "error": str(e), "time_ms": round(elapsed * 1000, 1), "call": self.grok_calls}
+
+        return {"status": "FAILED_ALL_RETRIES", "call": self.grok_calls}
+    
+    def _geocode_with_google_maps(self, address_str, normalized_address=None):
         self.google_maps_calls += 1
         key = os.getenv('GOOGLE_MAPS_API_KEY')
         if not key: return None
+
+        # Parse normalized_address for structured data
+        normalized_data = {}
+        if isinstance(normalized_address, str):
+            try:
+                normalized_data = json.loads(normalized_address)
+            except:
+                pass
+        elif isinstance(normalized_address, dict):
+            normalized_data = normalized_address.copy()
+
+        # Construct address string from normalized data if available
+        if normalized_data:
+            street = normalized_data.get('street', '')
+            city = normalized_data.get('city', '')
+            state = normalized_data.get('state', '')
+            zip_code = normalized_data.get('zip', '')
+            constructed_address = f"{street}, {city}, {state} {zip_code}".strip(', ')
+            if constructed_address:
+                address_str = constructed_address
+
         try:
             url = f"https://maps.googleapis.com/maps/api/geocode/json?address={requests.utils.quote(address_str)}&key={key}"
             r = requests.get(url, timeout=10)
@@ -390,9 +462,30 @@ class GeocodingAPIProcessor(BaseProcessor):
         except: pass
         return None
 
-    def _geocode_with_nominatim(self, address_str):
+    def _geocode_with_nominatim(self, address_str, normalized_address=None):
         self.nominatim_calls += 1
         if Nominatim is None: return None
+
+        # Parse normalized_address for structured data
+        normalized_data = {}
+        if isinstance(normalized_address, str):
+            try:
+                normalized_data = json.loads(normalized_address)
+            except:
+                pass
+        elif isinstance(normalized_address, dict):
+            normalized_data = normalized_address.copy()
+
+        # Construct address string from normalized data if available
+        if normalized_data:
+            street = normalized_data.get('street', '')
+            city = normalized_data.get('city', '')
+            state = normalized_data.get('state', '')
+            zip_code = normalized_data.get('zip', '')
+            constructed_address = f"{street}, {city}, {state} {zip_code}".strip(', ')
+            if constructed_address:
+                address_str = constructed_address
+
         try:
             geolocator = Nominatim(user_agent="irs990-geocoder")
             time.sleep(0.1)
@@ -402,8 +495,29 @@ class GeocodingAPIProcessor(BaseProcessor):
         except: pass
         return None
 
-    def _geocode_with_photon(self, address_str):
+    def _geocode_with_photon(self, address_str, normalized_address=None):
         self.photon_calls += 1
+
+        # Parse normalized_address for structured data
+        normalized_data = {}
+        if isinstance(normalized_address, str):
+            try:
+                normalized_data = json.loads(normalized_address)
+            except:
+                pass
+        elif isinstance(normalized_address, dict):
+            normalized_data = normalized_address.copy()
+
+        # Construct address string from normalized data if available
+        if normalized_data:
+            street = normalized_data.get('street', '')
+            city = normalized_data.get('city', '')
+            state = normalized_data.get('state', '')
+            zip_code = normalized_data.get('zip', '')
+            constructed_address = f"{street}, {city}, {state} {zip_code}".strip(', ')
+            if constructed_address:
+                address_str = constructed_address
+
         try:
             url = f"https://photon.komoot.io/api/?q={requests.utils.quote(address_str)}&limit=1"
             r = requests.get(url, timeout=10)
@@ -416,22 +530,66 @@ class GeocodingAPIProcessor(BaseProcessor):
         except: pass
         return None
 
-    def _geocode_with_opencage(self, address_str):
+    def _geocode_with_opencage(self, address_str, normalized_address=None):
         self.opencage_calls += 1
         if OpenCageGeocode is None: return None
         key = os.getenv('OPENCAGE_API_KEY')
         if not key: return None
+
+        # Parse normalized_address for structured data
+        normalized_data = {}
+        if isinstance(normalized_address, str):
+            try:
+                normalized_data = json.loads(normalized_address)
+            except:
+                pass
+        elif isinstance(normalized_address, dict):
+            normalized_data = normalized_address.copy()
+
         try:
             geocoder = OpenCageGeocode(key)
-            results = geocoder.geocode(address_str)
+            # Use structured query if normalized data is available
+            if normalized_data:
+                query = {
+                    'street': normalized_data.get('street', ''),
+                    'city': normalized_data.get('city', ''),
+                    'state': normalized_data.get('state', ''),
+                    'postalcode': normalized_data.get('zip', '')
+                }
+                # Remove empty fields
+                query = {k: v for k, v in query.items() if v}
+                results = geocoder.geocode(query=query) if query else geocoder.geocode(address_str)
+            else:
+                results = geocoder.geocode(address_str)
             if results and len(results) > 0:
                 r = results[0]
                 return {'match': True, 'lat': r['geometry']['lat'], 'lon': r['geometry']['lng'], 'formatted_address': r.get('formatted', address_str)}
         except: pass
         return None
     
-    def _geocode_with_librestreet(self, address_str):
+    def _geocode_with_librestreet(self, address_str, normalized_address=None):
         self.librestreet_calls += 1
+
+        # Parse normalized_address for structured data
+        normalized_data = {}
+        if isinstance(normalized_address, str):
+            try:
+                normalized_data = json.loads(normalized_address)
+            except:
+                pass
+        elif isinstance(normalized_address, dict):
+            normalized_data = normalized_address.copy()
+
+        # Construct address string from normalized data if available
+        if normalized_data:
+            street = normalized_data.get('street', '')
+            city = normalized_data.get('city', '')
+            state = normalized_data.get('state', '')
+            zip_code = normalized_data.get('zip', '')
+            constructed_address = f"{street}, {city}, {state} {zip_code}".strip(', ')
+            if constructed_address:
+                address_str = constructed_address
+
         try:
             url = f"https://librestreet.org/search.php?q={requests.utils.quote(address_str)}&format=json"
             r = requests.get(url, timeout=10)
@@ -447,7 +605,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         except: pass
         return None
 
-    def _geocode_with_name_search(self, geocoding_id: str, canonical_address: str):
+    def _geocode_with_name_search(self, geocoding_id: str, canonical_address: str, normalized_address=None):
         self.name_search_calls += 1
         try:
             result = self.db_ops.execute_query("SELECT name, zip_code FROM Addresses WHERE geocoding_id = ? LIMIT 1", (geocoding_id,))
@@ -480,6 +638,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 pending = min(pending, global_config.max_files)
             matched = self.db_ops.execute_query("SELECT COUNT(*) FROM Geocoding WHERE geocoding_status LIKE 'Match%'").fetchone()[0]
             return {
+                'current_step': 'geolocate',
                 'outstanding_geocode_requests': pending,
                 'geocoded_addresses': matched,
                 'census_calls': self.census_calls,
@@ -737,15 +896,24 @@ class GeocodingAPIProcessor(BaseProcessor):
                 success = False
                 for name, func in [
                     ("Grok", self._geocode_with_grok),
-                    ("Photon", self._geocode_with_photon),
-                    ("LibreStreet", self._geocode_with_librestreet),
-                    ("Nominatim", self._geocode_with_nominatim),
+                    #("Photon", self._geocode_with_photon),
+                    #("LibreStreet", self._geocode_with_librestreet),
+                    #("Nominatim", self._geocode_with_nominatim),
                     #("OpenCage", self._geocode_with_opencage),
-                    #("Name_Search", lambda _: self._geocode_with_name_search(gid, item['canonical_address'])),
+                    #("Name_Search", lambda _: self._geocode_with_name_search(gid, item['canonical_address'], item['normalized_address'])),
                     #("Google_Maps", self._geocode_with_google_maps),
                 ]:
                     try:
-                        res = func(item['canonical_address'])
+                        # PARSE HERE — if string, load to dict; if already dict, use as is
+                        norm_parsed = item['normalized_address']
+                        if isinstance(norm_parsed, str):
+                            try:
+                                norm_parsed = json.loads(norm_parsed)
+                            except json.JSONDecodeError:
+                                log_debug(f"Invalid JSON in normalized_address for {gid}: {norm_parsed[:100]}")
+                                norm_parsed = {"street": norm_parsed, "city": "", "state": "", "zip": ""}
+
+                        res = func(norm_parsed, item['canonical_address'])
                         if res and res.get('match'):
                             lat = float(res['lat'])
                             lon = float(res['lon'])
@@ -753,8 +921,10 @@ class GeocodingAPIProcessor(BaseProcessor):
                             self._apply_successful_geocode(context, gid, attempt, now, lat, lon, status, res, res.get('formatted_address'))
                             success = True
                             break
-                    except:
-                        continue
+                    except Exception as e:
+                        log_error(f"Fallback '{name}' failed for {gid}: {e}")
+                        print(f"Fallback '{name}' failed for {gid}: {e}")
+                        raise e
                 if not success:
                     context.addOperationToDatabase(DatabaseOperation(
                         operation_type=DatabaseOperationType.GENERIC_UPDATE,
