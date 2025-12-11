@@ -884,6 +884,75 @@ class GeocodingAPIProcessor(BaseProcessor):
                 self.api_queue.task_done()
 
         print(f"###DEBUG### WORKER {worker_id}: Completed")
+        
+    def _build_grok_prompt(self, addresses: List[Dict[str, Any]]) -> str:
+        numbered = []
+        for i, item in enumerate(addresses, 1):
+            canonical = item.get("canonical_address", "").strip()
+            normalized = item.get("normalized_address", {})
+            
+            # Safely extract normalized dict
+            if isinstance(normalized, str):
+                try:
+                    normalized = json.loads(normalized)
+                except:
+                    normalized = {}
+            street = (normalized.get("street") or "").strip()
+            city   = (normalized.get("city") or "").strip()
+            state  = (normalized.get("state") or "").strip()
+            zipc   = (normalized.get("zip") or "").strip()
+
+            # Build the best possible query
+            if canonical.lower().startswith("c/o") or street.lower().startswith("c/o"):
+                # Strategy: give Grok BOTH the raw line AND the parsed parts so it can reason
+                context = f"Raw: {canonical} | Parsed → Street: {street} | City: {city} | State: {state} | ZIP: {zipc}"
+                query = f"Geocode this care-of foundation/trust/bank address (common in IRS 990 forms): \"{context}\". Return the exact street address of the entity or office that handles the foundation, not a P.O. box."
+            else:
+                context = f"Raw: {canonical} | Street: {street} | City: {city} | State: {state} | ZIP: {zipc}"
+                query = f"Geocode this address from IRS 990 forms (often truncated or abbreviated): \"{context}\"."
+
+            # Common abbreviation fixes Grok now handles extremely well when hinted
+            hint = (
+                "Common patterns to expand: "
+                "“Ma” → Madison Avenue, "
+                "“Fith” → Fifth, "
+                "“Hami” → Hamilton, "
+                "“Po” → Point Drive, "
+                "“Finl Plz” → Financial Plaza, "
+                "“S National A” → South National Avenue, "
+                "“2 Piedmont” → 3565 Piedmont Road NE (Atlanta), "
+                "“52 Spring” → 52 Spring St NW (Concord NC), "
+                "“33 S Street” → 33 S State St (Chicago)"
+            )
+
+            full_query = f"{i}. {query}\n   {hint}"
+            numbered.append(full_query)
+
+        prompt = f"""You are an expert geocoder for messy U.S. nonprofit addresses extracted from IRS Form 990 filings.
+            Your only job is to return coordinates for the physical location these foundations, banks, or trustees actually use — never a P.O. box, never null when a real office exists.
+
+            Return ONLY a JSON array with exactly {len(addresses)} objects, no markdown, no extra text:
+
+            [
+            {{"id": 1, "lat": 40.7128, "long": -74.0060, "matched_address": "Full resolved street address, City, ST ZIP"}},
+            {{"id": 2, "lat": null, "long": null, "matched_address": null}},
+            ...
+            ]
+
+            Rules you MUST follow:
+            - If the address contains "C/O" or "c/o", ignore the prefix and geocode the entity/office that follows.
+            - Expand obvious abbreviations (Ma → Madison Ave, Fith → Fifth, etc.).
+            - When you recognize a known foundation (Cannon Foundation, Sapelo, Henry Luce, Skadden, Robins, Dobbs, etc.), use its real headquarters or trustee office.
+            - Prefer precision over guessing: if you are ≥95% sure, return lat/long; otherwise null.
+            - matched_address must be the complete, corrected street address you actually geocoded.
+
+            Input addresses:
+
+            {chr(10).join(numbered)}
+
+            Now return the JSON array and nothing else."""
+        print(f"###DEBUG### GROK_PROMPT: {prompt}")
+        return prompt
 
     def _geocode_with_grok_batch(self, addresses: List[Dict[str, Any]]):
         """Batch geocode with Grok, cribbed from test_grok.py"""
@@ -898,61 +967,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         client = OpenAI(api_key=os.environ["X_API_KEY"], base_url="https://api.x.ai/v1")
         print("###DEBUG### GROK_BATCH: Created OpenAI client")
 
-        numbered = []
-        for i, addr in enumerate(addresses, 1):
-            street = addr.get("street", "")
-            city = addr.get("city", "")
-            state = addr.get("state", "")
-            zip_code = addr.get('zip', '')
-
-            if re.match(r'(?i)^c/?o', street):
-                # C/O address: extract entity name and use search-oriented query with location hints
-                entity = self._extract_entity_from_co_address(street)
-                if entity:
-                    # Build location hint string for better geocoding accuracy
-                    location_parts = []
-                    if city and state:
-                        location_parts.append(f"{city}, {state}")
-                    elif state:
-                        location_parts.append(state)
-                    if zip_code:
-                        if location_parts:
-                            location_parts[-1] += f" {zip_code}"
-                        else:
-                            location_parts.append(zip_code)
-
-                    location_hint = " ".join(location_parts)
-                    if location_hint:
-                        grok_query = f"where is {entity} in {location_hint} located"
-                    else:
-                        grok_query = f"where is {entity} located"
-                    numbered.append(f"{i}. {grok_query}")
-                    print(f"###DEBUG### GROK_QUERY {i}: C/O address '{street}' -> '{grok_query}' (entity: {entity}, location_hint: '{location_hint}')")
-                else:
-                    # Fallback to original parsing if entity extraction fails
-                    grok_query = self._parse_co_address(street, 'grok', zip_code)
-                    numbered.append(f"{i}. {grok_query}")
-                    print(f"###DEBUG### GROK_QUERY {i}: C/O address fallback '{street}' -> '{grok_query}'")
-            else:
-                # Normal address: use search-oriented query
-                entity = street
-                grok_query = f"where is {entity} located"
-                numbered.append(f"{i}. {grok_query}")
-                print(f"###DEBUG### GROK_QUERY {i}: Normal address '{street}' -> '{grok_query}'")
-
-        prompt = f"""
-Return ONLY a JSON array with exactly {len(addresses)} items — no text, no explanation:
-
-[
-  {{"id": 1, "lat": number or null, "long": number or null, "matched_address": string or null}},
-  ...
-]
-
-Instructions: For addresses starting with "C/O" or similar care-of prefixes, ignore the prefix and geocode the actual address that follows. Focus on finding the geographic location of the street address, not the care-of entity.
-
-Input:
-{chr(10).join(numbered)}
-"""
+        prompt = self._build_grok_prompt(addresses)  
 
         response_format = {
             "type": "json_schema",
@@ -1035,7 +1050,10 @@ Input:
                     addr = {"street": normalized, "city": "", "state": "", "zip": ""}
             else:
                 addr = normalized.copy() if normalized else {}
-            addresses.append(addr)
+            addresses.append({
+                "canonical_address": canonical,
+                "normalized_address": addr
+            })
             item_map[idx] = item
             print(f"###DEBUG### GROK_PREP: idx={idx}, gid={item['geocoding_id']}, canonical={canonical}, normalized={normalized}, addr={addr}")
 

@@ -3,11 +3,17 @@
   "description": "Geocoding patterns for automatic resolution of common address issues",
   "patterns": [
     {
+      "regex": "(?i)(the organization|see attached|detailed address information|same as c above|c/o org)",
+      "colocator": "BOGUS:Placeholder",
+      "status": "No_Match:Invalid",
+          "priority": 1
+    },
+    {
       "name": "privacy_addresses",
       "description": "Addresses that charities choose not to disclose",
-      "regex": "(?i)(available upon request|upon request|on file|address available on request|see.*attached)",
+      "regex": "(?i)(Individual Contrbutions|Trustee Maintains List Of Addresses|available upon request|upon request|on file|address available on request|see.*attached|attached|Detailed Address Information)",
       "colocator": "PRIV:{zip}",
-      "status": "pending",
+      "status": "owner",
       "priority": 1
     },
     {
