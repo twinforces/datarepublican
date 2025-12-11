@@ -163,11 +163,11 @@ class DatabaseOperations:
         """Get thread-local write permission flag (default False)"""
         return getattr(DatabaseOperations._local, 'allow_write', False)
 
-    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "6GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300):
+    def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "6GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300, init_schema: bool = True):
         """
         Initialize DuckDB connection with performance optimizations.
 
-        Sets up thread-local connections, preloads ZIP cache, and initializes schema.
+        Sets up thread-local connections, preloads ZIP cache, and optionally initializes schema.
         Configures DuckDB with performance settings for bulk operations.
 
         Args:
@@ -177,6 +177,7 @@ class DatabaseOperations:
             threads: Number of threads for DuckDB (default: auto)
             dbUI: Whether to start DuckDB's web UI
             query_timeout: Query timeout in seconds (default: 300)
+            init_schema: Whether to initialize schema if not present (default: True)
 
         THREADING: Creates thread-local connections to avoid DuckDB's single-writer constraint.
         PERFORMANCE: Preloads ZIP file cache and applies bulk operation optimizations.
@@ -188,6 +189,7 @@ class DatabaseOperations:
         self.threads = threads
         self.dbUI = dbUI
         self.query_timeout = query_timeout
+        self.init_schema = init_schema
         self.main_thread_id = threading.get_ident()
         self._init_connection()
         self._preload_zip_file_cache()
@@ -289,9 +291,10 @@ class DatabaseOperations:
         # The timeout protection will be handled through enhanced error handling in execute_query
         # Store the timeout value for potential future use or custom timeout implementation
         pass
-   
-        # Initialize schema if needed
-        self._init_schema()
+
+        # Initialize schema if needed and requested
+        if self.init_schema:
+            self._init_schema()
 
         # Check for --dbUI flag and start UI if present
         if self.dbUI:
@@ -308,6 +311,11 @@ class DatabaseOperations:
         with DatabaseOperations._zip_cache_lock:
             if DatabaseOperations._zip_path_cache:
                 # Already preloaded
+                return
+
+            # Skip cache preload if schema initialization was skipped (tables may not exist)
+            if not self.init_schema:
+                log_debug("Skipping zip path cache preload (schema initialization disabled)")
                 return
 
             try:

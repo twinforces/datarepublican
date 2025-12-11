@@ -1,0 +1,346 @@
+{
+  "version": "1.0",
+  "description": "Geocoding patterns for automatic resolution of common address issues",
+  "patterns": [
+    {
+      "name": "privacy_addresses",
+      "description": "Addresses that charities choose not to disclose",
+      "regex": "(?i)(available upon request|upon request|on file|address available on request|see.*attached)",
+      "colocator": "PRIV:{zip}",
+      "status": "pending",
+      "priority": 1
+    },
+    {
+      "name": "po_box_addresses",
+      "description": "PO Box addresses that need proper colocator",
+      "regex": "(?i)(p\\.?\\s*o\\.?\\s*box|p\\s*o\\s*box|\\bbox\\b)",
+      "colocator": "PO:BOX:{zip}",
+      "status": "pending",
+      "priority": 2
+    },
+    {
+      "name": "co_addresses",
+      "description": "Care of addresses with entity names",
+      "regex": "(?i)^c/o\\s+(.+?),\\s*",
+      "action": "strip",
+      "status": "pending",
+      "priority": 3
+    },
+    {
+      "name": "various_addresses",
+      "description": "Multi-location organizations",
+      "regex": "(?i)(various|multiple|several)",
+      "colocator": "MULTI:{city}:{state}:{zip}",
+      "status": "pending",
+      "priority": 4
+    },
+    {
+      "name": "mall_complexes",
+      "description": "Shopping malls and complexes",
+      "regex": "(?i)(mall|center|plaza|square|courtyard|commons|village|crossing|junction|pavilion|atrium)",
+      "colocator": "MALL:{location}:{zip}",
+      "status": "pending",
+      "priority": 5
+    },
+    {
+      "name": "major_institutions",
+      "description": "Well-known institutions that should geocode but don't",
+      "patterns": [
+        {
+          "regex": "(?i)262 danny thomas (place|pl)",
+          "colocator": "MAJOR:St. Jude Children's Research Hospital:38105",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1000 fifth avenue",
+          "colocator": "MAJOR:Metropolitan Museum of Art:10028",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)200 first (street|st) sw",
+          "colocator": "MAJOR:Mayo Clinic:55905",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)6066 development office",
+          "colocator": "MAJOR:Dartmouth College Development:03755",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)122 east 42nd street",
+          "colocator": "MAJOR:United Nations:10168",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)100 raoul wallenberg place sw",
+          "colocator": "MAJOR:United States Holocaust Memorial Museum:20024",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)2900 rocky point drive",
+          "colocator": "MAJOR:Moffitt Cancer Center:33607",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)foundation source 501 silverside road",
+          "colocator": "MAJOR:Foundation Source:19809",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)100 n main st.*winston",
+          "colocator": "MAJOR:Wake Forest Baptist Medical Center:27101",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)7272 greenville.*dallas",
+          "colocator": "MAJOR:Texas Health Presbyterian Hospital Dallas:75231",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)4100.*lurie.*chicago",
+          "colocator": "MAJOR:Lurie Children's Hospital:60632",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i).*grace hall.*notre dame",
+          "colocator": "MAJOR:University of Notre Dame:46556",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)100 raoul wallenberg.*washington",
+          "colocator": "MAJOR:United States Holocaust Memorial Museum:20024",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)200 vesey street.*new york",
+          "colocator": "MAJOR:World Financial Center:10281",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)4245 north fairfax.*arlington",
+          "colocator": "MAJOR:INOVA Fairfax Hospital:22203",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)100 westminster.*providence",
+          "colocator": "MAJOR:Brown University:02903",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)2000 marcus.*new hyde park",
+          "colocator": "MAJOR:Northwell Health:11042",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1000 5th ave.*new york",
+          "colocator": "MAJOR:Metropolitan Museum of Art:10028",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1828 l street.*washington",
+          "colocator": "MAJOR:American Psychological Association:20036",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1030 15th st.*washington",
+          "colocator": "MAJOR:National Geographic Society:20005",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)2900 rocky point.*tampa",
+          "colocator": "MAJOR:Moffitt Cancer Center:33607",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)4900 puerto rico.*washington",
+          "colocator": "MAJOR:Catholic University:20017",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1000 lake cook.*glencoe",
+          "colocator": "MAJOR:Lake Forest College:60022",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)available.*charity",
+          "colocator": "PRIV:Charity Website:{zip}",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)10 s dearborn.*chicago",
+          "colocator": "MAJOR:Chase Tower:60603",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)500 first ave.*pittsburgh",
+          "colocator": "MAJOR:Pittsburgh Building:15219",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)4900 tiedeman.*brooklyn.*oh",
+          "colocator": "MAJOR:Tiedeman Facility:44144",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)5001 angel canyon.*kanab",
+          "colocator": "MAJOR:Angel Canyon:84741",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)31 evans terminal.*hillside",
+          "colocator": "MAJOR:Community FoodBank of New Jersey:07205",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)3677 mapleshade.*plano",
+          "colocator": "MAJOR:North Texas Food Bank:75075",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1 billy graham.*charlotte",
+          "colocator": "MAJOR:Billy Graham Parkway:28201",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)36 battery place.*new york",
+          "colocator": "MAJOR:Battery Place Building:10280",
+          "status": "pending"
+        },
+        {
+          "regex": "(?i)1619 d street.*virginia beach",
+          "colocator": "MAJOR:D Street Facility:23459",
+          "status": "pending"
+        }
+      ],
+      "priority": 6
+    },
+    {
+      "name": "incomplete_addresses",
+      "description": "Mark incomplete addresses",
+      "regex": "(?i)^(n/a|na|street|road|avenue|drive|way|lane|place|court|circle|boulevard|parkway|available|unavailable)$",
+      "colocator": "INCOMPLETE:{zip}",
+      "status": "pending",
+      "priority": 14
+    },
+    {
+      "name": "no_street_number",
+      "description": "Mark addresses without street numbers as partial",
+      "regex": "(?i)^(?!.*\\d).*(street|road|avenue|drive|way|lane|place|court|circle|boulevard|parkway|blvd|ave|rd|st|dr|ln|pl|ct|cir|pkwy)",
+      "colocator": "PARTIAL:{zip}",
+      "status": "pending",
+      "priority": 15
+    },{
+  "name": "registered_agents_2025",
+  "description": "Top 25 registered agent firms that dominate the final No_Match tail",
+  "priority": 2,
+  "patterns": [
+    {
+      "regex": "(?i)c/?o\\s+ct\\s+corporation\\s+system",
+      "colocator": "RA:CT_CORP",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+corporation\\s+service\\s+company",
+      "colocator": "RA:CSC",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+national\\s+registered\\s+agents",
+      "colocator": "RA:NRAI",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+northwest\\s+registered\\s+agent",
+      "colocator": "RA:NORTHWEST",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+incorp\\s+services",
+      "colocator": "RA:INCORP",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+registered\\s+agent\\s+solutions",
+      "colocator": "RA:RAS",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+paracorp",
+      "colocator": "RA:PARACORP",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+cogency\\s+global",
+      "colocator": "RA:COGENCY",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+united\\s+states\\s+corporation\\s+agents",
+      "colocator": "RA:USCA",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+capitol\\s+corporate\\s+services",
+      "colocator": "RA:CAPITOL",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+the\\s+corporation\\s+trust\\s+company",
+      "colocator": "RA:CTC",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+harvard\\s+business\\s+services",
+      "colocator": "RA:HARVARD",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+delaware\\s+registered\\s+agent",
+      "colocator": "RA:DELAWARE",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+legalzoom",
+      "colocator": "RA:LEGALZOOM",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+blumbergexcelsior",
+      "colocator": "RA:BLUMBERG",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+agents\\s+and\\s+corporations",
+      "colocator": "RA:AGENTS_CORP",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)(apo|dpo|fpo)\\s+[a-z]+\\s+\\d+",
+      "colocator": "MILITARY:APO",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+department\\s+of\\s+state",
+      "colocator": "GOV:STATE_DEPT",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+embassy",
+      "colocator": "GOV:EMBASSY",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+consulate",
+      "colocator": "GOV:CONSULATE",
+      "status": "pending"
+    },
+    {
+      "regex": "(?i)c/?o\\s+united\\s+nations",
+      "colocator": "GOV:UN",
+      "status": "pending"
+    }
+  ]
+}
+
+  ]
+}

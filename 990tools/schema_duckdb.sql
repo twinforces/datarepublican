@@ -175,6 +175,8 @@ CREATE TABLE Geocoding (
     longitude DOUBLE,
     -- Longitude coordinate
     geocoding_status VARCHAR DEFAULT 'pending',
+    geocoding_stage VARCHAR DEFAULT 'tier1',
+    -- Current geocoding stage (tier1, tier2, tier3, tier4)
     last_attempt TIMESTAMP,
     -- Last geocoding attempt
     attempt_count INTEGER DEFAULT 0,
