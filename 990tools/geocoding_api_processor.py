@@ -49,7 +49,7 @@ from pending_database_context import PendingDatabaseContext
 API_CONFIG = {
     # Census APIs
     'ENABLE_CENSUS_RAW': True,        # Tier 1: Raw census batch geocoding
-    'ENABLE_CENSUS_PATTERNS': True,   # Tier 2: Census with pattern preprocessing
+    'ENABLE_CENSUS_PATTERNS': False,   # BUGGY Tier 2: Census with pattern preprocessing
 
     # AI/ML APIs
     'ENABLE_GROK': True,             # Tier 3: Grok AI geocoding (disabled due to expense)
@@ -94,14 +94,15 @@ class GeocodingAPIProcessor(BaseProcessor):
         # Queue for parallel Grok processing
         self.api_queue = queue.Queue(maxsize=10000)
         self.grok_workers = []
+        self._thread_local = threading.local()
         if cg is None and not global_config.is_quiet():
             log_warning("censusgeocode library not available. Install with: pip install censusgeocode")
 
     def setup_address_counts(self):
-        log_info("Setup: Populating address_count if needed")
+        print("Setup: Populating address_count if needed")
         result = self.db_ops.execute_query("SELECT COUNT(DISTINCT address_count) FROM Geocoding")
         if result and result.fetchone()[0] > 1:
-            log_info("address_count already populated")
+            print("address_count already populated")
             return
 
         conn = self.db_ops._get_thread_local_connection()
@@ -113,7 +114,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 )
             """)
             conn.commit()
-            log_info("address_count populated")
+            print("address_count populated")
         except Exception as e:
             conn.rollback()
             log_error(f"Failed to populate address_count: {e}", exc_info=True)
@@ -126,7 +127,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 data = json.load(f)
             patterns = data.get('patterns', [])
             patterns.sort(key=lambda x: x.get('priority', 999))
-            log_info(f"Loaded {len(patterns)} geocoding patterns")
+            print(f"Loaded {len(patterns)} geocoding patterns")
             return patterns
         except Exception as e:
             log_warning(f"Failed to load geocoding_patterns.json: {e}")
@@ -153,7 +154,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         # Special logging for Tull address
         if "Tull Charitable Foundation" in address:
-            log_info(f"DEBUG_TULL: C/O stripping initiated for '{address}'")
+            print(f"DEBUG_TULL: C/O stripping initiated for '{address}'")
 
         # Try comma-separated entity first (e.g., "C/O The Organization, Branchport...")
         comma_pattern = r'^(?:c/?o,?)\s*[^,\d]*,\s*'
@@ -161,7 +162,7 @@ class GeocodingAPIProcessor(BaseProcessor):
             result = re.sub(comma_pattern, '', address, flags=re.IGNORECASE).strip()
             log_debug(f"C/O strip: Used comma pattern, result: '{result}'")
             if "Tull Charitable Foundation" in address:
-                log_info(f"DEBUG_TULL: C/O stripping - comma pattern matched, result: '{result}'")
+                print(f"DEBUG_TULL: C/O stripping - comma pattern matched, result: '{result}'")
             return result
 
         # Otherwise, entity until first digit (e.g., "C/O Foundation 3...")
@@ -170,12 +171,12 @@ class GeocodingAPIProcessor(BaseProcessor):
             result = re.sub(digit_pattern, '', address, flags=re.IGNORECASE).strip()
             log_debug(f"C/O strip: Used digit pattern, result: '{result}'")
             if "Tull Charitable Foundation" in address:
-                log_info(f"DEBUG_TULL: C/O stripping - digit pattern matched, result: '{result}'")
+                print(f"DEBUG_TULL: C/O stripping - digit pattern matched, result: '{result}'")
             return result
 
         log_debug(f"C/O strip: No pattern matched for '{address}', returning original")
         if "Tull Charitable Foundation" in address:
-            log_info(f"DEBUG_TULL: C/O stripping - no pattern matched, returning original: '{address}'")
+            print(f"DEBUG_TULL: C/O stripping - no pattern matched, returning original: '{address}'")
         return address
 
     def _extract_entity_from_co_address(self, address: str) -> str:
@@ -829,6 +830,8 @@ class GeocodingAPIProcessor(BaseProcessor):
     def _start_grok_workers(self):
         """Start 10 parallel Grok worker threads."""
         print("###DEBUG### START: Starting 10 Grok worker threads")
+        if self.grok_workers:
+            return  # already started
         for i in range(10):
             t = threading.Thread(target=self._grok_worker, args=(i,), name=f'GrokWorker-{i+1}')
             t.daemon = True
@@ -838,13 +841,16 @@ class GeocodingAPIProcessor(BaseProcessor):
     def _grok_worker(self, worker_id: int):
         """Worker thread that processes batches from api_queue and puts results to result_queue."""
         print(f"###DEBUG### WORKER {worker_id}: Started")
+        dont_get=False
         while True:
-            batch = self.api_queue.get()
+            if not dont_get:
+                batch = self.api_queue.get() # retrying batch otherwise
+            dont_get = False 
             if batch is None:  # Sentinel
                 self.api_queue.task_done()
                 # Put worker sentinel to result_queue
                 self.result_queue.put(WorkUnit.sentinel(1000 + worker_id))
-                print(f"###DEBUG### WORKER {worker_id}: Received sentinel, putting sentinel and exiting")
+                print(f"###DEBUG### GROK WORKER {worker_id}: Received sentinel, putting sentinel and exiting")
                 break
 
             print(f"###DEBUG### WORKER {worker_id}: Processing batch of {len(batch)} items")
@@ -853,14 +859,27 @@ class GeocodingAPIProcessor(BaseProcessor):
                 print(f"###DEBUG### WORKER {worker_id}: Putting result context to result_queue")
                 self.result_queue.put(WorkUnit.result(context))
             except Exception as e:
-                print(f"###DEBUG### WORKER {worker_id}: Error processing batch: {e}")
-                # For failed batch, mark all as No_Match
+                # Special case: OpenAI client bug that throws 0 *after* success
+                if (e == 0 or e is None or str(e) in ("", "0", "None")):
+                    # Did we just succeed in this thread?
+                    if getattr(self._thread_local, "grok_success_size", 0) == len(batch):
+                        print(f"###DEBUG### WORKER {worker_id}: Ignoring OpenAI 0-bug — batch already succeeded")
+                        # Clean up and exit cleanly
+                        if hasattr(self._thread_local, "grok_success_size"):
+                            del self._thread_local.grok_success_size
+                        return  # ← success already queued, do nothing
+
+                # If we get here: real failure or no prior success
+                if hasattr(self._thread_local, "grok_success_size"):
+                    del self._thread_local.grok_success_size
+
+                print(f"###DEBUG### WORKER {worker_id}: Real batch failure: {e}")
+                # Your existing No_Match handling
                 context = PendingDatabaseContext()
                 now = datetime.now().isoformat()
                 for item in batch:
                     gid = item['geocoding_id']
-                    attempt = int(item['attempt_count'])
-                    print(f"###DEBUG### WORKER_ERROR: Setting {gid} to No_Match due to batch processing error, canonical={item.get('canonical_address', '')}")
+                    print(f"###DEBUG### WORKER_ERROR: Setting {gid} to No_Match (real error)")
                     context.addOperationToDatabase(DatabaseOperation(
                         operation_type=DatabaseOperationType.GENERIC_UPDATE,
                         data={
@@ -868,98 +887,80 @@ class GeocodingAPIProcessor(BaseProcessor):
                             'updates': [{
                                 'geocoding_id': gid,
                                 'last_attempt': now,
-                                'attempt_count': attempt + 1,
+                                'attempt_count': int(item['attempt_count']) + 1,
                                 'geocoding_status': 'No_Match'
                             }],
                             'id_column': 'geocoding_id'
                         }
                     ))
-                    context.addOperationToDatabase(DatabaseOperation(
-                        operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                        data={'count': item.get('address_count', 0)}
-                    ))
-                print(f"###DEBUG### WORKER {worker_id}: Putting error result context to result_queue")
                 self.result_queue.put(WorkUnit.result(context))
             finally:
-                self.api_queue.task_done()
+                if not dont_get: self.api_queue.task_done()
 
-        print(f"###DEBUG### WORKER {worker_id}: Completed")
+        print(f"###DEBUG### GROK WORKER {worker_id}: Completed")
         
-    def _build_grok_prompt(self, addresses: List[Dict[str, Any]]) -> str:
-        numbered = []
-        for i, item in enumerate(addresses, 1):
-            canonical = item.get("canonical_address", "").strip()
-            normalized = item.get("normalized_address", {})
-            
-            # Safely extract normalized dict
-            if isinstance(normalized, str):
+    def _build_grok_prompt(self, addresses: list) -> str:
+        lines = []
+        for i, entry in enumerate(addresses, 1):
+            # These come straight from the DB — we don't care if normalized_address is str or dict
+            canon = str(entry.get("canonical_address", "")).strip()
+            norm_json = entry.get("normalized_address", "")
+
+            # If it's a dict, stringify it exactly like the DB stores it
+            if isinstance(norm_json, dict):
                 try:
-                    normalized = json.loads(normalized)
+                    norm_str = json.dumps(norm_json, separators=(',', ':'))
                 except:
-                    normalized = {}
-            street = (normalized.get("street") or "").strip()
-            city   = (normalized.get("city") or "").strip()
-            state  = (normalized.get("state") or "").strip()
-            zipc   = (normalized.get("zip") or "").strip()
-
-            # Build the best possible query
-            if canonical.lower().startswith("c/o") or street.lower().startswith("c/o"):
-                # Strategy: give Grok BOTH the raw line AND the parsed parts so it can reason
-                context = f"Raw: {canonical} | Parsed → Street: {street} | City: {city} | State: {state} | ZIP: {zipc}"
-                query = f"Geocode this care-of foundation/trust/bank address (common in IRS 990 forms): \"{context}\". Return the exact street address of the entity or office that handles the foundation, not a P.O. box."
+                    norm_str = str(norm_json)
             else:
-                context = f"Raw: {canonical} | Street: {street} | City: {city} | State: {state} | ZIP: {zipc}"
-                query = f"Geocode this address from IRS 990 forms (often truncated or abbreviated): \"{context}\"."
+                norm_str = str(norm_json)
 
-            # Common abbreviation fixes Grok now handles extremely well when hinted
-            hint = (
-                "Common patterns to expand: "
-                "“Ma” → Madison Avenue, "
-                "“Fith” → Fifth, "
-                "“Hami” → Hamilton, "
-                "“Po” → Point Drive, "
-                "“Finl Plz” → Financial Plaza, "
-                "“S National A” → South National Avenue, "
-                "“2 Piedmont” → 3565 Piedmont Road NE (Atlanta), "
-                "“52 Spring” → 52 Spring St NW (Concord NC), "
-                "“33 S Street” → 33 S State St (Chicago)"
-            )
+            lines.append(f"{i}. Raw: \"{canon}\" | JSON: {norm_str}")
 
-            full_query = f"{i}. {query}\n   {hint}"
-            numbered.append(full_query)
+        return f"""You are the world's best geocoder for broken IRS 990 nonprofit addresses.
 
-        prompt = f"""You are an expert geocoder for messy U.S. nonprofit addresses extracted from IRS Form 990 filings.
-            Your only job is to return coordinates for the physical location these foundations, banks, or trustees actually use — never a P.O. box, never null when a real office exists.
+Here is every address exactly as stored in the database — some have clean parsed JSON, some have garbage, some have OCR errors, some have C/O junk.
 
-            Return ONLY a JSON array with exactly {len(addresses)} objects, no markdown, no extra text:
+Your job: figure out the real physical location anyway.
 
-            [
-            {{"id": 1, "lat": 40.7128, "long": -74.0060, "matched_address": "Full resolved street address, City, ST ZIP"}},
-            {{"id": 2, "lat": null, "long": null, "matched_address": null}},
-            ...
-            ]
+CRITICAL FORMATTING INSTRUCTION — YOU MUST OBEY THIS EXACTLY:
 
-            Rules you MUST follow:
-            - If the address contains "C/O" or "c/o", ignore the prefix and geocode the entity/office that follows.
-            - Expand obvious abbreviations (Ma → Madison Ave, Fith → Fifth, etc.).
-            - When you recognize a known foundation (Cannon Foundation, Sapelo, Henry Luce, Skadden, Robins, Dobbs, etc.), use its real headquarters or trustee office.
-            - Prefer precision over guessing: if you are ≥95% sure, return lat/long; otherwise null.
-            - matched_address must be the complete, corrected street address you actually geocoded.
+Return ONE AND ONLY ONE ONLY JSON message containing the COMPLETE array for ALL addresses in this request.
 
-            Input addresses:
+It must be a single valid JSON array that starts with [ and ends with ] with no text before or after.
 
-            {chr(10).join(numbered)}
+Correct example:
+[{{"id":1,"lat":null,"long":null,"matched_address":null,"reason":null}},
+{{"id":2,"lat":35.7796,"long":-78.6382,"matched_address":"4300 Six Forks Rd, Raleigh, NC 27609","reason":null}}]
+Do NOT stream. Do NOT explain. Do NOT use markdown.
 
-            Now return the JSON array and nothing else."""
-        print(f"###DEBUG### GROK_PROMPT: {prompt}")
-        return prompt
+Rules:
+- Ignore C/O, c/o, Attn, "See Statement", "Unknown"
+- Expand: Ma=Madison Ave, Fith=Fifth, Hami=Hamilton, Po=Point, Finl Plz=Financial Plaza
+- Known entities → use real HQ (First Citizens → Raleigh, GMA → Boston, etc.)
+- Personal name + city/state → assume office or trustee home
+- Return lat/long if ≥75% confident
+- If 75–89% confident, add "reason": "best match from name+title+ZIP"
+- When you find a real street address (not just city), always return it in matched_address.
+
+Addresses:
+{"\n".join(lines)}
+
+Return ONE AND ONLY ONE JSON message containing the COMPLETE array for ALL {len(lines)} addresses.
+
+Return the complete JSON array now. Nothing else.
+"""
+
+
 
     def _geocode_with_grok_batch(self, addresses: List[Dict[str, Any]]):
         """Batch geocode with Grok, cribbed from test_grok.py"""
+        if not addresses:
+            return {"status": "SUCCESS", "results": []}  # ← don't return 0!
         print(f"###DEBUG### GROK_BATCH: Processing {len(addresses)} addresses")
         if not os.getenv("X_API_KEY"):
             print("###DEBUG### GROK_BATCH: ERROR NO API KEY!")
-            return None
+            return {"status": "FAILURE-nokey", "results": []}  # ← don't return 0!
 
         self.grok_calls += len(addresses)
 
@@ -968,36 +969,16 @@ class GeocodingAPIProcessor(BaseProcessor):
         print("###DEBUG### GROK_BATCH: Created OpenAI client")
 
         prompt = self._build_grok_prompt(addresses)  
+        print(f"###DEBUG### GROK_PROMPT: \n{prompt}\n")
 
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "geocoding_results",
-                "strict": True,
-                "schema": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "integer"},
-                            "lat": {"type": ["number", "null"]},
-                            "long": {"type": ["number", "null"]},
-                            "matched_address": {"type": ["string", "null"]}
-                        },
-                        "required": ["id", "lat", "long", "matched_address"],
-                        "additionalProperties": False
-                    },
-                    "minItems": len(addresses),
-                    "maxItems": len(addresses)
-                }
-            }
-        }
+
+        response_format = None
 
         for attempt in range(3):
             start = time.time()
             try:
                 response = client.chat.completions.create(
-                    model="grok-4-latest",
+                    model="grok-2-latest",
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=1200,
                     temperature=0.0,
@@ -1006,7 +987,29 @@ class GeocodingAPIProcessor(BaseProcessor):
                 )
                 elapsed = time.time() - start
 
-                result = json.loads(response.choices[0].message.content)
+                try:
+                    raw_content = response.choices[0].message.content.strip()
+                    
+                    # Remove markdown code blocks if present
+                    if raw_content.startswith("```"):
+                        # Find the first { and last } to extract just the JSON
+                        start = raw_content.find("{")
+                        end = raw_content.rfind("}") + 1
+                        if start != -1 and end > start:
+                            raw_content = raw_content[start:end]
+                        else:
+                            # Fallback: strip all ``` lines
+                            raw_content = re.sub(r"^```.*\w*\n?|```$", "", raw_content, flags=re.MULTILINE).strip()
+                    
+                    result = json.loads(raw_content)
+                    
+                    if not isinstance(result, list):
+                        raise ValueError("Not a list")
+                        
+                except Exception as e:
+                    log_error(f"Grok response parsing failed: {e}\nRaw content:\n{raw_content}")
+                    return {"status": "FAILED_PARSE", "error": str(e)}
+                self._thread_local.grok_success_size = len(addresses)
                 print(f"###DEBUG### GROK_BATCH: SUCCESS - {len(result)} results in {elapsed:.2f}s")
                 # Debug: log the raw results
                 for i, res in enumerate(result, 1):
@@ -1022,7 +1025,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 elapsed = time.time() - start
                 if attempt < 2:
                     wait = (2 ** attempt) + random.random()
-                    log_info(f"Grok batch retry {attempt + 2}/3 in {wait:.1f}s... ({e})")
+                    print(f"Grok batch retry {attempt + 2}/3 in {wait:.1f}s... ({e})")
                     time.sleep(wait)
                 else:
                     print(f"###DEBUG### GROK_BATCH: FAILED_ALL_RETRIES - {str(e)}")
@@ -1059,7 +1062,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
             # Special logging for Tull address in Grok processing
             if "Tull Charitable Foundation" in canonical:
-                log_info(f"DEBUG_TULL: Grok batch prep - idx={idx}, geocoding_id={item['geocoding_id']}, street='{addr.get('street', '')}', zip='{addr.get('zip', '')}'")
+                print(f"DEBUG_TULL: Grok batch prep - idx={idx}, geocoding_id={item['geocoding_id']}, street='{addr.get('street', '')}', zip='{addr.get('zip', '')}'")
 
         # Call batched Grok
         grok_result = self._geocode_with_grok_batch(addresses)
@@ -1080,26 +1083,26 @@ class GeocodingAPIProcessor(BaseProcessor):
 
                 # Special logging for Tull address Grok results
                 if "Tull Charitable Foundation" in item.get('canonical_address', ''):
-                    log_info(f"DEBUG_TULL: Grok result - geocoding_id={gid}, lat={lat}, lon={lon}, matched_address='{matched}'")
+                    print(f"DEBUG_TULL: Grok result - geocoding_id={gid}, lat={lat}, lon={lon}, matched_address='{matched}'")
 
                 if lat is not None and lon is not None:
                     status = "Match:Grok"
                     print(f"###DEBUG### GROK_SUCCESS: Setting {gid} to Match:Grok")
                     if "Tull Charitable Foundation" in item.get('canonical_address', ''):
-                        log_info(f"DEBUG_TULL: Grok SUCCESS - geocoding_id={gid}, status={status}")
+                        print(f"DEBUG_TULL: Grok SUCCESS - geocoding_id={gid}, status={status}")
                     self._apply_successful_geocode(context, gid, attempt, now, lat, lon, status, res, matched)
                     grok_success_count += 1
                 else:
                     # Grok failed, move to tier4 (individual APIs)
                     print(f"###DEBUG### GROK_FAILED: {gid} has null lat/lon, falling back to individual APIs")
                     if "Tull Charitable Foundation" in item.get('canonical_address', ''):
-                        log_info(f"DEBUG_TULL: Grok FAILURE - geocoding_id={gid}, null lat/lon, falling back to individual APIs")
+                        print(f"DEBUG_TULL: Grok FAILURE - geocoding_id={gid}, null lat/lon, falling back to individual APIs")
                     self._update_geocoding_stage(context, gid, 'tier4', now)
                     self._process_fallbacks_for_item(context, item, now)
                     grok_failure_count += 1
-            log_info(f"DEBUG_GROK: Batch processed {len(addresses)} addresses - Success: {grok_success_count}, Failures: {grok_failure_count}")
+            print(f"DEBUG_GROK: Batch processed {len(addresses)} addresses - Success: {grok_success_count}, Failures: {grok_failure_count}")
         else:
-            log_info(f"DEBUG_GROK: Batch failed with status={grok_result.get('status') if grok_result else 'None'}, processing {len(batch)} addresses individually")
+            print(f"DEBUG_GROK: Batch failed with status={grok_result.get('status') if grok_result else 'None'}, processing {len(batch)} addresses individually")
             # Batch failed, move all to tier4 and fallback individually
             for item in batch:
                 self._update_geocoding_stage(context, item['geocoding_id'], 'tier4', now)
@@ -1120,7 +1123,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         """Modified consumer worker that processes all result_queue items."""
         # Consumer thread: allow writes
         self.db_ops.set_allow_write(True)
-        log_info("CONSUMER THREAD STARTED")
+        print("CONSUMER THREAD STARTED")
         current_batch = []
         current_estimated = 0
         sentinels_received = 0
@@ -1142,15 +1145,15 @@ class GeocodingAPIProcessor(BaseProcessor):
                 op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
                 merged.operations.append(op)
                 optimize_added = True
-                log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
+                print(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
 
-            log_info(f"Saving batch of {len(current_batch)} contexts to database (estimated_updates: {merged.estimated_updates})")
+            print(f"Saving batch of {len(current_batch)} contexts to database (estimated_updates: {merged.estimated_updates})")
             self.update_pdc_size_gauge(merged)
             print(f"###DEBUG### CONSUMER_SAVE: Calling save_to_database with {len(merged.operations)} operations")
             merged.save_to_database(self.db_ops)
             print(f"###DEBUG### CONSUMER_SAVE: save_to_database completed successfully")
             #self.db_ops.db_conn.execute("CHECKPOINT")
-            log_info(f"Successfully saved batch of {len(current_batch)} contexts + checkpointed")
+            print(f"Successfully saved batch of {len(current_batch)} contexts + checkpointed")
             self.total_objects_saved += merged.getTotalObjectCount()
             self.total_processed += len(current_batch)
 
@@ -1186,7 +1189,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
             if item.is_sentinel():
                 sentinels_received += 1
-                print(f"###DEBUG### CONSUMER: Received sentinel {sentinels_received}/{num_producers}")
+                print(f"###DEBUG### CONSUMER: Received sentinel {sentinels_received}/{num_producers+10}")
                 continue
 
             context = item.data
@@ -1205,7 +1208,7 @@ class GeocodingAPIProcessor(BaseProcessor):
             if len(current_batch) >= CONSUMER_BATCH_SIZE:
                 save_current_batch()
 
-        log_info("CONSUMER THREAD COMPLETED")
+        print("CONSUMER THREAD COMPLETED")
 
     def _process_fallbacks_for_item(self, context: PendingDatabaseContext, item: Dict[str, Any], now: str):
         """Process fallbacks for a single item."""
@@ -1215,7 +1218,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         # Special logging for Tull address entering fallback processing
         if "Tull Charitable Foundation" in canonical:
-            log_info(f"DEBUG_TULL: Entering Tier 4 fallback processing - geocoding_id={gid}, canonical='{canonical}'")
+            print(f"DEBUG_TULL: Entering Tier 4 fallback processing - geocoding_id={gid}, canonical='{canonical}'")
 
         # Strip C/O from canonical address before fallback processing
         stripped_canonical = self._strip_co_from_address(canonical)
@@ -1243,11 +1246,11 @@ class GeocodingAPIProcessor(BaseProcessor):
         success = False
         fallbacks = self._build_api_fallbacks(gid, canonical)
         if "Tull Charitable Foundation" in canonical:
-            log_info(f"DEBUG_TULL: Tier 4 - trying {len(fallbacks)} fallback APIs: {[name for name, _ in fallbacks]}")
+            print(f"DEBUG_TULL: Tier 4 - trying {len(fallbacks)} fallback APIs: {[name for name, _ in fallbacks]}")
         for name, func in fallbacks:
             try:
                 if "Tull Charitable Foundation" in canonical:
-                    log_info(f"DEBUG_TULL: Tier 4 - trying fallback API: {name}")
+                    print(f"DEBUG_TULL: Tier 4 - trying fallback API: {name}")
                 res = func(norm_parsed, canonical)
                 if res and res.get('match'):
                     lat = float(res['lat'])
@@ -1255,23 +1258,23 @@ class GeocodingAPIProcessor(BaseProcessor):
                     status = f"Match:{name.replace('_', ' ')}"
                     matched_address = res.get('formatted_address')
                     if "Tull Charitable Foundation" in canonical:
-                        log_info(f"DEBUG_TULL: Tier 4 SUCCESS - {name} matched, geocoding_id={gid}, status={status}, lat={lat}, lon={lon}")
+                        print(f"DEBUG_TULL: Tier 4 SUCCESS - {name} matched, geocoding_id={gid}, status={status}, lat={lat}, lon={lon}")
                     self._apply_successful_geocode(context, gid, attempt, now, lat, lon, status, res, matched_address)
                     success = True
                     break
                 else:
                     if "Tull Charitable Foundation" in canonical:
-                        log_info(f"DEBUG_TULL: Tier 4 - {name} failed to match")
+                        print(f"DEBUG_TULL: Tier 4 - {name} failed to match")
             except Exception as e:
                 log_debug(f"Fallback {name} failed for {gid}: {e}")
                 if "Tull Charitable Foundation" in canonical:
-                    log_info(f"DEBUG_TULL: Tier 4 - {name} exception: {e}")
+                    print(f"DEBUG_TULL: Tier 4 - {name} exception: {e}")
 
         if not success:
             # No_Match
             print(f"###DEBUG### FALLBACK_FAILED: Setting {gid} to No_Match after all fallbacks failed, canonical={item.get('canonical_address', '')}")
             if "Tull Charitable Foundation" in canonical:
-                log_info(f"DEBUG_TULL: Tier 4 FINAL FAILURE - all {len(fallbacks)} fallback APIs failed, setting to No_Match")
+                print(f"DEBUG_TULL: Tier 4 FINAL FAILURE - all {len(fallbacks)} fallback APIs failed, setting to No_Match")
             context.addOperationToDatabase(DatabaseOperation(
                 operation_type=DatabaseOperationType.GENERIC_UPDATE,
                 data={
@@ -1414,9 +1417,9 @@ class GeocodingAPIProcessor(BaseProcessor):
             log_warning("censusgeocode not available")
             return 0
         self.setup_address_counts()
-        log_info("Starting geocoding processing")
+        print("Starting geocoding processing")
         processed = self.process_parallel(max_files=max_files)
-        log_info(f"Geocoding complete: {processed} records processed")
+        print(f"Geocoding complete: {processed} records processed")
         return processed
 
     def process_parallel(self, max_files=None, workers=4) -> int:
@@ -1427,13 +1430,17 @@ class GeocodingAPIProcessor(BaseProcessor):
         # Call parent process_parallel
         print("###DEBUG### PROCESS_PARALLEL: Calling super().process_parallel")
         processed = super().process_parallel(max_files=max_files, workers=workers)
-
+        # ← ADD THIS: Tell workers to shut down
+        print("###DEBUG### MAIN: Sending 10 shutdown sentinels to api_queue")
+        for _ in range(10):
+            self.api_queue.put(None)
         # Wait for Grok workers to complete
         print("###DEBUG### PROCESS_PARALLEL: Waiting for Grok workers to complete")
         for i, t in enumerate(self.grok_workers):
             t.join()
             print(f"###DEBUG### PROCESS_PARALLEL: Grok worker {i} completed")
         print("###DEBUG### PROCESS_PARALLEL: All Grok workers completed")
+        self.result_queue.put(WorkUnit.sentinel(999))
 
         return processed
     
@@ -1502,7 +1509,7 @@ class GeocodingAPIProcessor(BaseProcessor):
             self._update_geocoding_stage(context, item['geocoding_id'], stage, now)
 
         # Apply patterns if this is tier2
-        if stage == 'tier2':
+        if False and stage == 'tier2': #disabling for now
             dangerous_matches = []
             dangerous_failures = []  # Dangerous matches that should continue to next tier
             non_matches = []
@@ -1523,13 +1530,13 @@ class GeocodingAPIProcessor(BaseProcessor):
                         stripped = self._strip_co_from_address(item['canonical_address'])
                         is_valid = self._is_valid_street_address(stripped)
                         if "Tull Charitable Foundation" in item['canonical_address']:
-                            log_info(f"DEBUG_TULL: Tier 2 C/O check - stripped='{stripped}', is_valid={is_valid}")
+                            print(f"DEBUG_TULL: Tier 2 C/O check - stripped='{stripped}', is_valid={is_valid}")
                         if not is_valid:
                             # Invalid address after stripping - let it continue to next tier
                             dangerous_failures.append(item)
                             dangerous_failure_count += 1
                             if "Tull Charitable Foundation" in item['canonical_address']:
-                                log_info(f"DEBUG_TULL: Tier 2 - C/O address with invalid stripped result, continuing to next tier")
+                                print(f"DEBUG_TULL: Tier 2 - C/O address with invalid stripped result, continuing to next tier")
                             continue
                     dangerous_matches.append((item, pattern))
                     dangerous_count += 1
@@ -1537,11 +1544,13 @@ class GeocodingAPIProcessor(BaseProcessor):
                     modified_item = self._apply_patterns_to_item(item)
                     non_matches.append(modified_item)
             # Handle dangerous matches that should be processed as patterns
+            still_need_census = []
             for item, pattern in dangerous_matches:
-                self._handle_pattern_match(context, item, pattern, now)
+                if not self._handle_pattern_match(context, item, pattern, now):
+                    still_need_census.append(item)
             # Process census on non_matches and dangerous failures
-            items = non_matches + dangerous_failures
-            log_info(f"DEBUG_PATTERNS: Tier 2 - {dangerous_count} addresses matched dangerous patterns, {dangerous_failure_count} C/O addresses continue to next tier, {len(non_matches)} non-matches continue to Census")
+            items = non_matches + dangerous_failures + still_need_census
+            print(f"DEBUG_PATTERNS: Tier 2 - {dangerous_count} addresses matched dangerous patterns, {dangerous_failure_count} C/O addresses continue to next tier, {len(non_matches)} non-matches continue to Census")
 
         # Process in batches
         failed_items = []
@@ -1578,7 +1587,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 if original_street != record['street']:
                     log_debug(f"Census batch: Stripped C/O from street '{original_street}' -> '{record['street']}' for geocoding_id {item['geocoding_id']}")
                     if "Tull Charitable Foundation" in item['canonical_address']:
-                        log_info(f"DEBUG_TULL: Census API prep - C/O stripped from street: '{original_street}' -> '{record['street']}'")
+                        print(f"DEBUG_TULL: Census API prep - C/O stripped from street: '{original_street}' -> '{record['street']}'")
 
             record.pop('id', None)
             record['id'] = str(item['geocoding_id'])
@@ -1587,7 +1596,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
             # Log Tull address preparation for Census
             if "Tull Charitable Foundation" in item['canonical_address']:
-                log_info(f"DEBUG_TULL: Census API prep - prepared record for geocoding_id {item['geocoding_id']}: street='{record.get('street', '')}', city='{record.get('city', '')}', state='{record.get('state', '')}', zip='{record.get('zip', '')}'")
+                print(f"DEBUG_TULL: Census API prep - prepared record for geocoding_id {item['geocoding_id']}: street='{record.get('street', '')}', city='{record.get('city', '')}', state='{record.get('state', '')}', zip='{record.get('zip', '')}'")
 
         try:
             self.census_calls += 1
@@ -1623,7 +1632,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
             # Special logging for Tull address Census results
             if "Tull Charitable Foundation" in item['canonical_address']:
-                log_info(f"DEBUG_TULL: Census API result - geocoding_id={gid}, match={result.get('match')}, lat={result.get('lat')}, lon={result.get('lon')}, matchtype={result.get('matchtype')}, exact_match={result.get('exact_match')}")
+                print(f"DEBUG_TULL: Census API result - geocoding_id={gid}, match={result.get('match')}, lat={result.get('lat')}, lon={result.get('lon')}, matchtype={result.get('matchtype')}, exact_match={result.get('exact_match')}")
 
             if result.get('match') and result.get('lat') and result.get('lon'):
                 lat = float(result['lat'])
@@ -1631,11 +1640,11 @@ class GeocodingAPIProcessor(BaseProcessor):
                 matchtype = result.get('matchtype', 'Exact')
                 status = 'Match' if matchtype == 'Exact' else f'Match:{matchtype}'
                 if "Tull Charitable Foundation" in item['canonical_address']:
-                    log_info(f"DEBUG_TULL: Census API SUCCESS - geocoding_id={gid}, status={status}, lat={lat}, lon={lon}")
+                    print(f"DEBUG_TULL: Census API SUCCESS - geocoding_id={gid}, status={status}, lat={lat}, lon={lon}")
                 self._apply_successful_geocode(context, gid, attempt, now, lat, lon, status, result)
             else:
                 if "Tull Charitable Foundation" in item['canonical_address']:
-                    log_info(f"DEBUG_TULL: Census API FAILURE - geocoding_id={gid}, no match or missing coordinates")
+                    print(f"DEBUG_TULL: Census API FAILURE - geocoding_id={gid}, no match or missing coordinates")
                 failed_items.append(item)
 
         return failed_items
@@ -1662,9 +1671,9 @@ class GeocodingAPIProcessor(BaseProcessor):
         tull_in_batch = any("Tull Charitable Foundation" in item['canonical_address'] for item in batch)
         if tull_in_batch:
             tull_items = [item for item in batch if "Tull Charitable Foundation" in item['canonical_address']]
-            log_info(f"DEBUG_TULL: Tull Charitable Foundation address entered _process_batch - {len(tull_items)} instances found")
+            print(f"DEBUG_TULL: Tull Charitable Foundation address entered _process_batch - {len(tull_items)} instances found")
             for item in tull_items:
-                log_info(f"DEBUG_TULL: Batch entry - geocoding_id={item['geocoding_id']}, canonical='{item['canonical_address']}', normalized='{item['normalized_address']}', status={item['geocoding_status']}")
+                print(f"DEBUG_TULL: Batch entry - geocoding_id={item['geocoding_id']}, canonical='{item['canonical_address']}', normalized='{item['normalized_address']}', status={item['geocoding_status']}")
 
         # Debug counters for pipeline flow
         total_addresses = len(batch)
@@ -1688,7 +1697,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 owners_items.append(item)
                 owners_count += 1
                 if "Tull Charitable Foundation" in item['canonical_address']:
-                    log_info(f"DEBUG_TULL: Routing decision - routed to OWNERS processing")
+                    print(f"DEBUG_TULL: Routing decision - routed to OWNERS processing")
             else:
                 zip_code = ""
                 if isinstance(item['normalized_address'], str):
@@ -1702,26 +1711,27 @@ class GeocodingAPIProcessor(BaseProcessor):
                     safe_pattern = self._check_geocoding_patterns(item['canonical_address'], zip_code, 'safe')
                     dangerous_pattern = self._check_geocoding_patterns(item['canonical_address'], zip_code, 'dangerous')
                     all_patterns = self._check_geocoding_patterns(item['canonical_address'], zip_code, 'all')
-                    log_info(f"DEBUG_TULL: Pattern matching - safe={safe_pattern is not None}, dangerous={dangerous_pattern is not None}, all={all_patterns is not None}")
+                    print(f"DEBUG_TULL: Pattern matching - safe={safe_pattern is not None}, dangerous={dangerous_pattern is not None}, all={all_patterns is not None}")
                     if safe_pattern:
-                        log_info(f"DEBUG_TULL: Safe pattern details - action={safe_pattern.get('action')}, status={safe_pattern.get('status')}")
+                        print(f"DEBUG_TULL: Safe pattern details - action={safe_pattern.get('action')}, status={safe_pattern.get('status')}")
                     if dangerous_pattern:
-                        log_info(f"DEBUG_TULL: Dangerous pattern details - action={dangerous_pattern.get('action')}, status={dangerous_pattern.get('status')}")
+                        print(f"DEBUG_TULL: Dangerous pattern details - action={dangerous_pattern.get('action')}, status={dangerous_pattern.get('status')}")
                     if all_patterns:
-                        log_info(f"DEBUG_TULL: All patterns details - action={all_patterns.get('action')}, status={all_patterns.get('status')}")
+                        print(f"DEBUG_TULL: All patterns details - action={all_patterns.get('action')}, status={all_patterns.get('status')}")
 
                 pattern = self._check_geocoding_patterns(item['canonical_address'], zip_code, 'safe')
                 if pattern:
                     pattern_items.append((item, pattern))
                     pattern_safe_count += 1
                     if "Tull Charitable Foundation" in item['canonical_address']:
-                        log_info(f"DEBUG_TULL: Routing decision - routed to PATTERN MATCHING (safe)")
+                        print(f"DEBUG_TULL: Routing decision - routed to PATTERN MATCHING (safe)")
                 else:
                     api_items.append(item)
                     api_items_count += 1
                     if "Tull Charitable Foundation" in item['canonical_address']:
-                        log_info(f"DEBUG_TULL: Routing decision - routed to API GEOCODING PIPELINE")
+                        print(f"DEBUG_TULL: Routing decision - routed to API GEOCODING PIPELINE")
 
+        print(f"####DEBUG: {len(api_items)} items need API after Census/Patterns")
         # Process owners (no API call)
         for item in owners_items:
             subctx = self._process_owners_work_item(item)
@@ -1751,51 +1761,54 @@ class GeocodingAPIProcessor(BaseProcessor):
             # Check if Tull address is in current_items
             tull_in_tier1 = any("Tull Charitable Foundation" in item['canonical_address'] for item in current_items)
             if tull_in_tier1:
-                log_info(f"DEBUG_TULL: Entering Tier 1 (Census Raw) - address present in {len(current_items)} items")
-            tier1_failures = self._process_census_tier(current_items, context, now, 'tier1', 1000)
+                print(f"DEBUG_TULL: Entering Tier 1 (Census Raw) - address present in {len(current_items)} items")
+            tier1_failures = self._process_census_tier(list(current_items), context, now, 'tier1', 1000)
+            #tier1_failures = self._process_census_tier(current_items, context, now, 'tier1', 1000)
             tier1_success = len(current_items) - len(tier1_failures)
             tier1_failures_count = len(tier1_failures)
             current_items = tier1_failures
             if tull_in_tier1:
-                log_info(f"DEBUG_TULL: Tier 1 complete - Success: {tier1_success}, Failures: {tier1_failures_count}, Remaining: {len(current_items)}")
-            log_info(f"DEBUG_PIPELINE: Tier 1 complete - Success: {tier1_success}, Failures: {tier1_failures_count}, Remaining: {len(current_items)}")
+                print(f"DEBUG_TULL: Tier 1 complete - Success: {tier1_success}, Failures: {tier1_failures_count}, Remaining: {len(current_items)}")
+            print(f"DEBUG_PIPELINE: Tier 1 complete - Success: {tier1_success}, Failures: {tier1_failures_count}, Remaining: {len(current_items)}")
         else:
-            log_info("Tier 1 (Census Raw) disabled, skipping to next tier")
+            print("Tier 1 (Census Raw) disabled, skipping to next tier")
 
         # Tier 2: Census(patterns) batch 1000 on failures (apply patterns first)
         if API_CONFIG.get('ENABLE_CENSUS_PATTERNS', True) and current_items:
             # Check if Tull address is in current_items
             tull_in_tier2 = any("Tull Charitable Foundation" in item['canonical_address'] for item in current_items)
             if tull_in_tier2:
-                log_info(f"DEBUG_TULL: Entering Tier 2 (Census Patterns) - address present in {len(current_items)} items")
-            tier2_failures = self._process_census_tier(current_items, context, now, 'tier2', 1000)
+                print(f"DEBUG_TULL: Entering Tier 2 (Census Patterns) - address present in {len(current_items)} items")
+            tier2_failures = self._process_census_tier(list(current_items), context, now, 'tier2', 1000)
             tier2_success = len(current_items) - len(tier2_failures)
             tier2_failures_count = len(tier2_failures)
             current_items = tier2_failures
             if tull_in_tier2:
-                log_info(f"DEBUG_TULL: Tier 2 complete - Success: {tier2_success}, Failures: {tier2_failures_count}, Remaining: {len(current_items)}")
-            log_info(f"DEBUG_PIPELINE: Tier 2 complete - Success: {tier2_success}, Failures: {tier2_failures_count}, Remaining: {len(current_items)}")
+                print(f"DEBUG_TULL: Tier 2 complete - Success: {tier2_success}, Failures: {tier2_failures_count}, Remaining: {len(current_items)}")
+            print(f"DEBUG_PIPELINE: Tier 2 complete - Success: {tier2_success}, Failures: {tier2_failures_count}, Remaining: {len(current_items)}")
         elif not API_CONFIG.get('ENABLE_CENSUS_PATTERNS', True):
-            log_info("Tier 2 (Census Patterns) disabled, skipping to next tier")
+            print("Tier 2 (Census Patterns) disabled, skipping to next tier")
 
         # Tier 3: Grok batch 20 on failures
         if API_CONFIG.get('ENABLE_GROK', False) and current_items:
             # Check if Tull address is in current_items
             tull_in_tier3 = any("Tull Charitable Foundation" in item['canonical_address'] for item in current_items)
             if tull_in_tier3:
-                log_info(f"DEBUG_TULL: Entering Tier 3 (Grok Batch) - address present in {len(current_items)} items")
+                print(f"DEBUG_TULL: Entering Tier 3 (Grok Batch) - address present in {len(current_items)} items")
             # Update stage to tier3 for Grok items
+            print(f"DEBUG_ENQUEUE_PREPARE: Enqueuing {len(current_items)} items for Grok processing")
             for item in current_items:
                 self._update_geocoding_stage(context, item['geocoding_id'], 'tier3', now)
             # Enqueue for Grok processing
+            print(f"DEBUG_ENQUEUE_PREPARE: Enqueuing {len(current_items)} items for Grok processing")
             self._enqueue_grok_batches(current_items, 20)
             tier3_enqueued = len(current_items)
-            current_items = []  # Grok handles all remaining items
+            current_items.clear()  # Grok handles all remaining items
             if tull_in_tier3:
-                log_info(f"DEBUG_TULL: Tier 3 - Enqueued {tier3_enqueued} addresses for Grok processing")
-            log_info(f"DEBUG_PIPELINE: Tier 3 - Enqueued {tier3_enqueued} addresses for Grok processing")
+                print(f"DEBUG_TULL: Tier 3 - Enqueued {tier3_enqueued} addresses for Grok processing")
+            print(f"DEBUG_PIPELINE: Tier 3 - Enqueued {tier3_enqueued} addresses for Grok processing")
         elif not API_CONFIG.get('ENABLE_GROK', False):
-            log_info("Tier 3 (Grok) disabled, skipping to individual API fallbacks")
+            print("Tier 3 (Grok) disabled, skipping to individual API fallbacks")
 
         # Tier 4: Individual API fallbacks for any remaining items
         # This happens asynchronously via the Grok workers calling _process_fallbacks_for_item
@@ -1876,10 +1889,10 @@ class GeocodingAPIProcessor(BaseProcessor):
                             'id_column': 'geocoding_id'
                         }
                     ))
-            log_info(f"DEBUG_PIPELINE: Tier 4 complete - Processed {tier4_processed} addresses with individual API fallbacks")
+            print(f"DEBUG_PIPELINE: Tier 4 complete - Processed {tier4_processed} addresses with individual API fallbacks")
 
         # Pipeline summary logging
-        log_info(f"DEBUG_PIPELINE_SUMMARY: Batch processed {total_addresses} addresses - "
+        print(f"DEBUG_PIPELINE_SUMMARY: Batch processed {total_addresses} addresses - "
                 f"Owners: {owners_count}, SafePatterns: {pattern_safe_count}, API_Items: {api_items_count}, "
                 f"Tier1_Success: {tier1_success}, Tier2_Success: {tier2_success}, Tier3_Grok: {tier3_enqueued}")
 
