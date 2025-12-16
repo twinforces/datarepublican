@@ -19,16 +19,12 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from openai import OpenAI
 
-try:
-    import censusgeocode as cg
-    import requests
-    from geopy.geocoders import Nominatim
-    from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-    from opencage.geocoder import OpenCageGeocode
-except ImportError:
-    cg = None
-    Nominatim = None
-    OpenCageGeocode = None
+import censusgeocode as cg
+import requests
+from urllib.parse import quote
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+from opencage.geocoder import OpenCageGeocode
 
 try:
     import tqdm
@@ -79,33 +75,182 @@ API_PRIORITY = [
 
 
 class GeocodingAPIProcessor(BaseProcessor):
+    def _preprocess_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+        """
+        Preprocess stage:
+        - Skip owners (progress only)
+        - Match safe patterns (progress + match)
+        - Strip C/O from canonical_address (update DB)
+        - Forward everything else
+        """
+        results = []
+        now = datetime.now().isoformat()
+
+        for unit in batch:
+            item = unit.data
+            gid = item['geocoding_id']
+            addr = item['canonical_address']
+
+            # 1. Owners — skip geocoding, just progress
+            if item.get('is_owner'):
+                ctx = PendingDatabaseContext()
+                ctx.addOperationToDatabase(DatabaseOperation(
+                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                    data={'count': item.get('address_count', 1)}
+                ))
+                results.append((True, ctx))
+                continue
+
+            # 2. Safe patterns — match and progress
+            pattern = self._check_geocoding_patterns(addr, item.get('zip_code', ''), 'safe')
+            if pattern:
+                ctx = PendingDatabaseContext()
+                # Build match context (lat/lon from pattern if present)
+                update = {
+                    'geocoding_id': gid,
+                    'last_attempt': now,
+                    'attempt_count': item.get('attempt_count', 0) + 1,
+                    'geocoding_status': pattern.get('status', 'Pattern_Match'),
+                }
+                if pattern.get('lat') is not None:
+                    update['lat'] = pattern['lat']
+                    update['lon'] = pattern['lon']
+                if pattern.get('formatted_address'):
+                    update['matched_address'] = pattern['formatted_address']
+
+                ctx.addOperationToDatabase(DatabaseOperation(
+                    operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                    data={'table': 'Geocoding', 'updates': [update], 'id_column': 'geocoding_id'}
+                ))
+                ctx.addOperationToDatabase(DatabaseOperation(
+                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                    data={'count': item.get('address_count', 1)}
+                ))
+                results.append((True, ctx))
+                continue
+
+            # 3. C/O stripping — update canonical_address
+            stripped = self._strip_co_from_address(addr)
+            if stripped != addr:
+                ctx = PendingDatabaseContext()
+                ctx.addOperationToDatabase(DatabaseOperation(
+                    operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                    data={
+                        'table': 'Geocoding',
+                        'updates': [{'geocoding_id': gid, 'canonical_address': stripped}],
+                        'id_column': 'geocoding_id'
+                    }
+                ))
+                # Modify item for downstream stages
+                modified_item = item.copy()
+                modified_item['canonical_address'] = stripped
+                results.append((False, modified_item))
+            else:
+                # Normal item — forward unchanged
+                results.append((False, item))
+
+        return results
+
+    def _grok_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+        items = [u.data for u in batch]
+        results = []
+
+        # Use your exact prompt
+        prompt = self._build_grok_prompt(items)
+
+        client = OpenAI(api_key=os.getenv("X_API_KEY"), base_url="https://api.x.ai/v1")
+
+        try:
+            response = client.chat.completions.create(
+                model="grok-2-latest",  # ← critical
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=4000,
+                response_format={"type": "text"},  # ← critical
+                timeout=300
+            )
+            raw = (response.choices[0].message.content or "").strip()
+            data = json.loads(raw)
+
+            for item, result in zip(items, data):
+                lat = result.get('lat')
+                lon = result.get('long')
+                matched = result.get('matched_address')
+
+                if lat is not None and lon is not None:
+                    results.append(self._apply_successful_geocode(item, float(lat), float(lon), "Match:Grok", matched or item['canonical_address']))
+                else:
+                    results.append((False, item))
+        except Exception as e:
+                # Your special case for the OpenAI "0" bug
+                if e == 0 or e is None or str(e) in ("", "0", "None"):
+                    pass # open API bug, not real
+                else:
+                    print(f"Grok batch failed: {e}")
+                    results = [(False, item) for item in items]
+        return results
+
+    def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+        """
+        Final failure stage — called when an item fails all previous stages.
+        Builds a PendingDatabaseContext with No_Match for all items.
+        Returns (True, ctx) so pipeline saves it.
+        """
+        ctx = PendingDatabaseContext()
+        now = datetime.now().isoformat()
+
+        for unit in batch:
+            item = unit.data
+            gid = item['geocoding_id']
+
+            ctx.addOperationToDatabase(DatabaseOperation(
+                operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                data={
+                    'table': 'Geocoding',
+                    'updates': [{
+                        'geocoding_id': gid,
+                        'geocoding_status': 'No_Match',
+                        'last_attempt': now,
+                        'attempt_count': item.get('attempt_count', 0) + 1,
+                        'matched_address': 'Failed all stages',
+                    }],
+                    'id_column': 'geocoding_id'
+                }
+            ))
+
+            # Progress update — each item counts
+            ctx.addOperationToDatabase(DatabaseOperation(
+                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                data={'count': item.get('address_count', 1)}
+            ))
+
+        # Return success so pipeline saves the context
+        return [(True, ctx)] * len(batch)  # one ctx for whole batch is fine
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_BATCH_SIZE):
         super().__init__(db_ops)
         self.batch_size = batch_size
         self.geocoding_patterns = self._load_geocoding_patterns()
           # Queue for parallel Grok processing
-        if cg is None and not global_config.is_quiet():
-            log_warning("censusgeocode library not available. Install with: pip install censusgeocode")
         stages = [
-            {"name": "preprocess", "workers": 4, "batch_size": 5000, "handler": self._preprocess_handler},
-            {"name": "census", "workers": 1, "batch_size": 1000, "handler": self._census_handler},
+            PipelineStage(name="preprocess", workers=4, batch_size=5000, handler=self._preprocess_handler),
+            PipelineStage(name="census", workers=1, batch_size=1000, handler=self._census_handler),
         ]
 
         if API_CONFIG.get('ENABLE_GROK', True):
-            stages.append({"name": "grok", "workers": 8, "batch_size": 20, "handler": self._grok_handler})
+            stages.append(PipelineStage(name="grok", workers=8, batch_size=20, handler=self._grok_handler))
 
     # Individual fallback stages (single item each)
         if API_CONFIG.get('ENABLE_PHOTON', True):
-            stages.append({"name": "photon", "workers": 6, "batch_size": 1, "handler": self._photon_handler})
+            stages.append(PipelineStage(name="photon", workers=6, batch_size=1, handler=self._photon_handler))
         if API_CONFIG.get('ENABLE_LIBRESTREET', True):
-            stages.append({"name": "librestreet", "workers": 6, "batch_size": 1, "handler": self._librestreet_handler})
+            stages.append(PipelineStage(name="librestreet", workers=6, batch_size=1, handler=self._librestreet_handler))
         if API_CONFIG.get('ENABLE_NOMINATIM', True):
-            stages.append({"name": "nominatim", "workers": 6, "batch_size": 1, "handler": self._nominatim_handler})
+            stages.append(PipelineStage(name="nominatim", workers=6, batch_size=1, handler=self._nominatim_handler))
         if API_CONFIG.get('ENABLE_OPENCAGE', True):
-            stages.append({"name": "opencage", "workers": 6, "batch_size": 1, "handler": self._opencage_handler})
+            stages.append(PipelineStage(name="opencage", workers=6, batch_size=1, handler=self._opencage_handler))
 
         # Final failure stage
-        stages.append({"name": "fail", "workers": 1, "batch_size": 1000, "handler": self._final_fail_handler, "is_final_failure": True})
+        stages.append(PipelineStage(name="fail", workers=1, batch_size=1000, handler=self._final_fail_handler, is_final_failure=True))
         self.pipeline = Pipeline(stages)
 
     def setup_address_counts(self):
@@ -456,12 +601,12 @@ class GeocodingAPIProcessor(BaseProcessor):
         addrs = [self._parse_co_address(u.data['canonical_address'], 'census', u.data.get('zip_code', '')) for u in batch]
 
         try:
-            census_results = cg.address_batch(addrs)
+            census_results = cg.addressbatch(addrs)
             for unit, res in zip(batch, census_results):
                 item = unit.data
                 if res and res.get('coordinates'):
-                    lat = res['coordinates']['y']
-                    lon = res['coordinates']['x']
+                    lat = float(res['coordinates'][1])
+                    lon = float(res['coordinates'][0])
                     matched = res.get('matchedAddress', item['canonical_address'])
                     results.append(self._apply_successful_geocode(item, lat, lon, "Match:Census", matched))
                 else:
@@ -473,7 +618,6 @@ class GeocodingAPIProcessor(BaseProcessor):
         return results
     
     def _geocode_with_google_maps(self, address_str, normalized_address=None):
-        self.google_maps_calls += 1
         key = os.getenv('GOOGLE_MAPS_API_KEY')
         if not key: return None
 
@@ -498,7 +642,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 address_str = constructed_address
 
         try:
-            url = f"https://maps.googleapis.com/maps/api/geocode/json?address={requests.utils.quote(address_str)}&key={key}"
+            url = f"https://maps.googleapis.com/maps/api/geocode/json?address={quote(address_str)}&key={key}"
             r = requests.get(url, timeout=10)
             data = r.json()
             if data.get('status') == 'OK' and data.get('results'):
@@ -508,8 +652,6 @@ class GeocodingAPIProcessor(BaseProcessor):
         return None
 
     def _geocode_with_opencage(self, address_str, normalized_address=None):
-        self.opencage_calls += 1
-        if OpenCageGeocode is None: return None
         key = os.getenv('OPENCAGE_API_KEY')
         if not key: return None
 
@@ -538,14 +680,20 @@ class GeocodingAPIProcessor(BaseProcessor):
                 results = geocoder.geocode(query=query) if query else geocoder.geocode(address_str)
             else:
                 results = geocoder.geocode(address_str)
-            if results and len(results) > 0:
+            if isinstance(results, list) and results:
                 r = results[0]
+            elif isinstance(results, dict) and 'results' in results and isinstance(results['results'], list) and results['results']:
+                r = results['results'][0]
+            else:
+                return None
+            if isinstance(r, dict) and 'geometry' in r and isinstance(r['geometry'], dict) and 'lat' in r['geometry'] and 'lng' in r['geometry']:
                 return {'match': True, 'lat': r['geometry']['lat'], 'lon': r['geometry']['lng'], 'formatted_address': r.get('formatted', address_str)}
+            else:
+                return None
         except: pass
         return None
     
     def _geocode_with_librestreet(self, address_str, normalized_address=None):
-        self.librestreet_calls += 1
 
         # Parse normalized_address for structured data
         normalized_data = {}
@@ -568,7 +716,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 address_str = constructed_address
 
         try:
-            url = f"https://librestreet.org/search.php?q={requests.utils.quote(address_str)}&format=json"
+            url = f"https://librestreet.org/search.php?q={quote(address_str)}&format=json"
             r = requests.get(url, timeout=10)
             data = r.json()
             if data:
@@ -594,7 +742,7 @@ class GeocodingAPIProcessor(BaseProcessor):
             cx = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
             if not key or not cx: return None
             time.sleep(1)
-            url = f"https://www.googleapis.com/customsearch/v1?key={key}&cx={cx}&q={requests.utils.quote(query)}"
+            url = f"https://www.googleapis.com/customsearch/v1?key={key}&cx={cx}&q={quote(query)}"
             r = requests.get(url, timeout=10)
             data = r.json()
             if 'items' in data:
@@ -662,44 +810,6 @@ Return the complete JSON array now. Nothing else.
 
 
     
-def _grok_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
-    items = [u.data for u in batch]
-    results = []
-
-    # Use your exact prompt
-    prompt = self._build_grok_prompt(items)
-
-    client = OpenAI(api_key=os.getenv("X_API_KEY"), base_url="https://api.x.ai/v1")
-
-    try:
-        response = client.chat.completions.create(
-            model="grok-2-latest",  # ← critical
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=4000,
-            response_format=None,  # ← critical
-            timeout=300
-        )
-        raw = response.choices[0].message.content.strip()
-        data = json.loads(raw)
-
-        for item, result in zip(items, data):
-            lat = result.get('lat')
-            lon = result.get('long')
-            matched = result.get('matched_address')
-
-            if lat is not None and lon is not None:
-                results.append(self._apply_successful_geocode(item, float(lat), float(lon), "Match:Grok", matched or item['canonical_address']))
-            else:
-                results.append((False, item))
-    except Exception as e:
-            # Your special case for the OpenAI "0" bug
-            if e == 0 or e is None or str(e) in ("", "0", "None"):
-                pass # open API bug, not real
-            else:
-                print(f"Grok batch failed: {e}")
-                results = [(False, item) for item in items]
-    return results
 
 def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
         """
@@ -819,9 +929,6 @@ def get_progress_config(self, max_files=None):
     return total, "addresses", "Geocoding addresses"
 
 def process_pending_geocoding_records(self, max_files=None, progress_bar=None) -> int:
-    if cg is None:
-        log_warning("censusgeocode not available")
-        return 0
     self.setup_address_counts()
     print("Starting geocoding processing")
     processed = self.pipeline.run_with_provider(self, max_items=max_files)
