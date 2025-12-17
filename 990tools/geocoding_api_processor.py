@@ -851,13 +851,17 @@ Return the complete JSON array now. Nothing else.
             return [(True, ctx)] * len(batch)  # one ctx for whole batch is fine
 
     def _get_custom_metrics(self) -> Dict[str, Any]:
-        """Metrics for QueueStatusDisplay — uses Pipeline's live stats"""
+        """Return live pipeline metrics for QueueStatusDisplay"""
         if not hasattr(self, 'pipeline'):
             return {'current_step': 'geolocate'}
-        return self.pipeline.get_status()['metrics']
+        status = self.pipeline.get_status()
+        metrics = status['metrics']
+        metrics['current_step'] = 'geolocate'
+        return metrics
 
 
-    def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict], Optional[str]]:
+    def get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict], Optional[str]]:
+        print(f"####DEBUG: get_work_batch called with last_pk={last_pk}, batch_size={self.batch_size}")
         where_parts = ["geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')"]
         params = []
 
@@ -877,7 +881,7 @@ Return the complete JSON array now. Nothing else.
 
         result = self.db_ops.execute_query(query, tuple(params))
         rows = result.fetchall()
-
+        print(f"####DEBUG: got {len(rows)} rows")
         batch = []
         new_pk = last_pk
 
@@ -961,47 +965,4 @@ Return the complete JSON array now. Nothing else.
         count = result.fetchone()[0]
         return int(count)
     
-    def get_work_batch(self, last_id: Optional[str] = None, batch_size: int = 5000) -> tuple[List[dict], Optional[str]]:
-        """
-        Fetch next batch of pending geocoding records.
-        Used by Pipeline.run_with_provider for streaming.
-        """
-        where_parts = ["geocoding_status = 'Pending'"]
-        params = []
-
-        if last_id is not None:
-            where_parts.append("geocoding_id > ?")
-            params.append(last_id)
-
-        where_clause = " AND ".join(where_parts)
-        query = f"""
-            SELECT 
-                geocoding_id,
-                canonical_address,
-                normalized_address,
-                attempt_count,
-                address_count
-            FROM Geocoding
-            WHERE {where_clause}
-            ORDER BY geocoding_id
-            LIMIT ?
-        """
-        params.append(batch_size)
-
-        rows = self.db_ops.execute_query(query, tuple(params)).fetchall()
-        if not rows:
-            return [], None
-
-        # Convert rows to dicts
-        batch = []
-        for row in rows:
-            batch.append({
-                'geocoding_id': row[0],
-                'canonical_address': row[1],
-                'normalized_address': row[2],
-                'attempt_count': row[3],
-                'address_count': row[4] or 1,
-            })
-
-        new_last_id = rows[-1][0]
-        return batch, new_last_id
+    

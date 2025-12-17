@@ -12,13 +12,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pending_database_context import PendingDatabaseContext
 from database_operations import DatabaseOperation, DatabaseOperationType
 from datetime import datetime
-
+from queue_status_display import QueueStatusDisplay
+from constants import BATCH_SIZE
 
 # ==============================
 # Constants
 # ==============================
 BACKPRESSURE_ENABLED_DEFAULT = True
-ADAPTIVE_BACKPRESSURE = True
+ADAPTIVE_BACKPRESSURE = False
 BACKPRESSURE_THRESHOLD = 2000
 IDLE_THRESHOLD = 500
 ADAPTIVE_INTERVAL = 30
@@ -121,7 +122,7 @@ class PipelineStage:
 
             while True:
                 try:
-                    unit = self.queue.get(timeout=10)
+                    unit = self.queue.get()
                 except queue.Empty:
                     if pending:
                         self._process_batch(pending)
@@ -198,23 +199,24 @@ class PipelineStage:
         self.queue.put(unit)
         
     def adjust_workers(self, target_workers: int):
-        """Dynamically adjust number of worker threads for this stage"""
         current = self.current_workers
 
-        if target_workers > current:
+        # Never go below 1 worker
+        target_workers = max(1, target_workers)
+
+        diff = target_workers - current
+
+        if diff > 0:
             print(f"SCALING UP {self.name}: {current} → {target_workers}")
-            for _ in range(target_workers - current):
-                self._spawn_worker()
-        elif target_workers < current:
-            print(f"SCALING DOWN {self.name}: {current} → {target_workers}")
-            # Send sentinels to kill excess workers
-            diff = current - target_workers
             for _ in range(diff):
-                self.queue.put(WorkUnit.sentinel(999))
+                self._spawn_worker()
+        elif diff < 0:
+            print(f"SCALING DOWN {self.name}: {current} → {target_workers}")
+            for _ in range(-diff):
+                self.queue.put(WorkUnit.sentinel())
 
         self.workers = target_workers
         self.metrics['nThreads'] = target_workers
-
 
 class Pipeline:
     def __init__(
@@ -257,14 +259,14 @@ class Pipeline:
             'overall': {'total': 0, 'success': 0, 'failure': 0, 'expected': 0},
             'stages': {}
         }
-        for name in self.order:
-            self.metrics['stages'][name] = {
+        for stage in stages:
+            self.metrics['stages'][stage.name] = {
                 'total': 0,
                 'success': 0,
                 'failure': 0,
                 'current_queue': 0,
                 'peak_queue': 0,
-                'nThreads': self.stages[name]['workers'],
+                'nThreads': stage.workers,
             }
 
         # Set executors
@@ -286,8 +288,20 @@ class Pipeline:
 
     def run_with_provider(self, provider, max_items: Optional[int] = None):
         total = provider.get_total_work()
+        if max_items is not None:
+            total = min(total, max_items)
         self.metrics['overall']['expected'] = total
+        self.overall_total= total
         print(f"Pipeline starting — {total:,} items")
+
+        # Start QueueStatusDisplay — owned by Pipeline
+        first_stage_queue = self.feed_stage.queue if hasattr(self, 'feed_stage') else list(self.stages.values())[0].queue
+        self.queue_status_display = QueueStatusDisplay(
+            tracking_queue=first_stage_queue,
+            update_interval=MONITOR_UPDATE,
+            custom_metrics_func=self.get_status
+        )
+        self.queue_status_display.start()
 
         processed = 0
         last_id = None
@@ -333,8 +347,10 @@ class Pipeline:
                 prefixed[f"{prefix}{k}"] = v
 
         prefixed.update({
-            'overall_total': self.overall_total,
-            'overall_success': self.overall_success,
+            'overall_total': self.metrics['overall']['total'],
+            'overall_success': self.metrics['overall']['success'],
+            'overall_expected': self.metrics['overall']['expected'],
+            'overall_failure': self.metrics['overall']['failure'],
             'in_flight': sum(s.metrics['current_queue'] for s in self.stages.values()),
         })
 
@@ -348,6 +364,9 @@ class Pipeline:
             while True:
                 time.sleep(MONITOR_UPDATE)
                 for stage_name, stage in self.stages.items():
+                    if stage_name not in ADAPTIVE_STAGES:
+                        continue
+
                     current_queue = stage.metrics['current_queue']
                     current_workers = stage.current_workers
 
@@ -356,12 +375,12 @@ class Pipeline:
                     if current_queue > 3000:
                         target = min(target + 4, MAX_WORKERS.get(stage_name, 32))
                     elif current_queue < IDLE_THRESHOLD:
-                        target = max(target - 2, MIN_WORKERS.get(stage_name, 1))
+                        # NEVER DROP TO 0 — always keep at least 1 worker
+                        target = max(target - 2, max(1, MIN_WORKERS.get(stage_name, 1)))
 
                     if target != stage.workers:
                         print(f"ADAPTING {stage_name}: {stage.workers} → {target} workers")
                         stage.adjust_workers(target)
 
-        threading.Thread(target=monitor, daemon=True).start()
-    
+        threading.Thread(target=monitor, daemon=True).start()    
     
