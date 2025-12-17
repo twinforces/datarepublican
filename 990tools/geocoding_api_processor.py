@@ -39,7 +39,8 @@ from config import global_config
 from constants import GEOCODING_BATCH_SIZE, GEOCODING_MAX_UPDATES_PER_BATCH, CONSUMER_BATCH_SIZE, OPTIMIZE_THRESHOLD
 from pending_database_context import PendingDatabaseContext
 from pipeline import PipelineStage,Pipeline,WorkUnit
-
+if 'GeocodingAPIProcessor' in sys.modules:
+    print("WARNING: GeocodingAPIProcessor already imported — check for duplicate imports!")
 
 # === API Configuration ===
 # Centralized configuration for enabling/disabling geocoding APIs and their priorities
@@ -226,6 +227,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         # Return success so pipeline saves the context
         return [(True, ctx)] * len(batch)  # one ctx for whole batch is fine
+    
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_BATCH_SIZE):
         super().__init__(db_ops)
         self.batch_size = batch_size
@@ -811,126 +813,195 @@ Return the complete JSON array now. Nothing else.
 
     
 
-def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+            """
+            Final failure stage — called when an item fails all previous stages.
+            Builds a PendingDatabaseContext with No_Match for all items.
+            Returns (True, ctx) so pipeline saves it.
+            """
+            ctx = PendingDatabaseContext()
+            now = datetime.now().isoformat()
+
+            for unit in batch:
+                item = unit.data
+                gid = item['geocoding_id']
+
+                ctx.addOperationToDatabase(DatabaseOperation(
+                    operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                    data={
+                        'table': 'Geocoding',
+                        'updates': [{
+                            'geocoding_id': gid,
+                            'geocoding_status': 'No_Match',
+                            'last_attempt': now,
+                            'attempt_count': item.get('attempt_count', 0) + 1,
+                            'matched_address': 'Failed all stages',
+                        }],
+                        'id_column': 'geocoding_id'
+                    }
+                ))
+
+                # Progress update — each item counts
+                ctx.addOperationToDatabase(DatabaseOperation(
+                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                    data={'count': item.get('address_count', 1)}
+                ))
+
+            # Return success so pipeline saves the context
+            return [(True, ctx)] * len(batch)  # one ctx for whole batch is fine
+
+    def _get_custom_metrics(self) -> Dict[str, Any]:
+        """Metrics for QueueStatusDisplay — uses Pipeline's live stats"""
+        if not hasattr(self, 'pipeline'):
+            return {'current_step': 'geolocate'}
+        return self.pipeline.get_status()['metrics']
+
+
+    def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict], Optional[str]]:
+        where_parts = ["geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')"]
+        params = []
+
+        if last_pk is not None:
+            where_parts.append("geocoding_id > ?")
+            params.append(last_pk)
+
+        where_clause = " AND ".join(where_parts)
+
+        query = f"""
+            SELECT geocoding_id, normalized_address, attempt_count, canonical_address, address_count, geocoding_status
+            FROM Geocoding
+            WHERE {where_clause}
+            ORDER BY geocoding_id
+            LIMIT {self.batch_size}
         """
-        Final failure stage — called when an item fails all previous stages.
-        Builds a PendingDatabaseContext with No_Match for all items.
-        Returns (True, ctx) so pipeline saves it.
+
+        result = self.db_ops.execute_query(query, tuple(params))
+        rows = result.fetchall()
+
+        batch = []
+        new_pk = last_pk
+
+        for row in rows:
+            batch.append({
+                'geocoding_id': row[0],
+                'normalized_address': row[1],
+                'attempt_count': row[2],
+                'canonical_address': row[3],
+                'address_count': row[4] or 0,
+                'geocoding_status': row[5]
+            })
+            new_pk = row[0]
+
+        return batch, new_pk
+
+    def get_work_count(self, max_files=None) -> int:
         """
-        ctx = PendingDatabaseContext()
-        now = datetime.now().isoformat()
-
-        for unit in batch:
-            item = unit.data
-            gid = item['geocoding_id']
-
-            ctx.addOperationToDatabase(DatabaseOperation(
-                operation_type=DatabaseOperationType.GENERIC_UPDATE,
-                data={
-                    'table': 'Geocoding',
-                    'updates': [{
-                        'geocoding_id': gid,
-                        'geocoding_status': 'No_Match',
-                        'last_attempt': now,
-                        'attempt_count': item.get('attempt_count', 0) + 1,
-                        'matched_address': 'Failed all stages',
-                    }],
-                    'id_column': 'geocoding_id'
-                }
-            ))
-
-            # Progress update — each item counts
-            ctx.addOperationToDatabase(DatabaseOperation(
-                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                data={'count': item.get('address_count', 1)}
-            ))
-
-        # Return success so pipeline saves the context
-        return [(True, ctx)] * len(batch)  # one ctx for whole batch is fine
-
-def _get_custom_metrics(self) -> Dict[str, Any]:
-    """Metrics for QueueStatusDisplay — uses Pipeline's live stats"""
-    if not hasattr(self, 'pipeline'):
-        return {'current_step': 'geolocate'}
-    return self.pipeline.get_status()['metrics']
-
-
-def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict], Optional[str]]:
-    where_parts = ["geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')"]
-    params = []
-
-    if last_pk is not None:
-        where_parts.append("geocoding_id > ?")
-        params.append(last_pk)
-
-    where_clause = " AND ".join(where_parts)
-
-    query = f"""
-        SELECT geocoding_id, normalized_address, attempt_count, canonical_address, address_count, geocoding_status
-        FROM Geocoding
-        WHERE {where_clause}
-        ORDER BY geocoding_id
-        LIMIT {self.batch_size}
-    """
-
-    result = self.db_ops.execute_query(query, tuple(params))
-    rows = result.fetchall()
-
-    batch = []
-    new_pk = last_pk
-
-    for row in rows:
-        batch.append({
-            'geocoding_id': row[0],
-            'normalized_address': row[1],
-            'attempt_count': row[2],
-            'canonical_address': row[3],
-            'address_count': row[4] or 0,
-            'geocoding_status': row[5]
-        })
-        new_pk = row[0]
-
-    return batch, new_pk
-
-def get_work_count(self, max_files=None) -> int:
-    """
-    Return the total number of child addresses that will be processed,
-    respecting max_files and the correct processing order.
-    """
-    base_query = """
-        SELECT COALESCE(SUM(address_count), 0)
-        FROM Geocoding
-        WHERE geocoding_status IS NULL
-        OR geocoding_status IN ('pending', 'owners')
-    """
-
-    if max_files is None:
-        result = self.db_ops.execute_query(base_query)
-        return result.fetchone()[0]
-
-    # When max_files is set, we need to sum address_count for the first N geocoding records
-    # in processing order (by geocoding_id)
-    query = f"""
-        SELECT COALESCE(SUM(address_count), 0)
-        FROM (
-            SELECT address_count
+        Return the total number of child addresses that will be processed,
+        respecting max_files and the correct processing order.
+        """
+        base_query = """
+            SELECT COALESCE(SUM(address_count), 0)
             FROM Geocoding
             WHERE geocoding_status IS NULL
             OR geocoding_status IN ('pending', 'owners')
+        """
+
+        if max_files is None:
+            result = self.db_ops.execute_query(base_query)
+            return result.fetchone()[0]
+
+        # When max_files is set, we need to sum address_count for the first N geocoding records
+        # in processing order (by geocoding_id)
+        query = f"""
+            SELECT COALESCE(SUM(address_count), 0)
+            FROM (
+                SELECT address_count
+                FROM Geocoding
+                WHERE geocoding_status IS NULL
+                OR geocoding_status IN ('pending', 'owners')
+                ORDER BY geocoding_id
+                LIMIT {max_files}
+            ) sub
+        """
+        result = self.db_ops.execute_query(query)
+        return result.fetchone()[0]
+
+    def get_progress_config(self, max_files=None):
+        total = self.get_work_count(max_files = (max_files or global_config.max_files))
+        return total, "addresses", "Geocoding addresses"
+
+    def process_pending_geocoding_records(self, max_files=None, progress_bar=None) -> int:
+        self.setup_address_counts()
+        print("Starting geocoding processing")
+        processed = self.pipeline.run_with_provider(self, max_items=max_files)
+        print(f"Geocoding complete: {processed} records processed")
+        return processed
+
+    def setup_address_counts(self):
+        # Update address_count for records where it's NULL
+        update_query = """
+            UPDATE Geocoding
+            SET address_count = (
+                SELECT COUNT(*)
+                FROM Addresses
+                WHERE Addresses.geocoding_id = Geocoding.geocoding_id
+            )
+            WHERE address_count IS NULL
+        """
+        self.db_ops.execute_query(update_query)
+
+    def get_total_work(self) -> int:
+        query = """
+            SELECT COALESCE(SUM(address_count), 0)
+            FROM Geocoding
+            WHERE geocoding_status IS NULL
+            OR geocoding_status IN ('pending', 'owners')
+        """
+        result = self.db_ops.execute_query(query)
+        count = result.fetchone()[0]
+        return int(count)
+    
+    def get_work_batch(self, last_id: Optional[str] = None, batch_size: int = 5000) -> tuple[List[dict], Optional[str]]:
+        """
+        Fetch next batch of pending geocoding records.
+        Used by Pipeline.run_with_provider for streaming.
+        """
+        where_parts = ["geocoding_status = 'Pending'"]
+        params = []
+
+        if last_id is not None:
+            where_parts.append("geocoding_id > ?")
+            params.append(last_id)
+
+        where_clause = " AND ".join(where_parts)
+        query = f"""
+            SELECT 
+                geocoding_id,
+                canonical_address,
+                normalized_address,
+                attempt_count,
+                address_count
+            FROM Geocoding
+            WHERE {where_clause}
             ORDER BY geocoding_id
-            LIMIT {max_files}
-        ) sub
-    """
-    result = self.db_ops.execute_query(query)
-    return result.fetchone()[0]
+            LIMIT ?
+        """
+        params.append(batch_size)
 
-def get_progress_config(self, max_files=None):
-    total = self.get_work_count(max_files = (max_files or global_config.max_files))
-    return total, "addresses", "Geocoding addresses"
+        rows = self.db_ops.execute_query(query, tuple(params)).fetchall()
+        if not rows:
+            return [], None
 
-def process_pending_geocoding_records(self, max_files=None, progress_bar=None) -> int:
-    self.setup_address_counts()
-    print("Starting geocoding processing")
-    processed = self.pipeline.run_with_provider(self, max_items=max_files)
-    print(f"Geocoding complete: {processed} records processed")
-    return processed
+        # Convert rows to dicts
+        batch = []
+        for row in rows:
+            batch.append({
+                'geocoding_id': row[0],
+                'canonical_address': row[1],
+                'normalized_address': row[2],
+                'attempt_count': row[3],
+                'address_count': row[4] or 1,
+            })
+
+        new_last_id = rows[-1][0]
+        return batch, new_last_id

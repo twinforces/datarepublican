@@ -609,8 +609,7 @@ class IRS990Processor(BaseProcessor):
             log_info("Shutdown requested before starting geocoding")
             return 0
         self.setup_status_gauges(interval=10.0)
-        # Import here to avoid circular imports
-        from geocoding_api_processor import GeocodingAPIProcessor
+        #from geocoding_api_processor import GeocodingAPIProcessor
    
         # Check if censusgeocode is available
         if cg is None:
