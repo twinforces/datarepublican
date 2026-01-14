@@ -24,6 +24,7 @@ import pstats
 import io
 import signal
 import faulthandler
+from constants import MONITOR_INTERVAL_SECONDS
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime
@@ -608,7 +609,7 @@ class IRS990Processor(BaseProcessor):
         if self.exit_processing:
             log_info("Shutdown requested before starting geocoding")
             return 0
-        self.setup_status_gauges(interval=10.0)
+        self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS)
         #from geocoding_api_processor import GeocodingAPIProcessor
    
         # Check if censusgeocode is available

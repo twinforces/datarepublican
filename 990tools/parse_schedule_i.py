@@ -12,9 +12,9 @@ from io import BytesIO
 import logging
 from xpaths import NAMESPACES, GRANT_XPATHS, GRANT_EIN_XPATHS, GRANT_NAME_XPATHS, GRANT_AMOUNT_XPATHS, GRANT_FOREIGN_ADDRESS_XPATH, GRANT_COUNTRY_XPATH, GRANT_US_ADDRESS_XPATH
 try:
-    from .xpaths_990 import XPATHS_990
-    from .xpaths_990ez import XPATHS_990EZ
-    from .xpaths_990pf import XPATHS_990PF
+    from xpaths_990 import XPATHS_990
+    from xpaths_990ez import XPATHS_990EZ
+    from xpaths_990pf import XPATHS_990PF
 except ImportError:
     from xpaths_990 import XPATHS_990
     from xpaths_990ez import XPATHS_990EZ

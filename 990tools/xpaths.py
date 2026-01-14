@@ -187,9 +187,9 @@ COMMON_XPATHS = {
 # Form-specific XPath configurations
 # Import form-specific XPath configurations
 try:
-    from .xpaths_990 import XPATHS_990
-    from .xpaths_990ez import XPATHS_990EZ
-    from .xpaths_990pf import XPATHS_990PF
+    from xpaths_990 import XPATHS_990
+    from xpaths_990ez import XPATHS_990EZ
+    from xpaths_990pf import XPATHS_990PF
 except ImportError:
     # Fallback for direct execution
     from xpaths_990 import XPATHS_990

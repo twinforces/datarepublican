@@ -195,7 +195,7 @@ class DatabaseOperations:
         self._preload_zip_file_cache()
         self._preload_table_metadata_cache()
         
-    def config_connection(self, conn):
+    def config_connection(self, conn,read_only):
         conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
         conn.execute("SET threads = 4")  # more threads
         conn.execute("SET memory_limit = '6GB'")
@@ -203,11 +203,7 @@ class DatabaseOperations:
         #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
 
         try:
-            conn.execute("SET insert_select_parallelism = true")  # Enable parallel insert-select operations
-        except Exception:
-            pass  # Ignore if not supported
-        try:
-            conn.execute("PRAGMA temp_store = '/tmp'")  # Store temporary data in memory
+            conn.execute("PRAGMA temp_directory = '/tmp'")  # Store temporary data in memory
         except Exception:
             pass  # Ignore if not supported
         try:
@@ -222,10 +218,14 @@ class DatabaseOperations:
         conn.execute("PRAGMA force_checkpoint;")
         conn.execute("SET enable_logging = true")
         conn.execute("SET logging_level = 'DEBUG'")
+        #if read_only:
+        #    conn.execute("SET access_mode = READ_ONLY")
+        #else:
+        #    conn.execute("SET access_mode = READ_WRITE")
 
-    def _apply_performance_settings(self, conn):
+    def _apply_performance_settings(self, conn,read_only):
         """Apply performance settings to a database connection"""
-        self.config_connection(conn)
+        self.config_connection(conn,read_only)
 
     def _get_conn(self, allow_write=True) -> duckdb.DuckDBPyConnection:
         """
@@ -283,7 +283,7 @@ class DatabaseOperations:
         # Cancel the WAL compaction timer since connection succeeded
         timer.cancel()
 
-        self._apply_performance_settings(self.db_conn)
+        self._apply_performance_settings(self.db_conn,self.read_only)
         if global_config.log_sql:
             self.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
 
@@ -515,7 +515,7 @@ class DatabaseOperations:
                 config.pop('read_only', None)  # Remove read_only to allow writes
             DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=config)
             # Apply the same performance settings as the main connection
-            self._apply_performance_settings(DatabaseOperations._local.db_conn)
+            self._apply_performance_settings(DatabaseOperations._local.db_conn, not allow_write)
 
             # Note: DuckDB doesn't have a built-in query_timeout setting in this version
             # The timeout protection will be handled through enhanced error handling in execute_query

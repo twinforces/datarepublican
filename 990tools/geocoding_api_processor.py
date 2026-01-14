@@ -76,7 +76,7 @@ API_PRIORITY = [
 
 
 class GeocodingAPIProcessor(BaseProcessor):
-    def _preprocess_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _preprocess_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         """
         Preprocess stage:
         - Skip owners (progress only)
@@ -152,7 +152,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         return results
 
-    def _grok_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _grok_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         items = [u.data for u in batch]
         results = []
 
@@ -191,7 +191,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                     results = [(False, item) for item in items]
         return results
 
-    def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         """
         Final failure stage — called when an item fails all previous stages.
         Builds a PendingDatabaseContext with No_Match for all items.
@@ -526,7 +526,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         return True, ctx
     
-    def _geopy_handler(self, batch: List[WorkUnit], geocoder_name: str) -> List[tuple[bool, Any]]:
+    def _geopy_handler(self, batch: List[WorkUnit], geocoder_name: str) -> List[tuple[bool, WorkUnit]]:
         """
         DRY handler for Nominatim and Photon (both use geopy)
         """
@@ -550,13 +550,13 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         return results
     
-    def _photon_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _photon_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         return self._geopy_handler(batch, "Photon")
 
-    def _nominatim_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _nominatim_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         return self._geopy_handler(batch, "Nominatim")
 
-    def _librestreet_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _librestreet_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         results = []
         now = datetime.now().isoformat()
 
@@ -576,7 +576,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         return results
 
-    def _opencage_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _opencage_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         results = []
         now = datetime.now().isoformat()
 
@@ -596,7 +596,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         return results
     
-    def _census_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _census_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
         results = []
         now = datetime.now().isoformat()
 
@@ -813,7 +813,7 @@ Return the complete JSON array now. Nothing else.
 
     
 
-    def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, Any]]:
+    def _final_fail_handler(self, batch: List[WorkUnit]) -> List[tuple[bool, WorkUnit]]:
             """
             Final failure stage — called when an item fails all previous stages.
             Builds a PendingDatabaseContext with No_Match for all items.

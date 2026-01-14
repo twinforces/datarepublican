@@ -18,22 +18,9 @@ logger = get_logger(__name__)
 # Add a new metric → one line here → it auto-shows only when relevant
 # ----------------------------------------------------------------------
 GAUGE_REGISTRY = [
-    # (metric_key, description, applies_to_steps, total_fn, value_fn, format_fn)
-    ("parsed_files_count",       "Parsed Files",       {"xml"},          lambda m: m.get("parsed_files_total", 100),     lambda m: m["parsed_files_count"],       lambda v: f"Count {v:,}"),
-    ("pdc_operations_count",     "PDC Operations",     {"all"}, lambda m: m.get("pdc_operations_total", 10000), lambda m: m["pdc_operations_count"],   lambda v: f"Count {v:,}"),
-    ("pdc_updates_count",        "PDC Updates",        {"all"}, lambda m: m.get("pdc_updates_total", 10000),    lambda m: m["pdc_updates_count"],      lambda v: f"Count {v:,}"),
-    ("zip_cache_size",           "Zip Cache Size",     {"xml"},          lambda _: 36,                                    lambda m: m["zip_cache_size"],         lambda v: f"Count {v}"),
-    ("outstanding_geocode_requests", "Outstanding Geocode", {"geolocate"}, lambda _: 10000,                           lambda m: m["outstanding_geocode_requests"], lambda v: f"Count {v:,}"),
-    ("census_calls",             "Census Calls",       {"geolocate"},      lambda _: 100,   lambda m: m["census_calls"],           lambda v: f"Count {v}"),
-    ("photon_calls",             "Photon Calls",       {"geolocate"},      lambda _: 100,   lambda m: m["photon_calls"],           lambda v: f"Count {v}"),
-    ("librestreet_calls",        "LibreStreet Calls",  {"geolocate"},      lambda _: 100,   lambda m: m["librestreet_calls"],      lambda v: f"Count {v}"),
-    ("nominatim_calls",          "Nominatim Calls",    {"geolocate"},      lambda _: 100,   lambda m: m["nominatim_calls"],        lambda v: f"Count {v}"),
-    ("grok_calls",               "Grok Calls",         {"geolocate"},      lambda _: 100,   lambda m: m["grok_calls"],             lambda v: f"Count {v}"),
-    ("opencage_calls",           "OpenCage Calls",     {"geolocate"},      lambda _: 100,   lambda m: m["opencage_calls"],         lambda v: f"Count {v}"),
-    ("google_maps_calls",        "Google Maps Calls",  {"geolocate"},      lambda _: 100,   lambda m: m["google_maps_calls"],      lambda v: f"Count {v}"),
-    ("name_search_calls",        "Name Search Calls",  {"geolocate"},      lambda _: 100,   lambda m: m["name_search_calls"],      lambda v: f"Count {v}"),
     # Example of "all steps" gauge
-    ("processed_total",          "Total Processed",    {"all"},            lambda m: m.get("total_expected", 1),           lambda m: m.get("processed_total", 0), lambda v: f"Count {v:,}"),
+("processed_total", "Total Processed", {"all"}, lambda m: m.get("overall_total", 0), lambda m: m.get("overall_total", 0), lambda v: f"{v:,}"),
+
 ]
 
 
@@ -102,11 +89,17 @@ class QueueStatusDisplay:
         self._update_active_gauges(custom)
 
     def _prune_and_create_gauges(self, metrics: dict, current_step: str):
-        wanted_keys = {
-            key for key, _, steps, _, _, _ in GAUGE_REGISTRY
-            if (steps == {"all"} or current_step in steps) and key in metrics
-        }
+ # Always show universal gauges
+        wanted_keys = {"total_processed"}
 
+        # Auto-discover stage gauges
+        for key in metrics:
+            if key.endswith('_processed') or key.endswith('_failed'):
+                # Extract stage name: "census_processed" → "census"
+                stage = key.rsplit('_', 1)[0]
+                if current_step == 'geolocate' or stage in metrics.get('active_stages', []):
+                    wanted_keys.add(key)
+                    
         # Close gauges that are no longer relevant
         for key in self._active_keys - wanted_keys:
             self._gauges[key].close()
@@ -142,20 +135,25 @@ class QueueStatusDisplay:
 
     def _update_queue_bar(self, custom: dict):
         try:
-            stats = self.queue.get_queue_stats()
-        except AttributeError:
-            stats = {"current_size": self.queue.qsize(), "current_utilization": 1.0}
+            # Use direct qsize() — the only reliable way with standard Queue
+            queue_depth = self.queue.qsize()
 
-        size = stats.get("current_size", self.queue.qsize())
-        utilization = stats.get("current_utilization", 1.0 if size else 0.0) * 100
-        level = ["low", "medium", "high", "critical"][min(size // 10, 3)]
+            # Optional: estimate utilization if you know max expected
+            max_expected = custom.get('overall_expected', 10000)
+            utilization = min(100, (queue_depth / max(1, max_expected // 10)) * 100)
 
-        est_gb = size * self.est_item_bytes / (1024**3)
-        parts = [level.upper(), f"Size {size}", f"Est {est_gb:.2f}GB"]
-        self.queue_bar.n = int(utilization)
-        self.queue_bar.set_postfix_str(" · ".join(parts))
-        self.queue_bar.refresh()
+            parts = [
+                f"Queue: {queue_depth:,}",
+                f"Util: {utilization:.0f}%"
+            ]
 
+            self.queue_bar.n = queue_depth
+            self.queue_bar.total = max_expected  # optional — shows "progress" of queue fill
+            self.queue_bar.set_postfix_str(" · ".join(parts))
+            self.queue_bar.refresh()
+        except Exception as e:
+            logger.debug(f"Failed to update queue bar: {e}")
+            
     def _update_memory_bar(self):
         mem_gb = self._process.memory_info().rss / (1024**3)
         peak = max(getattr(self, "_mem_peak", mem_gb), mem_gb)

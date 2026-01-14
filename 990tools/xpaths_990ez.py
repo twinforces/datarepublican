@@ -8,7 +8,7 @@ Universal XPaths are imported from xpaths.py.
 
 from lxml import etree
 try:
-    from .xpaths import COMMON_XPATHS, NAMESPACES
+    from xpaths import COMMON_XPATHS, NAMESPACES
 except ImportError:
     from xpaths import COMMON_XPATHS, NAMESPACES
 

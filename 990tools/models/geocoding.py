@@ -24,6 +24,7 @@ class Geocoding(BaseModel):
     geocoding_status: str = "pending"
     last_attempt: Optional[str] = None
     attempt_count: int = 0
+    matched_address: Optional[str] = None
 
     def __post_init__(self):
         """Generate geocoding_id if not set during instantiation"""
@@ -62,7 +63,7 @@ class Geocoding(BaseModel):
     def get_db_field_names(cls):
         """Get database field names for this model"""
         return ['geocoding_id', 'canonical_address', 'normalized_address', 'latitude', 'longitude',
-                'geocoding_status', 'last_attempt', 'attempt_count']
+                'geocoding_status', 'last_attempt', 'attempt_count', 'matched_address']
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database operations"""
@@ -74,5 +75,6 @@ class Geocoding(BaseModel):
             'longitude': self.longitude,
             'geocoding_status': self.geocoding_status or "pending",
             'last_attempt': self.last_attempt or "",
-            'attempt_count': self.attempt_count
+            'attempt_count': self.attempt_count,
+            'matched_address': self.matched_address or ""
         }

@@ -42,7 +42,7 @@ class Officer(BaseModel):
                       city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                       zip4: Optional[str] = None) -> 'Address':
         """Build an Address dataclass record owned by this officer"""
-        from .address import Address
+        from address import Address
         # Ensure we have an ID for the owner_id
         if self.officer_id is None:
             self.officer_id = self.generate_id()

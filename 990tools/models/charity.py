@@ -223,7 +223,7 @@ class Charity(BaseModel):
     def create_officer(self, name: str, title: str, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                        city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None) -> 'Officer':
         """Factory method to create an Officer owned by this Charity"""
-        from .officer import Officer
+        from officer import Officer
         if self.id is None:
             self.id = self.generate_id()
         officer = Officer(
