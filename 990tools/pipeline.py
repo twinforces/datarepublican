@@ -4,16 +4,16 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Callable, Tuple
+
 import queue
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 from pending_database_context import PendingDatabaseContext
-from database_operations import DatabaseOperation, DatabaseOperationType
-from datetime import datetime
+from database_operations import DatabaseOperations
 from queue_status_display import QueueStatusDisplay
-from constants import BATCH_SIZE
+from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE
 
 # ==============================
 # Constants
@@ -27,7 +27,8 @@ MIN_WORKERS = {'grok': 4, 'census': 1}
 MAX_WORKERS = {'grok': 32, 'census': 8}
 ADAPTIVE_STAGES = ['grok', 'census']
 MONITOR_UPDATE = 30
-BATCHER_TIMEOUT = 10.0  # Timeout for batcher to flush partial batches (seconds) TODO, make this adaptive collect avg time for a stage, wait max (this,avg)
+BATCHER_TIMEOUT = 10.0  # seconds — consider making adaptive later
+CONSUMER_THRESHOLD = CONSUMER_BATCH_SIZE  # when to flush merged PDCs
 
 # ==============================
 # WorkUnit
@@ -56,16 +57,19 @@ class WorkUnit:
     def batch(cls, stage: str, work_units: List["WorkUnit"]) -> "WorkUnit":
         return cls(type='batch', stage=stage, items=work_units)
 
-    def is_work_item(self) -> bool: return self.type == 'work'
-    def is_result(self) -> bool: return self.type == 'result'
-    def is_sentinel(self) -> bool: return self.type == 'sentinel'
-    def is_batch(self) -> bool: return self.type == 'batch'
-    
+    def is_work_item(self) -> bool:
+        return self.type == 'work'
+
+    def is_result(self) -> bool:
+        return self.type == 'result'
+
+    def is_sentinel(self) -> bool:
+        return self.type == 'sentinel'
+
+    def is_batch(self) -> bool:
+        return self.type == 'batch'
+
     def copy(self) -> "WorkUnit":
-        """
-        Return a shallow copy of this WorkUnit.
-        For batches, recursively copies the contained items.
-        """
         return WorkUnit(
             type=self.type,
             data=self.data,
@@ -76,12 +80,13 @@ class WorkUnit:
 
     def __str__(self) -> str:
         if self.is_batch():
-            return f"<Batch {self.stage} size={len(self.items)}>[{self.items}]</Batch"
+            return f"<Batch {self.stage} size={len(self.items)}>"
         return f"<WorkUnit {self.type} stage={self.stage}/>"
 
 DEBUG_PIPELINE = True
+
 # ==============================
-# PipelineStage
+# Base PipelineStage
 # ==============================
 class PipelineStage:
     def __init__(
@@ -96,7 +101,6 @@ class PipelineStage:
         next_on_failure: Optional["PipelineStage"] = None,
         is_final_failure: bool = False,
         max_workers: int = 64,
-        is_consumer: bool = False
     ):
         self.name = name
         self.workers = workers
@@ -110,17 +114,17 @@ class PipelineStage:
         self.is_final_failure = is_final_failure
         self.max_workers = max_workers
 
-        self.input_queue = queue.Queue()  # Upstream puts here
-        self.worker_queue = queue.Queue()  # Workers pull from here (batches/singles/sentinels)
-        self.executor = None  # Set by set_executor
+        self.input_queue = queue.Queue()
+        self.worker_queue = queue.Queue()
+        self.executor = None
         self.current_workers = 0
-        self.batcher_thread = None  # Set in _start_batcher
+        self.batcher_thread = None
 
         self.metrics = {
             'total': 0,
             'success': 0,
             'failure': 0,
-            'current_queue': 0,  # Refers to worker_queue.qsize()
+            'current_queue': 0,
             'peak_queue': 0,
             'nThreads': 0,
         }
@@ -131,8 +135,6 @@ class PipelineStage:
         self._start_workers()
 
     def _start_batcher(self):
-        """Start a dedicated thread to accumulate from input_queue and push batches to worker_queue."""
-
         def batcher():
             pending = []
             while True:
@@ -142,16 +144,18 @@ class PipelineStage:
                         if pending:
                             self._push_batch(pending)
                             pending = []
-                        self.worker_queue.put(unit)  # Propagate sentinel
-                        continue  # Keep running until all sentinels processed (workers will exit)
+                        self.worker_queue.put(unit)
+                        continue
 
                     if unit.is_batch():
                         pending.extend(unit.items)
                     else:
                         pending.append(unit)
 
-                    while len(pending) >= self.batch_size:  # Handle large incoming
+                    while len(pending) >= self.batch_size:
                         batch_chunk = pending[:self.batch_size]
+                        if DEBUG_PIPELINE:
+                            print(f"[{self.name}] BATCHING {len(batch_chunk)} units")
                         self._push_batch(batch_chunk)
                         pending = pending[self.batch_size:]
 
@@ -161,19 +165,17 @@ class PipelineStage:
                         pending = []
                 except Exception as e:
                     print(f"ERROR in {self.name} batcher: {e.__class__.__name__}: {str(e)}")
-                    # Continue to avoid stalling; log and skip bad unit if needed
 
         self.batcher_thread = threading.Thread(target=batcher, daemon=True, name=f"{self.name}_batcher")
         self.batcher_thread.start()
 
     def _push_batch(self, batch_units: List[WorkUnit]):
-        """Push a batch (or single if len==1) to worker_queue."""
         if not batch_units:
             return
         if len(batch_units) == 1:
             self.worker_queue.put(batch_units[0])
         else:
-            self.worker_queue.put(WorkUnit.batch(self.stage, batch_units))
+            self.worker_queue.put(WorkUnit.batch(self.name, batch_units))
 
     def _start_workers(self):
         for _ in range(self.workers):
@@ -182,47 +184,45 @@ class PipelineStage:
     def _spawn_worker(self):
         self.current_workers += 1
         self.metrics['nThreads'] = self.current_workers
-        print(f"SPAWNING WORKER for {self.name} — total workers: {self.current_workers}")
+        print(f"SPAWNING WORKER for {self.name} — total: {self.current_workers}")
+
         def worker():
-            if DEBUG_PIPELINE: print(f"WORKER STARTED for {self.name}")
+            if DEBUG_PIPELINE:
+                print(f"WORKER STARTED for {self.name}")
             pending = []
 
             while True:
                 try:
                     unit = self.worker_queue.get(timeout=1.0)
-                    if DEBUG_PIPELINE: print(f"[{self.name}] GOT → {unit!s} (pending={len(pending)}, q={self.worker_queue.qsize()})")                
+                    if DEBUG_PIPELINE:
+                        print(f"[{self.name}] GOT → {unit!s} (pending={len(pending)})")
                 except queue.Empty:
                     if pending:
-                        if DEBUG_PIPELINE: print(f"Empty queue for {self.name} {len(pending)} to do")
                         self._process_batch(pending)
                         pending = []
                     continue
 
                 if unit.is_sentinel():
                     if pending:
-                        if DEBUG_PIPELINE: print(f"Sentinel in queue for {self.name} {len(pending)} to do")
                         self._process_batch(pending)
                     self.current_workers -= 1
                     self.metrics['nThreads'] = self.current_workers
                     return
 
-                # Update queue depth (worker_queue)
                 current = self.worker_queue.qsize()
                 self.metrics['current_queue'] = current
                 self.metrics['peak_queue'] = max(self.metrics['peak_queue'], current + 1)
 
                 if unit.is_result():
-                    if DEBUG_PIPELINE: print(f"Result Item for {self.name}")
-                    if self == self.pipeline.result_consumer:
-                        unit.data.save_to_database()
-                    else:
-                        self.pipeline.result_consumer.put(WorkUnit.result(self.name, unit.data))
+                    # Normal stages forward results to consumer
+                    if DEBUG_PIPELINE:
+                        print(f"[{self.name}] FORWARDING RESULT → {unit!s}")
+                    self.pipeline.result_consumer.put(unit)
                     self.metrics['success'] += 1
                     self.pipeline._record_global_success()
                     self.worker_queue.task_done()
                     continue
-                
-                if DEBUG_PIPELINE: print(f"got work item {unit.type} for {self.name} {len(pending)} to do")
+
                 if unit.is_batch():
                     pending.extend(unit.items)
                 else:
@@ -237,12 +237,6 @@ class PipelineStage:
         self.executor.submit(worker)
 
     def _process_batch(self, batch_units: List[WorkUnit]):
-        """
-        Process a batch of WorkUnits using the handler.
-        The handler returns List[Tuple[bool, Any]] where Any is either:
-        - modified payload (dict) → continue as work item
-        - PendingDatabaseContext → treat as final result
-        """
         if not batch_units:
             return
 
@@ -250,101 +244,169 @@ class PipelineStage:
         self.pipeline._record_global_total(len(batch_units))
 
         try:
-            handler_results = self.handler(batch_units)  # → List[Tuple[bool, Any]]
+            if DEBUG_PIPELINE:
+                print(f"[{self.name}] PROCESSING BATCH of {len(batch_units)} units")
+            handler_results = self.handler(batch_units)
 
             if len(handler_results) != len(batch_units):
-                raise ValueError(
-                    f"Handler {self.name} returned {len(handler_results)} results "
-                    f"for {len(batch_units)} inputs (length mismatch)"
-                )
+                raise ValueError(f"Handler mismatch: {len(handler_results)} vs {len(batch_units)}")
 
             successes = []
             failures = []
 
-            for original_unit, (is_success, payload) in zip(batch_units, handler_results):
-                # Create a new/fresh WorkUnit with updated payload
-                # This preserves stage/producer/etc while allowing payload mutation
-                updated_unit = original_unit.copy()
-                updated_unit.data = payload
-
-                if is_success:
-                    successes.append(updated_unit)
+            for original, (success, payload) in zip(batch_units, handler_results):
+                updated = original.copy()
+                updated.data = payload
+                if success:
+                    successes.append(updated)
                 else:
-                    failures.append(updated_unit)
+                    failures.append(updated)
 
-            # Batch-forward groups
             self._forward(successes, self.next_on_success)
             self._forward(failures, self.next_on_failure)
 
         except Exception as e:
-            print(f"ERROR in {self.name} batch processing: {e.__class__.__name__}: {str(e)}")
-            # On batch-level failure → fail all original items
-            failures = [unit.copy() for unit in batch_units]  # Copy to avoid mutation
+            print(f"ERROR in {self.name} batch: {e.__class__.__name__}: {str(e)}")
+            failures = [u.copy() for u in batch_units]
             self._forward(failures, self.next_on_failure)
             self.metrics['failure'] += len(batch_units)
-        
-    def _forward(self, units: List[WorkUnit], target_stage: Optional["PipelineStage"]):
-        """Forward a group of units to a target stage (batched if >1), or to results if None."""
+
+    def _forward(self, units: List[WorkUnit], target: Optional["PipelineStage"]):
         if not units:
             return
-
-        if target_stage:
-            # Put to target's input_queue (for its batcher to handle)
+        if target:
             if len(units) == 1:
-                target_stage.put(units[0])
+                target.put(units[0])
             else:
-                target_stage.put(WorkUnit.batch(self.name, units))
+                target.put(WorkUnit.batch(self.name, units))
         else:
-            # No target: treat as final, forward to result_consumer as results
+            # Should only happen if no next stage — normally results go to consumer
             for unit in units:
-                if not isinstance(unit.data, PendingDatabaseContext):
-                    raise ValueError(f"Final forward in {self.name} expected PendingDatabaseContext, got {type(unit.data)}")
-                self.pipeline.result_consumer.put(WorkUnit.result(self.name, unit.data))
+                self.pipeline.result_consumer.put(unit)
 
     def put(self, unit: WorkUnit):
-        if DEBUG_PIPELINE: print(f"Adding {unit.type} to {self.name}")
+        if DEBUG_PIPELINE:
+            print(f"Adding {unit.type} to {self.name}")
         unit.stage = self.name
-        self.input_queue.put(unit)  # Upstream puts to input_queue for batching
-        
-    def adjust_workers(self, target_workers: int):
-        current = self.current_workers
+        self.input_queue.put(unit)
 
-        # Never go below 1 worker
-        target_workers = max(1, target_workers)
-
-        diff = target_workers - current
-
+    def adjust_workers(self, target: int):
+        target = max(1, target)
+        diff = target - self.current_workers
         if diff > 0:
-            print(f"SCALING UP {self.name}: {current} → {target_workers}")
+            print(f"SCALING UP {self.name}: {self.current_workers} → {target}")
             for _ in range(diff):
                 self._spawn_worker()
         elif diff < 0:
-            print(f"SCALING DOWN {self.name}: {current} → {target_workers}")
+            print(f"SCALING DOWN {self.name}: {self.current_workers} → {target}")
             for _ in range(-diff):
                 self.worker_queue.put(WorkUnit.sentinel())
+        self.workers = target
+        self.metrics['nThreads'] = target
 
-        self.workers = target_workers
-        self.metrics['nThreads'] = target_workers
+# ==============================
+# Specialized Consumer Stage
+# ==============================
+class ConsumerStage(PipelineStage):
+    def __init__(
+        self,
+        name: str,
+        db_ops: DatabaseOperations,
+        threshold: int = CONSUMER_THRESHOLD,
+        pipeline: Optional["Pipeline"] = None,
+    ):
+        super().__init__(
+            name=name,
+            workers=1,
+            batch_size=threshold,  # used only as hint / metric
+            handler=lambda items: [(True, item) for item in items],  # identity
+            pipeline=pipeline,
+            is_final_failure=True,
+        )
+        self.db_ops = db_ops
+        self.threshold = threshold
 
+    def set_executor(self, executor: ThreadPoolExecutor):
+        self.executor = executor
+        # No batcher for consumer — PDC handles merging
+        self._start_workers()
+
+    def _start_workers(self):
+        self._spawn_worker()
+
+    def _spawn_worker(self):
+        self.current_workers = 1
+        self.metrics['nThreads'] = 1
+
+        def consumer_worker():
+            pending_contexts: List[PendingDatabaseContext] = []
+            accumulated_updates = 0
+
+            while True:
+                try:
+                    unit = self.worker_queue.get(timeout=1.0)
+                except queue.Empty:
+                    if pending_contexts:
+                        self._flush(pending_contexts, accumulated_updates)
+                        pending_contexts = []
+                        accumulated_updates = 0
+                    continue
+
+                if unit.is_sentinel():
+                    if pending_contexts:
+                        self._flush(pending_contexts, accumulated_updates)
+                    return
+
+                if not unit.is_result() or not isinstance(unit.data, PendingDatabaseContext):
+                    self.worker_queue.task_done()
+                    continue
+
+                ctx = unit.data
+                pending_contexts.append(ctx)
+                # Use estimated_updates if available, otherwise fallback
+                added = ctx.estimated_updates or ctx.getTotalObjectCount() or 1
+                accumulated_updates += added
+
+                if accumulated_updates >= self.threshold:
+                    self._flush(pending_contexts, accumulated_updates)
+                    pending_contexts = []
+                    accumulated_updates = 0
+
+                self.metrics['success'] += 1
+                self.pipeline._record_global_success()
+                self.worker_queue.task_done()
+
+        self.executor.submit(consumer_worker)
+
+    def _flush(self, contexts: List[PendingDatabaseContext], count: int):
+        if not contexts:
+            return
+        print(f"Consumer flushing {len(contexts)} PDCs (~{count:,} updates)")
+        merged = PendingDatabaseContext.merge(contexts)
+        merged.save_to_database(self.db_ops)
+
+# ==============================
+# Pipeline
+# ==============================
 class Pipeline:
     def __init__(
         self,
         stages: List[PipelineStage],
+        db_ops: DatabaseOperations,
         backpressure_enabled: bool = BACKPRESSURE_ENABLED_DEFAULT,
-        chain_on: str = 'success',  # 'success' or 'failure' for chaining path
+        chain_on: str = 'success',
     ):
         if chain_on not in ('success', 'failure'):
             raise ValueError(f"Invalid chain_on: {chain_on}")
         self.chain_on = chain_on
         self.stages = {s.name: s for s in stages}
         self.order = [s.name for s in stages]
+        self.db_ops = db_ops
 
-        # Set pipeline for stages
         for stage in self.stages.values():
             stage.pipeline = self
         self.backpressure_enabled = backpressure_enabled
 
-        # Built-in feed and result
         self.feed_stage = PipelineStage(
             name="feed",
             workers=1,
@@ -352,16 +414,14 @@ class Pipeline:
             handler=lambda items: [(True, item) for item in items],
             pipeline=self,
         )
-        self.result_consumer = PipelineStage(
+
+        self.result_consumer = ConsumerStage(
             name="result",
-            workers=1,
-            batch_size=1,
-            handler=lambda items: [(True, item) for item in items],
+            db_ops=db_ops,
+            threshold=CONSUMER_THRESHOLD,
             pipeline=self,
-            is_consumer=True,
         )
 
-        # Link chains based on chain_on
         chain_attr = 'next_on_success' if chain_on == 'success' else 'next_on_failure'
         for i, stage in enumerate(stages):
             if i + 1 < len(stages):
@@ -383,7 +443,6 @@ class Pipeline:
                 'nThreads': stage.workers,
             }
 
-        # Set executors
         for stage in [self.feed_stage, self.result_consumer] + stages:
             stage.set_executor(ThreadPoolExecutor(max_workers=stage.max_workers, thread_name_prefix=stage.name))
 
@@ -391,10 +450,10 @@ class Pipeline:
             self._start_adaptive_monitor()
 
     def _record_global_total(self, count: int = 1):
-        self.metrics['overall']['total'] += count  # Fixed attribute error in original
+        self.metrics['overall']['total'] += count
 
     def _record_global_success(self):
-        self.metrics['overall']['success'] += 1  # Fixed missing attr
+        self.metrics['overall']['success'] += 1
 
     def feed(self, items: List[Any]):
         batch = WorkUnit.batch("feed", [WorkUnit.work_item("feed", item) for item in items])
@@ -407,7 +466,6 @@ class Pipeline:
         self.metrics['overall']['expected'] = total
         print(f"Pipeline starting — {total:,} items")
 
-        # Start QueueStatusDisplay — owned by Pipeline
         first_stage_queue = self.stages[self.order[0]].worker_queue if self.stages else self.feed_stage.worker_queue
         self.queue_status_display = QueueStatusDisplay(
             tracking_queue=first_stage_queue,
@@ -424,7 +482,6 @@ class Pipeline:
             if not batch:
                 break
 
-            # Respect max_items
             if max_items is not None:
                 remaining = max_items - processed
                 if remaining <= 0:
@@ -439,32 +496,24 @@ class Pipeline:
             if processed % 10000 == 0:
                 print(f"→ {processed:,}/{total:,} fed")
 
-        print("last batch sent - starting graceful shutdown...")
+        print("Last batch sent — starting graceful shutdown...")
         self.shutdown()
         print(f"Pipeline complete — {processed:,} processed")
 
     def shutdown(self):
-        """
-        Deterministic shutdown:
-        1. Poison only the entry point (feed_stage)
-        2. Let sentinels flow through the chain
-        3. Join queues in processing order
-        """
         print("Initiating graceful shutdown — poisoning feed stage only")
 
-        # Step 1: Send enough sentinels to kill all feed workers (extra as safety)
         for _ in range(self.feed_stage.current_workers + 10):
             self.feed_stage.input_queue.put(WorkUnit.sentinel())
 
-        # Step 2: Join stages in strict topological order
         stages_in_order = [self.feed_stage] + list(self.stages.values()) + [self.result_consumer]
 
         for stage in stages_in_order:
-            print(f"Waiting for {stage.name} to drain (input_q={stage.input_queue.qsize()}, worker_q={stage.worker_queue.qsize()}, unfinished={stage.worker_queue.unfinished_tasks})")
-            
-            # Join worker_queue (blocks until all task_done match puts)
+            print(f"Waiting for {stage.name} to drain "
+                  f"(input_q={stage.input_queue.qsize()}, "
+                  f"worker_q={stage.worker_queue.qsize()}, "
+                  f"unfinished={stage.worker_queue.unfinished_tasks})")
             stage.worker_queue.join()
-            
             print(f"{stage.name} fully drained — {stage.current_workers} workers exited")
 
         print("Pipeline shutdown complete — all stages drained deterministically")
@@ -488,7 +537,7 @@ class Pipeline:
             'stages': ['feed'] + self.order + ['result'],
             'metrics': prefixed,
         }
-    
+
     def _start_adaptive_monitor(self):
         def monitor():
             while True:
@@ -496,20 +545,15 @@ class Pipeline:
                 for stage_name, stage in self.stages.items():
                     if stage_name not in ADAPTIVE_STAGES:
                         continue
-
                     current_queue = stage.metrics['current_queue']
                     current_workers = stage.current_workers
-
                     target = stage.workers
-
                     if current_queue > 3000:
                         target = min(target + 4, MAX_WORKERS.get(stage_name, 32))
                     elif current_queue < IDLE_THRESHOLD:
-                        # NEVER DROP TO 0 — always keep at least 1 worker
                         target = max(target - 2, max(1, MIN_WORKERS.get(stage_name, 1)))
-
                     if target != stage.workers:
-                        print(f"ADAPTING {stage_name}: {stage.workers} → {target} workers")
+                        print(f"ADAPTING {stage_name}: {stage.workers} → {target}")
                         stage.adjust_workers(target)
 
-        threading.Thread(target=monitor, daemon=True).start()    
+        threading.Thread(target=monitor, daemon=True).start()
