@@ -3,8 +3,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Callable, Tuple
-
+from typing import Any, List, Optional, Callable, Tuple, Generic, TypeVar
 import queue
 import threading
 import time
@@ -14,7 +13,8 @@ from pending_database_context import PendingDatabaseContext
 from database_operations import DatabaseOperations
 from queue_status_display import QueueStatusDisplay
 from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE
-
+# Generics first
+W = TypeVar("W", bound="WorkUnit")
 # ==============================
 # Constants
 # ==============================
@@ -88,13 +88,13 @@ DEBUG_PIPELINE = True
 # ==============================
 # Base PipelineStage
 # ==============================
-class PipelineStage:
+class PipelineStage(Generic[W]):
     def __init__(
         self,
         name: str,
         workers: int,
         batch_size: int,
-        handler: Callable[[List[WorkUnit]], List[Tuple[bool, Any]]],
+        handler: Callable[[List[W]], List[Tuple[bool, W]]],
         pipeline: Optional["Pipeline"] = None,
         *,
         next_on_success: Optional["PipelineStage"] = None,
@@ -107,7 +107,7 @@ class PipelineStage:
         if DEBUG_PIPELINE:
             self.workers = 1
         self.batch_size = batch_size
-        self.handler = handler
+        self.handler: Callable[[List[W]], List[Tuple[bool, W]]] = handler
         self.pipeline = pipeline
         self.next_on_success = next_on_success
         self.next_on_failure = next_on_failure
@@ -278,7 +278,7 @@ class PipelineStage:
             if len(units) == 1:
                 target.put(units[0])
             else:
-                target.put(WorkUnit.batch(self.name, units))
+                target.put(self.pipeline.workunit_class.batch(self.name, units))
         else:
             # Should only happen if no next stage — normally results go to consumer
             for unit in units:
@@ -312,7 +312,7 @@ class ConsumerStage(PipelineStage):
         self,
         name: str,
         db_ops: DatabaseOperations,
-        threshold: int = CONSUMER_THRESHOLD,
+        threshold: int = CONSUMER_BATCH_SIZE,
         pipeline: Optional["Pipeline"] = None,
     ):
         super().__init__(
@@ -388,13 +388,14 @@ class ConsumerStage(PipelineStage):
 # ==============================
 # Pipeline
 # ==============================
-class Pipeline:
+class Pipeline(Generic[W]):
     def __init__(
         self,
-        stages: List[PipelineStage],
+        stages: List[PipelineStage[W]],
         db_ops: DatabaseOperations,
         backpressure_enabled: bool = BACKPRESSURE_ENABLED_DEFAULT,
         chain_on: str = 'success',
+        workunit_class: type[W] = WorkUnit,
     ):
         if chain_on not in ('success', 'failure'):
             raise ValueError(f"Invalid chain_on: {chain_on}")
@@ -402,16 +403,19 @@ class Pipeline:
         self.stages = {s.name: s for s in stages}
         self.order = [s.name for s in stages]
         self.db_ops = db_ops
+        self.workunit_class = workunit_class
 
         for stage in self.stages.values():
             stage.pipeline = self
         self.backpressure_enabled = backpressure_enabled
 
+        # Feed handler depends on chain_on: return (continue_flag, raw_data) to forward on chain path
+        continue_flag = False if chain_on == 'failure' else True
         self.feed_stage = PipelineStage(
             name="feed",
             workers=1,
             batch_size=10000,
-            handler=lambda items: [(True, item) for item in items],
+            handler=lambda batch: [(continue_flag, wu) for wu in batch],  # unpack to raw payload, flag for chain
             pipeline=self,
         )
 
@@ -456,7 +460,7 @@ class Pipeline:
         self.metrics['overall']['success'] += 1
 
     def feed(self, items: List[Any]):
-        batch = WorkUnit.batch("feed", [WorkUnit.work_item("feed", item) for item in items])
+        batch = self.workunit_class.batch("feed", [self.workunit_class.work_item("feed", item) for item in items])
         self.feed_stage.put(batch)
 
     def run_with_provider(self, provider, max_items: Optional[int] = None):
