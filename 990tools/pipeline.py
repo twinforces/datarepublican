@@ -262,8 +262,7 @@ class PipelineStage(Generic[W]):
             for continue_flag, output in results:
                 if isinstance(output, ResultWorkUnit):
                     # Success with result context — forward to consumer as ResultWorkUnit
-                    result_unit = self.pipeline.workunit_class.result(self.name, output)
-                    self.pipeline.result_consumer.put(result_unit)
+                    self.pipeline.result_consumer.put(output)
                     self.metrics['success'] += 1
                 else:
                     # Forward the original unit (W subclass)
@@ -328,7 +327,7 @@ class ConsumerStage(PipelineStage):
         merged = PendingDatabaseContext()
         for unit in batch:
             if unit.is_result():
-                merged.merge(unit.data)
+                merged.merge([unit.data])
         self.db_ops.process_pdc(merged)
         return [(True, None) for _ in batch]  # No forward
 
