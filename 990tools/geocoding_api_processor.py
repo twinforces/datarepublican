@@ -36,7 +36,7 @@ from database_operations import DatabaseOperations, DatabaseOperation, DatabaseO
 from logging_utils import log_info, log_error, log_debug, log_warning
 from models.geocoding import Geocoding
 from pending_database_context import PendingDatabaseContext
-from pipeline import PipelineStage, Pipeline, WorkUnit
+from pipeline import PipelineStage, Pipeline, WorkUnit, ResultWorkUnit
 
 # === API Configuration ===
 API_CONFIG = {
@@ -49,6 +49,14 @@ API_CONFIG = {
     'ENABLE_GOOGLE_MAPS': False,
     'ENABLE_NAME_SEARCH': False,
 }
+
+owner_mapping = {
+                'charity': ('Charities', 'charity_id'),
+                'grant': ('Grants', 'grant_id'),
+                'contractor': ('Contractors', 'contractor_id'),
+                'politicalcontribution': ('PoliticalContributions', 'political_id'),
+                'political': ('PoliticalContributions', 'political_id')
+            }
 
 # === Structured Output for Grok-4 ===
 class GeocodeResult(BaseModel):
@@ -93,11 +101,19 @@ class GeocodingWorkUnit(WorkUnit):
 
     @classmethod
     def work_item(cls, stage: str, data: Dict) -> "GeocodingWorkUnit":
+        if not isinstance(data,Dict):
+            raise ValueError(f"Expected dict for work item, got {type(data)}")
         return cls(type='work', data=data, stage=stage)
     
     @classmethod
     def batch(cls, stage: str, work_units: List["WorkUnit"]) -> "GeocodingWorkUnit":
         return cls(type='batch', stage=stage, items=work_units)
+    
+    def __str__(self) -> str:
+        if self.is_batch():
+            return f"<GeoBatch {self.stage} size={len(self.items)}>"
+        return f"<GeoWorkUnit {self.type} stage={self.stage}/>"
+
 
 class GeocodingAPIProcessor(BaseProcessor):
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_BATCH_SIZE):
@@ -107,8 +123,10 @@ class GeocodingAPIProcessor(BaseProcessor):
         self.geocoding_patterns = self._load_geocoding_patterns()
 
         preprocess_stage = PipelineStage("preprocess", 4, 5000, self._preprocess_handler)
-        census_stage = PipelineStage("census", 1, 1000, self._census_handler)
-        stages = [preprocess_stage, census_stage]
+        census_stage_raw = PipelineStage("census", 1, 1000, self._census_handler_raw)
+        census_stage_strip = PipelineStage("census", 1, 1000, self._census_handler_strip)
+
+        stages = [preprocess_stage, census_stage_raw, census_stage_strip]
 
         if API_CONFIG['ENABLE_GROK']:
             stages.append(PipelineStage("grok", 4, 15, self._grok_handler))
@@ -322,15 +340,9 @@ class GeocodingAPIProcessor(BaseProcessor):
         for row in result.fetchall():
             if not row[1]: continue
             addr_type, owner_id = row[0], row[1]
-            mapping = {
-                'charity': ('Charities', 'charity_id'),
-                'grant': ('Grants', 'grant_id'),
-                'contractor': ('Contractors', 'contractor_id'),
-                'politicalcontribution': ('PoliticalContributions', 'political_id'),
-                'political': ('PoliticalContributions', 'political_id')
-            }
-            if addr_type in mapping:
-                table, col = mapping[addr_type]
+            
+            if addr_type in owner_mapping:
+                table, col = owner_mapping[addr_type]
                 updates.setdefault(table, []).append({col: str(owner_id), 'colocator': colocator})
         for table, items in updates.items():
             context.addOperationToDatabase(DatabaseOperation(
@@ -338,7 +350,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                 data={'table': table, 'updates': items, 'id_column': list(items[0].keys())[0]}
             ))
 
-    def _apply_successful_geocode(self, unit: GeocodingWorkUnit, lat: float, lon: float, status: str, matched: str) -> tuple[bool, PendingDatabaseContext]:
+    def _apply_successful_geocode(self, unit: GeocodingWorkUnit, lat: float, lon: float, status: str, matched: str) -> ResultWorkUnit:
         item = unit.data
         ctx = PendingDatabaseContext()
         now = datetime.now().isoformat()
@@ -368,7 +380,7 @@ class GeocodingAPIProcessor(BaseProcessor):
             operation_type=DatabaseOperationType.PROGRESS_UPDATE,
             data={'count': item.get('address_count', 1)}
         ))
-        return True, ctx
+        return  ResultWorkUnit.result("geocode", ctx)
 
     def _preprocess_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         results = []
@@ -444,14 +456,28 @@ class GeocodingAPIProcessor(BaseProcessor):
                 results.append((False, unit))
 
         return results
+    
+    def _census_handler_raw(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
+        return self._census_handler(batch, do_strip=False)
+        
+    def _census_handler_strip(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
+        return self._census_handler(batch, do_strip=True)
 
-    def _census_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
+    def _census_handler(self, batch: List[GeocodingWorkUnit], do_strip=False) -> List[tuple[bool, GeocodingWorkUnit]]:
         results = []
         census_data = []
         now = datetime.now().isoformat()
 
         for unit in batch:
-            parsed = unit.parsed_normalized
+            parsed = unit.parsed_normalized.copy()
+            # Optional in-memory C/O strip for stripped path
+            if do_strip:
+                stripped_addr = self._strip_co_from_address(unit.canonical_address)
+                # Update parsed street if present (most important field)
+                if 'street' in parsed:
+                    parsed['street'] = self._strip_co_from_address(parsed['street'])
+                # Optionally log or track that we stripped
+                log_debug(f"Census stripped path: {unit.geocoding_id} → stripped canonical")
             if not parsed:
                 log_warning(f"Census fallback to canonical {unit.geocoding_id}")
                 parts = unit.canonical_address.split(', ')
@@ -462,23 +488,23 @@ class GeocodingAPIProcessor(BaseProcessor):
                 parsed = {'street': street, 'city': city, 'state': state, 'zip': zip_code}
 
             census_entry = {
-                'unique_id': unit.geocoding_id,
-                'street': parsed.get('street', ''),
+                'id': unit.geocoding_id,
+                'address': parsed.get('street', ''),
                 'city': parsed.get('city', ''),
                 'state': parsed.get('state', ''),
-                'zip': parsed.get('zip', '')
+                'zipcode': parsed.get('zip', '')
             }
             census_data.append(census_entry)
 
         try:
             geocoded_results = geocode(census_data, return_type='locations')
             for res, unit in zip(geocoded_results, batch):
-                if res.get('is_match', False):
+                if res.get('is_match',  "No_Match") != "No_Match":
                     lat = res.get('latitude')
                     lon = res.get('longitude')
                     matched = res.get('matched_address', '')
-                    success, ctx = self._apply_successful_geocode(unit, lat, lon, "Match:Census", matched)
-                    results.append((success, ctx))
+                    result_unit = self._apply_successful_geocode(unit, lat, lon, "Match:Census", matched)
+                    results.append((True, result_unit))
                 else:
                     unit.data['attempt_count'] = unit.attempt_count + 1
                     results.append((False, unit))
@@ -545,12 +571,12 @@ Return lat/long only if ≥75% confident in a real street location."""
             results = []
             parsed_dict = {res.id: res for res in parsed.results}  # map by UUID
             for unit, res_item in zip(items, parsed.results):
-                res_item = parsed_dict.get(unit.geocoding_id)
+                res_item = parsed_dict.get(f"{unit.geocoding_id}", None)
                 if res_item.lat is not None and res_item.long is not None:
-                    success, ctx = self._apply_successful_geocode(
+                    result_unit = self._apply_successful_geocode(
                         unit, res_item.lat, res_item.long, "Match:Grok-4", res_item.matched_address or unit.canonical_address
                     )
-                    results.append((success, ctx))
+                    results.append((True, result_unit))
                 else:
                     results.append((False, unit))
             return results
@@ -589,8 +615,8 @@ Return lat/long only if ≥75% confident in a real street location."""
                     lat = float(loc['lat'])
                     lon = float(loc['lon'])
                     matched = loc['display_name']
-                    success, ctx = self._apply_successful_geocode(unit, lat, lon, "Match:LibreStreet", matched)
-                    results.append((success, ctx))
+                    result_unit = self._apply_successful_geocode(unit, lat, lon, "Match:LibreStreet", matched)
+                    results.append((True, result_unit))
                     continue
             except Exception as e:
                 log_warning(f"LibreStreet failed {unit.geocoding_id}: {e}")
