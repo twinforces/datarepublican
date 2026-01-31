@@ -135,7 +135,9 @@ class PipelineStage(Generic[W]):
         self.worker_queue = queue.Queue()
         self.executor = None
         self.current_workers = 0
-        self.batcher_thread = None
+        self.batcher_thread = None        
+        self.stop_event = threading.Event()
+
 
         self.metrics = {
             'total': 0,
@@ -154,14 +156,16 @@ class PipelineStage(Generic[W]):
     def _start_batcher(self):
         def batcher():
             pending = []
-            while True:
+            while not self.stop_event.is_set():
                 try:
                     unit = self.input_queue.get(timeout=BATCHER_TIMEOUT)
+                    self.input_queue.task_done()
                     if unit.is_sentinel():
                         if pending:
                             self._push_batch(pending)
                             pending = []
                         self.worker_queue.put(unit)
+                        break
                         continue
 
                     if unit.is_batch():
@@ -180,8 +184,11 @@ class PipelineStage(Generic[W]):
                     if pending:
                         self._push_batch(pending)
                         pending = []
+                        if self.stop_event.is_set(): break
+                        continue
                 except Exception as e:
                     print(f"ERROR in {self.name} batcher: {e.__class__.__name__}: {str(e)}")
+                    continue
 
         self.batcher_thread = threading.Thread(target=batcher, daemon=True, name=f"{self.name}_batcher")
         self.batcher_thread.start()
@@ -210,22 +217,22 @@ class PipelineStage(Generic[W]):
                 print(f"WORKER STARTED for {self.name}")
             pending = []
 
-            while True:
+            while not self.stop_event.is_set():
                 try:
                     unit = self.worker_queue.get(timeout=1.0)
                     if DEBUG_PIPELINE:
                         print(f"[{self.name}] GOT → {unit!s} (pending={len(pending)})")
                     if unit.is_sentinel():
                         if pending:
+                            if DEBUG_PIPELINE: print(f"Sentinel in queue for {self.name} {len(pending)} to do")
+
                             self._process_batch(pending)
                             pending = []
                         self.worker_queue.task_done()
-                        # Forward sentinel to next stages
-                        if self.next_on_success:
-                            self.next_on_success.put(unit)
-                        if self.next_on_failure:
-                            self.next_on_failure.put(unit)
-                        continue
+                        self.current_workers -= 1
+                        self.metrics['nThreads'] = self.current_workers
+                        break  # Explicit break on sentinel
+                        return
 
                     if unit.is_batch():
                         pending.extend(unit.items)
@@ -241,6 +248,8 @@ class PipelineStage(Generic[W]):
                     if pending:
                         self._process_batch(pending)
                         pending = []
+                        if self.stop_event.is_set(): break
+                        continue
                 except Exception as e:
                     log_error(f"ERROR in {self.name} worker: {e}")
 
@@ -459,19 +468,31 @@ class Pipeline(Generic[W]):
         return ResultWorkUnit(stage=stage, data=context)
 
     def shutdown(self):
-        print("Initiating graceful shutdown — poisoning feed stage only")
-
-        for _ in range(self.feed_stage.current_workers + 10):
-            self.feed_stage.input_queue.put(WorkUnit.sentinel())
+        """
+        Deterministic sequential shutdown:
+        - Poison each stage one-by-one, waiting for upstream to drain first
+        - This lets work/sentinels flow naturally downstream
+        """
+        print("Initiating graceful shutdown — poisoning sequentially")
 
         stages_in_order = [self.feed_stage] + list(self.stages.values()) + [self.result_consumer]
 
-        for stage in stages_in_order:
-            print(f"Waiting for {stage.name} to drain "
-                  f"(input_q={stage.input_queue.qsize()}, "
-                  f"worker_q={stage.worker_queue.qsize()}, "
-                  f"unfinished={stage.worker_queue.unfinished_tasks})")
+        for i, stage in enumerate(stages_in_order):
+            # Poison with sentinels = current_workers + extra for batcher/safety
+            for _ in range(stage.current_workers + 2):
+                stage.input_queue.put(WorkUnit.sentinel())
+
+            print(f"Poisoned {stage.name} with {stage.current_workers + 2} sentinels")
+
+            # Join input_queue: wait for batcher to flush to worker_queue
+            stage.input_queue.join()
+
+            # Join worker_queue: wait for workers to process and exit
             stage.worker_queue.join()
+            
+            # Safety: force any lingering loops to break
+            stage.stop_event.set()
+
             print(f"{stage.name} fully drained — {stage.current_workers} workers exited")
 
         print("Pipeline shutdown complete — all stages drained deterministically")
