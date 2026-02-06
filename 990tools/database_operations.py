@@ -49,6 +49,7 @@ import threading
 from enum import Enum
 from functools import lru_cache
 from config import global_config
+import re
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(__file__))
@@ -60,6 +61,18 @@ from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_T
 from logging_utils import log_error, log_debug, log_info, log_warning
 from loggingDuckDB import LoggingDuckDBConnection
 
+_WRITE_KEYWORD_PATTERN = re.compile(
+    r'^(CREATE|DROP|INSERT|UPDATE|DELETE|ALTER|VACUUM|CHECKPOINT)\s',
+    re.IGNORECASE
+)
+
+# utility function
+def is_write_query(query: str) -> bool:
+        if not query:
+            return False
+        # strip() removes leading/trailing whitespace; search from start
+        match = _WRITE_KEYWORD_PATTERN.search(query.strip())
+        return bool(match)
 
 class DatabaseOperationType(Enum):
     """

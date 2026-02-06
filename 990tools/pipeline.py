@@ -160,6 +160,7 @@ class PipelineStage(Generic[W]):
         self.current_workers = AtomicCounter(0)
         self.batcher_thread = None        
         self.stop_event = threading.Event()
+        self.workload = AtomicCounter(0)
 
 
         self.metrics = {
@@ -227,10 +228,12 @@ class PipelineStage(Generic[W]):
         if not batch_units:
             return
         if len(batch_units) == 1:
+            self.workload.inc()
             self.worker_queue.put(batch_units[0])
         else:
             # Use the pipeline's workunit_class to create a batch of the correct type
             batch_obj = self.pipeline.workunit_class.batch(self.name, batch_units)
+            self.workload.inc(len(batch_units))
             self.worker_queue.put(batch_obj)
 
     def _start_workers(self):
@@ -331,6 +334,7 @@ class PipelineStage(Generic[W]):
             self.metrics['failure'] += len(batch)
         finally:
             self.worker_queue.task_done()
+            self.workload.dec(len(batch))
 
     def _forward(self, units: List[W], target: Optional["PipelineStage[W]"]):
         if not units:
@@ -371,6 +375,7 @@ class ConsumerStage(PipelineStage):
             pipeline=pipeline,
             max_workers=1,
         )
+        self.db_ops = db_ops
 
     def _consume_handler(self, batch: List[ResultWorkUnit]) -> List[Tuple[bool, Any]]:
         print(f"###ERROR### CONSUMER HANDLER: Processing batch of {len(batch)} units, should never be called")
@@ -396,8 +401,8 @@ class ConsumerStage(PipelineStage):
                try:
                     unit = self.input_queue.get(timeout=1.0)
                     if DEBUG_PIPELINE: print(f"[{self.name}] GOT → {unit!s} (pending={len(pending_contexts)})")
-                    if unit: 
-                        print(f"Result Unit recieved Pending Contextx, {len(pending_contexts)}")
+                    if unit and unit.is_result(): 
+                        print(f"Result Unit recieved Pending Context, {len(pending_contexts)}")
                     if unit.is_sentinel():
                         if pending_contexts:
                             self._flush_pending_contexts(pending_contexts, accumulated_updates)
@@ -409,8 +414,9 @@ class ConsumerStage(PipelineStage):
                         pending_contexts.append(ctx)
                         added = ctx.estimated_updates or ctx.getTotalObjectCount() or 1
                         accumulated_updates += added
-                        print(f"[{self.name}] Added {added} updates to pending contexts, {len(pending_contexts)} {accumulated_updates} {self.threshold}")
-                        if accumulated_updates >= self.threshold:
+                        self.workload.inc()
+                        print(f"[{self.name}] Added {added} updates to pending contexts, {len(pending_contexts)} {accumulated_updates} {self.batch_size}")
+                        if accumulated_updates >= self.batch_size:
                             print(f"[{self.name}] Threshhold Reached — pending={len(pending_contexts)}, accumulated={accumulated_updates}")
                             self._flush_pending_contexts(pending_contexts, accumulated_updates)
                             pending_contexts = []
@@ -447,11 +453,16 @@ class ConsumerStage(PipelineStage):
        self.executor.submit(worker)
 
     def _flush_pending_contexts(self, contexts: List[PendingDatabaseContext], count: int):
-       if not contexts:
-           return
-       print(f"Consumer flushing {len(contexts)} PDCs (~{count:,} updates)")
-       merged = PendingDatabaseContext.merge(contexts)
-       merged.save_to_database(self.db_ops)
+        if not contexts:
+            return
+        print(f"Consumer flushing {len(contexts)} PDCs (~{count:,} updates)")
+        merged = PendingDatabaseContext.merge(contexts)
+        try:
+            merged.save_to_database(self.db_ops)
+        except Exception as e:
+            print(f"[{self.name}] ERROR saving to database: {e}")
+        
+        self.workload.dec(len(contexts))
 
 # ==============================
 # Pipeline
@@ -600,12 +611,14 @@ class Pipeline(Generic[W]):
                 stage.input_queue.put(WorkUnit.sentinel())
 
             print(f"Poisoned {stage.name} with {nThreads} sentinels")
+            if stage.name == 'result':
+                 print(f"result sentinels {nThreads}") # this is here for a breakpoint
 
             # Join input_queue: wait for batcher to flush to worker_queue
             print(f"joining input_queue for {stage.name}")
             stage.input_queue.join()
 
-            print(f"joining worker_queue for {stage.name}")
+            print(f"joining worker_queue for {stage.name} {stage.workload.get()}")
 
             # Join worker_queue: wait for workers to process and exit
             stage.worker_queue.join()

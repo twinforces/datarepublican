@@ -124,7 +124,7 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         preprocess_stage = PipelineStage("preprocess", 4, 5000, self._preprocess_handler)
         census_stage_raw = PipelineStage("census", 1, 1000, self._census_handler_raw)
-        census_stage_strip = PipelineStage("census", 1, 1000, self._census_handler_strip)
+        census_stage_strip = PipelineStage("census_strip", 1, 1000, self._census_handler_strip)
 
         stages = [preprocess_stage, census_stage_raw, census_stage_strip]
 
@@ -380,7 +380,7 @@ class GeocodingAPIProcessor(BaseProcessor):
             operation_type=DatabaseOperationType.PROGRESS_UPDATE,
             data={'count': item.get('address_count', 1)}
         ))
-        return  ResultWorkUnit.result("geocode", ctx)
+        return  ResultWorkUnit.result("result", ctx)
 
     def _preprocess_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         results = []
