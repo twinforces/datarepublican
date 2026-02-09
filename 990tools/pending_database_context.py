@@ -25,7 +25,7 @@ INTEGRATION:
 - Works with DatabaseOperations.INSERT_BY_TYPE() for type-grouped inserts
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Generator
 from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import log_info, log_error, log_warning, log_debug
@@ -52,6 +52,7 @@ class PendingDatabaseContext:
 
     THREADING: Safe for multi-threaded producers, single-threaded execution
     PERFORMANCE: Batches objects by type for efficient bulk inserts
+    POOL INTEGRATION: Uses db_ops.acquire_write_conn() for tx management
     """
     _updated_counter = 0
 
@@ -89,6 +90,7 @@ class PendingDatabaseContext:
             self.objects[obj_type].append(obj)
             # Increment estimated updates (rough estimate for size-based batching)
             self.estimated_updates += 1
+            log_debug(f"Added {obj_type} object to PDC (total {len(self.objects[obj_type])})")
         else:
             raise ValueError(f"Unknown object type: {obj_type}")
 
@@ -117,6 +119,7 @@ class PendingDatabaseContext:
         self.operations.append(operation)
         # Increment estimated updates (rough estimate for size-based batching)
         self.estimated_updates += 1
+        log_debug(f"Added operation {operation.operation_type} to PDC (total {len(self.operations)})")
 
     def getObjectsByType(self, obj_type: str) -> List[Any]:
         """
@@ -211,98 +214,97 @@ class PendingDatabaseContext:
            print("###DEBUG### PDC_SAVE: No operations or objects to save, returning early")
            return []
 
-        conn = db_ops._get_thread_local_connection()
         ids: List[str] = []
+        with db_ops.acquire_write_conn() as conn:
 
-        # <<< WINNING CODE — PERIODIC FLUSHING FOR ADDRESS DEDUP >>>
-        FLUSH_EVERY_N_ROWS = 10_000   # More aggressive flushing to prevent out-of-memory
+            # <<< WINNING CODE — PERIODIC FLUSHING FOR ADDRESS DEDUP >>>
+            FLUSH_EVERY_N_ROWS = 10_000   # More aggressive flushing to prevent out-of-memory
 
-        try:
-           # Start explicit transaction
-           print("###DEBUG### PDC_SAVE: Beginning transaction")
-           conn.execute("BEGIN TRANSACTION")
+            try:
+                # Start explicit transaction
+                log_debug("###DEBUG### PDC_SAVE: Beginning transaction")
+                conn.execute("BEGIN TRANSACTION")
 
-           # Insert any real objects first (normal for XML parsing, skipped in address dedup)
-           for obj_type in ['zipfile', 'xmlfile', 'charity', 'officer', 'grant',
-                            'contractor', 'political_contribution', 'address', 'geocoding']:
-               objects = self.objects.get(obj_type, [])
-               if objects:   # <-- only call if there are actual objects
-                   print(f"###DEBUG### PDC_SAVE: Inserting {len(objects)} {obj_type} objects")
-                   new_ids = db_ops.INSERT_BY_TYPE(objects, obj_type.capitalize(), commit_batches=False)
-                   PendingDatabaseContext._updated_counter += len(new_ids)
-                   if new_ids:
-                       ids.extend(new_ids)
+                # Insert any real objects first (normal for XML parsing, skipped in address dedup)
+                for obj_type in ['zipfile', 'xmlfile', 'charity', 'officer', 'grant',
+                                    'contractor', 'political_contribution', 'address', 'geocoding']:
+                    objects = self.objects.get(obj_type, [])
+                    if objects:   # <-- only call if there are actual objects
+                        print(f"###DEBUG### PDC_SAVE: Inserting {len(objects)} {obj_type} objects")
+                        new_ids = db_ops.INSERT_BY_TYPE(objects, obj_type.capitalize(), commit_batches=False, conn=conn)
+                        PendingDatabaseContext._updated_counter += len(new_ids)
+                        if new_ids:
+                            ids.extend(new_ids)
 
-           # Execute operations with periodic flushing
-           print(f"###DEBUG### PDC_SAVE: Executing {len(self.operations)} operations")
-           for i, operation in enumerate(self.operations):
-               print(f"###DEBUG### PDC_SAVE: Executing operation {i+1}/{len(self.operations)}: type={operation.operation_type}, data_keys={list(operation.data.keys()) if operation.data else 'None'}")
-               self._execute_operation(db_ops, operation)
+                # Execute operations with periodic flushing
+                print(f"###DEBUG### PDC_SAVE: Executing {len(self.operations)} operations")
+                for i, operation in enumerate(self.operations):
+                    print(f"###DEBUG### PDC_SAVE: Executing operation {i+1}/{len(self.operations)}: type={operation.operation_type}, data_keys={list(operation.data.keys()) if operation.data else 'None'}")
+                    self._execute_operation(db_ops, operation, conn=conn)
 
-               if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
-                   # Handle both traditional bulk updates and WHERE clause updates
-                   if 'updates' in operation.data:
-                       # Traditional bulk update - count the number of records
-                       rows_this_op = len(operation.data['updates'])
-                       print(f"###DEBUG### PDC_SAVE: GENERIC_UPDATE with {rows_this_op} updates to table {operation.data.get('table')}")
-                   elif 'where_clause' in operation.data:
-                       # WHERE clause update - check if batched
-                       param_sets = operation.data.get('param_sets')
-                       if param_sets:
-                           # Batched WHERE updates - estimate based on number of operations
-                           rows_this_op = len(param_sets) * 5  # Conservative estimate of 5 rows per canonical group
-                           print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE batched with {len(param_sets)} param sets")
-                       else:
-                           # Single WHERE clause update - estimate based on typical canonical group size
-                           # Most canonical groups have 2-10 addresses, but some have hundreds
-                           # Use conservative estimate of 5 addresses per canonical group
-                           rows_this_op = 10
-                           print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE single")
-                   else:
-                       # Unknown format, skip counting
-                       rows_this_op = 0
-                       print("###DEBUG### PDC_SAVE: GENERIC_UPDATE unknown format")
+                    if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
+                        # Handle both traditional bulk updates and WHERE clause updates
+                        if 'updates' in operation.data:
+                            # Traditional bulk update - count the number of records
+                            rows_this_op = len(operation.data['updates'])
+                            print(f"###DEBUG### PDC_SAVE: GENERIC_UPDATE with {rows_this_op} updates to table {operation.data.get('table')}")
+                        elif 'where_clause' in operation.data:
+                            # WHERE clause update - check if batched
+                            param_sets = operation.data.get('param_sets')
+                            if param_sets:
+                                # Batched WHERE updates - estimate based on number of operations
+                                rows_this_op = len(param_sets) * 5  # Conservative estimate of 5 rows per canonical group
+                                print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE batched with {len(param_sets)} param sets")
+                            else:
+                                # Single WHERE clause update - estimate based on typical canonical group size
+                                # Most canonical groups have 2-10 addresses, but some have hundreds
+                                # Use conservative estimate of 5 addresses per canonical group
+                                rows_this_op = 10
+                                print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE single")
+                        else:
+                            # Unknown format, skip counting
+                            rows_this_op = 0
+                            print("###DEBUG### PDC_SAVE: GENERIC_UPDATE unknown format")
 
-                   PendingDatabaseContext._updated_counter += rows_this_op
+                        PendingDatabaseContext._updated_counter += rows_this_op
 
-                   if PendingDatabaseContext._updated_counter >= FLUSH_EVERY_N_ROWS:
-                       print(f"###DEBUG### PDC_SAVE: Triggering intermediate commit after {PendingDatabaseContext._updated_counter} updates")
-                       PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(conn, PendingDatabaseContext._updated_counter, db_ops)
-                       # Get a fresh connection after recycling
-                       conn = db_ops._get_thread_local_connection()
-                       conn.execute("BEGIN TRANSACTION")
-                       PendingDatabaseContext._updated_counter = 0
+                        if PendingDatabaseContext._updated_counter >= FLUSH_EVERY_N_ROWS:
+                            print(f"###DEBUG### PDC_SAVE: Triggering intermediate commit after {PendingDatabaseContext._updated_counter} updates")
+                            PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(conn, PendingDatabaseContext._updated_counter, db_ops)
+                            # Get a fresh connection after recycling
+                            conn.execute("BEGIN TRANSACTION")
+                            PendingDatabaseContext._updated_counter = 0
 
-           # Final commit
-           print("###DEBUG### PDC_SAVE: Executing final commit")
-           conn.commit()
-           print("###DEBUG### PDC_SAVE: Final commit completed successfully")
-           log_info("Final commit completed – address deduplication batch saved")
+                # Final commit
+                print("###DEBUG### PDC_SAVE: Executing final commit")
+                conn.commit()
+                print("###DEBUG### PDC_SAVE: Final commit completed successfully")
+                log_info("Final commit completed – address deduplication batch saved")
 
-        except Exception as e:
-           print(f"###DEBUG### PDC_SAVE: ERROR during save: {e}")
-           try:
-               conn.rollback()
-           except:
-               pass
-           log_error(f"Failed to save context to database: {e}", exc_info=True)
-           raise
+            except Exception as e:
+                print(f"###DEBUG### PDC_SAVE: ERROR during save: {e}")
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                log_error(f"Failed to save context to database: {e}", exc_info=True)
+                raise
 
-       # Final checkpoint with macOS workaround
-        try:
-            # Recycle connection first to enable reliable checkpointing on macOS
-            db_ops.recycle_connection()
-            # Then attempt CHECKPOINT for WAL flushing
-            fresh_conn = db_ops._get_thread_local_connection()
-            fresh_conn.execute("CHECKPOINT")
-            print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
-            log_info("Final checkpoint completed successfully")
-        except Exception as e:
-            print(f"###DEBUG### PDC_SAVE: Final checkpoint failed: {e}")
-            log_warning(f"Final checkpoint failed: {e}")
-            # Continue anyway - data is still committed
+        # Final checkpoint with macOS workaround
+            try:
+                # Recycle connection first to enable reliable checkpointing on macOS
+                db_ops.recycle_connection()
+                # Then attempt CHECKPOINT for WAL flushing
+                fresh_conn = db_ops._get_thread_local_connection()
+                fresh_conn.execute("CHECKPOINT")
+                print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
+                log_info("Final checkpoint completed successfully")
+            except Exception as e:
+                print(f"###DEBUG### PDC_SAVE: Final checkpoint failed: {e}")
+                log_warning(f"Final checkpoint failed: {e}")
+                # Continue anyway - data is still committed
 
-        print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
+            print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
         return ids
 
     def _execute_operation(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
@@ -379,6 +381,7 @@ class PendingDatabaseContext:
         """Execute generic update operation"""
         data = operation.data
         updated_count = 0
+        conn = self._get_conn(allow_write=True) 
 
         # Check if this is a WHERE clause update (optimization for address deduplication)
         where_clause = data.get('where_clause')
@@ -398,16 +401,16 @@ class PendingDatabaseContext:
                 # Check if update_data is a list (bulk updates) or single dict
                 if isinstance(update_data, list):
                     # Bulk update - update_data is already a list of records
-                    updated_count = db_ops.bulk_update(table_name, update_data, id_column=id_column)
+                    updated_count = db_ops.bulk_update(table_name, update_data, id_column=id_column, conn=conn)
                 else:
                     # Single update - wrap in list for bulk_update
                     key_value = data.get("key_value")
                     if key_value is not None:
                         update_record = {**update_data, id_column: key_value}
-                        updated_count = db_ops.bulk_update(table_name, [update_record], id_column=id_column)
+                        updated_count = db_ops.bulk_update(table_name, [update_record], id_column=id_column, conn=conn)
                     else:
                         # Fallback for old format
-                        updated_count = db_ops.bulk_update(table_name, [update_data], id_column=id_column)
+                        updated_count = db_ops.bulk_update(table_name, [update_data], id_column=id_column, conn=conn)
 
         return updated_count
 

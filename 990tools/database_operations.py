@@ -36,7 +36,7 @@ PERFORMANCE FEATURES:
 import duckdb
 import pandas as pd
 import inspect
-from typing import Optional, List, Tuple, Dict, Any, Type, Union
+from typing import Optional, List, Tuple, Dict, Any, Type, Union, Generator, ContextManager
 from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +50,8 @@ from enum import Enum
 from functools import lru_cache
 from config import global_config
 import re
+import queue
+from contextlib import contextmanager
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(__file__))
@@ -60,6 +62,8 @@ from models.base import BaseModel
 from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_TIMEOUT,ENABLE_AUTO_CHECKPOINTS
 from logging_utils import log_error, log_debug, log_info, log_warning
 from loggingDuckDB import LoggingDuckDBConnection
+from constants import ENABLE_CHARITY_DEDUP_CHECK
+
 
 _WRITE_KEYWORD_PATTERN = re.compile(
     r'^(CREATE|DROP|INSERT|UPDATE|DELETE|ALTER|VACUUM|CHECKPOINT)\s',
@@ -73,6 +77,156 @@ def is_write_query(query: str) -> bool:
         # strip() removes leading/trailing whitespace; search from start
         match = _WRITE_KEYWORD_PATTERN.search(query.strip())
         return bool(match)
+    
+def wal_compaction_timer():
+            """Timer function to print and log WAL compaction message"""
+            log_info("Compacting Database WAL")
+            print("Compacting Database WAL")
+
+class DuckDBPool:
+    
+                
+    def __init__(self, db_path, initial_read=2, max_read=16, auto_checkpoint=False):
+        self.db_path = db_path
+        self.read_queue = queue.Queue()
+        self.log_wrapper_read = global_config.log_sql
+        self.log_wrapper_write = global_config.log_sql
+        self.wal_timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
+        self.wal_timer.start()
+        self.write_conn = LoggingDuckDBConnection(db_path, read_only=False) if self.log_wrapper_write else duckdb.connect(db_path, read_only=False)
+        self.config_connection(self.write_conn,read_only=False)
+        with self.acquire_write() as conn:
+            self._init_schema()
+            conn.execute("CHECKPOINT")
+        self.wal_timer.cancel()
+        self.wal_timer= None
+        self.max_read = max_read
+        self._lock = threading.Lock()
+        self.created_read = 0
+        
+         # Check for --dbUI flag and start UI if present
+        if global_config.dbUI:
+            try:
+                with self.acquire_read() as conn:
+                    conn.execute("CALL start_ui();")
+                    log_info("Database UI started successfully")
+            except Exception as e:
+                log_info(f"Failed to start database UI: {e}")
+                log_info("Continuing without UI...")
+                
+        for _ in range(initial_read):
+            self._create_and_queue_read_conn()
+
+        self.write_lock = threading.Lock()  # One writer
+        self.auto_checkpoint = auto_checkpoint
+        
+    def _create_and_queue_read_conn(self):
+        with self._lock:
+            if self.created_read >= self.max_read:
+                return False
+            log_debug(f"Creating new read connection ({self.created_read + 1}/{self.max_read})")
+            conn = LoggingDuckDBConnection(self.db_path, read_only=True) if self.log_wrapper_read else duckdb.connect(self.db_path, read_only=True)
+            self.config_connection(conn, read_only=True)
+            self.read_queue.put(conn)
+            self.created_read += 1
+            return True
+
+    @contextmanager
+    def acquire_read(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
+        try:
+            conn = self.read_queue.get_nowait()
+        except queue.Empty:
+                    # Try to create one more if under limit
+                    if self._create_and_queue_read_conn():
+                        conn = self.read_queue.get_nowait()  # should succeed now
+                    else:
+                        # Pool full → block and wait for one to be returned
+                        attempt_count = 1
+                        while True:
+                            try:
+                                conn = self.read_queue.get(timeout=30)  # or raise PoolExhausted
+                                break
+                            except queue.Empty:
+                                log_warning(f"Read Pool exhausted, waiting for connection {attempt_count}")
+                                attempt_count += 1
+        try:
+            yield conn
+        finally:
+            self.read_queue.put(conn)
+
+    @contextmanager
+    def acquire_write(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
+        with self.write_lock:
+            yield self.write_conn
+            # Auto-checkpoint on release?
+            try:
+                self.write_conn.execute("COMMIT")
+                if self.auto_checkpoint:
+                    self.write_conn.execute("CHECKPOINT")
+            except Exception as e:
+                log_warning(f"Auto-checkpoint on release failed: {e}")   
+                         
+    def config_connection(self, conn,read_only):
+        conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
+        conn.execute(f"SET threads = {global_config.db_threads}")  # more threads
+        conn.execute("SET memory_limit = '6GB'")
+        conn.execute("SET enable_object_cache = true")   # Enable object cache
+        #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
+
+        try:
+            conn.execute("PRAGMA temp_directory = '/tmp'")  # Store temporary data in memory
+        except Exception:
+            pass  # Ignore if not supported
+        try:
+            conn.execute("SET checkpoint_threshold = '500MB'")  # WAL size doesn't matter in grok benchmark.
+            conn.execute("PRAGMA checkpoint_threshold='500MB'")   # or '500MB'
+            conn.execute("PRAGMA wal_autocheckpoint='500MB'")    # same thing, older name
+
+        except Exception as e:
+            log_warning(f"exception setting checkpoint_threshold {e}")
+            pass  # Ignore if not supported
+        conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
+        #conn.execute("PRAGMA force_checkpoint;") unneccessary
+        conn.execute("SET enable_logging = true")
+        conn.execute("SET logging_level = 'DEBUG'")
+        #if read_only:
+        #    conn.execute("SET access_mode = READ_ONLY")
+        #else:
+        #    conn.execute("SET access_mode = READ_WRITE")
+        
+    def close(self):
+        while not self.read_queue.empty():
+            try:
+                conn = self.read_queue.get_nowait()
+                conn.close()
+            except queue.Empty:
+                break
+        if hasattr(self, 'write_conn'):
+            self.write_conn.close()
+            
+    def _init_schema(self):
+            """Initialize database schema if not already present"""
+            # Check if schema is already initialized
+            try:
+                result = self.write_conn.execute("SELECT table_name FROM duckdb_tables() WHERE table_name='Charities'").fetchone()
+                if result:
+                    return  # Schema already exists
+            except duckdb.CatalogException:
+                pass  # Table doesn't exist, continue with schema creation
+
+            # Read and execute schema_duckdb.sql
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema_duckdb.sql')
+            try:
+                with open(schema_path, 'r') as f:
+                    schema_sql = f.read()
+                self.write_conn.execute(schema_sql)
+                self.write_conn.commit()
+            except Exception as e:
+                log_error(f"Failed to initialize DuckDB database schema: {e}")
+                raise
+        
+
+
 
 class DatabaseOperationType(Enum):
     """
@@ -151,9 +305,6 @@ class DatabaseOperations:
 
     # SQL logging is now read directly from global_config
 
-    # Thread-local storage for database connections and write permissions
-    _local = threading.local()
-
     # Static cache for zip_id -> file_path mapping - preloaded at startup
     _zip_path_cache: Dict[str, str] = {}
     _zip_file_cache: Dict[str, ZipFile] = {}  # Cache for ZipFile objects
@@ -167,14 +318,6 @@ class DatabaseOperations:
         """Generate a UUID v7 (time-ordered) - now delegates to uuid7 module"""
         from uuid7 import generate_uuid_v7
         return generate_uuid_v7()
-
-    def set_allow_write(self, allow: bool) -> None:
-        """Set thread-local write permission flag"""
-        DatabaseOperations._local.allow_write = allow
-
-    def get_allow_write(self) -> bool:
-        """Get thread-local write permission flag (default False)"""
-        return getattr(DatabaseOperations._local, 'allow_write', False)
 
     def __init__(self, db_path: str, read_only: bool = False, memory_limit: str = "6GB", threads: Optional[int] = None, dbUI: bool = False, query_timeout: int = 300, init_schema: bool = True):
         """
@@ -208,115 +351,44 @@ class DatabaseOperations:
         self._preload_zip_file_cache()
         self._preload_table_metadata_cache()
         
-    def config_connection(self, conn,read_only):
-        conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
-        conn.execute("SET threads = 4")  # more threads
-        conn.execute("SET memory_limit = '6GB'")
-        conn.execute("SET enable_object_cache = true")   # Enable object cache
-        #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
+    _pool: Optional[DuckDBPool] = None
 
-        try:
-            conn.execute("PRAGMA temp_directory = '/tmp'")  # Store temporary data in memory
-        except Exception:
-            pass  # Ignore if not supported
-        try:
-            conn.execute("SET checkpoint_threshold = '500MB'")  # WAL size doesn't matter in grok benchmark.
-            conn.execute("PRAGMA checkpoint_threshold='500MB'")   # or '500MB'
-            conn.execute("PRAGMA wal_autocheckpoint='500MB'")    # same thing, older name
+    @classmethod
+    def initialize_pool(cls, db_path, **pool_kwargs):
+        if cls._pool is None:
+            cls._pool = DuckDBPool(db_path, **pool_kwargs)
+        return cls._pool
 
-        except Exception as e:
-            print(f"exception setting checkpoint_threshold {e}")
-            pass  # Ignore if not supported
-        conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
-        conn.execute("PRAGMA force_checkpoint;")
-        conn.execute("SET enable_logging = true")
-        conn.execute("SET logging_level = 'DEBUG'")
-        #if read_only:
-        #    conn.execute("SET access_mode = READ_ONLY")
-        #else:
-        #    conn.execute("SET access_mode = READ_WRITE")
-
-    def _apply_performance_settings(self, conn,read_only):
-        """Apply performance settings to a database connection"""
-        self.config_connection(conn,read_only)
-
-    def _get_conn(self, allow_write=True) -> duckdb.DuckDBPyConnection:
-        """
-        Get appropriate database connection based on thread context.
-
-        Returns main connection from main thread, thread-local connection from worker threads.
-        Thread-local connections have identical settings to main connection.
-        Optionally makes thread-local connections read-only unless allow_write=True.
-
-        Args:
-            allow_write: Whether to allow write operations on thread-local connections
-
-        Returns:
-            DuckDB connection object
-        """
-        if threading.get_ident() == self.main_thread_id:
-            return self.db_conn
-        else:
-            return self._get_thread_local_connection(allow_write)
-
-
+    @classmethod
+    def get_pool(cls) -> DuckDBPool:
+        if cls._pool is None:
+            raise RuntimeError("Pool not initialized")
+        return cls._pool
+    
+    @contextmanager
+    def acquire_read_conn(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
+        with self._pool.acquire_read() as conn:
+            yield conn
+    
+    @contextmanager
+    def acquire_write_conn(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
+        with self._pool.acquire_write() as conn:
+            yield conn
+    
+    @classmethod
+    def bootstrap(cls, db_path: str, **pool_kwargs) -> DuckDBPool:
+        cls.initialize_pool(db_path, **pool_kwargs)
+        return cls._pool
+        
     def _init_connection(self):
         """Initialize DuckDB connection and schema"""
         # Set up timer for WAL compaction
         import threading
         import time
 
-        def wal_compaction_timer():
-            """Timer function to print and log WAL compaction message"""
-            log_info("Compacting Database WAL")
-            print("Compacting Database WAL")
+    
 
-        # Start the timer just before database connection
-        timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
-        timer.start()
-
-        # Connect to DuckDB with performance optimizations
-        config: Dict[str, Any] = {
-            'memory_limit': '6GB'
-        }
-        if self.threads is not None and self.threads != 'auto':
-            config['threads'] = self.threads
-        if self.read_only:
-            config['read_only'] = True
-
-        # Store connection parameters for thread-local connections
-        self._connection_config = config
-
-        # Create main connection for single-threaded operations
-        if global_config.log_sql:
-            self.db_conn = LoggingDuckDBConnection(self.db_path, config=config)
-        else:
-            self.db_conn = duckdb.connect(self.db_path, config=config)
-
-        # Cancel the WAL compaction timer since connection succeeded
-        timer.cancel()
-
-        self._apply_performance_settings(self.db_conn,self.read_only)
-        if global_config.log_sql:
-            self.db_conn.execute("CALL enable_logging(storage_path = '/Volumes/Data/final/irs990db.log');")
-
-        # Note: DuckDB doesn't have a built-in query_timeout setting in this version
-        # The timeout protection will be handled through enhanced error handling in execute_query
-        # Store the timeout value for potential future use or custom timeout implementation
-        pass
-
-        # Initialize schema if needed and requested
-        if self.init_schema:
-            self._init_schema()
-
-        # Check for --dbUI flag and start UI if present
-        if self.dbUI:
-            try:
-                self.db_conn.execute("CALL start_ui();")
-                print("Database UI started successfully")
-            except Exception as e:
-                print(f"Failed to start database UI: {e}")
-                print("Continuing without UI...")
+       
 
     def _preload_zip_file_cache(self):
         """Preload all zip_id -> file_path mappings and ZipFile objects into the static cache at startup"""
@@ -406,28 +478,9 @@ class DatabaseOperations:
             log_error(f"Failed to preload table metadata cache: {e}")
             # Continue without cache
 
-    def _init_schema(self):
-        """Initialize database schema if not already present"""
-        # Check if schema is already initialized
-        try:
-            result = self.db_conn.execute("SELECT table_name FROM duckdb_tables() WHERE table_name='Charities'").fetchone()
-            if result:
-                return  # Schema already exists
-        except duckdb.CatalogException:
-            pass  # Table doesn't exist, continue with schema creation
+    
 
-        # Read and execute schema_duckdb.sql
-        schema_path = os.path.join(os.path.dirname(__file__), 'schema_duckdb.sql')
-        try:
-            with open(schema_path, 'r') as f:
-                schema_sql = f.read()
-            self.db_conn.execute(schema_sql)
-            self.db_conn.commit()
-        except Exception as e:
-            print(f"Failed to initialize DuckDB database schema: {e}")
-            raise
-
-    def execute_query(self, query: str, params: Optional[Tuple] = None, conn=None) -> Any:
+    def execute_query(self, query: str, params: Optional[Tuple] = None, conn: Optional[duckdb.DuckDBPyConnection] = None) -> Any:
         """
         Execute a query with timeout protection and enhanced error handling.
 
@@ -445,18 +498,6 @@ class DatabaseOperations:
         Raises:
             RuntimeError: For query execution failures with detailed error messages
         """
-        # Check write permission for write operations
-        query_upper = query.strip().upper()
-        is_write = query_upper in ['CREATE', 'DROP', 'INSERT', 'UPDATE', 'DELETE', 'ALTER']
-        
-        if is_write and not self.allow_write:
-            thread_name = threading.current_thread().name
-            if 'producer' in thread_name.lower() or 'Thread-' in thread_name:
-                raise RuntimeError(f"Write operation '{query_upper}' called from {thread_name} without write permission")
-            # ← Add this: allow main thread
-            log_debug(f"Allowing write '{query_upper}' from main thread")
-        if conn is None:
-            conn = self._get_thread_local_connection()
 
         # Don't log here if we're using LoggingDuckDBConnection - it will handle logging
         if global_config.log_sql and not isinstance(conn, LoggingDuckDBConnection):
@@ -478,10 +519,18 @@ class DatabaseOperations:
                         log_info(f"Parameters: {params}")
 
         try:
-            if params:
-                return conn.execute(query, params)
+            if is_write_query(query):
+                if conn is None:
+                    with self.acquire_write_conn() as inner_conn:
+                        return inner_conn.execute(query, params or ())
+                else:
+                    return conn.execute(query, params or ())
             else:
-                return conn.execute(query)
+                if conn is None:
+                    with self.acquire_read_conn() as inner_conn:
+                        return inner_conn.execute(query, params or ())
+                else:
+                    return conn.execute(query, params or ())
         except (duckdb.CatalogException, duckdb.BinderException, duckdb.SyntaxException,
                 duckdb.ConstraintException, duckdb.DataError) as e:
             # Handle query-specific errors (syntax, constraint violations, table not found, etc.)
@@ -516,25 +565,6 @@ class DatabaseOperations:
             error_msg = f"Unexpected database error: {str(e)}"
             log_error(error_msg)
             raise RuntimeError(error_msg) from e
-
-    def _get_thread_local_connection(self, allow_write=True) -> duckdb.DuckDBPyConnection:
-        """Get or create a thread-local database connection"""
-        if not hasattr(DatabaseOperations._local, 'db_conn'):
-            # Create a new connection for this thread
-            config = self._connection_config.copy()
-            if not allow_write:
-                config['read_only'] = True
-            else:
-                config.pop('read_only', None)  # Remove read_only to allow writes
-            DatabaseOperations._local.db_conn = duckdb.connect(self.db_path, config=config)
-            # Apply the same performance settings as the main connection
-            self._apply_performance_settings(DatabaseOperations._local.db_conn, not allow_write)
-
-            # Note: DuckDB doesn't have a built-in query_timeout setting in this version
-            # The timeout protection will be handled through enhanced error handling in execute_query
-            pass
-
-        return DatabaseOperations._local.db_conn  # type: ignore
 
     def select_dataclass(self, dataclass_type: Type, where_clause: str = "", params: Optional[Tuple] = None,
                         order_by: str = "", limit: Optional[int] = None, offset: Optional[int] = None,
@@ -616,21 +646,20 @@ class DatabaseOperations:
             return DatabaseOperations._table_metadata_cache[table_name]['columns']
 
         # Fallback to database query - use thread-local connection for thread safety
-        if conn is None:
-            conn = self._get_conn()
-        try:
-            result = conn.execute(f"DESCRIBE {table_name}")
-            columns = [row[0] for row in result.fetchall()]
+        with self.acquire_read_conn() as conn:
+            try:
+                result = conn.execute(f"DESCRIBE {table_name}")
+                columns = [row[0] for row in result.fetchall()]
 
-            # Cache the result (thread-safe since dict operations are atomic for simple cases)
-            DatabaseOperations._table_metadata_cache[table_name] = {
-                'columns': columns,
-                'column_count': len(columns)
-            }
+                # Cache the result (thread-safe since dict operations are atomic for simple cases)
+                DatabaseOperations._table_metadata_cache[table_name] = {
+                    'columns': columns,
+                    'column_count': len(columns)
+                }
 
-            return columns
-        except Exception:
-            return []
+                return columns
+            except Exception:
+                return []
 
     def _filter_existing_columns(self, table_name: str, field_names: List[str]) -> List[str]:
         """Filter field names to only include columns that exist in the table"""
@@ -664,65 +693,9 @@ class DatabaseOperations:
         else:
             return class_name + 's'
 
-    def begin_transaction(self,conn=None):
-        if conn is None:
-            conn = self._get_conn(allow_write=True)
-        conn.execute("BEGIN TRANSACTION;")
-        
-    def commit(self, conn=None ):
-        """Commit current transaction"""
-        if conn is None:
-            conn = self._get_conn(allow_write=True)
-
-        conn.commit()
-
-
-    def recycle_connection(self) -> None:
-        """
-        Recycle the database connection to work around macOS DuckDB CHECKPOINT issues.
-
-        On macOS, DuckDB has known issues with CHECKPOINT not working reliably.
-        The only reliable solution is to close and reopen the connection, which
-        forces a checkpoint and clears the WAL.
-
-        This method closes the current connection and creates a new one with
-        identical settings, effectively recycling the connection.
-        """
-        log_info("Recycling database connection to work around macOS DuckDB CHECKPOINT issues...")
-
-        try:
-            # Close the main connection
-            if hasattr(self, 'db_conn') and self.db_conn:
-                self.db_conn.commit()
-                self.db_conn.close()
-                log_debug("Closed main database connection")
-        except Exception as e:
-            log_warning(f"Error closing main connection during recycle: {e}")
-
-        try:
-            # Close thread-local connections
-            if hasattr(DatabaseOperations._local, 'db_conn'):
-                DatabaseOperations._local.db_conn.commit()
-                DatabaseOperations._local.db_conn.close()
-                delattr(DatabaseOperations._local, 'db_conn')
-                log_debug("Closed thread-local database connection")
-        except Exception as e:
-            log_warning(f"Error closing thread-local connection during recycle: {e}")
-
-        # Reinitialize the connection with the same settings
-        self._init_connection()
-        log_info("Database connection recycled successfully")
-
     def close(self):
         """Explicitly close the database connection"""
-        if hasattr(self, 'db_conn') and self.db_conn:
-            self.db_conn.commit()
-            self.db_conn.close()
-        # Close thread-local connections
-        if hasattr(DatabaseOperations._local, 'db_conn'):
-            DatabaseOperations._local.db_conn.commit()
-            DatabaseOperations._local.db_conn.close()
-            delattr(DatabaseOperations._local, 'db_conn')
+        DuckDBPool.close()
 
     def __del__(self):
         """Cleanup database connection on object destruction"""
@@ -821,13 +794,12 @@ class DatabaseOperations:
 
     def execute_update_xml_ein_operation(self, operation: DatabaseOperation, conn=None):
         """Execute UPDATE_XML_EIN operation"""
-        if conn is None:
-            conn = self._get_conn(allow_write=True)
-        xml_id = operation.xml_id
-        data = operation.data
-        ein = data.get("ein") if data else None
-        if ein:
-            conn.execute("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
+        with self.acquire_write_conn() as conn:
+            xml_id = operation.xml_id
+            data = operation.data
+            ein = data.get("ein") if data else None
+            if ein:
+                conn.execute("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
 
     def get_addresses_for_geocoding(self, limit: Optional[int] = None, last_address_id: Optional[str] = None) -> List[Address]:
         """Get addresses that need geocoding, with max primary key pagination support"""
@@ -1141,7 +1113,14 @@ class DatabaseOperations:
         return geocoding_id
 
     # Bulk operations
-    def bulk_insert(self, objects: List[BaseModel], batch_size: Optional[int] = None, commit_batches: bool = True, conn: Optional[duckdb.DuckDBPyConnection] = None, validate_counts: bool = False) -> List[str]:
+    def bulk_insert(self, objects: List[BaseModel], batch_size: Optional[int] = None, commit_batches: bool = True, validate_counts: bool = False, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
+        if conn is None:
+            with self.acquire_write_conn() as inner_conn:
+                self._bulk_insert_impl(objects, batch_size, commit_batches, validate_counts, conn=inner_conn)
+        else:
+            return self._bulk_insert_impl(objects, batch_size, commit_batches, validate_counts, conn=conn)
+
+    def _bulk_insert_impl(self, objects: List[BaseModel], conn: duckdb.DuckDBPyConnection,batch_size: Optional[int] = None, commit_batches: bool = True, validate_counts: bool = False) -> List[str]:
         """
         High-performance bulk insert with executemany and client-side UUID generation.
 
@@ -1165,10 +1144,7 @@ class DatabaseOperations:
         THREADING: Uses thread-local connections for DuckDB writer safety
         VALIDATION: Count validation ensures all rows were inserted successfully
         """
-        # Check write permission
-        if not self.get_allow_write():
-            raise RuntimeError("bulk_insert called from thread without write permission (producer thread?)")
-
+        
         if not objects:
             return []
         obj_type = type(objects[0])
@@ -1182,11 +1158,6 @@ class DatabaseOperations:
             if not isinstance(batch_size, int):
                 batch_size = 10000
 
-        # Validation moved to pending_database_context.py
-
-        # Use thread-local connection for proper multi-threading support
-        if conn is None:
-            conn = self._get_conn(allow_write=self.get_allow_write())
 
         # Prep all objects for insert - call prep_for_insert if method exists
         prep_start = time.perf_counter()
@@ -1205,7 +1176,6 @@ class DatabaseOperations:
             log_warning(f"Objects without prep_for_insert method: {missing_prep_types}")
 
         # Pre-insert deduplication check for Charities - controlled by command-line parameter
-        from constants import ENABLE_CHARITY_DEDUP_CHECK
         if type(objects[0]).__name__ == 'Charity' and objects and ENABLE_CHARITY_DEDUP_CHECK:
             # Collect all xml_names for batch query
             xml_names = [getattr(obj, 'xml_name', '') for obj in objects if hasattr(obj, 'xml_name') and getattr(obj, 'xml_name', '')]
@@ -1340,14 +1310,17 @@ class DatabaseOperations:
         # Return the client-generated IDs
         return [str(getattr(obj, id_field)) for obj in objects]
 
-    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 100, conn=None, commit: bool = True, commit_batches: bool = False) -> int:
+    # wrap bulk_update to use the pool
+    def bulk_update(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 100, commit: bool = True, commit_batches: bool = False, conn: Optional[duckdb.DuckDBPyConnection] = None) -> int:
+        if conn is None:
+            with self.acquire_write_conn() as inner_conn:
+                return self._bulk_update_impl(table_name, updates, id_column, batch_size, commit, commit_batches, conn=inner_conn)
+        else:
+            return self._bulk_update_impl(table_name, updates, id_column, batch_size, commit, commit_batches, conn=conn)
+
+    def _bulk_update_impl(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 100, commit: bool = True, commit_batches: bool = False, conn= duckdb.DuckDBPyConnection) -> int:
         """Generic bulk update method for database operations with batched processing"""
         # Check write permission
-        if not self.get_allow_write():
-            raise RuntimeError("bulk_update called from thread without write permission (producer thread?)")
-
-        if conn is None:
-            conn = self._get_conn(allow_write=True)
 
         if not updates:
             return 0
@@ -1497,38 +1470,38 @@ class DatabaseOperations:
     def optimize_database(self, commit: bool = True):
         """Run database optimization commands with macOS-compatible checkpointing"""
         log_info("Starting database optimization...")
+        with self.acquire_write_conn() as conn:
 
-        # Analyze tables for better query planning
-        tables_to_optimize = ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]
-        for table in tables_to_optimize:
-            log_debug(f"Optimizing table: {table}")
+            # Analyze tables for better query planning
+            tables_to_optimize = ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]
+            for table in tables_to_optimize:
+                log_debug(f"Optimizing table: {table}")
+                try:
+                    self.execute_query(f"VACUUM ANALYZE {table}",conn=conn)
+                    log_debug(f"Successfully optimized {table}")
+                except Exception as e:
+                    log_warning(f"Failed to optimize {table}: {e}")
+
+            # Ensure any pending changes are committed before checkpoint
+            if commit:
+                self.commit()
+
+            # On macOS, recycle connection first to work around CHECKPOINT reliability issues
+            # This enables CHECKPOINT to work properly for WAL flushing and performance
+            log_info("Recycling connection to enable reliable checkpointing...")
+            self.recycle_connection()
+
+            # Now attempt CHECKPOINT for WAL flushing and performance benefits
+            log_info("Performing database checkpoint for WAL cleanup...")
             try:
-                self.execute_query(f"VACUUM ANALYZE {table}")
-                log_debug(f"Successfully optimized {table}")
+                conn.execute("CHECKPOINT")
+                log_info("Database checkpoint completed successfully")
             except Exception as e:
-                log_warning(f"Failed to optimize {table}: {e}")
+                log_warning(f"Checkpoint failed even after connection recycling: {e}")
+                # Continue anyway - the recycling itself provides some WAL cleanup
 
-        # Ensure any pending changes are committed before checkpoint
-        if commit:
-            self.commit()
-
-        # On macOS, recycle connection first to work around CHECKPOINT reliability issues
-        # This enables CHECKPOINT to work properly for WAL flushing and performance
-        log_info("Recycling connection to enable reliable checkpointing...")
-        self.recycle_connection()
-
-        # Now attempt CHECKPOINT for WAL flushing and performance benefits
-        log_info("Performing database checkpoint for WAL cleanup...")
-        try:
-            conn = self._get_conn()
-            conn.execute("CHECKPOINT")
-            log_info("Database checkpoint completed successfully")
-        except Exception as e:
-            log_warning(f"Checkpoint failed even after connection recycling: {e}")
-            # Continue anyway - the recycling itself provides some WAL cleanup
-
-        if commit:
-            self.commit()
+            if commit:
+                self.commit(conn)
 
     # Logging methods removed - use global logging functions directly
 
@@ -1838,48 +1811,53 @@ class DatabaseOperations:
         else:
             log_warning("Unknown operation type: {}", operation.operation_type)
 
-    def _execute_xml_file_update_operation(self, operation: DatabaseOperation, conn=None):
+    def _execute_xml_file_update_operation(self, operation: DatabaseOperation):
         """Execute XML_FILE_UPDATE operation"""
+        with self.acquire_write_conn() as conn:
+
+            xml_id = operation.xml_id
+            metadata = operation.data
+
+            # Update the XML file with metadata
+            update_fields = []
+            params = []
+
+            if 'processed' in metadata:
+                update_fields.append("processed = ?")
+                params.append(metadata['processed'])
+
+            if 'processing_version' in metadata:
+                update_fields.append("processing_version = ?")
+                params.append(metadata['processing_version'])
+
+            if 'error_message' in metadata:
+                update_fields.append("error_message = ?")
+                params.append(metadata['error_message'])
+
+            if 'ein' in metadata:
+                update_fields.append("ein = ?")
+                params.append(metadata['ein'])
+
+            # Always update processed_at
+            update_fields.append("processed_at = ?")
+            params.append(datetime.now().isoformat())
+
+            if update_fields:
+                query = f"UPDATE XmlFiles SET {', '.join(update_fields)} WHERE xml_id = ?"
+                params.append(xml_id)
+                conn.execute(query, tuple(params))
+                conn.commit()
+
+    def _execute_generic_update_operation(self, operation: DatabaseOperation, conn: Optional[duckdb.DuckDBPyConnection] = None):
         if conn is None:
-            conn = self._get_conn(allow_write=True)
-
-        xml_id = operation.xml_id
-        metadata = operation.data
-
-        # Update the XML file with metadata
-        update_fields = []
-        params = []
-
-        if 'processed' in metadata:
-            update_fields.append("processed = ?")
-            params.append(metadata['processed'])
-
-        if 'processing_version' in metadata:
-            update_fields.append("processing_version = ?")
-            params.append(metadata['processing_version'])
-
-        if 'error_message' in metadata:
-            update_fields.append("error_message = ?")
-            params.append(metadata['error_message'])
-
-        if 'ein' in metadata:
-            update_fields.append("ein = ?")
-            params.append(metadata['ein'])
-
-        # Always update processed_at
-        update_fields.append("processed_at = ?")
-        params.append(datetime.now().isoformat())
-
-        if update_fields:
-            query = f"UPDATE XmlFiles SET {', '.join(update_fields)} WHERE xml_id = ?"
-            params.append(xml_id)
-            conn.execute(query, tuple(params))
-            conn.commit()
-
-    def _execute_generic_update_operation(self, operation: DatabaseOperation, conn=None):
+            with self.acquire_write_conn() as inner_conn:
+                self._execute_generic_update_operation_impl(operation, conn=inner_conn)
+        else:
+            self._execute_generic_update_operation_impl(operation, conn=conn)
+        
+        
+    def _execute_generic_update_operation_impl(self, operation: DatabaseOperation, conn: duckdb.DuckDBPyConnection):
         """Execute GENERIC_UPDATE operation"""
-        if conn is None:
-            conn = self._get_conn(allow_write=True)
 
         data = operation.data
         if not data or 'table' not in data:

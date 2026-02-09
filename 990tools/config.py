@@ -71,6 +71,7 @@ class GlobalConfig:
         self.nostats = getattr(args, 'nostats', self.nostats)
         self.no_backpressure = getattr(args, 'no_backpressure', self.no_backpressure)
         self.collect_xpath_stats = getattr(args, 'collect_xpath_stats', self.collect_xpath_stats)
+        self.db_threads = getattr(args, 'db_threads', self.db_threads)
 
     def is_quiet(self) -> bool:
         """Check if quiet mode is enabled"""

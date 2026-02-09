@@ -129,6 +129,7 @@ class IRS990Processor(BaseProcessor):
         log_info("USR1 signal handler available for stack trace dumps (via base_processor.py)")
   
         # Initialize components
+        DatabaseOperations._pool = DatabaseOperations.bootstrap(self.db_path, dbUI=global_config.dbUI)
         self.db_ops = DatabaseOperations(self.db_path, dbUI=global_config.dbUI)
         super().__init__(self.db_ops)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
@@ -739,6 +740,7 @@ def main():
     parser.add_argument("--nostats", action="store_true", help="Skip stats report generation after each step")
     parser.add_argument("--no-backpressure", action="store_true", help="Disable backpressure mechanism for producer threads")
     parser.add_argument("--collect-xpath-stats", action="store_true", help="Collect XPath performance statistics (only in thread 0 to avoid race conditions)")
+    parser.add_argument("--db-threads", type=int, default=4, help="Number of threads for DuckDB",  help="Threads for DuckDB (may only matter for 1.5+?)")
 
     args = parser.parse_args()
 
