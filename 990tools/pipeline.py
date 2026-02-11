@@ -403,18 +403,23 @@ class ConsumerStage(PipelineStage):
                     if DEBUG_PIPELINE: print(f"[{self.name}] GOT → {unit!s} (pending={len(pending_contexts)})")
                     if unit and unit.is_result(): 
                         print(f"Result Unit recieved Pending Context, {len(pending_contexts)}")
+                    
+                    
+                        
                     if unit.is_sentinel():
                         if pending_contexts:
                             self._flush_pending_contexts(pending_contexts, accumulated_updates)
                         exited=True
+                        pending_contexts = []
+                        accumulated_updates = 0
+                        print(f"[{self.name}] EXITING on sentinel")
                         break
-
-                    if unit.is_result() and isinstance(unit.data, PendingDatabaseContext):
+                    elif unit.is_result() and isinstance(unit.data, PendingDatabaseContext):
                         ctx = unit.data
                         pending_contexts.append(ctx)
                         added = ctx.estimated_updates or ctx.getTotalObjectCount() or 1
                         accumulated_updates += added
-                        self.workload.inc()
+                        self.workload.inc(added)
                         print(f"[{self.name}] Added {added} updates to pending contexts, {len(pending_contexts)} {accumulated_updates} {self.batch_size}")
                         if accumulated_updates >= self.batch_size:
                             print(f"[{self.name}] Threshhold Reached — pending={len(pending_contexts)}, accumulated={accumulated_updates}")
@@ -425,7 +430,7 @@ class ConsumerStage(PipelineStage):
                         self.metrics['success'] += 1
                         self.pipeline._record_global_success()
                     else:
-                        print("Error wrong Unit type in 'result'")
+                        print(f"Error wrong Unit type in 'result' {unit.type}")
                         
                except queue.Empty:
                    if pending_contexts:
@@ -468,6 +473,8 @@ class ConsumerStage(PipelineStage):
 # Pipeline
 # ==============================
 class Pipeline(Generic[W]):
+    
+    master= None
     def __init__(
         self,
         stages: List[PipelineStage[W]],
@@ -534,6 +541,7 @@ class Pipeline(Generic[W]):
 
         if ADAPTIVE_BACKPRESSURE:
             self._start_adaptive_monitor()
+        Pipeline.master = self
 
     def _record_global_total(self, count: int = 1):
         self.metrics['overall']['total'] += count
@@ -621,8 +629,9 @@ class Pipeline(Generic[W]):
             print(f"joining worker_queue for {stage.name} {stage.workload.get()}")
 
             # Join worker_queue: wait for workers to process and exit
+            print(f"  -> Joining worker_queue for {stage.name} (unfinished_tasks={stage.worker_queue.unfinished_tasks if hasattr(stage.worker_queue, 'unfinished_tasks') else 'N/A'})")
             stage.worker_queue.join()
-            
+            print(f"  -> worker_queue drained - stage {stage.name} done")            
             #stage.executor.shutdown(wait=False)  # Non-blocking shutdown
             #stage.executor._threads.clear()      # Force-clear internal thread refs (undocumented but works)
             #stage.executor=None # Force GC
@@ -630,6 +639,7 @@ class Pipeline(Generic[W]):
             stage.stop_event.set()
 
             print(f"{stage.name} fully drained — {nThreads} workers exited")
+            time.sleep(10) # what's your hurry?
 
         print("Pipeline shutdown complete — all stages drained deterministically")
 

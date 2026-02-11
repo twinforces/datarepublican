@@ -391,17 +391,15 @@ class GeocodingAPIProcessor(BaseProcessor):
             gid = unit.geocoding_id
             zip_code = unit.parsed_normalized.get('zip', '')
 
-            if unit.geocoding_status == 'owners':
-                ctx = PendingDatabaseContext()
-                ctx.addOperationToDatabase(DatabaseOperation(
-                    operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                    data={'count': unit.address_count}
-                ))
-                results.append((True, ctx))
-                continue
+           
 
             pattern = self._check_geocoding_patterns(addr, zip_code, 'safe')
             if pattern:
+                if pattern['status' ]== 'owners':
+                    ctx = PendingDatabaseContext()
+                    self._update_owner_colocators(ctx,unit.data['geocoding_id'], pattern['colocator'])
+                    results.append((True, Pipeline.result("result", ctx)))
+                    continue
                 ctx = PendingDatabaseContext()
                 update = {
                     'geocoding_id': gid,
@@ -423,7 +421,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                     operation_type=DatabaseOperationType.PROGRESS_UPDATE,
                     data={'count': unit.address_count}
                 ))
-                results.append((True, ctx))
+                results.append((True, ResultWorkUnit.result("result", ctx)))
                 continue
 
             stripped = self._strip_co_from_address(addr)
@@ -499,7 +497,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         try:
             geocoded_results = geocode(census_data, return_type='locations')
             for res, unit in zip(geocoded_results, batch):
-                if res.get('is_match',  "No_Match") != "No_Match":
+                if res.get('is_match',  "No_Match") != "No_Match" and res.get('latitude',"No_Match"):
                     lat = res.get('latitude')
                     lon = res.get('longitude')
                     matched = res.get('matched_address', '')
@@ -646,7 +644,8 @@ Return lat/long only if ≥75% confident in a real street location."""
                 operation_type=DatabaseOperationType.PROGRESS_UPDATE,
                 data={'count': unit.address_count}
             ))
-        return [(True, ctx)] * len(batch)
+            result = ResultWorkUnit(ctx,stage='fail')
+        return [(True,             result)] #only need one
 
     def get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
         print(f"####DEBUG: get_work_batch called with last_pk={last_pk}, batch_size={self.batch_size}")
