@@ -45,6 +45,7 @@ class GlobalConfig:
         self.nostats: bool = False
         self.no_backpressure: bool = False
         self.collect_xpath_stats: bool = False
+        self.db_threads: int = 4
 
     @classmethod
     def get_instance(cls):

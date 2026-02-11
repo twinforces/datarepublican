@@ -240,7 +240,7 @@ class PendingDatabaseContext:
                 print(f"###DEBUG### PDC_SAVE: Executing {len(self.operations)} operations")
                 for i, operation in enumerate(self.operations):
                     print(f"###DEBUG### PDC_SAVE: Executing operation {i+1}/{len(self.operations)}: type={operation.operation_type}, data_keys={list(operation.data.keys()) if operation.data else 'None'}")
-                    self._execute_operation(db_ops, operation, conn=conn)
+                    self._execute_operation(db_ops, operation)
 
                     if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
                         # Handle both traditional bulk updates and WHERE clause updates
@@ -293,10 +293,9 @@ class PendingDatabaseContext:
         # Final checkpoint with macOS workaround
             try:
                 # Recycle connection first to enable reliable checkpointing on macOS
-                db_ops.recycle_connection()
+                #db_ops.recycle_connection()
                 # Then attempt CHECKPOINT for WAL flushing
-                fresh_conn = db_ops._get_thread_local_connection()
-                fresh_conn.execute("CHECKPOINT")
+                conn.execute("CHECKPOINT")
                 print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
                 log_info("Final checkpoint completed successfully")
             except Exception as e:
@@ -377,11 +376,11 @@ class PendingDatabaseContext:
         if ein:
             db_ops.execute_query("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
 
+
     def _execute_generic_update(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> int:
         """Execute generic update operation"""
         data = operation.data
         updated_count = 0
-        conn = self._get_conn(allow_write=True) 
 
         # Check if this is a WHERE clause update (optimization for address deduplication)
         where_clause = data.get('where_clause')
@@ -401,16 +400,16 @@ class PendingDatabaseContext:
                 # Check if update_data is a list (bulk updates) or single dict
                 if isinstance(update_data, list):
                     # Bulk update - update_data is already a list of records
-                    updated_count = db_ops.bulk_update(table_name, update_data, id_column=id_column, conn=conn)
+                    updated_count = db_ops.bulk_update(table_name, update_data, id_column=id_column)
                 else:
                     # Single update - wrap in list for bulk_update
                     key_value = data.get("key_value")
                     if key_value is not None:
                         update_record = {**update_data, id_column: key_value}
-                        updated_count = db_ops.bulk_update(table_name, [update_record], id_column=id_column, conn=conn)
+                        updated_count = db_ops.bulk_update(table_name, [update_record], id_column=id_column)
                     else:
                         # Fallback for old format
-                        updated_count = db_ops.bulk_update(table_name, [update_data], id_column=id_column, conn=conn)
+                        updated_count = db_ops.bulk_update(table_name, [update_data], id_column=id_column)
 
         return updated_count
 
@@ -477,9 +476,6 @@ class PendingDatabaseContext:
             log_debug("Performing intermediate commit and checkpoint...")
             conn.commit()                               # Ends the huge transaction
 
-            # Recycle connection first to work around macOS CHECKPOINT reliability issues
-            db_ops.recycle_connection()
-
             # Now attempt CHECKPOINT for WAL flushing and performance benefits
             try:
                 # Get the fresh connection after recycling
@@ -541,6 +537,8 @@ class PendingDatabaseContext:
         if not contexts:
             print("###DEBUG### PDC_MERGE: No contexts to merge, returning empty")
             return cls()
+        if len(contexts) == 1:
+            return contexts[0] # already done!
 
         # Use the first context as the base
         merged = cls(xml_id=contexts[0].xml_id, xml_content=contexts[0].xml_content)

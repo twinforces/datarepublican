@@ -86,26 +86,45 @@ def wal_compaction_timer():
 class DuckDBPool:
     
                 
-    def __init__(self, db_path, initial_read=2, max_read=16, auto_checkpoint=False):
+    def __init__(self, db_path, initial_read=2, max_read=16, auto_checkpoint=False, dbUI=False):
         self.db_path = db_path
         self.read_queue = queue.Queue()
         self.log_wrapper_read = global_config.log_sql
         self.log_wrapper_write = global_config.log_sql
         self.wal_timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
         self.wal_timer.start()
-        self.write_conn = LoggingDuckDBConnection(db_path, read_only=False) if self.log_wrapper_write else duckdb.connect(db_path, read_only=False)
+        
+        # Build shared config dictionary that EVERY connection will use
+        self.shared_config = {
+            "memory_limit": "6GB",
+            "threads": str(global_config.db_threads),
+            #"access_mode": "READ_ONLY",
+            #"enable_progress_bar": "false",
+            "enable_object_cache": "true",
+            "preserve_insertion_order": "false",
+            "checkpoint_threshold": "500MB",  # or PRAGMA later if needed
+            "wal_autocheckpoint": "500MB",
+            # Add any other safe global-ish settings here
+        }
+        self.write_conn = LoggingDuckDBConnection(db_path, config=self.shared_config) if self.log_wrapper_write else duckdb.connect(db_path, config=self.shared_config)
         self.config_connection(self.write_conn,read_only=False)
+        self._lock = threading.Lock()
+        self.write_lock = threading.RLock()  # One writer, ehich can be reentrantly grabbed. 
+        self.auto_checkpoint = auto_checkpoint
         with self.acquire_write() as conn:
             self._init_schema()
             conn.execute("CHECKPOINT")
         self.wal_timer.cancel()
         self.wal_timer= None
         self.max_read = max_read
-        self._lock = threading.Lock()
         self.created_read = 0
         
-         # Check for --dbUI flag and start UI if present
-        if global_config.dbUI:
+                  
+        for _ in range(initial_read):
+            self._create_and_queue_read_conn()
+
+         # Check for --dbUI flag and start UI if present on a read only connection
+        if dbUI or global_config.dbUI:
             try:
                 with self.acquire_read() as conn:
                     conn.execute("CALL start_ui();")
@@ -113,20 +132,14 @@ class DuckDBPool:
             except Exception as e:
                 log_info(f"Failed to start database UI: {e}")
                 log_info("Continuing without UI...")
-                
-        for _ in range(initial_read):
-            self._create_and_queue_read_conn()
-
-        self.write_lock = threading.Lock()  # One writer
-        self.auto_checkpoint = auto_checkpoint
-        
+      
     def _create_and_queue_read_conn(self):
         with self._lock:
             if self.created_read >= self.max_read:
                 return False
             log_debug(f"Creating new read connection ({self.created_read + 1}/{self.max_read})")
-            conn = LoggingDuckDBConnection(self.db_path, read_only=True) if self.log_wrapper_read else duckdb.connect(self.db_path, read_only=True)
-            self.config_connection(conn, read_only=True)
+            conn = LoggingDuckDBConnection(self.db_path, config = self.shared_config) if self.log_wrapper_read else duckdb.connect(self.db_path, config = self.shared_config)
+            self.config_connection(conn,read_only=True)
             self.read_queue.put(conn)
             self.created_read += 1
             return True
@@ -160,7 +173,10 @@ class DuckDBPool:
             yield self.write_conn
             # Auto-checkpoint on release?
             try:
-                self.write_conn.execute("COMMIT")
+                try: 
+                    self.write_conn.execute("COMMIT")
+                except duckdb.TransactionException:
+                    pass #don't care if there's no transaction 
                 if self.auto_checkpoint:
                     self.write_conn.execute("CHECKPOINT")
             except Exception as e:
@@ -168,27 +184,30 @@ class DuckDBPool:
                          
     def config_connection(self, conn,read_only):
         conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
-        conn.execute(f"SET threads = {global_config.db_threads}")  # more threads
-        conn.execute("SET memory_limit = '6GB'")
-        conn.execute("SET enable_object_cache = true")   # Enable object cache
+        #conn.execute(f"SET threads = {global_config.db_threads}")  # more threads
+        #conn.execute("SET memory_limit = '6GB'")
+        #conn.execute("SET enable_object_cache = true")   # Enable object cache
         #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
 
-        try:
-            conn.execute("PRAGMA temp_directory = '/tmp'")  # Store temporary data in memory
-        except Exception:
-            pass  # Ignore if not supported
-        try:
-            conn.execute("SET checkpoint_threshold = '500MB'")  # WAL size doesn't matter in grok benchmark.
-            conn.execute("PRAGMA checkpoint_threshold='500MB'")   # or '500MB'
-            conn.execute("PRAGMA wal_autocheckpoint='500MB'")    # same thing, older name
+        #try:
+        #    conn.execute("PRAGMA temp_directory = '/tmp'")  # Store temporary data in memory
+        #except Exception:
+        #    pass  # Ignore if not supported
+        #try:
+        #    conn.execute("SET checkpoint_threshold = '500MB'")  # WAL size doesn't matter in grok benchmark.
+        #    conn.execute("PRAGMA checkpoint_threshold='500MB'")   # or '500MB'
+        #    conn.execute("PRAGMA wal_autocheckpoint='500MB'")    # same thing, older name
 
-        except Exception as e:
-            log_warning(f"exception setting checkpoint_threshold {e}")
-            pass  # Ignore if not supported
-        conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
+        #except Exception as e:
+        #    log_warning(f"exception setting checkpoint_threshold {e}")
+        #    pass  # Ignore if not supported
+        #conn.execute("SET preserve_insertion_order = false")  # Allow reordering for better performance
         #conn.execute("PRAGMA force_checkpoint;") unneccessary
-        conn.execute("SET enable_logging = true")
-        conn.execute("SET logging_level = 'DEBUG'")
+        #conn.execute("SET enable_logging = true")
+        #conn.execute("SET logging_level = 'DEBUG'")
+        
+        # THIS IS DEAD CODE, because duckdb doesn't support mixing modes. You can only set it at startup
+        # and it doesn't allow a mix of modes. 
         #if read_only:
         #    conn.execute("SET access_mode = READ_ONLY")
         #else:
@@ -1484,13 +1503,8 @@ class DatabaseOperations:
 
             # Ensure any pending changes are committed before checkpoint
             if commit:
-                self.commit()
-
-            # On macOS, recycle connection first to work around CHECKPOINT reliability issues
-            # This enables CHECKPOINT to work properly for WAL flushing and performance
-            log_info("Recycling connection to enable reliable checkpointing...")
-            self.recycle_connection()
-
+                conn.commit()
+            
             # Now attempt CHECKPOINT for WAL flushing and performance benefits
             log_info("Performing database checkpoint for WAL cleanup...")
             try:
@@ -1501,7 +1515,7 @@ class DatabaseOperations:
                 # Continue anyway - the recycling itself provides some WAL cleanup
 
             if commit:
-                self.commit(conn)
+                conn.commit()
 
     # Logging methods removed - use global logging functions directly
 

@@ -159,7 +159,7 @@ class IRS990Processor(BaseProcessor):
         self.stats_processor = self.db_ops.get_stats_processor()
   
         # Initialize database
-        self._init_database()
+        #self._init_database()
   
         # Initialize instance variables
         self.zips_dir = zips_dir
@@ -186,11 +186,9 @@ class IRS990Processor(BaseProcessor):
     def _init_database(self):
         """Initialize DuckDB database with schema"""
         # The database is already initialized by DatabaseOperations
-        # Just ensure the path is absolute
         if not os.path.isabs(self.db_path):
             self.db_path = os.path.join(self.final_dir, self.db_path)
-        # Use the existing connection from DatabaseOperations
-        self.db_conn = self.db_ops.db_conn
+        
 
     def _dump_stack_traces(self, signum, frame):
         """Dump stack traces of all threads when USR1 signal is received"""
@@ -740,7 +738,7 @@ def main():
     parser.add_argument("--nostats", action="store_true", help="Skip stats report generation after each step")
     parser.add_argument("--no-backpressure", action="store_true", help="Disable backpressure mechanism for producer threads")
     parser.add_argument("--collect-xpath-stats", action="store_true", help="Collect XPath performance statistics (only in thread 0 to avoid race conditions)")
-    parser.add_argument("--db-threads", type=int, default=4, help="Number of threads for DuckDB",  help="Threads for DuckDB (may only matter for 1.5+?)")
+    parser.add_argument("--db-threads", type=int, default=4,   help="Threads for DuckDB (may only matter for 1.5+?)")
 
     args = parser.parse_args()
 
