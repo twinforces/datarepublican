@@ -22,7 +22,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderServiceError, GeocoderQuotaExcee
 from geopy.extra.rate_limiter import RateLimiter
 from geopy.geocoders import Nominatim, Photon, OpenCage
 from openai import OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 try:
     import tqdm
@@ -129,7 +129,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         stages = [preprocess_stage, census_stage_raw, census_stage_strip]
 
         if API_CONFIG['ENABLE_GROK']:
-            stages.append(PipelineStage("grok", 4, 15, self._grok_handler))
+            stages.append(PipelineStage("grok", 4, 10, self._grok_handler))
         if API_CONFIG['ENABLE_PHOTON']:
             stages.append(PipelineStage("photon", 8, 1, self._photon_handler))
         if API_CONFIG['ENABLE_NOMINATIM']:
@@ -139,7 +139,7 @@ class GeocodingAPIProcessor(BaseProcessor):
         if API_CONFIG['ENABLE_LIBRESTREET']:
             stages.append(PipelineStage("librestreet", 6, 1, self._librestreet_handler))
 
-        stages.append(PipelineStage("fail", 1, 1000, self._final_fail_handler, is_final_failure=True))
+        stages.append(PipelineStage("fail", 1, 5000, self._final_fail_handler, is_final_failure=True))
 
         self.pipeline: Pipeline[GeocodingWorkUnit] = Pipeline(stages=stages, db_ops=db_ops, chain_on='failure',workunit_class=GeocodingWorkUnit)
 
@@ -512,6 +512,13 @@ class GeocodingAPIProcessor(BaseProcessor):
                 unit.data['attempt_count'] = unit.attempt_count + 1
                 results.append((False, unit))
         return results
+    
+    def safe_parse(self, raw: str):
+        try:
+            return BatchGeocodeOutput.model_validate_json(raw)
+        except ValidationError as e:
+            print(f"Bad Json from grok,{raw}")
+            raise  # or handle gracefully depending on your needs
 
     def _grok_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         if not batch: return []
@@ -546,25 +553,32 @@ Return lat/long only if ≥75% confident in a real street location."""
         - matched_address: best full address or null
         - reason: optional short note if partial match
 
-        Output ONLY the structured results array."""
+        Output ONLY the structured results array. 
+        Output ONLY the complete valid JSON object matching the schema. Do not stop early. 
+        Include ALL requested addresses even if the output is long. 
+        Close all arrays and objects properly."""
         try:
             schema = BatchGeocodeOutput.model_json_schema()
             response = client.chat.completions.create(
-                model="grok-4-1-fast",
+                #model="grok-4-1-fast",
+                model="grok-4-latest",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 response_format={
                     "type": "json_schema",
-                    "json_schema": {"name": "batch_geocode", "strict": True, "schema": schema}
+                    "json_schema": {"name": "batch_geocode", "strict": False, "schema": schema}
                 },
+                #response_format={"type": "json_object"},
                 temperature=0.0,
-                max_tokens=4000,
+                #max_tokens=4000,
+                max_tokens=16384,
+
                 timeout=300
             )
             raw = response.choices[0].message.content.strip()
-            parsed = BatchGeocodeOutput.model_validate_json(raw)
+            parsed = self.safe_parse(raw)
 
             results = []
             parsed_dict = {res.id: res for res in parsed.results}  # map by UUID
@@ -579,7 +593,7 @@ Return lat/long only if ≥75% confident in a real street location."""
                     results.append((False, unit))
             return results
         except Exception as e:
-            log_error(f"Grok failed: {e}")
+            log_error(f"Grok failed: {e} {raw}")
             return [(False, unit) for unit in batch]
 
     def _photon_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:

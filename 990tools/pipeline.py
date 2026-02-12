@@ -184,12 +184,12 @@ class PipelineStage(Generic[W]):
                 unit = None
                 try:
                     unit = self.input_queue.get(timeout=BATCHER_TIMEOUT)
+                    if unit: self.input_queue.task_done() # ack
                     if unit.is_sentinel():
                         if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got sentinel, unfinished_tasks now {self.input_queue.unfinished_tasks}")
                         if self.input_queue.qsize() > 1:  # Backlog? Put it back in the FIFO
                             if  DEBUG_PIPELINE: print(f"[{self.name}] REQUEUE sentinel — busy q={self.input_queue.qsize()}")
-                            self.input_queue.task_done() # ack
-                            self.input_queue.put(unit)  # Or input_queue
+                            self.input_queue.put(unit) 
                             unit = None #prevent it getting marked done
                             continue
                         if pending:
@@ -220,11 +220,7 @@ class PipelineStage(Generic[W]):
                 except Exception as e:
                     print(f"ERROR in {self.name} batcher: {e.__class__.__name__}: {str(e)}")
                     continue
-                finally:
-                    if unit is not None:
-                        if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got {unit.type}, unfinished_tasks now 1/2 {self.input_queue.unfinished_tasks}")
-                        self.input_queue.task_done()
-                        if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got {unit.type}, unfinished_tasks now 2/2 {self.input_queue.unfinished_tasks}")
+                
             if  DEBUG_PIPELINE: print(f"[{self.name}] batcher exited")
 
         self.batcher_thread = threading.Thread(target=batcher, daemon=True, name=f"{self.name}_batcher")
@@ -414,7 +410,7 @@ class ConsumerStage(PipelineStage):
            while not self.stop_event.is_set() and not exited:
                unit = None
                try:
-                    unit = self.input_queue.get(timeout=1.0)
+                    unit = self.worker_queue.get(timeout=1.0)
                     if DEBUG_PIPELINE: print(f"[{self.name}] GOT → {unit!s} (pending={len(pending_contexts)})")
                     if unit and unit.is_result(): 
                         if  DEBUG_PIPELINE: print(f"[{self.name}] Result Unit recieved Pending Context, {len(pending_contexts)}")
@@ -452,6 +448,11 @@ class ConsumerStage(PipelineStage):
 
                         self.metrics['success'] += 1
                         self.pipeline._record_global_success()
+                    elif unit.is_batch():
+                        contexts = [item.data for item in unit.items if item.is_result() and isinstance(item.data, PendingDatabaseContext)]
+                        added = sum([ctx.estimated_updates or ctx.getTotalObjectCount() or 1 for ctx in contexts])
+                        pending_contexts.extend(contexts)
+    
                     else:
                         print(f"Error wrong Unit type in 'result' {unit.type}")
                         
