@@ -189,7 +189,7 @@ class PendingDatabaseContext:
         """
         return sum(len(objects) for objects in self.objects.values())
 
-    def save_to_database(self, db_ops: DatabaseOperations) -> List[str]:
+    def save_to_database(self, db_ops: DatabaseOperations, checkpoint: bool = False) -> List[str]:
         """
         Execute all collected objects and operations directly with periodic flushing.
         This is the PRIMARY execution method for PDC. It handles both:
@@ -290,18 +290,19 @@ class PendingDatabaseContext:
                 log_error(f"Failed to save context to database: {e}", exc_info=True)
                 raise
 
-        # Final checkpoint with macOS workaround
-            try:
-                # Recycle connection first to enable reliable checkpointing on macOS
-                #db_ops.recycle_connection()
-                # Then attempt CHECKPOINT for WAL flushing
-                conn.execute("CHECKPOINT")
-                print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
-                log_info("Final checkpoint completed successfully")
-            except Exception as e:
-                print(f"###DEBUG### PDC_SAVE: Final checkpoint failed: {e}")
-                log_warning(f"Final checkpoint failed: {e}")
-                # Continue anyway - data is still committed
+            if checkpoint:
+            # Final checkpoint with macOS workaround
+                try:
+                    # Recycle connection first to enable reliable checkpointing on macOS
+                    #db_ops.recycle_connection()
+                    # Then attempt CHECKPOINT for WAL flushing
+                    conn.execute("CHECKPOINT")
+                    print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
+                    log_info("Final checkpoint completed successfully")
+                except Exception as e:
+                    print(f"###DEBUG### PDC_SAVE: Final checkpoint failed: {e}")
+                    log_warning(f"Final checkpoint failed: {e}")
+                    # Continue anyway - data is still committed
 
             print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
         return ids

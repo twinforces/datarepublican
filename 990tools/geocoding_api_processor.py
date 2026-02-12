@@ -570,7 +570,7 @@ Return lat/long only if ≥75% confident in a real street location."""
             parsed_dict = {res.id: res for res in parsed.results}  # map by UUID
             for unit, res_item in zip(items, parsed.results):
                 res_item = parsed_dict.get(f"{unit.geocoding_id}", None)
-                if res_item.lat is not None and res_item.long is not None:
+                if res_item and res_item.lat is not None and res_item.long is not None:
                     result_unit = self._apply_successful_geocode(
                         unit, res_item.lat, res_item.long, "Match:Grok-4", res_item.matched_address or unit.canonical_address
                     )

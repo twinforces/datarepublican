@@ -185,7 +185,13 @@ class PipelineStage(Generic[W]):
                 try:
                     unit = self.input_queue.get(timeout=BATCHER_TIMEOUT)
                     if unit.is_sentinel():
-                        print(f"[{self.name}] batcher got sentinel, unfinished_tasks now {self.input_queue.unfinished_tasks}")
+                        if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got sentinel, unfinished_tasks now {self.input_queue.unfinished_tasks}")
+                        if self.input_queue.qsize() > 1:  # Backlog? Put it back in the FIFO
+                            if  DEBUG_PIPELINE: print(f"[{self.name}] REQUEUE sentinel — busy q={self.input_queue.qsize()}")
+                            self.input_queue.task_done() # ack
+                            self.input_queue.put(unit)  # Or input_queue
+                            unit = None #prevent it getting marked done
+                            continue
                         if pending:
                             self._push_batch(pending)
                             pending = []
@@ -216,10 +222,10 @@ class PipelineStage(Generic[W]):
                     continue
                 finally:
                     if unit is not None:
-                        print(f"[{self.name}] batcher got sentinel, unfinished_tasks now 1/2 {self.input_queue.unfinished_tasks}")
+                        if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got {unit.type}, unfinished_tasks now 1/2 {self.input_queue.unfinished_tasks}")
                         self.input_queue.task_done()
-                        print(f"[{self.name}] batcher got sentinel, unfinished_tasks now 2/2 {self.input_queue.unfinished_tasks}")
-            print(f"[{self.name}] batcher exited")
+                        if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got {unit.type}, unfinished_tasks now 2/2 {self.input_queue.unfinished_tasks}")
+            if  DEBUG_PIPELINE: print(f"[{self.name}] batcher exited")
 
         self.batcher_thread = threading.Thread(target=batcher, daemon=True, name=f"{self.name}_batcher")
         self.batcher_thread.start()
@@ -243,7 +249,7 @@ class PipelineStage(Generic[W]):
     def _spawn_worker(self):
         self.current_workers.inc()
         self.metrics['nThreads'] = self.current_workers.get()
-        print(f"SPAWNING WORKER for {self.name} — total: {self.current_workers}")
+        if  DEBUG_PIPELINE: print(f"SPAWNING WORKER for {self.name} — total: {self.current_workers}")
 
         def worker():
             if DEBUG_PIPELINE:
@@ -263,6 +269,12 @@ class PipelineStage(Generic[W]):
 
                             self._process_batch(pending)
                             pending = []
+                        if self.worker_queue.qsize() > 1:  # Backlog? Put it back in the FIFO
+                            if  DEBUG_PIPELINE: print(f"[{self.name}] REQUEUE sentinel — busy q={self.input_queue.qsize()}")
+                            self.worker_queue.task_done()
+                            self.worker_queue.put(unit)  # Or input_queue
+                            unit = None #prevent it getting marked done
+                            continue
                         self.worker_queue.task_done()
                         exited=True
                         self.current_workers.dec()
@@ -288,7 +300,7 @@ class PipelineStage(Generic[W]):
                         continue
                 except Exception as e:
                     log_error(f"ERROR in {self.name} worker: {e}")
-            print(f"[{self.name}] worker exited")  # Debug print for exit confirmation
+            if  DEBUG_PIPELINE: print(f"[{self.name}] worker exited")  # Debug print for exit confirmation
             self.current_workers.dec()
             self.metrics['nThreads'] = self.current_workers.get()
         self.executor.submit(worker)
@@ -376,6 +388,8 @@ class ConsumerStage(PipelineStage):
             max_workers=1,
         )
         self.db_ops = db_ops
+        self.last_checkpoint = 0
+        self.checkpoint_interval = 10_000  # Checkpoint every 10,000 updates
 
     def _consume_handler(self, batch: List[ResultWorkUnit]) -> List[Tuple[bool, Any]]:
         print(f"###ERROR### CONSUMER HANDLER: Processing batch of {len(batch)} units, should never be called")
@@ -389,12 +403,13 @@ class ConsumerStage(PipelineStage):
     def _spawn_worker(self):
        self.current_workers.inc()
        self.metrics['nThreads'] = 1
-       print(f"SPAWNING WORKER for {self.name} — total: {self.current_workers.get()}")
+       if  DEBUG_PIPELINE: print(f"SPAWNING WORKER for {self.name} — total: {self.current_workers.get()}")
 
        def worker():
            if DEBUG_PIPELINE: print(f"WORKER STARTED for Consumer")
            pending_contexts: List[PendingDatabaseContext] = []
            accumulated_updates = 0
+           total_updates = 0
            exited=False
            while not self.stop_event.is_set() and not exited:
                unit = None
@@ -402,17 +417,24 @@ class ConsumerStage(PipelineStage):
                     unit = self.input_queue.get(timeout=1.0)
                     if DEBUG_PIPELINE: print(f"[{self.name}] GOT → {unit!s} (pending={len(pending_contexts)})")
                     if unit and unit.is_result(): 
-                        print(f"Result Unit recieved Pending Context, {len(pending_contexts)}")
+                        if  DEBUG_PIPELINE: print(f"[{self.name}] Result Unit recieved Pending Context, {len(pending_contexts)}")
                     
                     
                         
                     if unit.is_sentinel():
-                        if pending_contexts:
-                            self._flush_pending_contexts(pending_contexts, accumulated_updates)
+                        self._flush_pending_contexts(pending_contexts, accumulated_updates,total_updates)
+                        if self.worker_queue.qsize() > 1:  # Backlog?
+                            print(f"[{self.name}] REQUEUE sentinel — busy q={self.worker_queue.qsize()}")
+                            self.worker_queue.task_done()
+                            self.worker_queue.put(unit)  
+                            unit=None # prevent it being marked done
+                            continue  # Process work
+                        # Else: normal flush/break
                         exited=True
                         pending_contexts = []
+                        total_updates += accumulated_updates
                         accumulated_updates = 0
-                        print(f"[{self.name}] EXITING on sentinel")
+                        if  DEBUG_PIPELINE: print(f"[{self.name}] EXITING on sentinel")
                         break
                     elif unit.is_result() and isinstance(unit.data, PendingDatabaseContext):
                         ctx = unit.data
@@ -422,9 +444,10 @@ class ConsumerStage(PipelineStage):
                         self.workload.inc(added)
                         print(f"[{self.name}] Added {added} updates to pending contexts, {len(pending_contexts)} {accumulated_updates} {self.batch_size}")
                         if accumulated_updates >= self.batch_size:
-                            print(f"[{self.name}] Threshhold Reached — pending={len(pending_contexts)}, accumulated={accumulated_updates}")
-                            self._flush_pending_contexts(pending_contexts, accumulated_updates)
+                            if  DEBUG_PIPELINE: print(f"[{self.name}] Threshhold Reached — pending={len(pending_contexts)}, accumulated={accumulated_updates}")
+                            self._flush_pending_contexts(pending_contexts, accumulated_updates,total_updates)
                             pending_contexts = []
+                            total_updates += accumulated_updates
                             accumulated_updates = 0
 
                         self.metrics['success'] += 1
@@ -434,8 +457,9 @@ class ConsumerStage(PipelineStage):
                         
                except queue.Empty:
                    if pending_contexts:
-                       self._flush_pending_contexts(pending_contexts, accumulated_updates)
+                       self._flush_pending_contexts(pending_contexts, accumulated_updates,total_updates)
                        pending_contexts = []
+                       total_updates += accumulated_updates
                        accumulated_updates = 0
                    continue
                except Exception as e:
@@ -449,7 +473,7 @@ class ConsumerStage(PipelineStage):
                    if unit: self.input_queue.task_done()
 
            if pending_contexts:
-               self._flush_pending_contexts(pending_contexts, accumulated_updates)
+               self._flush_pending_contexts(pending_contexts, accumulated_updates, -1)
                pending_contexts=[]
            self.current_workers.dec()
            self.metrics['nThreads'] = self.current_workers.get()
@@ -457,13 +481,15 @@ class ConsumerStage(PipelineStage):
 
        self.executor.submit(worker)
 
-    def _flush_pending_contexts(self, contexts: List[PendingDatabaseContext], count: int):
+    def _flush_pending_contexts(self, contexts: List[PendingDatabaseContext], count: int, totalups: int):
         if not contexts:
             return
         print(f"Consumer flushing {len(contexts)} PDCs (~{count:,} updates)")
         merged = PendingDatabaseContext.merge(contexts)
         try:
-            merged.save_to_database(self.db_ops)
+            checkpoint=  totalups == -1 or self.last_checkpoint < totalups - self.checkpoint_interval
+                
+            merged.save_to_database(self.db_ops, checkpoint=checkpoint)
         except Exception as e:
             print(f"[{self.name}] ERROR saving to database: {e}")
         
@@ -601,6 +627,17 @@ class Pipeline(Generic[W]):
     def result(cls, stage: str, context: PendingDatabaseContext) -> ResultWorkUnit:
         """Create a result unit (non-generic, always ResultWorkUnit)."""
         return ResultWorkUnit(stage=stage, data=context)
+    
+    def _join_with_timeout(self, q, name: str, timeout_s: int = 3600):
+        """Poll join w/ timeout."""
+        start = time.time()
+        while time.time() - start < timeout_s:
+            if q.unfinished_tasks == 0:  # qsize() unreliable
+                print(f"{name} joined OK")
+                return True
+            time.sleep(0.5)
+        print(f"*** TIMEOUT *** {name} unfinished_tasks={q.unfinished_tasks}")
+        return False
 
     def shutdown(self):
         """
@@ -624,13 +661,13 @@ class Pipeline(Generic[W]):
 
             # Join input_queue: wait for batcher to flush to worker_queue
             print(f"joining input_queue for {stage.name}")
-            stage.input_queue.join()
+            self._join_with_timeout(stage.input_queue, f"batcher for {stage.name}")
 
             print(f"joining worker_queue for {stage.name} {stage.workload.get()}")
 
             # Join worker_queue: wait for workers to process and exit
             print(f"  -> Joining worker_queue for {stage.name} (unfinished_tasks={stage.worker_queue.unfinished_tasks if hasattr(stage.worker_queue, 'unfinished_tasks') else 'N/A'})")
-            stage.worker_queue.join()
+            self._join_with_timeout(stage.worker_queue, f"work_queue for {stage.name}")
             print(f"  -> worker_queue drained - stage {stage.name} done")            
             #stage.executor.shutdown(wait=False)  # Non-blocking shutdown
             #stage.executor._threads.clear()      # Force-clear internal thread refs (undocumented but works)
@@ -639,7 +676,6 @@ class Pipeline(Generic[W]):
             stage.stop_event.set()
 
             print(f"{stage.name} fully drained — {nThreads} workers exited")
-            time.sleep(10) # what's your hurry?
 
         print("Pipeline shutdown complete — all stages drained deterministically")
 
