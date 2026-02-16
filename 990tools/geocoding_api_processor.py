@@ -42,7 +42,7 @@ from pipeline import PipelineStage, Pipeline, WorkUnit, ResultWorkUnit
 API_CONFIG = {
     'ENABLE_CENSUS_RAW': True,
     'ENABLE_GROK': True,
-    'ENABLE_PHOTON': True,
+    'ENABLE_PHOTON': False,
     'ENABLE_NOMINATIM': False,
     'ENABLE_LIBRESTREET': False,
     'ENABLE_OPENCAGE': False,
@@ -331,6 +331,24 @@ class GeocodingAPIProcessor(BaseProcessor):
                     'fields': pattern.get('fields')
                 }
         return None
+    
+    def _update_geocoding_status(self,ctx: PendingDatabaseContext, unit: GeocodingWorkUnit, geocoding_id: str, status: str):
+        now = datetime.now().isoformat()
+        item = unit.data
+        update = {
+            'geocoding_id': geocoding_id,
+            'last_attempt': now,
+            'attempt_count': item.get('attempt_count', 0) + 1,
+            'geocoding_status': status,
+        }
+        ctx.addOperationToDatabase(DatabaseOperation(
+            operation_type=DatabaseOperationType.GENERIC_UPDATE,
+            data={'table': 'Geocoding', 'updates': [update], 'id_column': 'geocoding_id'}
+        ))
+        ctx.addOperationToDatabase(DatabaseOperation(
+            operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+            data={'count': item.get('address_count', 1)}
+        ))
 
     def _update_owner_colocators(self, context: PendingDatabaseContext, geocoding_id: str, colocator: str):
         result = self.db_ops.execute_query(
@@ -396,7 +414,9 @@ class GeocodingAPIProcessor(BaseProcessor):
             pattern = self._check_geocoding_patterns(addr, zip_code, 'safe')
             if pattern:
                 if pattern['status' ]== 'owners':
-                    ctx = PendingDatabaseContext()
+                    ctx = PendingDatabaseContext()                            
+                    self._update_geocoding_status(ctx, unit, gid, 'Match:PatternOwners')
+
                     self._update_owner_colocators(ctx,unit.data['geocoding_id'], pattern['colocator'])
                     results.append((True, Pipeline.result("result", ctx)))
                     continue
@@ -501,7 +521,7 @@ class GeocodingAPIProcessor(BaseProcessor):
                     lat = res.get('latitude')
                     lon = res.get('longitude')
                     matched = res.get('matched_address', '')
-                    result_unit = self._apply_successful_geocode(unit, lat, lon, "Match:Census", matched)
+                    result_unit = self._apply_successful_geocode(unit, lat, lon, "Match:Census_Strip" if do_strip else "Match:Census", matched)
                     results.append((True, result_unit))
                 else:
                     unit.data['attempt_count'] = unit.attempt_count + 1
@@ -636,6 +656,7 @@ Return lat/long only if ≥75% confident in a real street location."""
         return results
 
     def _final_fail_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
+        print("Final fail handler reached for batch of size", len(batch))
         ctx = PendingDatabaseContext()
         now = datetime.now().isoformat()
         for unit in batch:
@@ -658,8 +679,8 @@ Return lat/long only if ≥75% confident in a real street location."""
                 operation_type=DatabaseOperationType.PROGRESS_UPDATE,
                 data={'count': unit.address_count}
             ))
-            result = ResultWorkUnit(ctx,stage='fail')
-        return [(True,             result)] #only need one
+        result = ResultWorkUnit(ctx,stage='fail')
+        return [(True,             result)] #only need one PDC is self batching
 
     def get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
         print(f"####DEBUG: get_work_batch called with last_pk={last_pk}, batch_size={self.batch_size}")

@@ -1123,7 +1123,6 @@ def dump_threads_handler(signum, frame):
     """Signal handler: Dumps formatted stack traces for all live threads."""
     try:
         import os
-        # Get frame snapshots for all threads.
         frames = sys._current_frames()
 
         print(f"\n{'='*60}", file=sys.stderr)
@@ -1132,17 +1131,24 @@ def dump_threads_handler(signum, frame):
         print(f"Signal: {signum} (USR1)", file=sys.stderr)
         print(f"{'='*60}\n", file=sys.stderr)
 
-        for thread_id, frame in frames.items():
-            thread_name = threading.get_ident() == thread_id and "Main" or f"Thread-{thread_id}"
-            print(f"\nThread: {thread_name} (ID: 0x{thread_id:x})", file=sys.stderr)
+        # Get all live threads once for name lookup
+        live_threads = {t.ident: t for t in threading.enumerate() if t.is_alive()}
 
-            # Extract and format the stack.
+        for thread_id, frame in frames.items():
+            # Use the real thread.name if available
+            thread_obj = live_threads.get(thread_id)
+            thread_name = thread_obj.name if thread_obj else f"Thread-{thread_id} (unknown)"
+            daemon = thread_obj.daemon if thread_obj else "unknown"
+            
+            print(f"Thread: {thread_name} (ident: 0x{thread_id:x}, daemon: {daemon})", file=sys.stderr)
+
+            # Stack trace
             stack_lines = traceback.format_stack(frame)
             print("".join(stack_lines), file=sys.stderr)
 
         print(f"{'='*60}\n", file=sys.stderr)
         print("Thread dump complete. Process continuing...", file=sys.stderr)
-        sys.stderr.flush()  # Ensure output in signal context.
+        sys.stderr.flush()
     except Exception as e:
         print(f"Error in thread dump: {e}", file=sys.stderr)
         sys.stderr.flush()

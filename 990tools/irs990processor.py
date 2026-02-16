@@ -13,6 +13,7 @@ Key Features:
 - Threaded processing for performance
 """
 
+from concurrent.futures import thread
 import os
 import sys
 import argparse
@@ -190,34 +191,48 @@ class IRS990Processor(BaseProcessor):
             self.db_path = os.path.join(self.final_dir, self.db_path)
         
 
+    def get_os_thread_name(tid):
+        try:
+            with open(f"/proc/{os.getpid()}/task/{tid}/comm") as f:
+                return f.read().strip()
+        except:
+            return "unknown"
+        
     def _dump_stack_traces(self, signum, frame):
         """Dump stack traces of all threads when USR1 signal is received"""
         import traceback
         import sys
 
-        print("\n=== STACK TRACE DUMP (USR1 signal received) ===", file=sys.stderr)
+        print("\n"*5,"\n=== STACK TRACE DUMP (USR1 signal received) ===", file=sys.stderr)
         print(f"Timestamp: {datetime.now().isoformat()}", file=sys.stderr)
 
         # Get all threads
         threads = threading.enumerate()
 
-        for i, thread in enumerate(threads):
-            print(f"\n--- Thread {i+1}: {thread.name} (ident: {thread.ident}) ---", file=sys.stderr)
+        for i, thread in enumerate(threads, 1):
+            # Use thread.name directly — this is what you assigned
+            name = thread.name if thread.name else f"Unnamed-{thread.ident}"
+            os_name = self.get_os_thread_name(thread.ident)
+            status = "alive" if thread.is_alive() else "dead"
+            daemon = "daemon" if thread.daemon else "non-daemon"            
+            print(f"Thread {i}: {os_name}/{name} (ident: {thread.ident}, daemon: {daemon})", file=sys.stderr)
             if thread.is_alive():
-                # Get the stack trace for this thread
                 try:
                     thread_id = thread.ident
-                    if thread_id is not None:
+                    if thread_id in sys._current_frames():
                         frame = sys._current_frames()[thread_id]
+                        print(f"  Stack trace for {name}:", file=sys.stderr)
                         traceback.print_stack(frame, file=sys.stderr)
                     else:
-                        print("  (Thread ident is None)", file=sys.stderr)
-                except KeyError:
-                    print("  (Thread frame not available)", file=sys.stderr)
+                        print(f"  (No stack frame available for {name})", file=sys.stderr)
+                except Exception as e:
+                    print(f"  (Failed to get stack for {name}: {e})", file=sys.stderr)
             else:
-                print("  (Thread is not alive)", file=sys.stderr)
+                print(f"  ({name} is not alive)", file=sys.stderr)
+            
+            print("-" * 60, file=sys.stderr)
 
-        print("\n=== END STACK TRACE DUMP ===", file=sys.stderr)
+        print(f"\n=== END STACK TRACE DUMP === {'\n'*5}", file=sys.stderr)
         sys.stderr.flush()
 
         """Recompress ZIP files to standard format using 7z and zip"""
@@ -856,3 +871,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    sys.exit(0) #brute force exit to ensure all threads are killed and we don't hang on shutdown

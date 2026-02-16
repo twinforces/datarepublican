@@ -88,7 +88,7 @@ ENABLE_AUTO_CHECKPOINTS = False
 MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
-CONSUMER_BATCH_SIZE = 10  # No reason not to make this larger only applies with backlog
+CONSUMER_BATCH_SIZE = 1000  # No reason not to make this larger only applies with backlog
 MONITOR_INTERVAL_SECONDS = 30  # Change: Added constant to reduce psutil memory monitoring and QueueStatusDisplay updates to every 30 seconds
 
 # Address processing constants

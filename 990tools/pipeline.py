@@ -249,7 +249,7 @@ class PipelineStage(Generic[W]):
 
         def worker():
             if DEBUG_PIPELINE:
-                print(f"WORKER STARTED for {self.name}")
+                print(f"WORKER STARTED for {self.name} T:{threading.current_thread().name}")
             pending = []
 
             exited=False
@@ -396,6 +396,13 @@ class ConsumerStage(PipelineStage):
         self.db_ops.process_pdc(merged)
         return [(True, None) for _ in batch]  # No forward
     
+    def _flush_check(self, pending_contexts: List[PendingDatabaseContext], accumulated_updates: int, total_updates: int)  -> bool:
+        if accumulated_updates >= self.batch_size:
+            if  DEBUG_PIPELINE: print(f"[{self.name}] Threshhold Reached — pending={len(pending_contexts)}, accumulated={accumulated_updates}")
+            self._flush_pending_contexts(pending_contexts, accumulated_updates, total_updates)
+            return True
+        return False
+    
     def _spawn_worker(self):
        self.current_workers.inc()
        self.metrics['nThreads'] = 1
@@ -411,6 +418,8 @@ class ConsumerStage(PipelineStage):
                unit = None
                try:
                     unit = self.worker_queue.get(timeout=1.0)
+                    if unit:
+                        self.worker_queue.task_done()
                     if DEBUG_PIPELINE: print(f"[{self.name}] GOT → {unit!s} (pending={len(pending_contexts)})")
                     if unit and unit.is_result(): 
                         if  DEBUG_PIPELINE: print(f"[{self.name}] Result Unit recieved Pending Context, {len(pending_contexts)}")
@@ -439,9 +448,7 @@ class ConsumerStage(PipelineStage):
                         accumulated_updates += added
                         self.workload.inc(added)
                         print(f"[{self.name}] Added {added} updates to pending contexts, {len(pending_contexts)} {accumulated_updates} {self.batch_size}")
-                        if accumulated_updates >= self.batch_size:
-                            if  DEBUG_PIPELINE: print(f"[{self.name}] Threshhold Reached — pending={len(pending_contexts)}, accumulated={accumulated_updates}")
-                            self._flush_pending_contexts(pending_contexts, accumulated_updates,total_updates)
+                        if self._flush_check(pending_contexts, accumulated_updates, total_updates):
                             pending_contexts = []
                             total_updates += accumulated_updates
                             accumulated_updates = 0
@@ -451,8 +458,15 @@ class ConsumerStage(PipelineStage):
                     elif unit.is_batch():
                         contexts = [item.data for item in unit.items if item.is_result() and isinstance(item.data, PendingDatabaseContext)]
                         added = sum([ctx.estimated_updates or ctx.getTotalObjectCount() or 1 for ctx in contexts])
+                        self.metrics['success'] += len(contexts)
+                        self.pipeline._record_global_success(len(contexts))
+                        accumulated_updates += added
                         pending_contexts.extend(contexts)
-    
+                        if self._flush_check(pending_contexts, accumulated_updates, total_updates):
+                            pending_contexts = []
+                            total_updates += accumulated_updates
+                            accumulated_updates = 0
+   
                     else:
                         print(f"Error wrong Unit type in 'result' {unit.type}")
                         
@@ -470,8 +484,7 @@ class ConsumerStage(PipelineStage):
                     traceback.print_exc()
                     # Continue loop — don't let thread die
                     continue
-               finally:
-                   if unit: self.input_queue.task_done()
+    
 
            if pending_contexts:
                self._flush_pending_contexts(pending_contexts, accumulated_updates, -1)
@@ -564,6 +577,7 @@ class Pipeline(Generic[W]):
 
         for stage in [self.feed_stage] + stages+ [self.result_consumer]:
             stage.set_executor(ThreadPoolExecutor(max_workers=stage.max_workers, thread_name_prefix=stage.name))
+            print(f"Executor created with prefix: {stage.name}")
             
 
         if ADAPTIVE_BACKPRESSURE:
@@ -573,8 +587,8 @@ class Pipeline(Generic[W]):
     def _record_global_total(self, count: int = 1):
         self.metrics['overall']['total'] += count
 
-    def _record_global_success(self):
-        self.metrics['overall']['success'] += 1
+    def _record_global_success(self, count: int = 1):
+        self.metrics['overall']['success'] += count
 
     def feed(self, items: List[Any]):
         if DEBUG_PIPELINE:
@@ -629,7 +643,7 @@ class Pipeline(Generic[W]):
         """Create a result unit (non-generic, always ResultWorkUnit)."""
         return ResultWorkUnit(stage=stage, data=context)
     
-    def _join_with_timeout(self, q, name: str, timeout_s: int = 3600):
+    def _join_with_timeout(self, q, name: str, timeout_s: int = 24*3600):
         """Poll join w/ timeout."""
         start = time.time()
         while time.time() - start < timeout_s:
@@ -670,9 +684,9 @@ class Pipeline(Generic[W]):
             print(f"  -> Joining worker_queue for {stage.name} (unfinished_tasks={stage.worker_queue.unfinished_tasks if hasattr(stage.worker_queue, 'unfinished_tasks') else 'N/A'})")
             self._join_with_timeout(stage.worker_queue, f"work_queue for {stage.name}")
             print(f"  -> worker_queue drained - stage {stage.name} done")            
-            #stage.executor.shutdown(wait=False)  # Non-blocking shutdown
-            #stage.executor._threads.clear()      # Force-clear internal thread refs (undocumented but works)
-            #stage.executor=None # Force GC
+            stage.executor.shutdown(wait=False, cancel_futures=True)  # Non-blocking shutdown
+            stage.executor._threads.clear()      # Force-clear internal thread refs (undocumented but works)
+            stage.executor=None # Force GC
             # Safety: force any lingering loops to break
             stage.stop_event.set()
 
