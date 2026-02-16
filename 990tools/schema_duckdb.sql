@@ -418,3 +418,6 @@ CREATE INDEX idx_contractors_tax_year ON Contractors(tax_year);
 -- PoliticalContributions indexes
 CREATE INDEX idx_political_filer_ein ON PoliticalContributions(filer_ein);
 CREATE INDEX idx_political_tax_year ON PoliticalContributions(tax_year);
+-- Additional indexes for grant matching
+CREATE INDEX idx_grants_grant_id ON Grants(grant_id);
+CREATE INDEX idx_charities_colocator ON Charities(colocator);

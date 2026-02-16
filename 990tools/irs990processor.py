@@ -56,6 +56,8 @@ from irsfetch_processor import IRSFetchProcessor
 from officer_deduplication_processor import OfficerDeduplicationProcessor
 from photo_processor import PhotoProcessor
 from extract_processor import ExtractProcessor
+from grant_match_processor import GrantMatchProcessor
+from backfill_charities_processor import BackfillCharitiesProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from queue_status_display import QueueStatusDisplay
@@ -150,12 +152,13 @@ class IRS990Processor(BaseProcessor):
         self.address_dedup_processor = AddressDeduplicationProcessor(self.db_ops)
         # Initialize officer deduplication processor
         self.officer_dedup_processor = OfficerDeduplicationProcessor(self.db_ops)
+        # Initialize grant match processor
+        self.grant_match_processor = GrantMatchProcessor(self.db_ops)
+        # Initialize backfill charities processor
+        self.backfill_charities_processor = BackfillCharitiesProcessor(self.db_ops)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
-        # Initialize QueueStatusDisplay for visual monitoring (will be started by individual processors)
-        self.queue_status_display = None
-  
         # Initialize stats processor
         self.stats_processor = self.db_ops.get_stats_processor()
   
@@ -738,13 +741,13 @@ def main():
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
     parser.add_argument("--step", choices=["all", "irsfetch", "zip", "xml", "address", "geolocate",
-                                           "match", "percentiles", "export"],
+                                           "photos", "match", "grant_match", "backfill", "percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
     parser.add_argument("--start-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
-                                                  "photos", "match", "percentiles", "export"],
+                                                  "photos", "match", "grant_match", "backfill", "percentiles", "export"],
                            help="Starting step for processing")
     parser.add_argument("--stop-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
-                                                 "photos", "match", "percentiles", "export"],
+                                                 "photos", "match", "grant_match", "backfill", "percentiles", "export"],
                            help="Stopping step for processing")
     parser.add_argument("--progress", choices=["files", "bytes"], default="files",
                            help="Progress tracking type (default: files)")
@@ -759,7 +762,7 @@ def main():
 
     # Define processing steps in order
     steps = ["irsfetch", "zip", "xml", "address", "geolocate",
-                                            "photos", "match", "percentiles", "export"]
+             "photos", "match", "grant_match", "backfill", "percentiles", "export"]
 
     # Define step actions
     step_actions = {
@@ -770,6 +773,8 @@ def main():
         "geolocate": lambda: processor.geolocate_addresses(),
         "photos": lambda: processor.process_officer_photos(),
         "match": lambda: processor.match_grants_by_address(),
+        "grant_match": lambda: processor.grant_match_processor.match_grants(),
+        "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),
         "percentiles": lambda: processor.calculate_percentiles(),
         "export": lambda: processor.export_final_tsvs()
     }
