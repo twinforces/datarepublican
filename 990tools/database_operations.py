@@ -86,9 +86,9 @@ def wal_compaction_timer():
 class DuckDBPool:
     
                 
-    def __init__(self, db_path, initial_read=2, max_read=16, auto_checkpoint=False, dbUI=False):
+    def __init__(self, db_path, initial_read=17, max_read=128, auto_checkpoint=False, dbUI=False):
         self.db_path = db_path
-        self.read_queue = queue.Queue()
+        self.read_queue = queue.Queue(maxsize=max_read)
         self.log_wrapper_read = global_config.log_sql
         self.log_wrapper_write = global_config.log_sql
         self.wal_timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
@@ -117,11 +117,9 @@ class DuckDBPool:
         self.wal_timer.cancel()
         self.wal_timer= None
         self.max_read = max_read
+        self.local_pools = threading.local()
         self.created_read = 0
-        
-                  
-        for _ in range(initial_read):
-            self._create_and_queue_read_conn()
+        self.initial_read = initial_read
 
          # Check for --dbUI flag and start UI if present on a read only connection
         if dbUI or global_config.dbUI:
@@ -132,40 +130,46 @@ class DuckDBPool:
             except Exception as e:
                 log_info(f"Failed to start database UI: {e}")
                 log_info("Continuing without UI...")
+                
+    def _new_conn(self, read_only=False):
+        """Get a new connection with appropriate configuration"""
+        conn = LoggingDuckDBConnection(self.db_path, config=self.shared_config) if (self.log_wrapper_read and read_only) or (self.log_wrapper_write and not read_only) else duckdb.connect(self.db_path, config=self.shared_config)
+        self.config_connection(conn,read_only=read_only)
+        return conn
       
     def _create_and_queue_read_conn(self):
         with self._lock:
             if self.created_read >= self.max_read:
                 return False
             log_debug(f"Creating new read connection ({self.created_read + 1}/{self.max_read})")
-            conn = LoggingDuckDBConnection(self.db_path, config = self.shared_config) if self.log_wrapper_read else duckdb.connect(self.db_path, config = self.shared_config)
-            self.config_connection(conn,read_only=True)
+            conn = self._new_conn(read_only=True)
             self.read_queue.put(conn)
             self.created_read += 1
             return True
 
     @contextmanager
     def acquire_read(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
-        try:
-            conn = self.read_queue.get_nowait()
-        except queue.Empty:
-                    # Try to create one more if under limit
-                    if self._create_and_queue_read_conn():
-                        conn = self.read_queue.get_nowait()  # should succeed now
-                    else:
-                        # Pool full → block and wait for one to be returned
-                        attempt_count = 1
-                        while True:
-                            try:
-                                conn = self.read_queue.get(timeout=30)  # or raise PoolExhausted
-                                break
-                            except queue.Empty:
-                                log_warning(f"Read Pool exhausted, waiting for connection {attempt_count}")
-                                attempt_count += 1
+        tid = threading.get_ident()
+        if not hasattr(self.local_pools, 'conn'):
+            log_debug(f"TID={tid} DEDICATED init RO conn")
+            self.local_pools.conn = self._new_conn(read_only=True)
+            self.local_pools.health_ok = True
+        
+        conn = self.local_pools.conn
+        if not self.local_pools.health_ok or not self._health_check(conn):
+            log_warning(f"TID={tid} Dedicated recreate")
+            if hasattr(self.local_pools, 'conn'):
+                self.local_pools.conn.close()
+            self.local_pools.conn = self._new_conn(read_only=True)
+            self.local_pools.health_ok = True
+        
         try:
             yield conn
-        finally:
-            self.read_queue.put(conn)
+            self.local_pools.health_ok = True
+        except Exception:
+            self.local_pools.health_ok = False
+            log_warning(f"TID={tid} Query failed → mark unhealthy")
+            raise
 
     @contextmanager
     def acquire_write(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
@@ -184,9 +188,8 @@ class DuckDBPool:
                          
     def config_connection(self, conn,read_only):
         conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
-        #conn.execute(f"SET threads = {global_config.db_threads}")  # more threads
-        #conn.execute("SET memory_limit = '6GB'")
-        #conn.execute("SET enable_object_cache = true")   # Enable object cache
+        conn.execute(f"SET threads = {global_config.db_threads}")
+        conn.execute("SET enable_object_cache = true")
         #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
 
         #try:
@@ -212,8 +215,27 @@ class DuckDBPool:
         #    conn.execute("SET access_mode = READ_ONLY")
         #else:
         #    conn.execute("SET access_mode = READ_WRITE")
+
+    def _health_check(self, conn):
+        try:
+            conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception as e:
+            log_warning(f"Health check fail: {e}")
+            return False
+
+    def _new_conn(self, read_only):
+        wrapper = self.log_wrapper_read if read_only else self.log_wrapper_write
+        conn = LoggingDuckDBConnection(self.db_path, config=self.shared_config) if wrapper else duckdb.connect(self.db_path, config=self.shared_config)
+        self.config_connection(conn, read_only=read_only)
+        return conn
         
     def close(self):
+        # Close local thread conns if any active
+        for attr in dir(self.local_pools.__class__):
+            if attr.startswith('conn_'):  # Cleanup if needed
+                pass
+        # Legacy queue (if used)
         while not self.read_queue.empty():
             try:
                 conn = self.read_queue.get_nowait()
@@ -383,6 +405,13 @@ class DatabaseOperations:
         if cls._pool is None:
             raise RuntimeError("Pool not initialized")
         return cls._pool
+    
+    @classmethod
+    def close(cls):
+        if cls._pool is None:
+            raise RuntimeError("Pool not initialized")
+        cls._pool.close()
+        
     
     @contextmanager
     def acquire_read_conn(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
@@ -713,8 +742,8 @@ class DatabaseOperations:
             return class_name + 's'
 
     def close(self):
-        """Explicitly close the database connection"""
-        DuckDBPool.close()
+        """Explicitly close the database connection pool"""
+        DatabaseOperations.close()
 
     def __del__(self):
         """Cleanup database connection on object destruction"""

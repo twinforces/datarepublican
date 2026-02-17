@@ -137,7 +137,7 @@ class IRS990Processor(BaseProcessor):
         super().__init__(self.db_ops)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
         self.xml_processor = XMLProcessor(self.db_ops)
-        self.geolocation_processor = GeocodingAPIProcessor(self.db_ops)
+        self.geolocation_processor = None # GeocodingAPIProcessor(self.db_ops)
         #self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter

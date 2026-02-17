@@ -66,7 +66,7 @@ class GrantMatchProcessor(BaseProcessor):
 
     def _get_work_batch(self, last_id: Optional[str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         query = """
-        SELECT grant_id, grantee_name, colocator, tax_year
+        SELECT grant_id, grantee_name, colocator
         FROM Grants
         WHERE recipient_ein IS NULL
         """
@@ -87,7 +87,6 @@ class GrantMatchProcessor(BaseProcessor):
             grant_id = item['grant_id']
             grantee_name = item['grantee_name']
             colocator = item['colocator']
-            tax_year = item['tax_year']
 
             if not colocator:
                 continue
@@ -97,9 +96,8 @@ class GrantMatchProcessor(BaseProcessor):
             SELECT ein, filer_name, (COALESCE(govt_amt, 0) + COALESCE(receipt_amt, 0)) AS wealth
             FROM Charities
             WHERE colocator = ?
-            AND tax_year = ?
             """
-            charities = self.db_ops.execute_query(query_char, (colocator, tax_year)).fetchall()
+            charities = self.db_ops.execute_query(query_char, [colocator]).fetchall()
 
             if not charities:
                 continue

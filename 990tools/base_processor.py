@@ -148,7 +148,7 @@ class ThreadPoolManager:
             *args: Additional positional arguments for consumer_func
             **kwargs: Additional keyword arguments for consumer_func
         """
-        num_consumers = self.config.consumer_config.max_workers
+        num_consumers = 1 #self.config.consumer_config.max_workers There can be only one consumer for database safety
         log_info(f"Starting {num_consumers} consumer threads")
 
         for i in range(num_consumers):
@@ -438,7 +438,6 @@ class BaseProcessor:
     def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int], num_producers: int):
         """Abstract method: Feeder thread logic to fetch work items and put sentinels."""
         # Feeder thread: allow reads but not writes
-        self.db_ops.set_allow_write(False)
         raise NotImplementedError("Subclasses must implement _feed_thread")
 
     def _process_work_item(self, data: Any) -> PendingDatabaseContext:
@@ -603,76 +602,75 @@ class BaseProcessor:
     def _consumer_worker(self, num_producers: int):
         """Consumer worker thread: Drains result_queue, batches and executes PDCs with size-based preflight merging."""
         # Consumer thread: allow writes
-        self.db_ops.set_allow_write(True)
-        log_info("CONSUMER THREAD STARTED")
-        current_batch = []
-        current_estimated = 0
-        sentinels_received = 0
-
-        def save_current_batch():
-            nonlocal current_batch, current_estimated
-            if not current_batch:
-                return
-
-            merged = PendingDatabaseContext.merge(current_batch)
-            potential_total = self.total_objects_saved + merged.getTotalObjectCount()
-            current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
-            optimize_added = False
-            if current_optimize_needed > self.last_optimize:
-                op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
-                merged.operations.append(op)
-                optimize_added = True
-                log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
-
-            log_info(f"Saving batch of {len(current_batch)} contexts to database (estimated_updates: {merged.estimated_updates})")
-            self.update_pdc_size_gauge(merged)
-            merged.save_to_database(self.db_ops)
-            #self.db_ops.db_conn.execute("CHECKPOINT")
-            log_info(f"Successfully saved batch of {len(current_batch)} contexts + checkpointed")
-            self.total_objects_saved += merged.getTotalObjectCount()
-            self.total_processed += len(current_batch)
-
+        with self.db_ops.acquire_write_conn() as conn:
             current_batch = []
             current_estimated = 0
-            merged = None
-            gc.collect()
+            sentinels_received = 0
 
-            if optimize_added:
-                self.last_optimize = current_optimize_needed
+            def save_current_batch():
+                nonlocal current_batch, current_estimated
+                if not current_batch:
+                    return
 
-        while sentinels_received < num_producers or current_batch:
-            try:
-                item = self.result_queue.get_nowait()
-            except queue.Empty:
-                if sentinels_received >= num_producers and current_batch:
-                    save_current_batch()
-                    break
-                time.sleep(1.1)  # Avoid busy loop
-                continue
+                merged = PendingDatabaseContext.merge(current_batch)
+                potential_total = self.total_objects_saved + merged.getTotalObjectCount()
+                current_optimize_needed = potential_total // OPTIMIZE_THRESHOLD
+                optimize_added = False
+                if current_optimize_needed > self.last_optimize:
+                    op = DatabaseOperation(DatabaseOperationType.OPTIMIZE_DATABASE, data=None)
+                    merged.operations.append(op)
+                    optimize_added = True
+                    log_info(f"Appending OPTIMIZE_DATABASE to batch after {potential_total} objects")
 
-            if item.is_sentinel():
-                sentinels_received += 1
-                log_info(f"Received sentinel {sentinels_received}/{num_producers}")
+                log_info(f"Saving batch of {len(current_batch)} contexts to database (estimated_updates: {merged.estimated_updates})")
+                self.update_pdc_size_gauge(merged)
+                merged.save_to_database(self.db_ops)
+                #self.db_ops.db_conn.execute("CHECKPOINT")
+                log_info(f"Successfully saved batch of {len(current_batch)} contexts + checkpointed")
+                self.total_objects_saved += merged.getTotalObjectCount()
+                self.total_processed += len(current_batch)
+
+                current_batch = []
+                current_estimated = 0
+                merged = None
+                gc.collect()
+
+                if optimize_added:
+                    self.last_optimize = current_optimize_needed
+
+            while sentinels_received < num_producers or current_batch:
+                try:
+                    item = self.result_queue.get_nowait()
+                except queue.Empty:
+                    if sentinels_received >= num_producers and current_batch:
+                        save_current_batch()
+                        break
+                    time.sleep(1.1)  # Avoid busy loop
+                    continue
+
+                if item.is_sentinel():
+                    sentinels_received += 1
+                    log_info(f"Received sentinel {sentinels_received}/{num_producers}")
+                    self.result_queue.task_done()
+                    continue
+
+                context = item.data
                 self.result_queue.task_done()
-                continue
 
-            context = item.data
-            self.result_queue.task_done()
+                # Preflight: check if adding this context would exceed the size limit
+                if current_estimated + context.estimated_updates > GEOCODING_MAX_UPDATES_PER_BATCH and current_batch:
+                    # Save current batch before adding this large context
+                    save_current_batch()
 
-            # Preflight: check if adding this context would exceed the size limit
-            if current_estimated + context.estimated_updates > GEOCODING_MAX_UPDATES_PER_BATCH and current_batch:
-                # Save current batch before adding this large context
-                save_current_batch()
+                # Add context to current batch
+                current_batch.append(context)
+                current_estimated += context.estimated_updates
 
-            # Add context to current batch
-            current_batch.append(context)
-            current_estimated += context.estimated_updates
+                # Save if batch size reached
+                if len(current_batch) >= CONSUMER_BATCH_SIZE:
+                    save_current_batch()
 
-            # Save if batch size reached
-            if len(current_batch) >= CONSUMER_BATCH_SIZE:
-                save_current_batch()
-
-        log_info("CONSUMER THREAD COMPLETED")
+            log_info("CONSUMER THREAD COMPLETED")
 
     def setup_shutdown_handlers(self):
         def signal_handler(signum, frame):

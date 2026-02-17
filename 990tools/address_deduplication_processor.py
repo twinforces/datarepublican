@@ -505,8 +505,6 @@ class AddressDeduplicationProcessor(BaseProcessor):
 
             log_info(f"Setup phase completed: Created pending_canonicals table with {count} canonical address groups")
 
-            # Disable writes for main thread after setup
-            self.db_ops.set_allow_write(False)
 
         except Exception as e:
             try:
@@ -757,9 +755,9 @@ class AddressDeduplicationProcessor(BaseProcessor):
         # Phase 3: Cleanup - Drop temporary table
         log_info("Phase 3: Cleanup - Dropping pending_canonicals table")
         try:
-            self.db_ops.set_allow_write(True)
-            self.db_ops.execute_query("DROP TABLE IF EXISTS pending_canonicals;")
-            log_info("Successfully dropped pending_canonicals table")
+            with self.db_ops.acquire_write_conn() as conn:
+                conn.execute_query("DROP TABLE IF EXISTS pending_canonicals;", conn=conn)
+                log_info("Successfully dropped pending_canonicals table")
         except Exception as e:
             log_warning(f"Failed to drop pending_canonicals table: {e}")
 
