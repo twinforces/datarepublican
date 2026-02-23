@@ -480,9 +480,9 @@ class PendingDatabaseContext:
             # Now attempt CHECKPOINT for WAL flushing and performance benefits
             try:
                 # Get the fresh connection after recycling
-                fresh_conn = db_ops._get_thread_local_connection()
-                fresh_conn.execute("CHECKPOINT")
-                log_debug("Intermediate checkpoint succeeded after connection recycling")
+                with db_ops.acquire_write_conn() as fresh_conn:
+                    fresh_conn.execute("CHECKPOINT")
+                    log_debug("Intermediate checkpoint succeeded after connection recycling")
             except Exception as checkpoint_e:
                 log_warning(f"Checkpoint failed even after recycling: {checkpoint_e}")
                 # Continue anyway - the recycling itself provides WAL cleanup

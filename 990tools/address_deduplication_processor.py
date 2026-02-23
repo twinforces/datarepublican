@@ -457,62 +457,62 @@ class AddressDeduplicationProcessor(BaseProcessor):
         log_info("Phase 1: Setup - Creating pending_canonicals table")
         
         # Use explicit thread-local connection (safe even if called from any thread)
-        conn = self.db_ops._get_thread_local_connection()
+        with self.db_ops.acquire_write_conn as conn:
         
-        try:
-            # Explicit transaction for the entire setup
-            conn.execute("BEGIN TRANSACTION")
-
-            # Drop if exists (safe)
-            conn.execute("DROP TABLE IF EXISTS pending_canonicals")
-
-            # Create the table
-            conn.execute("""
-                CREATE TABLE pending_canonicals (
-                    canonical_address VARCHAR PRIMARY KEY,
-                    root_id UUID
-                )
-            """)
-
-            # Insert all distinct canonical addresses with min address_id as group_pk
-            conn.execute("""
-                INSERT INTO pending_canonicals
-                SELECT 
-                    canonical_address,
-                    MIN(address_id) AS root_id
-                FROM Addresses 
-                WHERE canonical_address IS NOT NULL AND canonical_address != '' and master_id is NULL and colocator is NULL
-                GROUP BY canonical_address
-                HAVING MAX(colocator IS NOT NULL) = FALSE
-            """)
-
-            # Create index for fast producer lookups
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_pk ON pending_canonicals(root_id)")
-
-            # Commit everything atomically
-            conn.commit()
-            log_info("pending_canonicals table created and populated successfully")
-
-            # Final clean checkpoint — no active transaction, no other threads touching the DB yet
-            conn.execute("CHECKPOINT")   # normal CHECKPOINT works perfectly here
-            log_info("Clean checkpoint completed after setup")
-            self.db_ops.execute_query("VACUUM ANALYZE pending_canonicals;")
-            print("Work Table Complete")
-
-            # Get count for logging
-            count_result = self.db_ops.execute_query("SELECT COUNT(*) FROM pending_canonicals;")
-            count = count_result.fetchone()[0] if count_result else 0
-
-            log_info(f"Setup phase completed: Created pending_canonicals table with {count} canonical address groups")
-
-
-        except Exception as e:
             try:
-                conn.rollback()
-            except:
-                pass
-            log_error(f"Failed to setup pending_canonicals: {e}", exc_info=True)
-            raise
+                # Explicit transaction for the entire setup
+                conn.execute("BEGIN TRANSACTION")
+
+                # Drop if exists (safe)
+                conn.execute("DROP TABLE IF EXISTS pending_canonicals")
+
+                # Create the table
+                conn.execute("""
+                    CREATE TABLE pending_canonicals (
+                        canonical_address VARCHAR PRIMARY KEY,
+                        root_id UUID
+                    )
+                """)
+
+                # Insert all distinct canonical addresses with min address_id as group_pk
+                conn.execute("""
+                    INSERT INTO pending_canonicals
+                    SELECT 
+                        canonical_address,
+                        MIN(address_id) AS root_id
+                    FROM Addresses 
+                    WHERE canonical_address IS NOT NULL AND canonical_address != '' and master_id is NULL and colocator is NULL
+                    GROUP BY canonical_address
+                    HAVING MAX(colocator IS NOT NULL) = FALSE
+                """)
+
+                # Create index for fast producer lookups
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_pk ON pending_canonicals(root_id)")
+
+                # Commit everything atomically
+                conn.commit()
+                log_info("pending_canonicals table created and populated successfully")
+
+                # Final clean checkpoint — no active transaction, no other threads touching the DB yet
+                conn.execute("CHECKPOINT")   # normal CHECKPOINT works perfectly here
+                log_info("Clean checkpoint completed after setup")
+                self.db_ops.execute_query("VACUUM ANALYZE pending_canonicals;")
+                print("Work Table Complete")
+
+                # Get count for logging
+                count_result = self.db_ops.execute_query("SELECT COUNT(*) FROM pending_canonicals;")
+                count = count_result.fetchone()[0] if count_result else 0
+
+                log_info(f"Setup phase completed: Created pending_canonicals table with {count} canonical address groups")
+
+
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                log_error(f"Failed to setup pending_canonicals: {e}", exc_info=True)
+                raise
     
     def _get_work_batch(self, where_clause: str, params: Tuple, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Get a batch of address deduplication work items from pending_canonicals using key-value paging"""

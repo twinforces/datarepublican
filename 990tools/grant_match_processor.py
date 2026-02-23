@@ -36,7 +36,7 @@ class GrantMatchProcessor(BaseProcessor):
         return self.process_parallel(global_config.max_files, global_config.workers)
 
     def get_work_count(self, max_files: Optional[int] = None) -> int:
-        query = "SELECT COUNT(*) FROM Grants WHERE recipient_ein IS NULL"
+        query = "SELECT COUNT(*) FROM Grants WHERE recipient_ein IS NULL and colocator IS NOT NULL"
         result = self.db_ops.execute_query(query)
         total = result.fetchone()[0]
         if max_files:
@@ -68,7 +68,7 @@ class GrantMatchProcessor(BaseProcessor):
         query = """
         SELECT grant_id, grantee_name, colocator
         FROM Grants
-        WHERE recipient_ein IS NULL
+        WHERE recipient_ein IS NULL and colocator IS NOT NULL
         """
         params: Tuple = (self.batch_size,)
         if last_id:

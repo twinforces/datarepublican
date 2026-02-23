@@ -88,7 +88,6 @@ class DuckDBPool:
                 
     def __init__(self, db_path, initial_read=17, max_read=128, auto_checkpoint=False, dbUI=False):
         self.db_path = db_path
-        self.read_queue = queue.Queue(maxsize=max_read)
         self.log_wrapper_read = global_config.log_sql
         self.log_wrapper_write = global_config.log_sql
         self.wal_timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
@@ -137,16 +136,6 @@ class DuckDBPool:
         self.config_connection(conn,read_only=read_only)
         return conn
       
-    def _create_and_queue_read_conn(self):
-        with self._lock:
-            if self.created_read >= self.max_read:
-                return False
-            log_debug(f"Creating new read connection ({self.created_read + 1}/{self.max_read})")
-            conn = self._new_conn(read_only=True)
-            self.read_queue.put(conn)
-            self.created_read += 1
-            return True
-
     @contextmanager
     def acquire_read(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
         tid = threading.get_ident()
@@ -164,6 +153,7 @@ class DuckDBPool:
             self.local_pools.health_ok = True
         
         try:
+            conn.commit()  # Ensure any pending transactions are resolved before yielding
             yield conn
             self.local_pools.health_ok = True
         except Exception:
@@ -233,15 +223,10 @@ class DuckDBPool:
     def close(self):
         # Close local thread conns if any active
         for attr in dir(self.local_pools.__class__):
-            if attr.startswith('conn_'):  # Cleanup if needed
-                pass
-        # Legacy queue (if used)
-        while not self.read_queue.empty():
-            try:
-                conn = self.read_queue.get_nowait()
-                conn.close()
-            except queue.Empty:
-                break
+            if attr.startswith('conn'):  # Cleanup if needed
+                attr_conn = getattr(self.local_pools, attr)
+                if attr_conn:
+                    attr_conn.close()
         if hasattr(self, 'write_conn'):
             self.write_conn.close()
             
@@ -406,11 +391,6 @@ class DatabaseOperations:
             raise RuntimeError("Pool not initialized")
         return cls._pool
     
-    @classmethod
-    def close(cls):
-        if cls._pool is None:
-            raise RuntimeError("Pool not initialized")
-        cls._pool.close()
         
     
     @contextmanager
@@ -428,6 +408,21 @@ class DatabaseOperations:
         cls.initialize_pool(db_path, **pool_kwargs)
         return cls._pool
         
+    @staticmethod
+    def closePool():
+        if DatabaseOperations._pool is None:
+            raise RuntimeError("Pool not initialized")
+        DatabaseOperations._pool.close()
+        DatabaseOperations._pool = None
+        
+    def close(self):
+        """Explicitly close the database connection pool"""
+        DatabaseOperations.closePool()
+
+    def __del__(self):
+        """Cleanup database connection on object destruction"""
+        self.close()
+
     def _init_connection(self):
         """Initialize DuckDB connection and schema"""
         # Set up timer for WAL compaction
@@ -741,13 +736,6 @@ class DatabaseOperations:
         else:
             return class_name + 's'
 
-    def close(self):
-        """Explicitly close the database connection pool"""
-        DatabaseOperations.close()
-
-    def __del__(self):
-        """Cleanup database connection on object destruction"""
-        self.close()
 
     # ZipFile operations
     def insert_zip_file(self, zip_file: ZipFile) -> str:
