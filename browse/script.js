@@ -112,7 +112,7 @@ function renderPopup() {
                           title="${item.description || ""}">
                     ${item.title}
                   </button>
-                `
+                `,
                 )
                 .join("")}
             </div>
@@ -132,7 +132,7 @@ function renderPopup() {
                           title="${group.description || ""}">
                     ${group.title}
                   </button>
-                `
+                `,
                   )
                   .join("") || ""
               }
@@ -153,7 +153,7 @@ function renderPopup() {
                           title="${group.description || ""}">
                     ${group.title}
                   </button>
-                `
+                `,
                   )
                   .join("") || ""
               }
@@ -167,7 +167,7 @@ function renderPopup() {
                 presets
                   .find(
                     (item) =>
-                      item.title === "Friendly Neighborhood Billionaires"
+                      item.title === "Friendly Neighborhood Billionaires",
                   )
                   ?.subcategories?.map(
                     (group) => `
@@ -177,7 +177,7 @@ function renderPopup() {
                           title="${group.description || ""}">
                     ${group.title}
                   </button>
-                `
+                `,
                   )
                   .join("") || ""
               }
@@ -198,7 +198,7 @@ function renderPopup() {
         ? "replace"
         : "add";
       console.log(
-        `${mode === "add" ? "Adding" : "Replacing"} ${title}: ${eins}`
+        `${mode === "add" ? "Adding" : "Replacing"} ${title}: ${eins}`,
       );
       loadPreset({ eins, title }, mode);
     });
@@ -316,7 +316,7 @@ $(document).ready(function () {
     viewModel.setZoom(
       parseFloat(params.get("zx")),
       parseFloat(params.get("zy")),
-      parseFloat(params.get("zk"))
+      parseFloat(params.get("zk")),
     );
   }
   if (params.has("hc")) {
@@ -392,7 +392,7 @@ function addEINFromInput() {
   if (!/^\d{3,9}$|86|99/) {
     // allow hack codes too.
     alert(
-      "EIN must be 9 digits after removing dashes/spaces or 3 for countries."
+      "EIN must be 9 digits after removing dashes/spaces or 3 for countries.",
     );
     return;
   }
@@ -416,8 +416,8 @@ function renderColorPicker() {
   for (let t = 0; t < 1; t += 0.02) {
     boxes.push(
       `<span class="color-box" style="width:12px; height:12px; background-color: ${interpolateRainbow(
-        t
-      )}" title=${t}></span>`
+        t,
+      )}" title=${t}></span>`,
     );
   }
   $("#colorPicker1").html(boxes.join(""));
@@ -425,8 +425,8 @@ function renderColorPicker() {
   for (let t = 0; t < 1; t += 0.02) {
     boxes.push(
       `<span class="color-box" style="width:12px; height:12px; background-color: ${interpolateDarkRainbow(
-        t
-      )}" title=${t}></span>`
+        t,
+      )}" title=${t}></span>`,
     );
   }
   $("#colorPicker2").html(boxes.join(""));
@@ -442,7 +442,7 @@ function renderActiveEINs() {
     const c = Charity.getCharity(ein);
     const name = c?.name || "???";
     const $tag = $(
-      `<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>`
+      `<div class="filter-tag flex items-center gap-0.5 rounded border border-green bg-green/10 text-green px-2 py-1 text-xs"></div>`,
     );
     $tag.on("click", function (event) {
       flashNodeAndShow(c.ein);
@@ -451,16 +451,16 @@ function renderActiveEINs() {
     // Add color box
     const $colorBox = $(
       `<div class="color-box" style="width:12px; height:12px; background-color: ${getColorForEIN(
-        c.ein
-      ).toString()}"></div>`
+        c.ein,
+      ).toString()}"></div>`,
     );
     const $text = $(
       `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
         .split(/[:~]/)[0]
-        .slice(2)}"></span>`
+        .slice(2)}"></span>`,
     ).text(name);
     const $rm = $(
-      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1" style=" cursor:pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
+      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1" style=" cursor:pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>',
     ).attr("data-ein", ein);
     $rm.on("click", function () {
       viewModel.removeFromShowList(ein);
@@ -481,15 +481,15 @@ function renderHideEINs() {
   viewModel.getHideList().forEach((ein) => {
     const name = Charity.getCharity(ein)?.name || "???";
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-red bg-red/10 text-red rounded-md px-2 py-1 text-xs"></div>'
+      '<div class="filter-tag flex items-center gap-0.5 rounded border border-red bg-red/10 text-red rounded-md px-2 py-1 text-xs"></div>',
     );
     const $text = $(
       `<span title="EIN: ${ein.split(/[:~]/)[0].slice(0, 2)}-${ein
         .split(/[:~]/)[0]
-        .slice(2)}"></span>`
+        .slice(2)}"></span>`,
     ).text(name);
     const $rm = $(
-      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
+      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>',
     ).attr("data-nein", ein);
     $rm.on("click", function () {
       viewModel.removeFromHideList(ein);
@@ -520,11 +520,11 @@ function renderActiveKeywords() {
 
   viewModel.getKeywordList().forEach((kw) => {
     const $tag = $(
-      '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>'
+      '<div class="filter-tag flex items-center gap-0.5 rounded border border-blue bg-blue/10 text-blue rounded-md px-2 py-1 text-xs"></div>',
     );
     const $text = $("<span></span>").text(kw);
     const $rm = $(
-      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>'
+      '<span class="remove-filter opacity-50 hover:opacity-100 size-5 -my-0.5 -mr-1 cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Zm7.53-3.53a.75.75 0 0 0-1.06 1.06L10.94 12l-2.47 2.47a.75.75 0 1 0 1.06 1.06L12 13.06l2.47 2.47a.75.75 0 1 0 1.06-1.06L13.06 12l2.47-2.47a.75.75 0 0 0-1.06-1.06L12 10.94 9.53 8.47Z" clip-rule="evenodd"/></svg></span>',
     ).attr("data-kw", kw);
     $rm.on("click", function () {
       viewModel.removeFromKeywords(kw);
@@ -601,7 +601,7 @@ function computeLinkY(node, linkIndex, links, heightKey, isSourceSide) {
   const sortedLinks = [...links].sort(compareLinks);
   const cumulativeHeight = d3.sum(
     sortedLinks.slice(0, linkIndex),
-    (l) => l.width
+    (l) => l.width,
   );
   const centerY = (node.y0 + node.y1) / 2;
   const height = node[heightKey] || 0;
@@ -623,7 +623,7 @@ function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
       outflowIndex,
       source.sourceLinks,
       "outflowHeight",
-      true
+      true,
     );
     const sourceX = source.x1;
 
@@ -635,7 +635,7 @@ function sankeyLinkHorizontalTrapezoid(curvature = 0.5) {
       inflowIndex,
       target.targetLinks,
       "inflowHeight",
-      false
+      false,
     );
     const targetX = target.x0;
 
@@ -663,11 +663,11 @@ function calculateRegularPosition(node, scale, height, maxRowsInColumn) {
 
   node.outflowHeight = Math.max(
     dynamicMin,
-    Math.min(sankeyHeight, node.grantsLogTotal * scaleFactor)
+    Math.min(sankeyHeight, node.grantsLogTotal * scaleFactor),
   );
   node.inflowHeight = Math.max(
     dynamicMin,
-    Math.min(sankeyHeight, node.grantsInLogTotal * scaleFactor)
+    Math.min(sankeyHeight, node.grantsInLogTotal * scaleFactor),
   );
 
   if (node.grantsLogTotal === 0) {
@@ -680,7 +680,7 @@ function calculateRegularPosition(node, scale, height, maxRowsInColumn) {
   }
   if (!isFinite(node.outflowHeight) || !isFinite(node.inflowHeight)) {
     console.error(
-      `Invalid heights for ${node.filer_ein}: outflow=${node.outflowHeight}, inflow=${node.inflowHeight}`
+      `Invalid heights for ${node.filer_ein}: outflow=${node.outflowHeight}, inflow=${node.inflowHeight}`,
     );
     node.outflowHeight = dynamicMin * 10; // Fallback larger
     node.inflowHeight = dynamicMin * 10;
@@ -702,7 +702,7 @@ function normalizeStrokeWidths(sankey) {
     if (totalOutflowWidth > 0 && outflowHeight > 0) {
       const scaleFactor = outflowHeight / totalOutflowWidth;
       node.sourceLinks.forEach(
-        (link) => (link.normalizedWidth = link.width * scaleFactor)
+        (link) => (link.normalizedWidth = link.width * scaleFactor),
       );
     }
     const totalInflowWidth = d3.sum(node.targetLinks, (l) => l.width);
@@ -710,7 +710,7 @@ function normalizeStrokeWidths(sankey) {
     if (totalInflowWidth > 0 && inflowHeight > 0) {
       const scaleFactor = inflowHeight / totalInflowWidth;
       node.targetLinks.forEach(
-        (link) => (link.normalizedWidth = link.width * scaleFactor)
+        (link) => (link.normalizedWidth = link.width * scaleFactor),
       );
     }
   });
@@ -876,7 +876,7 @@ function zoomToFit() {
       d3.zoomIdentity
         .translate(width / 2, height / 2)
         .scale(scale)
-        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2),
     );
 }
 
@@ -933,7 +933,7 @@ function generateGraph() {
     .filter(
       (event) =>
         event.type === "wheel" ||
-        (event.type === "mousedown" && event.button === 0 && !event.shiftKey)
+        (event.type === "mousedown" && event.button === 0 && !event.shiftKey),
     )
     .on("zoom", (event) => {
       svg.select("g.main").attr("transform", event.transform);
@@ -954,7 +954,7 @@ function generateGraph() {
       viewModel.setZoom(
         transform.x.toFixed(4),
         transform.y.toFixed(4),
-        transform.k.toFixed(4)
+        transform.k.toFixed(4),
       );
       history.replaceState(null, "", `?${params.toString()}`);
     });
@@ -1119,7 +1119,7 @@ function generateGraph() {
       viewModel.getShowList().length
         ? viewModel.getShowList()
         : [viewModel.GOV_EIN],
-      viewModel.previousData
+      viewModel.previousData,
     );
     $("#statusSpinner").hide();
   } catch (err) {
@@ -1154,7 +1154,7 @@ function generateGraph() {
         d3.zoomIdentity
           .translate(width / 2, height / 2)
           .scale(scale)
-          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+          .translate(-dx - bounds.width / 2, -dy - bounds.height / 2),
       );
   };
   document.getElementById("scaleUp").onclick = () => {
@@ -1291,7 +1291,7 @@ function generateGraph() {
       d3.zoomIdentity
         .translate(width / 2, height / 2)
         .scale(scale)
-        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2)
+        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2),
     );
   }
 }
@@ -1305,14 +1305,14 @@ function adjustCircularLinks(graph) {
       l.source.sourceLinks.indexOf(l),
       l.source.sourceLinks,
       "outflowHeight",
-      true
+      true,
     );
     l.y1 = computeLinkY(
       l.target,
       l.target.targetLinks.indexOf(l),
       l.target.targetLinks,
       "inflowHeight",
-      false
+      false,
     );
     adjustCircularLink(l);
   }
@@ -1364,7 +1364,7 @@ function scrollToNode(dataId) {
     {
       scrollTop: $element.offset().top,
     },
-    500
+    500,
   ); // 500ms for smooth scrolling
 }
 
@@ -1440,7 +1440,7 @@ function renderFocusedSankey(
   width,
   height,
   nodeIds,
-  previousData
+  previousData,
 ) {
   const ANIM_NODE = 500;
   const ANIM_LINK = 1200;
@@ -1452,10 +1452,10 @@ function renderFocusedSankey(
   const nodeCount = currentData.nodes.length;
   const edgeCount = currentData.links.length;
   const edgeTotal = formatNumber(
-    currentData.links.reduce((sum, g) => sum + g.amt, 0)
+    currentData.links.reduce((sum, g) => sum + g.amt, 0),
   );
   const nodeGov = formatNumber(
-    currentData.nodes.reduce((sum, n) => sum + n.govt_amt, 0)
+    currentData.nodes.reduce((sum, n) => sum + n.govt_amt, 0),
   );
   dataLoaded(true);
 
@@ -1520,7 +1520,7 @@ function renderFocusedSankey(
   linkEnter
     .append("title")
     .text(
-      (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`
+      (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`,
     );
 
   // Function to extract points from path (unchanged)
@@ -1598,8 +1598,8 @@ function renderFocusedSankey(
     .text(
       (d) =>
         `${d.source.name} → ${d.target.name}\n$${formatNumber(
-          d.amt
-        )} (Circular)`
+          d.amt,
+        )} (Circular)`,
     );
 
   // Node rendering
@@ -1649,7 +1649,7 @@ function renderFocusedSankey(
               y0: d.previousY0 || d.y0,
               x1: d.previousX1 || d.x1,
               y1: d.previousY1 || d.y1,
-            })
+            }),
       )
       .attr("fill", getColorForEIN(d.id))
       .style("cursor", d.isTerminal ? "zoom-in" : "grab")
@@ -1672,7 +1672,7 @@ function renderFocusedSankey(
     .transition()
     .duration(ANIM_NODE)
     .attr("d", (d) =>
-      d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d)
+      d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d),
     );
 
   // Hat and text rendering (unchanged for brevity, but ensure transitions are safe)
@@ -1684,9 +1684,9 @@ function renderFocusedSankey(
 
   const leftHats = hatGroup.selectAll("g.hat-left").data(
     graph.nodes.filter(
-      (d) => d.canExpandInflows && d.invisibleGrantsIn.length > 0
+      (d) => d.canExpandInflows && d.invisibleGrantsIn.length > 0,
     ),
-    (d) => `${d.id}-left`
+    (d) => `${d.id}-left`,
   );
 
   leftHats
@@ -1706,7 +1706,7 @@ function renderFocusedSankey(
   leftHatEnter
     .append("path")
     .attr("d", (d) =>
-      generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+      generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal }),
     )
     .attr("fill", (d) => getColorForEIN(d.id))
     .attr("stroke", "#000")
@@ -1724,13 +1724,13 @@ function renderFocusedSankey(
         d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
           ? 1
           : d.hasLeftHat &&
-            !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
-          ? 0
-          : 1
+              !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+            ? 0
+            : 1,
       )
       .select("path")
       .attr("d", (d) =>
-        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal }),
       );
   } catch (e) {
     console.error("Left hats transition failed:", e);
@@ -1740,22 +1740,22 @@ function renderFocusedSankey(
         d.canExpandInflows && d.invisibleGrantsIn.length > 0 && !d.hasLeftHat
           ? 1
           : d.hasLeftHat &&
-            !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
-          ? 0
-          : 1
+              !(d.canExpandInflows && d.invisibleGrantsIn.length > 0)
+            ? 0
+            : 1,
       )
       .select("path")
       .attr("d", (d) =>
-        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal })
+        generatePlusPath({ ...d, isRight: false, isTerminal: d.isTerminal }),
       );
   }
 
   const rightHats = hatGroup.selectAll("g.hat-right").data(
     graph.nodes.filter(
       (d) =>
-        !d.isTerminal && d.canExpandOutflows && d.invisibleGrants.length > 0
+        !d.isTerminal && d.canExpandOutflows && d.invisibleGrants.length > 0,
     ),
-    (d) => `${d.id}-right`
+    (d) => `${d.id}-right`,
   );
 
   rightHats
@@ -1794,13 +1794,13 @@ function renderFocusedSankey(
         !d.hasRightHat
           ? 1
           : d.hasRightHat &&
-            !(
-              !d.isTerminal &&
-              d.canExpandOutflows &&
-              d.invisibleGrants.length > 0
-            )
-          ? 0
-          : 1
+              !(
+                !d.isTerminal &&
+                d.canExpandOutflows &&
+                d.invisibleGrants.length > 0
+              )
+            ? 0
+            : 1,
       )
       .select("path")
       .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
@@ -1815,13 +1815,13 @@ function renderFocusedSankey(
         !d.hasRightHat
           ? 1
           : d.hasRightHat &&
-            !(
-              !d.isTerminal &&
-              d.canExpandOutflows &&
-              d.invisibleGrants.length > 0
-            )
-          ? 0
-          : 1
+              !(
+                !d.isTerminal &&
+                d.canExpandOutflows &&
+                d.invisibleGrants.length > 0
+              )
+            ? 0
+            : 1,
       )
       .select("path")
       .attr("d", (d) => generatePlusPath({ ...d, isRight: true }));
@@ -1844,7 +1844,7 @@ function renderFocusedSankey(
     .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
     .attr("y", (d) => ((d.previousY0 || d.y0) + (d.previousY1 || d.y1)) / 2)
     .attr("text-anchor", (d) =>
-      d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+      d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
     )
     .style("cursor", "crosshair")
     .attr("class", "nodeLabel")
@@ -1859,7 +1859,7 @@ function renderFocusedSankey(
       .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
       .attr("y", (d) => (d.y0 + d.y1) / 2)
       .attr("text-anchor", (d) =>
-        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
       )
       .style("cursor", "crosshair")
       .attr("class", "nodeLabel")
@@ -1873,7 +1873,7 @@ function renderFocusedSankey(
       .attr("x", (d) => (d.x0 < sankey.nodeWidth() / 2 ? d.x1 + 6 : d.x0 - 6))
       .attr("y", (d) => (d.y0 + d.y1) / 2)
       .attr("text-anchor", (d) =>
-        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end"
+        d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
       )
       .style("cursor", "crosshair")
       .attr("class", "nodeLabel")
@@ -1887,19 +1887,19 @@ function renderFocusedSankey(
   viewModel.cleanAfterRender();
   dataLoaded(true);
   updateStatus(
-    `Orgs: ${nodeCount} USG$: ${nodeGov} Flows:${edgeCount} $:${edgeTotal}`
+    `Orgs: ${nodeCount} USG$: ${nodeGov} Flows:${edgeCount} $:${edgeTotal}`,
   );
 
   const post = encodeURIComponent(
-    `Hey, @twinforces @datarepublican, Check this out because:`
+    `Hey, @GrumpTechBro @datarepublican, Check this out because:`,
   );
   const url = encodeURIComponent(window.location.href);
   const hashtags = encodeURIComponent("DRBadNGOs");
   $("#PostBox").html(
-    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&hashtags=${hashtags}&via=twinforces" 
+    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&hashtags=${hashtags}&via=grumpytechbro" 
     target="_blank"  
     title="Share on X" 
-    class="x-share-button">&#x1D54F;</a>`
+    class="x-share-button">&#x1D54F;</a>`,
   );
   return currentData;
 }
@@ -1920,7 +1920,7 @@ function handleSearch(e) {
 
   const matches = Object.values(Charity.charityLookup)
     .filter(
-      (d) => d.name.toLowerCase().includes(value) || d.ein.includes(value)
+      (d) => d.name.toLowerCase().includes(value) || d.ein.includes(value),
     )
     .slice(0, 5);
 
@@ -1935,7 +1935,7 @@ function handleSearch(e) {
                onmouseenter="handleSearchResultHover(${index})">
             ${d.name}
           </div>
-        `
+        `,
       )
       .join("");
     searchResults.classList.remove("hidden");
@@ -2085,12 +2085,12 @@ function showControlPanel(type, data, element) {
     let outflows = "<p>Outflows: N/A</p>";
     let hiddenInflows = node.invisibleGrantsIn.length
       ? `<p><i>$${formatNumber(
-          node.invisibleGrantsIn.reduce((sum, g) => sum + g.amt, 0)
+          node.invisibleGrantsIn.reduce((sum, g) => sum + g.amt, 0),
         )} hidden (${node.invisibleGrantsIn.length} grants)</i></p>`
       : "";
     let hiddenOutflows = node.invisibleGrants.length
       ? `<p><i>$${formatNumber(
-          node.invisibleGrants.reduce((sum, g) => sum + g.amt, 0)
+          node.invisibleGrants.reduce((sum, g) => sum + g.amt, 0),
         )} hidden (${node.invisibleGrants.length} grants)</i></p>`
       : "";
 
@@ -2103,8 +2103,8 @@ function showControlPanel(type, data, element) {
           <div class="flex-1 bg-gray-200 p-4">
             <p>US Taxpayers: <b>$4.6T</b></p>
             <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
-        node.visibleGrants.length
-      } grants)</p>
+              node.visibleGrants.length
+            } grants)</p>
             ${hiddenOutflows}
           </div>
           ${buttons}
@@ -2113,13 +2113,13 @@ function showControlPanel(type, data, element) {
     } else {
       if (!node.isRoot)
         inflows = `<p>Inflows: $${formatNumber(
-          node.visibleGrantsInTotal - node.govt_amt
+          node.visibleGrantsInTotal - node.govt_amt,
         )} visible (${
           node.visibleGrantsIn.length
         } grants)</p> ${hiddenInflows}`;
       if (!node.isTerminal)
         outflows = `<p>Outflows: $${formatNumber(
-          node.visibleGrantsTotal
+          node.visibleGrantsTotal,
         )} visible (${node.visibleGrants.length} grants)</p> ${hiddenOutflows}`;
       const bacon = "<span>&#x1F953;</span>";
       const stop = "<span>&#x1F6D1;</span>";
