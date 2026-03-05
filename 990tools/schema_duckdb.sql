@@ -421,3 +421,104 @@ CREATE INDEX idx_political_tax_year ON PoliticalContributions(tax_year);
 -- Additional indexes for grant matching
 CREATE INDEX idx_grants_grant_id ON Grants(grant_id);
 CREATE INDEX idx_charities_colocator ON Charities(colocator);
+
+-- FEC Committees table
+CREATE TABLE fec_committees (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    fec_cmte_id VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    treasurer_name VARCHAR,
+    report_year INTEGER NOT NULL,
+    colocator_id UUID,  -- Link to Addresses or colocator
+    colocation_score DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(fec_cmte_id, report_year)
+);
+
+-- FEC Candidate Spendings table
+CREATE TABLE fec_candidate_spendings (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    fec_sub_id VARCHAR NOT NULL,
+    fec_cand_id VARCHAR NOT NULL,
+    fec_cmte_id VARCHAR,
+    spending_amount DOUBLE NOT NULL,
+    spending_date TIMESTAMP NOT NULL,
+    payee_name VARCHAR NOT NULL,
+    purpose VARCHAR NOT NULL,
+    report_year INTEGER NOT NULL,
+    colocator_id UUID,
+    colocation_score DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- FEC Committee Transactions table
+CREATE TABLE fec_committee_transactions (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    fec_sub_id VARCHAR NOT NULL,
+    fec_cmte_id VARCHAR NOT NULL,  -- Recipient
+    other_cmte_id VARCHAR NOT NULL,  -- Donor
+    transaction_amount DOUBLE NOT NULL,
+    transaction_date TIMESTAMP NOT NULL,
+    transaction_type VARCHAR NOT NULL,
+    report_year INTEGER NOT NULL,
+    colocator_id UUID,
+    colocation_score DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- FEC Individual Contributions table
+CREATE TABLE fec_individual_contributions (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    fec_sub_id VARCHAR NOT NULL,
+    fec_cmte_id VARCHAR NOT NULL,
+    contributor_name VARCHAR NOT NULL,
+    contribution_amount DOUBLE NOT NULL,
+    contribution_date TIMESTAMP NOT NULL,
+    occupation VARCHAR,
+    employer VARCHAR,
+    report_year INTEGER NOT NULL,
+    colocator_id UUID,
+    colocation_score DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- FEC Operating Expenditures table
+CREATE TABLE fec_operating_expenditures (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    fec_sub_id VARCHAR NOT NULL,
+    fec_cmte_id VARCHAR NOT NULL,
+    payee_name VARCHAR NOT NULL,
+    expenditure_amount DOUBLE NOT NULL,
+    expenditure_date TIMESTAMP NOT NULL,
+    purpose VARCHAR NOT NULL,
+    report_year INTEGER NOT NULL,
+    colocator_id UUID,
+    colocation_score DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for FEC tables
+CREATE INDEX idx_fec_committees_id ON fec_committees(fec_cmte_id);
+CREATE INDEX idx_fec_committees_year ON fec_committees(report_year);
+
+CREATE INDEX idx_fec_candidate_spendings_cand_id ON fec_candidate_spendings(fec_cand_id);
+CREATE INDEX idx_fec_candidate_spendings_year ON fec_candidate_spendings(report_year);
+
+CREATE INDEX idx_fec_committee_transactions_cmte_id ON fec_committee_transactions(fec_cmte_id);
+CREATE INDEX idx_fec_committee_transactions_year ON fec_committee_transactions(report_year);
+
+CREATE INDEX idx_fec_individual_contributions_cmte_id ON fec_individual_contributions(fec_cmte_id);
+CREATE INDEX idx_fec_individual_contributions_year ON fec_individual_contributions(report_year);
+
+CREATE INDEX idx_fec_operating_expenditures_cmte_id ON fec_operating_expenditures(fec_cmte_id);
+CREATE INDEX idx_fec_operating_expenditures_year ON fec_operating_expenditures(report_year);
+
+-- Optional: Link to Charities if EIN matches
+ALTER TABLE fec_committees ADD COLUMN charity_ein VARCHAR(9);
+-- CREATE INDEX idx_fec_committees_charity_ein ON fec_committees(charity_ein);
+-- Similar for other tables if needed
