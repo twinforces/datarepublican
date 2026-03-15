@@ -10,7 +10,7 @@ from logging_utils import log_info, log_debug
 from config import global_config
 from base_processor import BaseProcessor, WorkUnit
 from pending_database_context import PendingDatabaseContext
-
+from collections import defaultdict
 
 def word_jaccard(name1: str, name2: str) -> float:
     """Compute Jaccard similarity on word sets"""
@@ -83,54 +83,66 @@ class GrantMatchProcessor(BaseProcessor):
     def _process_batch(self, batch: List[Dict[str, Any]]) -> PendingDatabaseContext:
         context = PendingDatabaseContext()
         updates = []
+        
+        # Group grants by colocator to fetch charities only once per unique colocator
+        grants_by_colocator: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for item in batch:
-            grant_id = item['grant_id']
-            grantee_name = item['grantee_name']
-            colocator = item['colocator']
-
-            if not colocator:
-                continue
-
-            # Find potential charities
+            colocator = item.get('colocator')
+            if colocator:  # Skip if no colocator (though your query filters this)
+                grants_by_colocator[colocator].append(item)
+        
+        for colocator, grants in grants_by_colocator.items():
+            # Fetch charities ONCE for this colocator
             query_char = """
             SELECT ein, filer_name, (COALESCE(govt_amt, 0) + COALESCE(receipt_amt, 0)) AS wealth
             FROM Charities
             WHERE colocator = ?
             """
             charities = self.db_ops.execute_query(query_char, [colocator]).fetchall()
-
+            
             if not charities:
-                continue
-
-            matches = []
-            for row in charities:
-                ein, filer_name, wealth = row
-                jacc = word_jaccard(grantee_name, filer_name)
-                if jacc >= self.jaccard_threshold:
-                    matches.append((jacc, ein, wealth))
-
-            if matches:
-                # Pick highest jacc, tiebreak by wealth
-                matches.sort(key=lambda x: (-x[0], -x[2]))
-                best_ein = matches[0][1]
-            else:
-                # Pick richest
-                best = max(charities, key=lambda x: x[2])
-                best_ein = best[0]
-
-            updates.append({'grant_id': grant_id, 'recipient_ein': best_ein})
-
+                for item in grants:
+                    updates.append({
+                        'grant_id': item['grant_id'],
+                        'recipient_ein': '8686'  # or 'NO_MATCH' / 'FAIL-86' / whatever you prefer
+                    })
+                continue  # No charities here, skip all grants for this colocator
+            
+            # Now process each grant using the shared charities list
+            for item in grants:
+                grant_id = item['grant_id']
+                grantee_name = item['grantee_name']
+                
+                matches = []
+                for row in charities:
+                    ein, filer_name, wealth = row
+                    jacc = word_jaccard(grantee_name, filer_name)
+                    if jacc >= self.jaccard_threshold:
+                        matches.append((jacc, ein, wealth))
+                
+                if matches:
+                    # Pick highest jacc, tiebreak by wealth
+                    matches.sort(key=lambda x: (-x[0], -x[2]))
+                    best_ein = matches[0][1]
+                else:
+                    # Pick richest
+                    best = max(charities, key=lambda x: x[2])
+                    best_ein = best[0]
+                
+                updates.append({'grant_id': grant_id, 'recipient_ein': best_ein})
+        
         if updates:
             bulk_op = DatabaseOperation(
                 DatabaseOperationType.GENERIC_UPDATE,
                 data={'table': 'Grants', 'updates': updates, 'id_column': 'grant_id'}
             )
             context.addOperationToDatabase(bulk_op)
-
+        
         progress_op = DatabaseOperation(
             DatabaseOperationType.PROGRESS_UPDATE,
             data={"count": len(batch)}
         )
         context.addOperationToDatabase(progress_op)
-
+        
         return context
+        
