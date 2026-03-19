@@ -11,6 +11,11 @@ from typing import Optional
 from uuid7 import generate_uuid_v7
 from .base import BaseModel
 from .address import Address
+import fuzzy
+import re
+
+CLEAN_AND = re.compile(r'\s+and\s+', re.IGNORECASE)
+STRIP_SUFFIX = re.compile(r'\s+(inc|corp|llc|foundation|association|society|institute|trust|nonprofit|center|program|fdn|federation|national|international)$', re.IGNORECASE)
 
 
 @dataclass
@@ -21,6 +26,7 @@ class Grant(BaseModel):
     charity_id: Optional[str] = None
     filer_ein: str = ""
     filer_name: str = ""
+    grantee_sndx: Optional[str] = None  # Precomputed double metaphone for fuzzy matching
     grantee_name: str = ""
     recipient_ein: Optional[str] = None
     grant_amt: float = 0.0
@@ -28,6 +34,7 @@ class Grant(BaseModel):
     colocator: Optional[str] = None
     filer_colocator: Optional[str] = None
     created_at: Optional[str] = None
+    grantee_sndx: Optional[str] = None  # Precomputed soundex for fuzzy matching
 
     def is_large_grant(self) -> bool:
         """Check if grant amount exceeds $100,000"""
@@ -61,6 +68,9 @@ class Grant(BaseModel):
     def prep_for_insert(self):
         """Prepare the record for database insertion"""
         super().prep_for_insert()
+        cleaned_name = STRIP_SUFFIX.sub('', CLEAN_AND.sub(' & ', self.grantee_name.lower()))
+        primary, secondary = fuzzy.DMetaphone()(cleaned_name)
+        self.grantee_sndx = f"{primary}|{secondary}" if primary and secondary else primary or secondary or ''
         pass
 
     @property
@@ -91,9 +101,11 @@ class Grant(BaseModel):
             'filer_ein': self.filer_ein or "",
             'filer_name': self.filer_name or "",
             'grantee_name': self.grantee_name or "",
+            'grantee_sndx': self.grantee_sndx,
             'recipient_ein': self.recipient_ein or "",
             'grant_amt': self.grant_amt,
             'tax_year': self.tax_year,
             'colocator': self.colocator or "",
             'created_at': self.created_at or ""
-        }
+        },
+           

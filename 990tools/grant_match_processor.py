@@ -43,6 +43,8 @@ class GrantMatchProcessor(BaseProcessor):
 
     def match_grants(self) -> int:
         """Run the grant matching process"""
+        self.db_ops.execute_query("INSTALL spatial;")
+        self.db_ops.execute_query("LOAD spatial;")
         return self.process_parallel(global_config.max_files, global_config.workers)
 
     def get_work_count(self, max_files: Optional[int] = None) -> int:
@@ -76,7 +78,7 @@ class GrantMatchProcessor(BaseProcessor):
 
     def _get_work_batch(self, last_id: Optional[str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         query = """
-        SELECT grant_id, grantee_name, colocator
+        SELECT grant_id, grantee_name, colocator, grantee_sndx
         FROM Grants
         WHERE recipient_ein IS NULL and colocator IS NOT NULL
         """
@@ -217,4 +219,4 @@ class GrantMatchProcessor(BaseProcessor):
     def _parse_zip(self, colocator: str) -> Optional[str]:
         if colocator and colocator.startswith('PO:'):
             return colocator.split(':')[1]
-        return None
+        return None # No zip code available

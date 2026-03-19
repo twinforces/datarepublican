@@ -14,6 +14,12 @@ from .address import Address
 from .grant import Grant
 from .contractor import Contractor
 from .political_contribution import PoliticalContribution
+import fuzzy
+import re
+
+CLEAN_AND = re.compile(r'\s+and\s+', re.IGNORECASE)
+STRIP_SUFFIX = re.compile(r'\s+(inc|corp|llc|foundation|association|society|institute|trust|nonprofit|center|program|fdn|federation|national|international)$', re.IGNORECASE)
+
 
 
 @dataclass
@@ -61,6 +67,7 @@ class Charity(BaseModel):
     grift: Optional[float] = None
     travel_ptile_value: Optional[float] = None
     updated_at: Optional[str] = None
+    sndx: Optional[str] = None  # Precomputed double metaphone for fuzzy matching
 
     def __post_init__(self) -> None:
         """Validate EIN after initialization"""
@@ -160,6 +167,12 @@ class Charity(BaseModel):
         super().prep_for_insert()
         # Force ID generation for client-side UUID
         _ = self.id
+
+        # Clean and compute soundex
+        cleaned_name = STRIP_SUFFIX.sub('', CLEAN_AND.sub(' & ', self.filer_name.lower()))
+        primary, secondary = fuzzy.DMetaphone()(cleaned_name)
+        self.sndx = f"{primary}|{secondary}" if primary and secondary else primary or secondary or ''
+
 
     @property
     def id(self) -> str:
@@ -288,6 +301,7 @@ class Charity(BaseModel):
             'ein': self.ein,
             'tax_year': self.tax_year,
             'filer_name': self.filer_name,
+            'sndx': self.sndx,
             'receipt_amt': self.receipt_amt,
             'govt_amt': self.govt_amt,
             'contrib_amt': self.contrib_amt,
