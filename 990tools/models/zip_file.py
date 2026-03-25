@@ -54,7 +54,7 @@ class ZipFile(BaseModel):
 
     def create_xml_file(self, filename: str, internal_path: str, file_size: Optional[int] = None) -> 'XMLFile':
         """Factory method to create XMLFile objects with correct zip_id"""
-        from xml_file import XMLFile
+        from .xml_file import XMLFile
         return XMLFile(
             zip_id=self.zip_id,
             filename=filename,
