@@ -90,6 +90,8 @@ QUEUE_SIZE = 1000
 BATCH_SIZE = 100
 CONSUMER_BATCH_SIZE = 1000  # No reason not to make this larger only applies with backlog
 MONITOR_INTERVAL_SECONDS = 30  # Change: Added constant to reduce psutil memory monitoring and QueueStatusDisplay updates to every 30 seconds
+CONSUMER_MAX_IDLE_SECONDS = 60.0
+CONSUMER_POLL_TIMEOUT = 5.0
 
 # Address processing constants
 ADDRESS_BATCH_SIZE = 1000

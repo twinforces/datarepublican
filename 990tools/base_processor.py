@@ -29,10 +29,9 @@ import queue
 from enum import Enum
 import time
 from pending_database_context import PendingDatabaseContext
-from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS, OPTIMIZE_THRESHOLD, GEOCODING_MAX_UPDATES_PER_BATCH
+from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE, MONITOR_INTERVAL_SECONDS, OPTIMIZE_THRESHOLD, GEOCODING_MAX_UPDATES_PER_BATCH, CONSUMER_MAX_IDLE_SECONDS, CONSUMER_POLL_TIMEOUT
 from logging_utils import start_progress_reporting
 from queue_status_display import QueueStatusDisplay
-
 
 class PoolConfig:
     """
@@ -601,14 +600,14 @@ class BaseProcessor:
 
     def _consumer_worker(self, num_producers: int):
         """Consumer worker thread: Drains result_queue, batches and executes PDCs with size-based preflight merging."""
-        # Consumer thread: allow writes
         with self.db_ops.acquire_write_conn() as conn:
             current_batch = []
             current_estimated = 0
             sentinels_received = 0
+            last_flush_time = time.time()
 
             def save_current_batch():
-                nonlocal current_batch, current_estimated
+                nonlocal current_batch, current_estimated, last_flush_time
                 if not current_batch:
                     return
 
@@ -625,13 +624,13 @@ class BaseProcessor:
                 log_info(f"Saving batch of {len(current_batch)} contexts to database (estimated_updates: {merged.estimated_updates})")
                 self.update_pdc_size_gauge(merged)
                 merged.save_to_database(self.db_ops)
-                #self.db_ops.db_conn.execute("CHECKPOINT")
                 log_info(f"Successfully saved batch of {len(current_batch)} contexts + checkpointed")
                 self.total_objects_saved += merged.getTotalObjectCount()
                 self.total_processed += len(current_batch)
 
                 current_batch = []
                 current_estimated = 0
+                last_flush_time = time.time()
                 merged = None
                 gc.collect()
 
@@ -640,12 +639,20 @@ class BaseProcessor:
 
             while sentinels_received < num_producers or current_batch:
                 try:
-                    item = self.result_queue.get_nowait()
+                    item = self.result_queue.get(timeout=CONSUMER_POLL_TIMEOUT)
                 except queue.Empty:
+                    now = time.time()
+                    # Time-based flush while producers are still working
+                    if current_batch and (now - last_flush_time > CONSUMER_MAX_IDLE_SECONDS):
+                        log_info(f"Consumer: time-based flush of {len(current_batch)} contexts (producers still running)")
+                        save_current_batch()
+                        continue
+
+                    # Final flush when all producers are done
                     if sentinels_received >= num_producers and current_batch:
                         save_current_batch()
                         break
-                    time.sleep(1.1)  # Avoid busy loop
+
                     continue
 
                 if item.is_sentinel():
@@ -659,7 +666,6 @@ class BaseProcessor:
 
                 # Preflight: check if adding this context would exceed the size limit
                 if current_estimated + context.estimated_updates > GEOCODING_MAX_UPDATES_PER_BATCH and current_batch:
-                    # Save current batch before adding this large context
                     save_current_batch()
 
                 # Add context to current batch
@@ -667,11 +673,11 @@ class BaseProcessor:
                 current_estimated += context.estimated_updates
 
                 # Save if batch size reached
-                if len(current_batch) >= CONSUMER_BATCH_SIZE:
+                if current_estimated >= CONSUMER_BATCH_SIZE:
                     save_current_batch()
 
             log_info("CONSUMER THREAD COMPLETED")
-
+    
     def setup_shutdown_handlers(self):
         def signal_handler(signum, frame):
             log_error(f"Received signal {signum}, shutting down gracefully...")

@@ -6,7 +6,7 @@
       "regex": "(?i)(the organization|see attached|detailed address information|same as c above|c/o org)",
       "colocator": "BOGUS:Placeholder",
       "status": "No_Match:Invalid",
-          "priority": 1
+      "priority": 1
     },
     {
       "name": "privacy_addresses",
@@ -224,6 +224,11 @@
           "regex": "(?i)1619 d street.*virginia beach",
           "colocator": "MAJOR:D Street Facility:23459",
           "status": "owner"
+        },
+        {
+          "regex": "(?i)500 fifth (avenue|ave).*seattle.*wa.*98109",
+          "colocator": "PO:23350:98102",
+          "status": "owner"
         }
       ],
       "priority": 6
@@ -243,118 +248,118 @@
       "colocator": "PARTIAL:{zip}",
       "status": "pending",
       "priority": 15
-    },{
-  "name": "registered_agents_2025",
-  "description": "Top 25 registered agent firms that dominate the final No_Match tail",
-  "priority": 2,
-  "patterns": [
-    {
-      "regex": "(?i)c/?o\\s+ct\\s+corporation\\s+system",
-      "colocator": "RA:CT_CORP",
-      "status": "owner"
     },
     {
-      "regex": "(?i)c/?o\\s+corporation\\s+service\\s+company",
-      "colocator": "RA:CSC",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+national\\s+registered\\s+agents",
-      "colocator": "RA:NRAI",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+northwest\\s+registered\\s+agent",
-      "colocator": "RA:NORTHWEST",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+incorp\\s+services",
-      "colocator": "RA:INCORP",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+registered\\s+agent\\s+solutions",
-      "colocator": "RA:RAS",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+paracorp",
-      "colocator": "RA:PARACORP",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+cogency\\s+global",
-      "colocator": "RA:COGENCY",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+united\\s+states\\s+corporation\\s+agents",
-      "colocator": "RA:USCA",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+capitol\\s+corporate\\s+services",
-      "colocator": "RA:CAPITOL",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+the\\s+corporation\\s+trust\\s+company",
-      "colocator": "RA:CTC",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+harvard\\s+business\\s+services",
-      "colocator": "RA:HARVARD",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+delaware\\s+registered\\s+agent",
-      "colocator": "RA:DELAWARE",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+legalzoom",
-      "colocator": "RA:LEGALZOOM",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+blumbergexcelsior",
-      "colocator": "RA:BLUMBERG",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+agents\\s+and\\s+corporations",
-      "colocator": "RA:AGENTS_CORP",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)(apo|dpo|fpo)\\s+[a-z]+\\s+\\d+",
-      "colocator": "MILITARY:APO",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+department\\s+of\\s+state",
-      "colocator": "GOV:STATE_DEPT",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+embassy",
-      "colocator": "GOV:EMBASSY",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+consulate",
-      "colocator": "GOV:CONSULATE",
-      "status": "owner"
-    },
-    {
-      "regex": "(?i)c/?o\\s+united\\s+nations",
-      "colocator": "GOV:UN",
-      "status": "owner"
+      "name": "registered_agents_2025",
+      "description": "Top 25 registered agent firms that dominate the final No_Match tail",
+      "priority": 2,
+      "patterns": [
+        {
+          "regex": "(?i)c/?o\\s+ct\\s+corporation\\s+system",
+          "colocator": "RA:CT_CORP",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+corporation\\s+service\\s+company",
+          "colocator": "RA:CSC",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+national\\s+registered\\s+agents",
+          "colocator": "RA:NRAI",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+northwest\\s+registered\\s+agent",
+          "colocator": "RA:NORTHWEST",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+incorp\\s+services",
+          "colocator": "RA:INCORP",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+registered\\s+agent\\s+solutions",
+          "colocator": "RA:RAS",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+paracorp",
+          "colocator": "RA:PARACORP",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+cogency\\s+global",
+          "colocator": "RA:COGENCY",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+united\\s+states\\s+corporation\\s+agents",
+          "colocator": "RA:USCA",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+capitol\\s+corporate\\s+services",
+          "colocator": "RA:CAPITOL",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+the\\s+corporation\\s+trust\\s+company",
+          "colocator": "RA:CTC",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+harvard\\s+business\\s+services",
+          "colocator": "RA:HARVARD",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+delaware\\s+registered\\s+agent",
+          "colocator": "RA:DELAWARE",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+legalzoom",
+          "colocator": "RA:LEGALZOOM",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+blumbergexcelsior",
+          "colocator": "RA:BLUMBERG",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+agents\\s+and\\s+corporations",
+          "colocator": "RA:AGENTS_CORP",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)(apo|dpo|fpo)\\s+[a-z]+\\s+\\d+",
+          "colocator": "MILITARY:APO",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+department\\s+of\\s+state",
+          "colocator": "GOV:STATE_DEPT",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+embassy",
+          "colocator": "GOV:EMBASSY",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+consulate",
+          "colocator": "GOV:CONSULATE",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+united\\s+nations",
+          "colocator": "GOV:UN",
+          "status": "owner"
+        }
+      ]
     }
-  ]
-}
-
   ]
 }

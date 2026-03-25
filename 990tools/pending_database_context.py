@@ -26,7 +26,7 @@ INTEGRATION:
 """
 
 from typing import Dict, List, Any, Optional, Generator
-from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address
+from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address, Geocoding, ZipFile, XMLFile, AuthoritativeEin
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import log_info, log_error, log_warning, log_debug
 from datetime import datetime
@@ -69,6 +69,7 @@ class PendingDatabaseContext:
             'address': [],
             'geocoding': [],  # For geocoding records
             'zipfile': [],  # For ZIP file records
+            'authoritativeein': [],  # For AuthoritativeEin records
             'xmlfile': []   # For XML file records
         }
         self._updates: List[Dict[str, Any]] = []  # For future UPDATE operations
@@ -336,6 +337,11 @@ class PendingDatabaseContext:
             self._execute_update_geocoding(db_ops, operation)
         elif op_type == DatabaseOperationType.UPDATE_ADDRESS_GEOCODING:
             self._execute_update_address_geocoding(db_ops, operation)
+        elif op_type == DatabaseOperationType.AUTHORITATIVE_EIN_UPDATE:
+            name = data['name']
+            colocator = data['colocator']
+            ein = data['ein']
+            db_ops.update_authoritative_ein(name, colocator, ein)
         # Add other operation types as needed
 
     def _execute_xml_file_update(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:

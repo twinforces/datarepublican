@@ -403,7 +403,7 @@ CREATE INDEX idx_xmlfiles_ein ON XmlFiles(ein);
 CREATE INDEX idx_xmlfiles_tax_year ON XmlFiles(tax_year);
 CREATE INDEX idx_xmlfiles_processed ON XmlFiles(processed);
 -- Backfill indexes
-CREATE INDEX idx_backfill_recipient_ein ON Backfill(recipient_ein);
+CREATE UNIQUE INDEX idx_backfill_recipient_ein ON Backfill (recipient_ein);
 CREATE INDEX idx_backfill_zip_code ON Backfill(zip_code);
 -- PipelineProgress indexes
 CREATE INDEX idx_pipeline_step_name ON PipelineProgress(step_name);
@@ -519,3 +519,34 @@ ALTER TABLE fec_committees
 ADD COLUMN charity_ein VARCHAR(9);
 -- CREATE INDEX idx_fec_committees_charity_ein ON fec_committees(charity_ein);
 -- Similar for other tables if needed
+-- Zips table for geo-matching (loaded from compressed TSV in repo)
+CREATE TABLE IF NOT EXISTS Zips_raw (
+    country_code VARCHAR,
+    zip VARCHAR,
+    place_name VARCHAR,
+    admin_name1 VARCHAR,
+    admin_code1 VARCHAR,
+    admin_name2 VARCHAR,
+    admin_code2 VARCHAR,
+    admin_name3 VARCHAR,
+    admin_code3 VARCHAR,
+    lat DOUBLE,
+    lon DOUBLE,
+    accuracy INTEGER
+);
+COPY Zips_raw
+FROM 'US_zips.txt.gz' (
+        FORMAT CSV,
+        DELIMITER '\t',
+        HEADER FALSE,
+        IGNORE_ERRORS TRUE,
+        NULL_PADDING TRUE,
+        COMPRESSION 'gzip'
+    );
+CREATE TABLE IF NOT EXISTS Zips AS
+SELECT zip,
+    lat,
+    lon
+FROM Zips_raw
+WHERE country_code = 'US';
+CREATE INDEX IF NOT EXISTS idx_zips_zip ON Zips(zip);

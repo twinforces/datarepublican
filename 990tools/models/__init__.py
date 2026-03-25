@@ -18,6 +18,7 @@ from .contribution import Contribution
 from .geocoding import Geocoding
 from .backfill import Backfill
 from .pipeline_progress import PipelineProgress
+from .authoritative_ein import AuthoritativeEin
 
 __all__ = [
     'Address',
@@ -31,5 +32,6 @@ __all__ = [
     'Contribution',
     'Geocoding',
     'Backfill',
-    'PipelineProgress'
+    'PipelineProgress',
+    'AuthoritativeEin'
 ]

@@ -279,6 +279,7 @@ class DatabaseOperationType(Enum):
     INSERT_GEOCODING = "insert_geocoding"
     UPDATE_GEOCODING = "update_geocoding"
     UPDATE_ADDRESS_GEOCODING = "update_address_geocoding"
+    AUTHORITATIVE_EIN_UPDATE = "AUTHORITATIVE_EIN_UPDATE"
 
 
 class DatabaseOperation:
@@ -2008,4 +2009,15 @@ class DatabaseOperations:
             except:
                 pass
             return 0
+        
+    def update_authoritative_ein(self, name: str, colocator: str, ein: str):
+        """Insert or update AuthoritativeEin with conflict handling."""
+        self.execute_query("""
+            INSERT INTO AuthoritativeEin (name, colocator, ein, count)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT (name, colocator) 
+            DO UPDATE SET 
+                ein = excluded.ein,
+                count = AuthoritativeEin.count + 1
+        """, [name, colocator, ein])
         
