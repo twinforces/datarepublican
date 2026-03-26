@@ -13,7 +13,7 @@ Key Features:
 - Threaded processing for performance
 """
 
-from concurrent.futures import thread
+
 import os
 import sys
 import argparse
@@ -138,7 +138,7 @@ class IRS990Processor(BaseProcessor):
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
         self.xml_processor = XMLProcessor(self.db_ops)
         self.geolocation_processor = None # GeocodingAPIProcessor(self.db_ops)
-        #self.address_matcher = AddressMatcher(self.db_ops)
+        self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
         # Initialize TSV exporter
         self.tsv_exporter = TSVExporter(self.db_ops, global_config.final_dir)
@@ -876,4 +876,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    sys.exit(0) #brute force exit to ensure all threads are killed and we don't hang on shutdown
+    sys.exit(0) #brute force exit to ensure all threads are killed and we don't hang on shutdownang on shutdown

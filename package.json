@@ -6,6 +6,8 @@
     "jekyll:serve": "bundle exec jekyll serve --incremental --livereload"
   },
   "dependencies": {
+    "@cucumber/cucumber": "^11.3.0",
+    "@playwright/test": "^1.53.2",
     "@tailwindcss/container-queries": "^0.1.1",
     "autoprefixer": "^10.4.14",
     "postcss": "^8.4.23",

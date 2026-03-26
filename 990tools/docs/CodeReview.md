@@ -436,10 +436,62 @@ Code Review #6:
 		XML_FILE_UPDATE operation is still needed though you don't have to loop over the operations, just add an update operation with the file_size and form_type.
 		
 		
-		
+Code Review Friday AM:
+* You moved the conference XPaths to xpaths.py, but I see multiple form types in there. This is bad. form_type governs the XPaths, that's why we have an xpaths file per form_type, because once you now the form type, you can optimize to only use the appropriate Xpaths. please refactor those into files by type and load them from there. The files are: 
+	* xpaths.py universal xpaths, like address parsers, etc. 
+	* xpaths_990.py xpaths specific to 990 forms. 
+	* xpaths_990ez.py xpaths specific to 990ez forms.
+	* xpaths_990pf xpaths specific to 990pf forms. 990pf forms are the red-headed stepchild of forms, very much legacy, very much a problem but a large portion of the money in NGOs comes from them. 
+
+CR Continued: 
+Read the file ./990tools/Architecture.md and extract the key instructions related to the project structure, XPath handling, and any refactoring guidelines. Provide a concise summary of the instructions that should be followed for this task. This subtask should only perform the reading and summarization as outlined, and signal completion using attempt_completion with a thorough summary of the extracted instructions.
+
+then complete the following code review items:
+database_operations.py:
+	* lock on write is a perferred multi-processing strategy, and locks are death on performance. DatabaseOperations._table_metadata_lock is unnecessary, its filled at startup, and never changed. Probably don't need an @lru_cache either, there's not that many tables. Don't need the fallback either just log and sys.exit(-100). So refactor all uses of that in that file appropriately.
+	* _get_table_name doesn't need an lru_cache ether, not that many tables. 
+	* Audit use of DatabaseOperations._zip_cache_lock it only gets written when we load a new zip file. 
+	* The 100000 batch size constant at line 992 should be a constant in constants.py
+	* make the charity de-dup check starting at line 1044 controlled by a command-line parameter, its only needed in extremis. 
+base_processor.py:
+	* don't need complicated set events, that's all locks. Just setup global flags called self.exit_processing, have the signal handlers set that flag to True, check the flag inside the producer and consumer, print("Exiting thread"). False -> True is foolproof. Probably can go in base_processor right after the call to _process_work_batch_to_context on line 338. And set it in line 400, check it after line 411. Maybe that will fix why we're not getting profile information reliably. 
+	_
+xml_processor.py:
+	* still see a content cache line 64? Makes no sense, we load an XML, we parse it, we throw it away. remove ALL OF THAT. Audit the whole file. 
+	
+
+Other thoughts:
+
+
 Code Revew #7:
 	adresss_depulication_processor.py:
 		lines 254->260 can be replaced with context.addObjectToDatabase(geocoding)
 		_process_operations_batch I think is dead code? PDC should do this?
 		_
 		
+big refactor code review:
+	address_depuplication_processor.py:
+		* Still see self.producer.shutdown_event.is_set()
+		
+	xml_processor.py:
+		* still referencing timeout_event. 
+		
+		
+
+		
+		
+Ok, we've done a big refactor of the code, and we made it through all the steps to xml, but then we hit a snag with the producer/consumer model. We worked through it, but we need the following 3 thread set architecture which is now implemented in the xml_processor:
+	* A feeder thread fetches data from the database. It then slices that data up into small pieces, packages them inside a WorkQueueUnit that has 3 types of work units. 
+		* sentinel: A sentinel work unit encodes the number of the producer thread, that tells the producer that there is no more work. When the feeder runs out of work, it puts one of these in the work queue for each producer. Producers handle this kind of work unit by checking to see if it belongs to them. If it doesn't it puts it back in the queue. If it does match, it passes it along to the result_queue and exits. _
+		* xml_file: this is the basic work data for a producer, producers take these items, work on them, collect the data into a PendingDatabaseContext, wrap that PDC into a 'result' unit, and place it in the result_queue. Producers increment a thread-safe counter to tell the consumer thread how many of these to expect in the result_queue
+		* result: A result work unit wraps a PendingDatabaseContext, the consumer thread collects however many there are in the result_queue, merges them, and executes them en-masses. 
+	* the work_queue is bounded in size, so essentially the feeder thread will automatically block when the consumer and producer threads are busy. The consumer thread rolls up work results in batches of 100, so its pretty efficient at saving to the database. 
+	* So the thread sets are:
+		* the feeder thread
+		* the producer ThreadPool
+		* the consumer thread
+
+So the next task is to:
+	1. Generalize the architecture in xml_processor up into base_processor so everything is more OOPy. It was tricky to get all this code working, so it would be nice if subclasses merely had to implement _feed_thread, _producer_thread_, and can probably use the base class consumer thread, since we've standardized on PendingDatabaseContext the pattern.  
+	2. Make sure xml processor still runs by doing a few `timeout 120 python irs990processor.py --max-files 105 `. `select count() from Charities` against '/Volumes/Data/final/irs990.duckdb' should show an increase after each run, and it shouldn't deadlock. 
+	3. Port address_deduplication_processor.py to the new architecture. 

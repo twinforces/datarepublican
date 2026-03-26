@@ -20,3 +20,5 @@ This is all code in the context of processing addresses from IRS 990 filings by 
 ## Deliverables
 * The Python code for the new GeocodingWorkUnit class, which I will add at the top of geocoding_api_processor.py
 * The update handler methods that use the structured form, but one at a time, with discussion first. 
+
+#GrumpyNews #GrokNews News with the 🐂💩 removed via a grok prompt, which I share. Be informed, not manipulated. IT = Directionally True (Irish), LT = Lizard True (Lawyer), 5 🌐5 🇺🇸

@@ -422,6 +422,7 @@ def officer_writer_thread(writer_id):
 
 def parse_xml_file(xml_content, xml_filename, zip_prefix, zip_path):
     initialize_thread_local_counters()
+    results = []
     xpath_cache = {}
     start_time = time.time()
     form_type = None
