@@ -1108,7 +1108,7 @@ class DatabaseOperations:
 
         return all_ids
 
-    def INSERT_BY_TYPE(self, objects: List[BaseModel], obj_type: str, commit_batches: bool = True) -> List[str]:
+    def INSERT_BY_TYPE(self, objects: List[BaseModel], obj_type: str, commit_batches: bool = True, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         """
         Insert method for DatabasePendingContext that takes a list of objects of the same type
         and calls bulk_insert directly (no sorting needed since DPC has already sorted by type).
@@ -1133,7 +1133,7 @@ class DatabaseOperations:
             if type(obj).__name__.lower() != obj_type.lower():
                 raise ValueError(f"All objects must be of type {obj_type}, got {type(obj).__name__}")
 
-        return self.bulk_insert(objects, commit_batches=commit_batches)
+        return self.bulk_insert(objects, commit_batches=commit_batches, conn=conn)
 
     # Geocoding operations
     def insert_geocoding_record(self, normalized_address: str,
@@ -1153,9 +1153,9 @@ class DatabaseOperations:
     def bulk_insert(self, objects: List[BaseModel], batch_size: Optional[int] = None, commit_batches: bool = True, validate_counts: bool = False, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         if conn is None:
             with self.acquire_write_conn() as inner_conn:
-                self._bulk_insert_impl(objects, batch_size, commit_batches, validate_counts, conn=inner_conn)
+                self._bulk_insert_impl(objects, inner_conn, batch_size, commit_batches, validate_counts)
         else:
-            return self._bulk_insert_impl(objects, batch_size, commit_batches, validate_counts, conn=conn)
+            return self._bulk_insert_impl(objects, conn, batch_size, commit_batches, validate_counts)
 
     def _bulk_insert_impl(self, objects: List[BaseModel], conn: duckdb.DuckDBPyConnection,batch_size: Optional[int] = None, commit_batches: bool = True, validate_counts: bool = False) -> List[str]:
         """
