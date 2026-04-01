@@ -771,9 +771,9 @@ def main():
         "xml": lambda: processor.process_xml_files(),
         "address": lambda: processor.deduplicate_addresses(),  # Deduplicate addresses and create master-child relationships
         "geolocate": lambda: processor.geolocate_addresses(),
-        "photos": lambda: processor.process_officer_photos(),
         "match": lambda: processor.match_grants_by_address(),
         "grant_match": lambda: processor.grant_match_processor.match_grants(),
+        "photos": lambda: processor.process_officer_photos(),
         "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),
         "percentiles": lambda: processor.calculate_percentiles(),
         "export": lambda: processor.export_final_tsvs()

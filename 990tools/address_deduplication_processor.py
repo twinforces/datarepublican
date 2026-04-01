@@ -457,7 +457,7 @@ class AddressDeduplicationProcessor(BaseProcessor):
         log_info("Phase 1: Setup - Creating pending_canonicals table")
         
         # Use explicit thread-local connection (safe even if called from any thread)
-        with self.db_ops.acquire_write_conn as conn:
+        with self.db_ops.acquire_write_conn() as conn:
         
             try:
                 # Explicit transaction for the entire setup
@@ -490,11 +490,10 @@ class AddressDeduplicationProcessor(BaseProcessor):
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_pk ON pending_canonicals(root_id)")
 
                 # Commit everything atomically
-                conn.commit()
+                self.db_ops.optimize_database(commit=True)
                 log_info("pending_canonicals table created and populated successfully")
 
                 # Final clean checkpoint — no active transaction, no other threads touching the DB yet
-                conn.execute("CHECKPOINT")   # normal CHECKPOINT works perfectly here
                 log_info("Clean checkpoint completed after setup")
                 self.db_ops.execute_query("VACUUM ANALYZE pending_canonicals;")
                 print("Work Table Complete")
@@ -512,6 +511,84 @@ class AddressDeduplicationProcessor(BaseProcessor):
                 except:
                     pass
                 log_error(f"Failed to setup pending_canonicals: {e}", exc_info=True)
+                raise
+            
+    def _sql_deduplicate_and_geocode(self) -> int:
+        """Pure DuckDB SQL version of address deduplication + geocoding record creation.
+
+        Replaces the entire slow producer-consumer loop, GeocodingRecordCreator,
+        and all threading/queue overhead. One transaction, one pass over the data.
+        """
+        log_info("Running master/child assignment and geocoding record creation in SQL...")
+
+        with self.db_ops.acquire_write_conn() as conn:
+            conn.execute("BEGIN TRANSACTION")
+
+            try:
+                result = conn.execute("""
+                    INSERT INTO Geocoding (
+                    geocoding_id,
+                    canonical_address,
+                    normalized_address,
+                    geocoding_status,
+                    created_at
+                )
+                WITH grouped AS (
+                    SELECT 
+                        pc.canonical_address,
+                        pc.root_id,
+                        root.address_line1,
+                        root.address_line2,
+                        root.city,
+                        root.state,
+                        root.zip_code,
+                        root.po_box
+                    FROM pending_canonicals pc
+                    JOIN Addresses root 
+                      ON root.address_id = pc.root_id
+                )
+                SELECT 
+                    uuidv7() AS geocoding_id,
+                    g.canonical_address,
+                    to_json(
+                        json_object(
+                            'id', 0,
+                            'street', TRIM(COALESCE(g.address_line1, '') || ' ' || COALESCE(g.address_line2, '')),
+                            'city', COALESCE(g.city, ''),
+                            'state', COALESCE(g.state, ''),
+                            'zip', COALESCE(g.zip_code, '')
+                        )
+                    ) AS normalized_address,
+                    'pending' AS geocoding_status,
+                    CURRENT_TIMESTAMP
+                FROM grouped g
+                WHERE g.po_box IS NULL;
+                """).fetchone()
+
+                conn.commit()
+                conn.execute("""UPDATE Addresses addr
+                SET 
+                    master_id = pc.root_id,
+                    geocoding_id = g.geocoding_id
+                FROM pending_canonicals pc
+                JOIN Geocoding g 
+                  ON g.canonical_address = pc.canonical_address
+                WHERE addr.canonical_address = pc.canonical_address
+                  AND addr.master_id IS NULL;""").fetchone()
+                conn.commit()
+
+                updated_count = int(result[0]) if result and result[0] is not None else 0
+
+                # Light maintenance after the big write
+                conn.execute("VACUUM ANALYZE Addresses;")
+                conn.execute("VACUUM ANALYZE Geocoding;")
+
+                log_info(f"SQL deduplication complete - {updated_count:,} addresses updated")
+                return updated_count
+
+            except Exception as e:
+                conn.rollback()
+                log_error(f"SQL deduplication failed: {e}", exc_info=True)
                 raise
     
     def _get_work_batch(self, where_clause: str, params: Tuple, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -738,6 +815,37 @@ class AddressDeduplicationProcessor(BaseProcessor):
         log_info(f"Addresses table clustered in {duration/60:.1f} minutes — deduplication now 1000× faster")
     
     def deduplicate_addresses(self, progress_bar=None) -> int:
+        """Deduplicate addresses and create geocoding records using pure SQL.
+
+        This is the only method you need to call. Everything else (producer,
+        consumer, GeocodingRecordCreator, _process_work_item, etc.) can now be
+        deleted from the file once you confirm this works.
+        """
+        log_info("Starting address deduplication (pure DuckDB SQL version)")
+
+        # Phase 1: Setup - Create pending_canonicals table (unchanged)
+        log_info("Phase 1: Building pending_canonicals table...")
+        self.setup_pending_canonicals()
+
+        # Phase 2: Main work - one fast SQL statement
+        log_info("Phase 2: Master/child assignment + geocoding records...")
+        start = time.time()
+        total_processed = self._sql_deduplicate_and_geocode()
+        duration = time.time() - start
+        log_info(f"Phase 2 finished in {duration:.1f} seconds ({total_processed:,} groups)")
+
+        # Phase 3: Cleanup
+        log_info("Phase 3: Cleanup - dropping temporary table")
+        try:
+            with self.db_ops.acquire_write_conn() as conn:
+                conn.execute("DROP TABLE IF EXISTS pending_canonicals")
+        except Exception as e:
+            log_warning(f"Could not drop pending_canonicals: {e}")
+
+        log_info(f"Address deduplication completed successfully: {total_processed:,} canonical groups")
+        return total_processed
+
+    def old_deduplicate_addresses(self, progress_bar=None) -> int:
         def run():
             return self.process_parallel(global_config.max_files, 4)
         """Deduplicate addresses using the new pending_canonicals approach."""

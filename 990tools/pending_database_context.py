@@ -32,6 +32,8 @@ from logging_utils import log_info, log_error, log_warning, log_debug
 from datetime import datetime
 import threading
 
+PDC_DEBUG = False
+
 class PendingDatabaseContext:
     """
     Context object that collects all database objects during XML parsing.
@@ -210,9 +212,9 @@ class PendingDatabaseContext:
         THREADING: Must be called from single consumer thread (DuckDB writer constraint)
         PERFORMANCE: Batches by type for efficient bulk inserts
         """
-        print(f"###DEBUG### PDC_SAVE: Starting save_to_database with {len(self.operations)} operations")
+        if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Starting save_to_database with {len(self.operations)} operations")
         if not self.operations and all(not objs for objs in self.objects.values()):
-           print("###DEBUG### PDC_SAVE: No operations or objects to save, returning early")
+           if PDC_DEBUG: print("###DEBUG### PDC_SAVE: No operations or objects to save, returning early")
            return []
 
         ids: List[str] = []
@@ -224,6 +226,7 @@ class PendingDatabaseContext:
             try:
                 # Start explicit transaction
                 log_debug("###DEBUG### PDC_SAVE: Beginning transaction")
+                if PDC_DEBUG: print("###DEBUG### PDC_SAVE: Beginning transaction")
                 conn.execute("BEGIN TRANSACTION")
 
                 # Insert any real objects first (normal for XML parsing, skipped in address dedup)
@@ -231,7 +234,7 @@ class PendingDatabaseContext:
                                     'contractor', 'political_contribution', 'address', 'geocoding']:
                     objects = self.objects.get(obj_type, [])
                     if objects:   # <-- only call if there are actual objects
-                        print(f"###DEBUG### PDC_SAVE: Inserting {len(objects)} {obj_type} objects")
+                        if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Inserting {len(objects)} {obj_type} objects")
                         new_ids = db_ops.INSERT_BY_TYPE(objects, obj_type.capitalize(), commit_batches=False)
                         PendingDatabaseContext._updated_counter += len(new_ids or [])
                         if new_ids:
@@ -240,7 +243,7 @@ class PendingDatabaseContext:
                 # Execute operations with periodic flushing
                 print(f"###DEBUG### PDC_SAVE: Executing {len(self.operations)} operations")
                 for i, operation in enumerate(self.operations):
-                    print(f"###DEBUG### PDC_SAVE: Executing operation {i+1}/{len(self.operations)}: type={operation.operation_type}, data_keys={list(operation.data.keys()) if operation.data else 'None'}")
+                    if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Executing operation {i+1}/{len(self.operations)}: type={operation.operation_type}, data_keys={list(operation.data.keys()) if operation.data else 'None'}")
                     self._execute_operation(db_ops, operation)
 
                     if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
@@ -248,38 +251,38 @@ class PendingDatabaseContext:
                         if 'updates' in operation.data:
                             # Traditional bulk update - count the number of records
                             rows_this_op = len(operation.data['updates'])
-                            print(f"###DEBUG### PDC_SAVE: GENERIC_UPDATE with {rows_this_op} updates to table {operation.data.get('table')}")
+                            if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: GENERIC_UPDATE with {rows_this_op} updates to table {operation.data.get('table')}")
                         elif 'where_clause' in operation.data:
                             # WHERE clause update - check if batched
                             param_sets = operation.data.get('param_sets')
                             if param_sets:
                                 # Batched WHERE updates - estimate based on number of operations
                                 rows_this_op = len(param_sets) * 5  # Conservative estimate of 5 rows per canonical group
-                                print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE batched with {len(param_sets)} param sets")
+                                if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE batched with {len(param_sets)} param sets")
                             else:
                                 # Single WHERE clause update - estimate based on typical canonical group size
                                 # Most canonical groups have 2-10 addresses, but some have hundreds
                                 # Use conservative estimate of 5 addresses per canonical group
                                 rows_this_op = 10
-                                print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE single")
+                                if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE single")
                         else:
                             # Unknown format, skip counting
                             rows_this_op = 0
-                            print("###DEBUG### PDC_SAVE: GENERIC_UPDATE unknown format")
+                            if PDC_DEBUG: print("###DEBUG### PDC_SAVE: GENERIC_UPDATE unknown format")
 
                         PendingDatabaseContext._updated_counter += rows_this_op
 
                         if PendingDatabaseContext._updated_counter >= FLUSH_EVERY_N_ROWS:
-                            print(f"###DEBUG### PDC_SAVE: Triggering intermediate commit after {PendingDatabaseContext._updated_counter} updates")
+                            if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Triggering intermediate commit after {PendingDatabaseContext._updated_counter} updates")
                             PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(conn, PendingDatabaseContext._updated_counter, db_ops)
                             # Get a fresh connection after recycling
                             conn.execute("BEGIN TRANSACTION")
                             PendingDatabaseContext._updated_counter = 0
 
                 # Final commit
-                print("###DEBUG### PDC_SAVE: Executing final commit")
+                if PDC_DEBUG: print("###DEBUG### PDC_SAVE: Executing final commit")
                 conn.commit()
-                print("###DEBUG### PDC_SAVE: Final commit completed successfully")
+                if PDC_DEBUG: print("###DEBUG### PDC_SAVE: Final commit completed successfully")
                 log_info("Final commit completed – address deduplication batch saved")
 
             except Exception as e:
@@ -298,14 +301,14 @@ class PendingDatabaseContext:
                     #db_ops.recycle_connection()
                     # Then attempt CHECKPOINT for WAL flushing
                     conn.execute("CHECKPOINT")
-                    print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
+                    if PDC_DEBUG: print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
                     log_info("Final checkpoint completed successfully")
                 except Exception as e:
                     print(f"###DEBUG### PDC_SAVE: Final checkpoint failed: {e}")
                     log_warning(f"Final checkpoint failed: {e}")
                     # Continue anyway - data is still committed
 
-            print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
+            if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
         return ids
 
     def _execute_operation(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
@@ -540,9 +543,9 @@ class PendingDatabaseContext:
         THREADING: Safe for merging results from parallel producer threads
         PERFORMANCE: Enables batch processing of multiple XML files at once
         """
-        print(f"###DEBUG### PDC_MERGE: Merging {len(contexts)} contexts")
+        if PDC_DEBUG: print(f"###DEBUG### PDC_MERGE: Merging {len(contexts)} contexts")
         if not contexts:
-            print("###DEBUG### PDC_MERGE: No contexts to merge, returning empty")
+            if PDC_DEBUG: print("###DEBUG### PDC_MERGE: No contexts to merge, returning empty")
             return cls()
         if len(contexts) == 1:
             return contexts[0] # already done!
@@ -619,7 +622,7 @@ class PendingDatabaseContext:
                     }
                 ))
 
-        print(f"###DEBUG### PDC_MERGE: Merged context has {len(merged.operations)} operations, estimated_updates={merged.estimated_updates}")
+        if PDC_DEBUG: print(f"###DEBUG### PDC_MERGE: Merged context has {len(merged.operations)} operations, estimated_updates={merged.estimated_updates}")
         return merged
 
     def clear(self) -> None:
