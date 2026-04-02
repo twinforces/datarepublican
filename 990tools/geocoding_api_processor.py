@@ -47,6 +47,8 @@ API_CONFIG = {
     'ENABLE_GROK': True,
     'ENABLE_PHOTON': True,
     'ENABLE_NOMINATIM': True,
+    'ENABLE_GEOCODE_MAPS_CO': True,
+
     'ENABLE_LIBRESTREET': False,
     'ENABLE_OPENCAGE': True,
     'ENABLE_GOOGLE_MAPS': False,
@@ -139,6 +141,8 @@ class GeocodingAPIProcessor(BaseProcessor):
             stages.append(PipelineStage("photon", 8, 1, self._photon_handler))
         if API_CONFIG['ENABLE_NOMINATIM']:
             stages.append(PipelineStage("nominatim", 4, 1, self._nominatim_handler))
+        if API_CONFIG['ENABLE_GEOCODE_MAPS_CO']:
+            stages.append(PipelineStage("geocode_maps_co", 4, 1, self._geocode_maps_co_handler))
         if API_CONFIG['ENABLE_OPENCAGE']:
             stages.append(PipelineStage("opencage", 4, 1, self._opencage_handler))
         if API_CONFIG['ENABLE_LIBRESTREET']:
@@ -164,6 +168,11 @@ class GeocodingAPIProcessor(BaseProcessor):
             elif geocoder_key == "photon":
                 geo = Photon()
                 limiter = RateLimiter(geo.geocode, min_delay_seconds=0.4, max_retries=max_retries)
+            elif geocoder_key == "geocode_maps_co":
+                key = os.getenv('GEOCODE_MAPS_API_KEY')
+                if not key: return False, unit
+                geo = Nominatim(user_agent="irs990-geocoder/1.0", domain="geocode.maps.co", scheme='https')
+                limiter = RateLimiter(geo.geocode, min_delay_seconds=1.01, max_retries=max_retries)
             elif geocoder_key == "opencage":
                 key = os.getenv('OPENCAGE_API_KEY')
                 if not key: return False, unit
@@ -171,18 +180,22 @@ class GeocodingAPIProcessor(BaseProcessor):
                 limiter = RateLimiter(geo.geocode, min_delay_seconds=0.6, max_retries=max_retries)
             else: raise ValueError(geocoder_key)
             self._geocoders[geocoder_key] = limiter
+            
+        
 
         limiter = self._geocoders[geocoder_key]
 
         parsed = unit.parsed_normalized
         query = None
-        if prefer_structured and geocoder_key == "nominatim" and parsed:
+        if prefer_structured and (geocoder_key == "nominatim" or geocoder_key == "geocode_maps_co") and parsed:
             query = {k: v for k, v in {
                 'street': parsed.get('street', '') or parsed.get('address_line1', ''),
                 'city': parsed.get('city', ''),
                 'state': parsed.get('state', ''),
                 'postalcode': parsed.get('zip', '')
             }.items() if v}
+            if key:
+                query['api_key'] = key
 
         if not query:
             parts = [parsed.get('street', '') or parsed.get('address_line1', ''),
@@ -626,6 +639,9 @@ Return lat/long only if ≥75% confident in a real street location."""
 
     def _nominatim_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         return [self._geocode_with_geopy(u, "nominatim", "Nominatim", prefer_structured=True) for u in batch]
+
+    def _geocode_maps_co_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
+        return [self._geocode_with_geopy(u, "geocode_maps_co", "GeocodeMapsCo", prefer_structured=True) for u in batch]
 
     def _opencage_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         return [self._geocode_with_geopy(u, "opencage", "OpenCage", prefer_structured=False) for u in batch]

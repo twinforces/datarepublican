@@ -110,18 +110,24 @@ class Address(BaseModel):
                 self.address_line2 = " ".join(words)
 
         # Detect PO Box
-        if self.address_line1:
-            match = PO_BOX_REGEX.search(self.address_line1.upper())
-            if match:
-                po_box_str = match.group(1).strip() if match.group(1) else ""
-                # If we have a box number, use it; otherwise treat as generic PO Box
-                if po_box_str:
-                    number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
-                    if number_match:
-                        self.po_box = number_match.group(0)
-                else:
-                    # No specific box number, but it's still a PO Box address
-                    self.po_box = "POBOX"  # Generic PO Box identifier
+        po_box_candidate = None
+        for line in (self.address_line1, self.address_line2):
+            if line:
+                match = PO_BOX_REGEX.search(line.upper())
+                if match:
+                    po_box_str = (match.group(1) or "").strip()
+                    if po_box_str:
+                        number_match = PO_BOX_NUMBER_REGEX.match(po_box_str)
+                        if number_match:
+                            po_box_candidate = number_match.group(0)
+                            break
+                    else:
+                        # Generic PO Box with no number (still skip geocoding)
+                        po_box_candidate = "POBOX"
+                        break
+
+        if po_box_candidate:
+            self.po_box = po_box_candidate
 
         # Validate state
         if self.state and self.state.upper() not in VALID_STATES:

@@ -34,7 +34,11 @@ STATE_NAME_TO_ABBREV = {
 # Regular expressions for parsing
 MONEY_PATTERN = re.compile(r'[^\d.]+')
 FLOAT_PATTERN = re.compile(r'-?\d*\.?\d+')
-PO_BOX_REGEX = re.compile(r'P(?:.*?\bBOX\b\s*)([-\w\d]*)', re.IGNORECASE)
+PO_BOX_REGEX = re.compile(
+    r'(?i)\b(?:p\.?o\.?\s*b(?:ox)?|pobox|po box|post\s+office\s+box|box)\b'
+    r'(?:\s*(?:#|no\.?|number)?\s*)?([-\w\d]+)',
+    re.IGNORECASE  # explicit flag kept for clarity even though inline (?i) works
+)
 PO_BOX_NUMBER_REGEX = re.compile(r'[-\w\d]+')
 
 # Organization type suffixes for different form types
