@@ -394,6 +394,13 @@ class BaseParser:
         xpaths_for_form = self.get_xpaths_for_form(form_type)
         result = parse_string_field(root, xpaths_for_form, field, namespaces, xml_filename, context, xpath_cache, xpath_match_stats=xpath_match_stats, default="Unknown")
         return result if result is not None else "Unknown"
+    
+    def softUnion(self, paths: List[etree._Element], root: etree._Element) -> List[etree._Element]:
+        for path in paths:
+                    elem = path(root)
+                    if elem:
+                        return elem
+        return None
 
     def parse_schedule_i(
         self,
@@ -406,7 +413,7 @@ class BaseParser:
         xpath_match_stats: Optional[Dict[str, int]] = None
     ) -> None:
         """Parse Schedule I (Grants to Organizations) - optimized with XPath unions for better performance"""
-        from xpaths import GRANT_UNION_XPATH, GRANT_NAME_UNION_XPATH, GRANT_AMOUNT_UNION_XPATH
+        from xpaths import GRANT_UNION_XPATH, GRANT_NAME_UNION_XPATH, GRANT_AMOUNT_UNION_XPATH, NAMESPACES, GRANT_UNION_EIN_XPATHS
 
         # Get all grant elements in one query
         grant_elements: List[etree._Element] = GRANT_UNION_XPATH(root)
@@ -418,6 +425,13 @@ class BaseParser:
 
             grant_name: Optional[str] = None
             grant_amount: Optional[int] = None
+            recipient_ein_elem = GRANT_UNION_EIN_XPATHS(grant_elem)  # Get recipient EIN element using union XPath
+            recipient_ein = None
+            if recipient_ein_elem is not None:
+                for ein_elem in recipient_ein_elem:
+                    if ein_elem.text and ein_elem.text.strip():
+                        recipient_ein = ein_elem.text.strip()
+                        break
 
             # Get first valid name
             for name_elem in name_elements:
@@ -440,7 +454,7 @@ class BaseParser:
                 grant = Grant.create_for_charity(
                     charity,
                     grant_name,
-                    None,  # recipient_ein
+                    recipient_ein,  # recipient_ein
                     grant_amount,
                     charity.tax_year if charity else 0
                 )
