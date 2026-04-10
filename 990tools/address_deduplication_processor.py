@@ -452,7 +452,7 @@ class AddressDeduplicationProcessor(BaseProcessor):
     def __init__(self, db_ops: DatabaseOperations):
         super().__init__(db_ops)
         self.batch_size = 1000
-
+        
     def setup_pending_canonicals(self):
         log_info("Phase 1: Setup - Creating pending_canonicals table (clean slate)")
 
@@ -460,7 +460,7 @@ class AddressDeduplicationProcessor(BaseProcessor):
             try:
                 conn.execute("BEGIN TRANSACTION")
 
-                # Force clean slate every single run
+                # Force clean slate
                 conn.execute("DROP TABLE IF EXISTS pending_canonicals")
 
                 conn.execute("""
@@ -485,7 +485,6 @@ class AddressDeduplicationProcessor(BaseProcessor):
                     HAVING MAX(colocator IS NOT NULL) = FALSE
                 """)
 
-                # Helpful indexes
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_root ON pending_canonicals(root_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_canon ON pending_canonicals(canonical_address)")
 
@@ -495,15 +494,19 @@ class AddressDeduplicationProcessor(BaseProcessor):
                 log_info(f"Setup complete: Created pending_canonicals with {count:,} unique canonical groups")
 
             except Exception as e:
-                conn.rollback()
+                try:
+                    conn.rollback()
+                except:
+                    pass
                 log_error(f"Failed to setup pending_canonicals: {e}", exc_info=True)
                 raise
             
     def _sql_deduplicate_and_geocode(self) -> int:
         """Pure DuckDB SQL version of address deduplication + geocoding record creation.
 
-        Defensive version: uses DISTINCT subquery to prevent duplicate-key errors.
-        Uses your _intermediate_commit_and_checkpoint helper.
+        - INSERT is fully idempotent
+        - Mapping table uses canonical_address (unique) 
+        - UPDATE is simple join on canonical_address + small batches
         """
         log_info("Running master/child assignment and geocoding record creation in SQL...")
 
@@ -523,91 +526,247 @@ class AddressDeduplicationProcessor(BaseProcessor):
 
             log_info(f"Processing {pending_count:,} canonical groups ({unprocessed:,} addresses)")
 
-            conn.execute("BEGIN TRANSACTION")
-
-            try:
-                # Helpful indexes
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_canon ON pending_canonicals(canonical_address)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_addresses_canonical ON Addresses(canonical_address)")
-
-                # Step 1: Insert new Geocoding records
-                result = conn.execute("""
-                    INSERT INTO Geocoding (
-                        geocoding_id,
-                        canonical_address,
-                        normalized_address,
-                        geocoding_status,
-                        created_at
-                    )
-                    WITH grouped AS (
-                        SELECT 
-                            pc.canonical_address,
-                            pc.root_id,
-                            root.address_line1,
-                            root.address_line2,
-                            root.city,
-                            root.state,
-                            root.zip_code,
-                            root.po_box
-                        FROM pending_canonicals pc
-                        JOIN Addresses root ON root.address_id = pc.root_id
-                    )
+            # Step 1: Idempotent INSERT
+            result = conn.execute("""
+                INSERT INTO Geocoding (
+                    geocoding_id,
+                    canonical_address,
+                    normalized_address,
+                    geocoding_status,
+                    created_at
+                )
+                WITH grouped AS (
                     SELECT 
-                        uuidv7() AS geocoding_id,
-                        g.canonical_address,
-                        to_json(
-                            json_object(
-                                'id', 0,
-                                'street', TRIM(COALESCE(g.address_line1, '') || ' ' || COALESCE(g.address_line2, '')),
-                                'city', COALESCE(g.city, ''),
-                                'state', COALESCE(g.state, ''),
-                                'zip', COALESCE(g.zip_code, '')
-                            )
-                        ) AS normalized_address,
-                        'pending' AS geocoding_status,
-                        CURRENT_TIMESTAMP
-                    FROM grouped g
-                    WHERE g.po_box IS NULL;
-                """)
+                        pc.canonical_address,
+                        pc.root_id,
+                        root.address_line1,
+                        root.address_line2,
+                        root.city,
+                        root.state,
+                        root.zip_code,
+                        root.po_box
+                    FROM pending_canonicals pc
+                    JOIN Addresses root ON root.address_id = pc.root_id
+                )
+                SELECT 
+                    uuidv7() AS geocoding_id,
+                    g.canonical_address,
+                    to_json(json_object(
+                        'id', 0,
+                        'street', TRIM(COALESCE(g.address_line1, '') || ' ' || COALESCE(g.address_line2, '')),
+                        'city', COALESCE(g.city, ''),
+                        'state', COALESCE(g.state, ''),
+                        'zip', COALESCE(g.zip_code, '')
+                    )) AS normalized_address,
+                    'pending' AS geocoding_status,
+                    CURRENT_TIMESTAMP
+                FROM grouped g
+                WHERE g.po_box IS NULL
+                AND NOT EXISTS (
+                    SELECT 1 
+                    FROM Geocoding existing 
+                    WHERE existing.canonical_address = g.canonical_address
+                );
+            """)
 
-                row = result.fetchone()
-                inserted = int(row[0]) if row and row[0] is not None else 0
-                log_info(f"DEBUG: Inserted {inserted:,} new Geocoding records")
+            row = result.fetchone()
+            inserted = int(row[0]) if row and row[0] is not None else 0
+            log_info(f"DEBUG: Inserted {inserted:,} new Geocoding records (idempotent)")
 
-                self.db_ops._intermediate_commit_and_checkpoint(conn, inserted)
+            self.db_ops._intermediate_commit_and_checkpoint(conn, inserted)
 
-                # Step 2: Update Addresses — DISTINCT prevents duplicate-key error
-                result = conn.execute("""
+            # Step 2: Build mapping table (canonical_address is unique here)
+            conn.execute("""
+                CREATE OR REPLACE TEMP TABLE address_map AS
+                SELECT 
+                    pc.canonical_address,
+                    pc.root_id AS master_id,
+                    g.geocoding_id
+                FROM pending_canonicals pc
+                JOIN Geocoding g ON g.canonical_address = pc.canonical_address;
+            """)
+
+            map_count = conn.execute("SELECT COUNT(*) FROM address_map").fetchone()[0] or 0
+            log_info(f"DEBUG: Built mapping table with {map_count:,} canonical groups")
+
+            # Step 3: Batched UPDATE using canonical_address (simple and safe)
+            batch_size = 50_000
+            offset = 0
+            total_updated = 0
+
+            while True:
+                result = conn.execute(f"""
                     UPDATE Addresses addr
                     SET 
-                        master_id = pc.root_id,
-                        geocoding_id = g.geocoding_id
+                        master_id = m.master_id,
+                        geocoding_id = m.geocoding_id
                     FROM (
-                        SELECT DISTINCT canonical_address, root_id
-                        FROM pending_canonicals
-                    ) pc
-                    JOIN Geocoding g ON g.canonical_address = pc.canonical_address
-                    WHERE addr.canonical_address = pc.canonical_address
+                        SELECT canonical_address, master_id, geocoding_id
+                        FROM address_map
+                        ORDER BY canonical_address
+                        LIMIT {batch_size} OFFSET {offset}
+                    ) m
+                    WHERE addr.canonical_address = m.canonical_address
                     AND addr.master_id IS NULL;
                 """)
 
                 row = result.fetchone()
-                updated_count = int(row[0]) if row and row[0] is not None else 0
+                batch_updated = int(row[0]) if row and row[0] is not None else 0
+                total_updated += batch_updated
 
-                self.db_ops._intermediate_commit_and_checkpoint(conn, updated_count)
+                log_info(f"DEBUG: Batch {offset//batch_size + 1} updated {batch_updated:,} addresses (total so far: {total_updated:,})")
 
-                # Light maintenance
-                conn.execute("VACUUM ANALYZE Addresses;")
-                conn.execute("VACUUM ANALYZE Geocoding;")
+                self.db_ops._intermediate_commit_and_checkpoint(conn, batch_updated)
 
-                log_info(f"SQL deduplication complete - {updated_count:,} addresses updated ({inserted:,} geocoding records created)")
-                return updated_count
+                if batch_updated < batch_size:
+                    break
 
-            except Exception as e:
-                conn.rollback()
-                log_error(f"SQL deduplication failed: {e}", exc_info=True)
-                raise
+                offset += batch_size
+
+            # Cleanup
+            #conn.execute("DROP TABLE IF EXISTS address_map;")
+
+            # Light maintenance
+            conn.execute("VACUUM ANALYZE Addresses;")
+            conn.execute("VACUUM ANALYZE Geocoding;")
+
+            log_info(f"SQL deduplication complete - {total_updated:,} addresses updated ({inserted:,} geocoding records created)")
+            return total_updated
+        
+    def _sql_deduplicate_and_geocode(self) -> int:
+        """Pure DuckDB SQL version of address deduplication + geocoding record creation.
+
+        - INSERT is fully idempotent
+        - Mapping table is forced to 1 row per canonical_address (MIN + ANY_VALUE)
+        - UPDATE uses very small batches
+        """
+        log_info("Running master/child assignment and geocoding record creation in SQL...")
+
+        with self.db_ops.acquire_write_conn() as conn:
+            conn.execute("PRAGMA memory_limit = '16GB';")
+
+            # Fast no-op checks
+            pending_count = conn.execute("SELECT COUNT(*) FROM pending_canonicals").fetchone()[0] or 0
+            if pending_count == 0:
+                log_info("Nothing to do — pending_canonicals table is empty.")
+                return 0
+
+            unprocessed = conn.execute("SELECT COUNT(*) FROM Addresses WHERE master_id IS NULL").fetchone()[0] or 0
+            if unprocessed == 0:
+                log_info("Nothing to do — all addresses already have master_id set.")
+                return 0
+
+            log_info(f"Processing {pending_count:,} canonical groups ({unprocessed:,} addresses)")
+
+            # Step 1: Idempotent INSERT
+            result = conn.execute("""
+                INSERT INTO Geocoding (
+                    geocoding_id,
+                    canonical_address,
+                    normalized_address,
+                    geocoding_status,
+                    created_at
+                )
+                WITH grouped AS (
+                    SELECT 
+                        pc.canonical_address,
+                        pc.root_id,
+                        root.address_line1,
+                        root.address_line2,
+                        root.city,
+                        root.state,
+                        root.zip_code,
+                        root.po_box
+                    FROM pending_canonicals pc
+                    JOIN Addresses root ON root.address_id = pc.root_id
+                )
+                SELECT 
+                    uuidv7() AS geocoding_id,
+                    g.canonical_address,
+                    to_json(json_object(
+                        'id', 0,
+                        'street', TRIM(COALESCE(g.address_line1, '') || ' ' || COALESCE(g.address_line2, '')),
+                        'city', COALESCE(g.city, ''),
+                        'state', COALESCE(g.state, ''),
+                        'zip', COALESCE(g.zip_code, '')
+                    )) AS normalized_address,
+                    'pending' AS geocoding_status,
+                    CURRENT_TIMESTAMP
+                FROM grouped g
+                WHERE g.po_box IS NULL
+                AND NOT EXISTS (
+                    SELECT 1 
+                    FROM Geocoding existing 
+                    WHERE existing.canonical_address = g.canonical_address
+                );
+            """)
+
+            row = result.fetchone()
+            inserted = int(row[0]) if row and row[0] is not None else 0
+            log_info(f"DEBUG: Inserted {inserted:,} new Geocoding records (idempotent)")
+
+            self.db_ops._intermediate_commit_and_checkpoint(conn, inserted)
+
+            # Step 2: Build UNIQUE mapping table (exactly 1 row per canonical_address)
+            conn.execute("""
+                CREATE OR REPLACE TEMP TABLE address_map AS
+                SELECT 
+                    pc.canonical_address,
+                    MIN(pc.root_id) AS master_id,
+                    ANY_VALUE(g.geocoding_id) AS geocoding_id
+                FROM pending_canonicals pc
+                JOIN Geocoding g ON g.canonical_address = pc.canonical_address
+                GROUP BY pc.canonical_address;
+            """)
+
+            map_count = conn.execute("SELECT COUNT(*) FROM address_map").fetchone()[0] or 0
+            log_info(f"DEBUG: Built UNIQUE mapping table with {map_count:,} canonical groups")
+
+            # Step 3: Batched UPDATE from the mapping table (small batches)
+            batch_size = 50_000
+            offset = 0
+            total_updated = 0
+
+            while True:
+                result = conn.execute(f"""
+                    UPDATE Addresses addr
+                    SET 
+                        master_id = m.master_id,
+                        geocoding_id = m.geocoding_id
+                    FROM (
+                        SELECT canonical_address, master_id, geocoding_id
+                        FROM address_map
+                        ORDER BY canonical_address
+                        LIMIT {batch_size} OFFSET {offset}
+                    ) m
+                    WHERE addr.canonical_address = m.canonical_address
+                    AND addr.master_id IS NULL;
+                """)
+
+                row = result.fetchone()
+                batch_updated = int(row[0]) if row and row[0] is not None else 0
+                total_updated += batch_updated
+
+                log_info(f"DEBUG: Batch {offset//batch_size + 1} updated {batch_updated:,} addresses (total so far: {total_updated:,})")
+
+                self.db_ops._intermediate_commit_and_checkpoint(conn, batch_updated)
+
+                if batch_updated < batch_size:
+                    break
+
+                offset += batch_size
+
+            # Cleanup
+            conn.execute("DROP TABLE IF EXISTS address_map;")
+
+            # Light maintenance
+            conn.execute("VACUUM ANALYZE Addresses;")
+            conn.execute("VACUUM ANALYZE Geocoding;")
+
+            log_info(f"SQL deduplication complete - {total_updated:,} addresses updated ({inserted:,} geocoding records created)")
+            return total_updated
     
+        
     def _get_work_batch(self, where_clause: str, params: Tuple, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Get a batch of address deduplication work items from pending_canonicals using key-value paging"""
         effective_batch_size = min(self.batch_size, global_config.max_files) if global_config.max_files else self.batch_size
@@ -645,115 +804,6 @@ class AddressDeduplicationProcessor(BaseProcessor):
                 max_pk = row[1]
 
         return batch, max_pk
-    
-    def _sql_deduplicate_and_geocode(self) -> int:
-        """Pure DuckDB SQL version of address deduplication + geocoding record creation.
-
-        Uses only .fetchone() after execute() (no changes(), no RETURNING).
-        Fast no-op detection + your _intermediate_commit_and_checkpoint helper.
-        """
-        log_info("Running master/child assignment and geocoding record creation in SQL...")
-
-        with self.db_ops.acquire_write_conn() as conn:
-            conn.execute("PRAGMA memory_limit = '16GB';")
-
-            # === FAST EARLY EXIT CHECKS ===
-            pending_count = conn.execute("SELECT COUNT(*) FROM pending_canonicals").fetchone()[0] or 0
-            if pending_count == 0:
-                log_info("Nothing to do — pending_canonicals table is empty.")
-                return 0
-
-            unprocessed = conn.execute("SELECT COUNT(*) FROM Addresses WHERE master_id IS NULL").fetchone()[0] or 0
-            if unprocessed == 0:
-                log_info("Nothing to do — all addresses already have master_id set.")
-                return 0
-
-            log_info(f"Processing {pending_count:,} canonical groups ({unprocessed:,} addresses)")
-
-            conn.execute("BEGIN TRANSACTION")
-
-            try:
-                # Helpful indexes
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_canonicals_canon ON pending_canonicals(canonical_address)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_addresses_canonical ON Addresses(canonical_address)")
-
-                # Step 1: Insert new Geocoding records
-                result = conn.execute("""
-                    INSERT INTO Geocoding (
-                        geocoding_id,
-                        canonical_address,
-                        normalized_address,
-                        geocoding_status,
-                        created_at
-                    )
-                    WITH grouped AS (
-                        SELECT 
-                            pc.canonical_address,
-                            pc.root_id,
-                            root.address_line1,
-                            root.address_line2,
-                            root.city,
-                            root.state,
-                            root.zip_code,
-                            root.po_box
-                        FROM pending_canonicals pc
-                        JOIN Addresses root ON root.address_id = pc.root_id
-                    )
-                    SELECT 
-                        uuidv7() AS geocoding_id,
-                        g.canonical_address,
-                        to_json(
-                            json_object(
-                                'id', 0,
-                                'street', TRIM(COALESCE(g.address_line1, '') || ' ' || COALESCE(g.address_line2, '')),
-                                'city', COALESCE(g.city, ''),
-                                'state', COALESCE(g.state, ''),
-                                'zip', COALESCE(g.zip_code, '')
-                            )
-                        ) AS normalized_address,
-                        'pending' AS geocoding_status,
-                        CURRENT_TIMESTAMP
-                    FROM grouped g
-                    WHERE g.po_box IS NULL;
-                """)
-
-                row = result.fetchone()
-                inserted = int(row[0]) if row and row[0] is not None else 0
-                log_info(f"DEBUG: Inserted {inserted:,} new Geocoding records")
-
-                self.db_ops._intermediate_commit_and_checkpoint(conn, inserted)
-
-                # Step 2: Update Addresses (defensive DISTINCT prevents duplicate-key error)
-                result = conn.execute("""
-                    UPDATE Addresses addr
-                    SET 
-                        master_id = pc.root_id,
-                        geocoding_id = g.geocoding_id
-                    FROM (
-                        SELECT DISTINCT canonical_address, root_id
-                        FROM pending_canonicals
-                    ) pc
-                    JOIN Geocoding g ON g.canonical_address = pc.canonical_address
-                    WHERE addr.canonical_address = pc.canonical_address
-                    AND addr.master_id IS NULL;
-                """)
-
-                row = result.fetchone()
-                updated_count = int(row[0]) if row and row[0] is not None else 0
-
-                self.db_ops._intermediate_commit_and_checkpoint(conn, updated_count)
-
-                # Light maintenance
-                conn.execute("VACUUM ANALYZE Addresses;")
-                conn.execute("VACUUM ANALYZE Geocoding;")
-
-                log_info(f"SQL deduplication complete - {updated_count:,} addresses updated ({inserted:,} geocoding records created)")
-                return updated_count
-
-            except Exception as e:
-                conn.rollback()
-                log_error(f"SQL deduplication failed: {e}", exc_info=True)
-                raise
     
     
     def _feed_thread(self, work_queue: queue.Queue, max_files: Optional[int] = None, num_producers: int = 4):
@@ -965,7 +1015,8 @@ class AddressDeduplicationProcessor(BaseProcessor):
         log_info("Phase 3: Cleanup - dropping temporary table")
         try:
             with self.db_ops.acquire_write_conn() as conn:
-                conn.execute("DROP TABLE IF EXISTS pending_canonicals")
+                #conn.execute("DROP TABLE IF EXISTS pending_canonicals")
+                pass
         except Exception as e:
             log_warning(f"Could not drop pending_canonicals: {e}")
 
