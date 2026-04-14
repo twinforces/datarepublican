@@ -1,279 +1,185 @@
 #!/usr/bin/env python3
 """
-address_matcher.py - Grant-to-charity matching for IRS 990 data
+address_matcher.py - Full grant normalization + recipient_ein backfill
 
-This module handles matching grants with unknown EINs to charities
-based on address and colocator information, aligned with base_processor.py OOP patterns.
+1. Geo normalization (grantee_name_geo)
+2. Full 6-step name + EIN consolidation using grantee_name_geo
 """
 
 import logging
-import time
-import queue
-from typing import List, Tuple, Optional, Dict, Any
+import json
+from pathlib import Path
+from typing import Dict
 
-try:
-    import tqdm
-except ImportError:
-    tqdm = None
-
-from base_processor import BaseProcessor, BaseProducer, BaseConsumer, ThreadPoolManager, ThreadPoolConfig, PoolConfig, DatabaseOperation, DatabaseOperationType
 from database_operations import DatabaseOperations
-from pending_database_context import PendingDatabaseContext
-from logging_utils import log_info, log_debug, log_error, get_logger
-from config import global_config
-from queue_status_display import QueueStatusDisplay
+from logging_utils import log_info, log_error
 
 
-class AddressMatcherProducer(BaseProducer):
-    """Producer for address matching operations"""
+class AddressMatcher:
+    """Handles geo normalization + full name-based EIN backfill."""
 
-    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000) -> None:
-        super().__init__(db_ops, batch_size=batch_size)
-        self.logger = get_logger("address_matcher")
+    def __init__(self, db_ops: DatabaseOperations, rules_file: str = "name_rules.json"):
+        self.db_ops = db_ops
+        self.logger = logging.getLogger("address_matcher")
+        self.rules_file = Path(rules_file)
+        self.rules = self._load_rules()
 
-    def _get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Get a batch of unmatched grants using key-value paging on UUID7 str grant_id pks"""
-        where_clause = "recipient_ein IS NULL"
-        params = None
-        if last_pk is not None:
-            where_clause += " AND grant_id > ?"
-            params = (last_pk,)
+    def _load_rules(self) -> Dict[str, list]:
+        if self.rules_file.exists():
+            with open(self.rules_file) as f:
+                rules = json.load(f)
+            log_info(f"Loaded {len(rules):,} name rules from {self.rules_file}")
+            return rules
+        log_error(f"Rules file {self.rules_file} not found!")
+        return {}
 
-        effective_batch_size = min(global_config.max_files, self.batch_size) if global_config.max_files else self.batch_size
-        query = f"""
-            SELECT grant_id, filer_ein, grant_amt, tax_year
-            FROM Grants
-            WHERE {where_clause}
-            ORDER BY grant_id
-            LIMIT ?
-        """
-        if params is None:
-            params = (effective_batch_size,)
-        else:
-            params = params + (effective_batch_size,)
+    def match_grants(self, dry_run: bool = False, batch_size: int = 50000) -> Dict[str, int]:
+        """Full pipeline: geo normalization → full name-based EIN consolidation."""
+        log_info("Starting full grant normalization + EIN backfill...")
 
-        result = self.db_ops.execute_query(query, params)
-        if result:
-            rows = result.fetchall()
-            batch_data = [
-                {
-                    'grant_id': row[0],
-                    'filer_ein': row[1],
-                    'grant_amt': row[2],
-                    'tax_year': row[3]
-                }
-                for row in rows
-            ]
+        stats = {
+            "geo_normalized": 0,
+            "name_normalized_updated": 0,
+            "total_updated": 0
+        }
 
-            max_pk = max(row[0] for row in rows) if rows else None
+        with self.db_ops.acquire_write_conn() as conn:
+            conn.execute("BEGIN TRANSACTION")
 
-            if not global_config.is_quiet():
-                log_debug(f"Retrieved {len(batch_data)} unmatched grants from database (last_pk={last_pk})")
+            try:
+                # ====================== 1. GEO NORMALIZATION ======================
+                log_info("Step 1: Geo-aware name normalization...")
+                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_geo VARCHAR;")
 
-            return batch_data, max_pk
-        return [], None
+                for core, name_list in self.rules.items():
+                    if not name_list:
+                        continue
+                    variant_list = "', '".join(n.replace("'", "''") for n in name_list)
+                    conn.execute(f"""
+                        UPDATE Grants 
+                        SET grantee_name_geo = '{core.replace("'", "''")}' 
+                        WHERE grantee_name_geo IS NULL 
+                          AND grantee_name IN ('{variant_list}')
+                    """)
 
-    def _process_work_batch_to_context(self, batch: List[Dict[str, Any]]) -> Optional[PendingDatabaseContext]:
-        """Process a batch of unmatched grants into PendingDatabaseContext object"""
-        if not batch:
-            return None
+                conn.execute("""
+                    UPDATE Grants 
+                    SET grantee_name_geo = grantee_name 
+                    WHERE grantee_name_geo IS NULL
+                """)
 
-        context = PendingDatabaseContext()
+                stats["geo_normalized"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE grantee_name_geo IS NOT NULL").fetchone()[0]
+                log_info(f"Geo normalization complete: {stats['geo_normalized']:,} rows")
 
-        operation = DatabaseOperation(
-            operation_type=DatabaseOperationType.GENERIC_UPDATE,
-            data={
-                "batch": batch,
-                "operation": "match_grant_batch"
-            }
-        )
-        context.addOperationToDatabase(operation)
+                self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
 
-        return context
+                # ====================== 2. FULL NAME + EIN CONSOLIDATION (your 6-step process) ======================
+                log_info("Step 2: Full name-based EIN consolidation using grantee_name_geo...")
 
+                # Use your proven 6-step process, but on grantee_name_geo instead of raw grantee_name
+                # (I'll use your exact steps, adapted)
 
-class AddressMatcherConsumer(BaseConsumer):
-    """Consumer for address matching operations"""
+                # Step 2.1: Build base_name_ein using grantee_name_geo
+                conn.execute("DROP TABLE IF EXISTS base_name_ein;")
+                conn.execute("""
+                    CREATE TEMP TABLE base_name_ein AS
+                    SELECT
+                        grantee_name_geo AS original_name,
+                        recipient_ein,
+                        COUNT(*) AS grant_count,
+                        SUM(grant_amt) AS total_amount,
+                        CAST(NULL AS VARCHAR) AS shortest_name,
+                        CAST(NULL AS VARCHAR) AS grantee_name_conc
+                    FROM Grants
+                    WHERE grantee_name_geo IS NOT NULL
+                    GROUP BY grantee_name_geo, recipient_ein;
+                """)
 
-    def __init__(self, db_ops: DatabaseOperations) -> None:
-        super().__init__(db_ops)
-        self.logger = get_logger("address_matcher")
+                # Step 2.2: Collapse by EIN to get shortest name per EIN
+                conn.execute("DROP TABLE IF EXISTS temp_per_ein;")
+                conn.execute("""
+                    CREATE TEMP TABLE temp_per_ein AS
+                    WITH ranked AS (
+                        SELECT
+                            recipient_ein,
+                            grantee_name_geo AS grantee_name,
+                            ROW_NUMBER() OVER (PARTITION BY recipient_ein
+                                               ORDER BY array_length(regexp_split_to_array(grantee_name_geo, '\s+')) ASC,
+                                                        SUM(grant_amt) DESC) AS rn
+                        FROM Grants
+                        WHERE recipient_ein IS NOT NULL AND recipient_ein != ''
+                        GROUP BY recipient_ein, grantee_name_geo
+                    )
+                    SELECT
+                        recipient_ein,
+                        grantee_name AS shortest_name
+                    FROM ranked
+                    WHERE rn = 1;
+                """)
 
-    def _process_operations_batch(self, operations_by_type: Dict[str, List[DatabaseOperation]]) -> int:
-        """Process address matching operations"""
-        if DatabaseOperationType.GENERIC_UPDATE.value in operations_by_type:
-            for operation in operations_by_type[DatabaseOperationType.GENERIC_UPDATE.value]:
-                if operation.data.get("operation") == "match_grant_batch":
-                    self._execute_grant_match_operation(operation)
-        return 0
+                # Step 2.3: Push shortest_name back
+                conn.execute("""
+                    UPDATE base_name_ein b
+                    SET shortest_name = t.shortest_name
+                    FROM temp_per_ein t
+                    WHERE b.recipient_ein = t.recipient_ein;
+                """)
 
-    def _execute_grant_match_operation(self, operation: DatabaseOperation) -> None:
-        """Execute a grant matching operation"""
-        data = operation.data
-        batch = data.get("batch", [])
-        if not batch:
-            return
+                # Step 2.4: Apply prefix/suffix cleanup on shortest_name
+                conn.execute("""
+                    UPDATE base_name_ein
+                    SET grantee_name_conc = CASE
+                        WHEN shortest_name LIKE 'THE %' THEN regexp_replace(shortest_name, '^THE ', '', 'i')
+                        WHEN shortest_name LIKE '% INC' THEN regexp_replace(shortest_name, ' INC$', '', 'i')
+                        WHEN shortest_name LIKE '% FOUNDATION' THEN regexp_replace(shortest_name, ' FOUNDATION$', '', 'i')
+                        WHEN shortest_name LIKE '% FOUNDATION INC' THEN regexp_replace(shortest_name, ' FOUNDATION INC$', '', 'i')
+                        WHEN shortest_name LIKE '% LLC' THEN regexp_replace(shortest_name, ' LLC$', '', 'i')
+                        WHEN shortest_name ~ ' (CORPORATION|CORP)$' THEN regexp_replace(shortest_name, ' (CORPORATION|CORP)$', '', 'i')
+                        WHEN shortest_name ~ ' ASSOCIATION( INC)?$' THEN regexp_replace(shortest_name, ' ASSOCIATION( INC)?$', '', 'i')
+                        WHEN shortest_name ~ ' (SCHOOL|SCHOOL DISTRICT)$' THEN regexp_replace(shortest_name, ' (SCHOOL|SCHOOL DISTRICT)$', '', 'i')
+                        WHEN shortest_name ~ ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$' THEN regexp_replace(shortest_name, ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$', '', 'i')
+                        WHEN shortest_name ~ ' CENTER( INC)?$' THEN regexp_replace(shortest_name, ' CENTER( INC)?$', '', 'i')
+                        ELSE shortest_name
+                    END;
+                """)
 
-        updates = []
-        matched_count = 0
-        for grant in batch:
-            if self.exit_processing:
-                break
-            grant_id = grant['grant_id']
-            filer_ein = grant['filer_ein']
-            grant_amt = grant['grant_amt']
-            tax_year = grant['tax_year']
+                # Step 2.5: Final mapping table
+                conn.execute("DROP TABLE IF EXISTS name_mapping;")
+                conn.execute("""
+                    CREATE TEMP TABLE name_mapping AS
+                    SELECT
+                        original_name,
+                        grantee_name_conc,
+                        ANY_VALUE(recipient_ein ORDER BY total_amount DESC) AS winner_ein
+                    FROM base_name_ein
+                    GROUP BY original_name, grantee_name_conc;
+                """)
 
-            matched_ein = self._find_charity_by_grant_info(grant_id, filer_ein, grant_amt, tax_year)
-            if matched_ein:
-                updates.append({'grant_id': grant_id, 'recipient_ein': matched_ein})
-                matched_count += 1
-                if not global_config.is_quiet():
-                    log_info(f"Matched grant {grant_id} to charity {matched_ein}")
-            else:
-                stub_ein = self._create_stub_charity_for_grant(grant_id, filer_ein, grant_amt, tax_year)
-                if stub_ein:
-                    updates.append({'grant_id': grant_id, 'recipient_ein': stub_ein})
-                    if not global_config.is_quiet():
-                        log_info(f"Created stub charity {stub_ein} for grant {grant_id}")
+                # Step 2.6: Backfill to Grants
+                conn.execute("""
+                    ALTER TABLE Grants ADD COLUMN IF NOT EXISTS recipient_ein_backfilled VARCHAR;
+                    ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_conc VARCHAR;
+                """)
 
-        # Build PDC for updates
-        context = PendingDatabaseContext()
-        for update in updates:
-            db_op = DatabaseOperation(
-                operation_type=DatabaseOperationType.GENERIC_UPDATE,
-                data={
-                    'table': 'Grants',
-                    'updates': {'recipient_ein': update['recipient_ein']},
-                    'key_field': 'grant_id',
-                    'key_value': update['grant_id']
-                }
-            )
-            context.addOperationToDatabase(db_op)
+                conn.execute("""
+                    UPDATE Grants g
+                    SET
+                        recipient_ein_backfilled = m.winner_ein,
+                        grantee_name_conc = m.grantee_name_conc
+                    FROM name_mapping m
+                    WHERE g.grantee_name_geo = m.original_name;
+                """)
 
-        self.update_pdc_size_gauge(context)
-        ids = context.save_to_database(self.db_ops)
+                stats["name_normalized_updated"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE recipient_ein_backfilled IS NOT NULL").fetchone()[0] or 0
 
-        if not global_config.is_quiet():
-            log_debug(f"Updated {len(updates)} grants, {matched_count} matched")
+                conn.commit()
 
-        return
+                stats["total_updated"] = stats["name_normalized_updated"]
+                log_info(f"Full name-based EIN consolidation complete. Updated {stats['total_updated']:,} grants")
 
-    def _find_charity_by_grant_info(self, grant_id: str, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
-        """Find charity EIN by grant information - preserve placeholder logic"""
-        # This is a simplified implementation
-        # In practice, this would need access to grant recipient information
-        # For now, return None to create stubs
-        return None
+                return stats
 
-    def _create_stub_charity_for_grant(self, grant_id: str, filer_ein: str, grant_amt: float, tax_year: int) -> Optional[str]:
-        """Create a stub charity record for unmatched grants - preserve placeholder logic"""
-        # Generate a pseudo-EIN for stub records
-        stub_ein = f"STUB{hash(f'{filer_ein}_{grant_id}_{tax_year}') % 1000000000:09d}"
-
-        # Check if stub already exists - simplified for now
-        return stub_ein
-
-
-class AddressMatcher(BaseProcessor):
-    """Main processor for grant-to-charity address matching using producer-consumer pattern"""
-
-    def __init__(self, db_ops: DatabaseOperations, batch_size: int = 1000) -> None:
-        super().__init__(db_ops)
-        self.batch_size = batch_size
-        self.logger = get_logger("address_matcher")
-
-        # Initialize producer and consumer
-        self.producer = AddressMatcherProducer(db_ops, batch_size)
-        self.consumer = AddressMatcherConsumer(db_ops)
-
-        # Initialize thread pool manager
-        thread_config = ThreadPoolConfig(
-            producer_config=PoolConfig(max_workers=4, queue_size=1000),  # Multiple producers for parallel processing
-            consumer_config=PoolConfig(max_workers=1, queue_size=1000)   # Single consumer for DB safety
-        )
-        self.thread_pool_manager = ThreadPoolManager(thread_config, self)
-        self.setup_status_gauges(interval=10.0, queues=[self.thread_pool_manager.result_queue])
-
-        # Initialize QueueStatusDisplay for visual monitoring
-        self.queue_status_display = QueueStatusDisplay(self.thread_pool_manager.result_queue, update_interval=30.0)
-
-    def _get_custom_metrics(self) -> Dict[str, Any]:
-        try:
-            unmatched_result = self.db_ops.execute_query(
-                "SELECT COUNT(*) FROM Grants WHERE recipient_ein IS NULL"
-            )
-            unmatched = unmatched_result.fetchone()[0] if unmatched_result else 0
-
-            total_result = self.db_ops.execute_query(
-                "SELECT COUNT(*) FROM Grants"
-            )
-            total = total_result.fetchone()[0] if total_result else 0
-
-            matched = total - unmatched
-
-            return {
-                'unmatched_grants': unmatched,
-                'matched_grants': matched,
-                **super()._get_custom_metrics()
-            }
-        except Exception as e:
-            log_error(f"Error getting custom metrics: {e}")
-            return super()._get_custom_metrics()
-
-    def match_grants_by_address(self, progress_bar=None) -> int:
-        """Match grants with unknown EINs by address or colocator using producer-consumer pattern.
- 
-        Args:
-            progress_bar: Optional progress bar to update
- 
-        Returns:
-            Number of grants processed
-        """
-        if not global_config.is_quiet():
-            log_info("Matching grants with unknown EINs by address/colocator")
-
-        # Start QueueStatusDisplay for visual monitoring
-        self.queue_status_display.start()
-
-        try:
-            # Get total count for progress
-            total_result = self.db_ops.execute_query(
-                "SELECT COUNT(*) FROM Grants WHERE recipient_ein IS NULL"
-            )
-            total_items = total_result.fetchone()[0] if total_result else 0
-
-            if total_items == 0:
-                if not global_config.is_quiet():
-                    log_info("No grants with unknown EINs to match")
-                return 0
-
-            if progress_bar is None and tqdm is not None:
-                progress_bar = tqdm.tqdm(total=total_items, desc="Matching grants", unit="grant")
-
-            # Use standard parallel collection and execution
-            context = self.producer.collect_contexts_parallel()
-
-            if context and not context.isEmpty():
-                self.consumer.execute_contexts_batch(context)
-                if progress_bar:
-                    progress_bar.update(total_items)
-
-            if progress_bar is not None:
-                progress_bar.close()
-
-            if not global_config.is_quiet():
-                log_info(f"Grant matching complete: {total_items} grants processed")
-
-            # Stop QueueStatusDisplay
-            self.queue_status_display.stop()
-
-            return total_items
-
-        except Exception as e:
-            log_error(f"Grant matching failed: {e}", exc_info=True)
-            if progress_bar is not None:
-                progress_bar.close()
-            # Stop QueueStatusDisplay on error
-            self.queue_status_display.stop()
-            return 0
+            except Exception as e:
+                conn.rollback()
+                log_error(f"Full grant matching failed: {e}", exc_info=True)
+                raise
