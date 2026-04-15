@@ -13,8 +13,8 @@ from typing import Dict
 
 from database_operations import DatabaseOperations
 from logging_utils import log_info, log_error
-
-
+import gzip
+import os
 class AddressMatcher:
     """Handles geo normalization + full name-based EIN backfill."""
 
@@ -24,27 +24,48 @@ class AddressMatcher:
         self.rules_file = Path(rules_file)
         self.rules = self._load_rules()
 
-    def _load_rules(self) -> Dict[str, list]:
-        if self.rules_file.exists():
-            with open(self.rules_file) as f:
-                rules = json.load(f)
-            log_info(f"Loaded {len(rules):,} name rules from {self.rules_file}")
-            return rules
-        log_error(f"Rules file {self.rules_file} not found!")
-        return {}
+    def _load_rules(self):
+        """Load rules, preferring the .gz version if it exists."""
+        gz_path = 'name_rules.json.gz'
+        json_path = 'name_rules.json'
+        
+        if os.path.exists(gz_path):
+            path = gz_path
+            print(f"Loading rules from {path}...")
+            with gzip.open(path, 'rt', encoding='utf-8') as f:
+                self.rules = json.load(f)
+        elif os.path.exists(json_path):
+            path = json_path
+            print(f"Loading rules from {path}...")
+            with open(path, 'r', encoding='utf-8') as f:
+                self.rules = json.load(f)
+        else:
+            print("Warning: name_rules.json.gz or name_rules.json not found!")
+            self.rules = {}
+        
+        print(f"Loaded {len(self.rules):,} rules")
+        return self.rules
     
     def dump_stats(self,conn, round:str):
         result=conn.execute("""SELECT 
-    COUNT(*) AS total_grants,
-    COUNT(CASE WHEN recipient_ein IS NOT NULL OR recipient_ein_backfilled IS NOT NULL THEN 1 END) AS grants_with_ein,
-    ROUND(100.0 * COUNT(CASE WHEN recipient_ein IS NOT NULL OR recipient_ein_backfilled IS NOT NULL THEN 1 END) / COUNT(*), 2) AS pct_with_ein,
-    COUNT(DISTINCT COALESCE(grantee_name_geo, grantee_name)) AS distinct_canonical_names
-    FROM Grants;
-    """).fetchone()
+            COUNT(*) AS total_grants,
+            COUNT(CASE WHEN recipient_ein IS NOT NULL OR recipient_ein_backfilled IS NOT NULL THEN 1 END) AS grants_with_ein,
+            ROUND(100.0 * COUNT(CASE WHEN recipient_ein IS NOT NULL OR recipient_ein_backfilled IS NOT NULL THEN 1 END) / COUNT(*), 2) AS pct_with_ein,
+            COUNT(DISTINCT COALESCE(grantee_name_conc,grantee_name_geo,grantee_name_bmf, grantee_name)) AS distinct_canonical_names
+            COUNT(DISTINCT grantee_name) AS distinct_original_names,
+            COUNT(DISTINCT grantee_name_bmf) AS distinct_bmf_names
+            COUNT(DISTINCT grantee_name_geo) AS distinct_geo_names
+            COUNT(DISTINCT grantee_name_conc) AS distinct_canonical_names
+            FROM Grants;
+            """).fetchone()
         print(f"[{round}] Total grants: {result[0]:,}")
         print(f"[{round}] Grants with EIN: {result[1]:,}")
         print(f"[{round}] Percentage with EIN: {result[2]}%")
         print(f"[{round}] Distinct canonical names: {result[3]:,}")
+        print(f"[{round}] Distinct original names: {result[4]:,}")
+        print(f"[{round}] Distinct BMF names: {result[5]:,}")
+        print(f"[{round}] Distinct geo names: {result[6]:,}")
+        print(f"[{round}] Distinct canonical names: {result[7]:,}")
 
     def match_grants(self, dry_run: bool = False, batch_size: int = 50000) -> Dict[str, int]:
         """Full pipeline: geo normalization → full name-based EIN consolidation."""
@@ -61,29 +82,96 @@ class AddressMatcher:
 
             try:
                 
-                # ====================== 1. GEO NORMALIZATION ======================
-                log_info("Step 1: Geo-aware name normalization...")
-                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_geo VARCHAR;")
-                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS recipient_ein_backfilled VARCHAR;")
-                self.dump_stats(conn, "Before Geo Normalization")
-                for core, name_list in self.rules.items():
-                    if not name_list:
-                        continue
-                    variant_list = "', '".join(n.replace("'", "''") for n in name_list)
-                    conn.execute(f"""
-                        UPDATE Grants 
-                        SET grantee_name_geo = '{core.replace("'", "''")}' 
-                        WHERE grantee_name_geo IS NULL 
-                          AND grantee_name IN ('{variant_list}')
-                    """) # note rules are all already uppercased
-                self.dump_stats(conn, "After Geo Normalization")
+                # RULES:
+                # recipient_ein_backfilled = backfilled EIN based on any method (BMF, address match, name match)
+                # name flow grantee_name (original) → grantee_name_bmf (backfill from BMF matches) → grantee_name_geo (geo normalization) → grantee_name_conc (full name-based consolidation)
+                # grantee_name_bmf = cleaned name from BMF backfill step (if matched on name)
+                # grantee_name_geo = cleaned name from geo normalization step (computed from stripping names, finding shortest
+                # grantee_name_conc = cleaned name from full name-based consolidation step (your 6-step process
+                # final canonical name to use for matching is COALESCE(grantee_name_conc, grantee_name_geo, grantee_name_bmf, grantee_name)
+                
+                log_info("Step 0: BMF pre-backfill - expand known EINs then collapse to canonical name...")
 
+                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS recipient_ein_backfilled VARCHAR;")
+                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_bmf VARCHAR;")
+                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_geo VARCHAR;")
+                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_conc VARCHAR;")
+
+                prefixes = conn.execute("""
+                    SELECT DISTINCT LEFT(recipient_ein, 2) AS prefix
+                    FROM Grants 
+                    WHERE recipient_ein IS NOT NULL AND recipient_ein != ''
+                    ORDER BY prefix
+                """).fetchall()
+
+                for (prefix,) in prefixes:
+                    log_info(f"Processing EIN prefix {prefix}...")
+
+                    conn.execute(f"""
+                        WITH known_names AS (
+                            SELECT DISTINCT 
+                                g2.recipient_ein AS ein,
+                                g2.grantee_name
+                            FROM Grants g2
+                            WHERE g2.recipient_ein LIKE '{prefix}%'
+                              AND g2.recipient_ein IS NOT NULL
+                              AND g2.recipient_ein != ''
+                        )
+                        UPDATE Grants g
+                        SET 
+                            grantee_name_bmf = b.NAME,
+                            recipient_ein_backfilled = b.EIN
+                        FROM known_names kn
+                        JOIN irs_eo_bmf b ON kn.ein = b.EIN
+                        WHERE g.grantee_name = kn.grantee_name
+                          AND g.recipient_ein LIKE '{prefix}%';
+                    """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_bmf_name ON Grants(grantee_name_bmf);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_backfill_ein ON Grants(recipient_ein_backfilled);")
+
+
+                self.dump_stats(conn, "After BMF Pre-Backfill");
+                
+                # ====================== 1. GEO NORMALIZATION ======================
+                log_info("Step 1: Geo-aware name normalization (batched IN)...")
+                # 1. Ensure columns exist FIRST
+                self.dump_stats(conn, "Before Geo Normalization")
+                conn.execute("UPDATE Grants SET grantee_name_geo = UPPER(grantee_name) WHERE grantee_name_geo IS NULL;")
+                self.dump_stats(conn, "After Case Normalization")
+                BATCH_SIZE = 1000   # sweet spot for DuckDB
+
+                for core, variants in self.rules.items():
+                    if not variants:
+                        continue
+                    
+                    log_info(f"Processing rule '{core}' with {len(variants):,} variants...")
+
+                    for i in range(0, len(variants), BATCH_SIZE):
+                        batch = variants[i:i + BATCH_SIZE]
+                        variant_list = "', '".join(v.replace("'", "''") for v in batch)
+                        
+                        conn.execute(f"""
+                            UPDATE Grants 
+                            SET grantee_name_geo = '{core.replace("'", "''")}' 
+                            WHERE grantee_name_geo IS NULL 
+                              AND grantee_name_bmf IN ('{variant_list}')
+                        """)
+                self.dump_stats(conn, "After Geo Rules Normalization")
+
+                # Fallback: copy bmf (always uppercase) or original to geo if geo is still null after rules
                 conn.execute("""
                     UPDATE Grants 
-                    SET grantee_name_geo = upper(grantee_name) 
+                    SET grantee_name_geo = COALESCE(grantee_name_bmf, UPPER(grantee_name))
                     WHERE grantee_name_geo IS NULL
                 """)
-                self.dump_stats(conn, "After Geo Normalization+ case")
+
+                # Small cleanups
+                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, ',\\s*$', '') WHERE grantee_name_geo IS NOT NULL")
+                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, 'B&GC', 'BOYS AND GIRLS CLUB', 'i') WHERE grantee_name_geo IS NOT NULL")
+                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, '\s+BSA\s+', 'BOY SCOUTS OF AMERICA', 'i') WHERE grantee_name_geo IS NOT NULL")
+
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_geo_name ON Grants(grantee_name_geo);")
+                self.dump_stats(conn, "After Geo Normalization+Case+CLEANUPs")
 
 
                 stats["geo_normalized"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE grantee_name_geo IS NOT NULL").fetchone()[0]
@@ -100,15 +188,23 @@ class AddressMatcher:
                         g.grant_id,
                         ANY_VALUE(known.recipient_ein)
                     FROM Grants g
-                    JOIN Addresses a ON a.owner_id = g.grant_id AND a.address_type = 'grant'
+                    JOIN Addresses a 
+                        ON a.owner_id = g.grant_id 
+                    AND a.address_type = 'grant'
                     JOIN (
-                        SELECT grantee_name_geo, canonical_address, recipient_ein
+                        SELECT 
+                            COALESCE(g2.grantee_name_geo, g2.grantee_name) AS match_name,   -- use geo if available, else original
+                            a2.canonical_address,
+                            g2.recipient_ein
                         FROM Grants g2
-                        JOIN Addresses a2 ON a2.owner_id = g2.grant_id AND a2.address_type = 'grant'
-                        WHERE g2.recipient_ein IS NOT NULL AND g2.recipient_ein != ''
+                        JOIN Addresses a2 
+                            ON a2.owner_id = g2.grant_id 
+                        AND a2.address_type = 'grant'
+                        WHERE g2.recipient_ein IS NOT NULL 
+                        AND g2.recipient_ein != ''
                     ) known
-                    ON known.grantee_name_geo = g.grantee_name_geo 
-                       AND known.canonical_address = a.canonical_address
+                    ON known.match_name = COALESCE(g.grantee_name_geo, g.grantee_name)      -- match on cleaned geo or original
+                    AND known.canonical_address = a.canonical_address
                     WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '')
                     GROUP BY g.grant_id;
                 """)
@@ -205,34 +301,28 @@ class AddressMatcher:
                 conn.execute("""
                     CREATE TEMP TABLE name_mapping AS
                     SELECT
-                        original_name,
-                        grantee_name_conc,
+                        grantee_name_conc AS match_name,           -- use the final cleaned name
                         ANY_VALUE(recipient_ein ORDER BY total_amount DESC) AS winner_ein
                     FROM base_name_ein
-                    GROUP BY original_name, grantee_name_conc;
+                    GROUP BY grantee_name_conc;
                 """)
 
                 # Step 2.6: Backfill to Grants
-                conn.execute("""
-                    ALTER TABLE Grants ADD COLUMN IF NOT EXISTS recipient_ein_backfilled VARCHAR;
-                    ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_conc VARCHAR;
-                """)
 
 
                 conn.execute("""
                     UPDATE Grants g
                     SET
                         recipient_ein_backfilled = m.winner_ein,
-                        grantee_name_conc = m.grantee_name_conc
+                        grantee_name_conc = m.match_name
                     FROM name_mapping m
-                    WHERE g.grantee_name_geo = m.original_name;
+                    WHERE COALESCE(g.grantee_name_conc, g.grantee_name_geo) = m.match_name;
                 """)
 
                 stats["name_normalized_updated"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE recipient_ein_backfilled IS NOT NULL").fetchone()[0] or 0
 
                 self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
                 self.dump_stats(conn, "After Name Backfill")
-
 
                 stats["total_updated"] = stats["name_normalized_updated"]
                 log_info(f"Full name-based EIN consolidation complete. Updated {stats['total_updated']:,} grants")

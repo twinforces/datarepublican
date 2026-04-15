@@ -667,13 +667,13 @@ class IRS990Processor(BaseProcessor):
         # This method is now handled by geolocation_processor.py
         return []
 
-    def match_grants_by_address(self):
+    def match_grants(self):
         """Match grants with unknown EINs by address or colocator (step 9)"""
         if self.exit_processing:
             log_info("Shutdown requested before starting grant matching")
             return 0
         log_info("Matching grants with unknown EINs by address/colocator")
-        return self.address_matcher.match_grants_by_address()
+        return self.address_matcher.match_grants()
 
     def _find_charity_by_address(self, name: str, address: str, zip_code: str, po_box: str, tax_year: int) -> Optional[str]:
         """Find charity EIN by address/colocator matching"""
@@ -770,9 +770,9 @@ def main():
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
         "xml": lambda: processor.process_xml_files(),
         "address": lambda: processor.deduplicate_addresses(),  # Deduplicate addresses and create master-child relationships
+        "match": lambda: processor.match_grants(),
         "geolocate": lambda: processor.geolocate_addresses(),
-        "match": lambda: processor.match_grants_by_address(),
-        "grant_match": lambda: processor.grant_match_processor.match_grants(),
+        "grant_match": lambda: processor.grant_match_processor.match_grants_by_address(),
         "photos": lambda: processor.process_officer_photos(),
         "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),
         "percentiles": lambda: processor.calculate_percentiles(),

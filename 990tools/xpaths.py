@@ -221,6 +221,8 @@ GRANT_EIN_XPATHS = [
     etree.XPath("irs:RecipientEIN", namespaces=NAMESPACES),
     etree.XPath("irs:EIN", namespaces=NAMESPACES),
 ]
+GRANT_UNION_EIN_XPATHS = etree.XPath("irs:RecipientEIN | irs:EIN", namespaces=NAMESPACES)
+    
 
 GRANT_NAME_XPATHS = [
     etree.XPath("irs:RecipientNameBusiness | irs:RecipientBusinessName/irs:BusinessNameLine1Txt | irs:BusinessName/irs:BusinessNameLine1Txt", namespaces=NAMESPACES),
