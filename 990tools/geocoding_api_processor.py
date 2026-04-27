@@ -44,13 +44,13 @@ archive_path = os.path.join(os.path.dirname(DEFAULT_FINAL_DIR), 'geocode_archive
 # === API Configuration ===
 API_CONFIG = {
     'ENABLE_CENSUS_RAW': True,
-    'ENABLE_GROK': True,
-    'ENABLE_PHOTON': True,
-    'ENABLE_NOMINATIM': True,
+    'ENABLE_GROK': False,
+    'ENABLE_PHOTON': False,
+    'ENABLE_NOMINATIM': False,
     'ENABLE_GEOCODE_MAPS_CO': True,
 
     'ENABLE_LIBRESTREET': False,
-    'ENABLE_OPENCAGE': True,
+    'ENABLE_OPENCAGE': False,
     'ENABLE_GOOGLE_MAPS': False,
     'ENABLE_NAME_SEARCH': False,
 }

@@ -4,7 +4,7 @@
 -- INSTALL uuid;
 -- LOAD uuid;
 -- Charities table - Core charity data from IRS 990 filings
-CREATE TABLE Charities (
+CREATE TABLE IF NOT EXISTS Charities (
     charity_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein VARCHAR(9) NOT NULL,
     -- Employer Identification Number (3/9 digits)
@@ -89,7 +89,7 @@ CREATE TABLE Charities (
     UNIQUE(xml_name) -- Prevent duplicate charity records per EIN per year
 );
 -- Grants table - Grant data from charity filings
-CREATE TABLE Grants (
+CREATE TABLE IF NOT EXISTS Grants (
     grant_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein VARCHAR(9) NOT NULL,
     -- Filer EIN (foreign key to Charities with tax_year)
@@ -113,7 +113,7 @@ CREATE TABLE Grants (
     -- FOREIGN KEY (filer_ein, tax_year) REFERENCES Charities(ein, tax_year) -- DuckDB doesn't support CASCADE
 );
 -- Contributions table - Contribution data from filings
-CREATE TABLE Contributions (
+CREATE TABLE IF NOT EXISTS Contributions (
     contribution_id UUID DEFAULT uuidv7() PRIMARY KEY,
     filer_ein CHAR(9) NOT NULL,
     -- Filer EIN
@@ -129,7 +129,7 @@ CREATE TABLE Contributions (
     -- FOREIGN KEY (filer_ein, tax_year) REFERENCES Charities(ein, tax_year) -- DuckDB doesn't support CASCADE
 );
 -- Addresses table - Address data for charities and grantees
-CREATE TABLE Addresses (
+CREATE TABLE IF NOT EXISTS Addresses (
     address_id UUID DEFAULT uuidv7() PRIMARY KEY,
     ein CHAR(9),
     -- EIN this address belongs to if Charity
@@ -168,7 +168,7 @@ CREATE TABLE Addresses (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- FOREIGN KEY (geocoding_id) REFERENCES Geocoding(geocoding_id) -- DuckDB doesn't support SET NULL
 );
 -- Geocoding table - Cached geocoding results
-CREATE TABLE Geocoding (
+CREATE TABLE IF NOT EXISTS Geocoding (
     geocoding_id UUID DEFAULT uuidv7() PRIMARY KEY,
     canonical_address VARCHAR,
     -- Canonical address this geocoding represents
@@ -193,7 +193,7 @@ CREATE TABLE Geocoding (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- ZipFiles table - ZIP file metadata
-CREATE TABLE ZipFiles (
+CREATE TABLE IF NOT EXISTS ZipFiles (
     zip_id UUID PRIMARY KEY,
     filename VARCHAR NOT NULL UNIQUE,
     -- ZIP filename
@@ -213,7 +213,7 @@ CREATE TABLE ZipFiles (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- XmlFiles table - XML file metadata within ZIPs
-CREATE TABLE XmlFiles (
+CREATE TABLE IF NOT EXISTS XmlFiles (
     xml_id UUID DEFAULT uuidv7() PRIMARY KEY,
     zip_id UUID NOT NULL,
     -- Reference to ZIP file
@@ -244,7 +244,7 @@ CREATE TABLE XmlFiles (
     UNIQUE(zip_id, filename) -- Unique within each ZIP
 );
 -- Backfill table - Additional grantee data for unknown EINs
-CREATE TABLE Backfill (
+CREATE TABLE IF NOT EXISTS Backfill (
     backfill_id UUID DEFAULT uuidv7() PRIMARY KEY,
     grant_id UUID,
     -- Grant originator
@@ -261,7 +261,7 @@ CREATE TABLE Backfill (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 );
 -- PendingCanonicals table - Pre-computed canonical address groups for deduplication
-CREATE TABLE PendingCanonicals (
+CREATE TABLE IF NOT EXISTS PendingCanonicals (
     canonical_address VARCHAR PRIMARY KEY,
     -- Canonical address string (primary key)
     root_id UUID NOT NULL,
@@ -269,7 +269,7 @@ CREATE TABLE PendingCanonicals (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- When this canonical group was created
 );
 -- PipelineProgress table - Track processing pipeline status
-CREATE TABLE PipelineProgress (
+CREATE TABLE IF NOT EXISTS PipelineProgress (
     progress_id UUID DEFAULT uuidv7() PRIMARY KEY,
     step_name VARCHAR NOT NULL,
     -- Pipeline step name
@@ -293,7 +293,7 @@ CREATE TABLE PipelineProgress (
     UNIQUE(step_name, start_year, end_year) -- One entry per step per year range
 );
 -- Officers table - Officer compensation data
-CREATE TABLE Officers (
+CREATE TABLE IF NOT EXISTS Officers (
     officer_id UUID DEFAULT uuidv7() PRIMARY KEY,
     charity_id UUID NOT NULL,
     -- Reference to Charities
@@ -313,7 +313,7 @@ CREATE TABLE Officers (
     -- FOREIGN KEY (charity_id) REFERENCES Charities(charity_id) -- DuckDB doesn't support CASCADE
 );
 -- Contractors table - Contractor payment data
-CREATE TABLE Contractors (
+CREATE TABLE IF NOT EXISTS Contractors (
     contractor_id UUID DEFAULT uuidv7() PRIMARY KEY,
     charity_id UUID NOT NULL,
     -- owning charity
@@ -333,7 +333,7 @@ CREATE TABLE Contractors (
     -- FOREIGN KEY (filer_ein) REFERENCES Charities(ein) -- DuckDB doesn't support CASCADE
 );
 -- PoliticalContributions table - Political contribution data
-CREATE TABLE PoliticalContributions (
+CREATE TABLE IF NOT EXISTS PoliticalContributions (
     political_id UUID DEFAULT uuidv7() PRIMARY KEY,
     charity_id UUID NOT NULL,
     -- owning charity
@@ -352,7 +352,7 @@ CREATE TABLE PoliticalContributions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein) REFERENCES Charities(ein) -- DuckDB doesn't support CASCADE
 );
-CREATE TABLE _meta_clustering (
+CREATE TABLE IF NOT EXISTS _meta_clustering (
     table_name VARCHAR,
     clustered_column VARCHAR,
     clustered_at TIMESTAMP,
@@ -360,73 +360,73 @@ CREATE TABLE _meta_clustering (
 );
 -- Indexes for performance optimization
 -- Charities indexes
-CREATE INDEX idx_charities_ein ON Charities(ein);
-CREATE INDEX idx_charities_tax_year ON Charities(tax_year);
-CREATE INDEX idx_charities_org_type ON Charities(org_type);
-CREATE INDEX idx_charities_form_type ON Charities(form_type);
-CREATE INDEX idx_charities_denominator ON Charities(denominator);
+CREATE INDEX IF NOT EXISTS idx_charities_ein ON Charities(ein);
+CREATE INDEX IF NOT EXISTS idx_charities_tax_year ON Charities(tax_year);
+CREATE INDEX IF NOT EXISTS idx_charities_org_type ON Charities(org_type);
+CREATE INDEX IF NOT EXISTS idx_charities_form_type ON Charities(form_type);
+CREATE INDEX IF NOT EXISTS idx_charities_denominator ON Charities(denominator);
 -- Grants indexes
-CREATE INDEX idx_grants_filer_ein ON Grants(filer_ein);
-CREATE INDEX idx_grants_recipient_ein ON Grants(recipient_ein);
-CREATE INDEX idx_grants_tax_year ON Grants(tax_year);
-CREATE INDEX idx_grants_colocator ON Grants(colocator);
-CREATE INDEX idx_grants_filer_colocator ON Grants(filer_colocator);
---CREATE INDEX idx_grants_filer_ein_year ON Grants(filer_ein, tax_year);
+CREATE INDEX IF NOT EXISTS idx_grants_filer_ein ON Grants(filer_ein);
+CREATE INDEX IF NOT EXISTS idx_grants_recipient_ein ON Grants(recipient_ein);
+CREATE INDEX IF NOT EXISTS idx_grants_tax_year ON Grants(tax_year);
+CREATE INDEX IF NOT EXISTS idx_grants_colocator ON Grants(colocator);
+CREATE INDEX IF NOT EXISTS idx_grants_filer_colocator ON Grants(filer_colocator);
+--CREATE INDEX IF NOT EXISTS idx_grants_filer_ein_year ON Grants(filer_ein, tax_year);
 -- Contributions indexes
-CREATE INDEX idx_contributions_filer_ein ON Contributions(filer_ein);
-CREATE INDEX idx_contributions_recipient_ein ON Contributions(recipient_ein);
-CREATE INDEX idx_contributions_tax_year ON Contributions(tax_year);
+CREATE INDEX IF NOT EXISTS idx_contributions_filer_ein ON Contributions(filer_ein);
+CREATE INDEX IF NOT EXISTS idx_contributions_recipient_ein ON Contributions(recipient_ein);
+CREATE INDEX IF NOT EXISTS idx_contributions_tax_year ON Contributions(tax_year);
 -- Addresses indexes
-CREATE INDEX idx_addresses_ein ON Addresses(ein);
-CREATE INDEX idx_addresses_zip_code ON Addresses(zip_code);
-CREATE INDEX idx_addresses_type ON Addresses(address_type);
-CREATE INDEX idx_addresses_geocoding ON Addresses(geocoding_id);
-CREATE INDEX idx_addresses_master_id ON Addresses(master_id);
-CREATE INDEX idx_addresses_canonical ON Addresses(canonical_address);
-CREATE INDEX idx_dedup_canon_groups ON Addresses (canonical_address, address_id);
-create index idx_addresses_colocator on Addresses (colocator);
-CREATE INDEX idx_addresses_canonical_covering ON Addresses(
+CREATE INDEX IF NOT EXISTS idx_addresses_ein ON Addresses(ein);
+CREATE INDEX IF NOT EXISTS idx_addresses_zip_code ON Addresses(zip_code);
+CREATE INDEX IF NOT EXISTS idx_addresses_type ON Addresses(address_type);
+CREATE INDEX IF NOT EXISTS idx_addresses_geocoding ON Addresses(geocoding_id);
+CREATE INDEX IF NOT EXISTS idx_addresses_master_id ON Addresses(master_id);
+CREATE INDEX IF NOT EXISTS idx_addresses_canonical ON Addresses(canonical_address);
+CREATE INDEX IF NOT EXISTS idx_dedup_canon_groups ON Addresses (canonical_address, address_id);
+create index IF NOT EXISTS idx_addresses_colocator on Addresses (colocator);
+CREATE INDEX IF NOT EXISTS idx_addresses_canonical_covering ON Addresses(
     canonical_address,
     address_id,
     master_id,
     geocoding_id
 );
 -- Geocoding indexes
-CREATE INDEX idx_geocoding_status ON Geocoding(geocoding_status);
-CREATE INDEX idx_geocoding_canonical ON Geocoding(canonical_address);
+CREATE INDEX IF NOT EXISTS idx_geocoding_status ON Geocoding(geocoding_status);
+CREATE INDEX IF NOT EXISTS idx_geocoding_canonical ON Geocoding(canonical_address);
 -- ZipFiles indexes
-CREATE INDEX idx_zipfiles_tax_year ON ZipFiles(tax_year);
-CREATE INDEX idx_zipfiles_status ON ZipFiles(status);
+CREATE INDEX IF NOT EXISTS idx_zipfiles_tax_year ON ZipFiles(tax_year);
+CREATE INDEX IF NOT EXISTS idx_zipfiles_status ON ZipFiles(status);
 -- XmlFiles indexes
-CREATE INDEX idx_xmlfiles_zip_id ON XmlFiles(zip_id);
-CREATE INDEX idx_xmlfiles_ein ON XmlFiles(ein);
-CREATE INDEX idx_xmlfiles_tax_year ON XmlFiles(tax_year);
-CREATE INDEX idx_xmlfiles_processed ON XmlFiles(processed);
+CREATE INDEX IF NOT EXISTS idx_xmlfiles_zip_id ON XmlFiles(zip_id);
+CREATE INDEX IF NOT EXISTS idx_xmlfiles_ein ON XmlFiles(ein);
+CREATE INDEX IF NOT EXISTS idx_xmlfiles_tax_year ON XmlFiles(tax_year);
+CREATE INDEX IF NOT EXISTS idx_xmlfiles_processed ON XmlFiles(processed);
 -- Backfill indexes
-CREATE UNIQUE INDEX idx_backfill_recipient_ein ON Backfill (recipient_ein);
-CREATE INDEX idx_backfill_zip_code ON Backfill(zip_code);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_backfill_recipient_ein ON Backfill (recipient_ein);
+CREATE INDEX IF NOT EXISTS idx_backfill_zip_code ON Backfill(zip_code);
 -- PipelineProgress indexes
-CREATE INDEX idx_pipeline_step_name ON PipelineProgress(step_name);
-CREATE INDEX idx_pipeline_status ON PipelineProgress(status);
-CREATE INDEX idx_pipeline_years ON PipelineProgress(start_year, end_year);
+CREATE INDEX IF NOT EXISTS idx_pipeline_step_name ON PipelineProgress(step_name);
+CREATE INDEX IF NOT EXISTS idx_pipeline_status ON PipelineProgress(status);
+CREATE INDEX IF NOT EXISTS idx_pipeline_years ON PipelineProgress(start_year, end_year);
 -- Officers indexes
-CREATE INDEX idx_officers_charity_id ON Officers(charity_id);
-CREATE INDEX idx_officers_tax_year ON Officers(tax_year);
-CREATE INDEX idx_officers_master_id ON Officers(master_id);
-CREATE INDEX idx_officers_name ON Officers(last_name, first_name);
-CREATE INDEX idx_officers_full_name ON Officers(full_name);
-CREATE INDEX idx_officers_colocator ON Officers(colocator);
+CREATE INDEX IF NOT EXISTS idx_officers_charity_id ON Officers(charity_id);
+CREATE INDEX IF NOT EXISTS idx_officers_tax_year ON Officers(tax_year);
+CREATE INDEX IF NOT EXISTS idx_officers_master_id ON Officers(master_id);
+CREATE INDEX IF NOT EXISTS idx_officers_name ON Officers(last_name, first_name);
+CREATE INDEX IF NOT EXISTS idx_officers_full_name ON Officers(full_name);
+CREATE INDEX IF NOT EXISTS idx_officers_colocator ON Officers(colocator);
 -- Contractors indexes
-CREATE INDEX idx_contractors_filer_ein ON Contractors(filer_ein);
-CREATE INDEX idx_contractors_tax_year ON Contractors(tax_year);
+CREATE INDEX IF NOT EXISTS idx_contractors_filer_ein ON Contractors(filer_ein);
+CREATE INDEX IF NOT EXISTS idx_contractors_tax_year ON Contractors(tax_year);
 -- PoliticalContributions indexes
-CREATE INDEX idx_political_filer_ein ON PoliticalContributions(filer_ein);
-CREATE INDEX idx_political_tax_year ON PoliticalContributions(tax_year);
+CREATE INDEX IF NOT EXISTS idx_political_filer_ein ON PoliticalContributions(filer_ein);
+CREATE INDEX IF NOT EXISTS idx_political_tax_year ON PoliticalContributions(tax_year);
 -- Additional indexes for grant matching
-CREATE INDEX idx_grants_grant_id ON Grants(grant_id);
-CREATE INDEX idx_charities_colocator ON Charities(colocator);
+CREATE INDEX IF NOT EXISTS idx_grants_grant_id ON Grants(grant_id);
+CREATE INDEX IF NOT EXISTS idx_charities_colocator ON Charities(colocator);
 -- FEC Committees table
-CREATE TABLE fec_committees (
+CREATE TABLE IF NOT EXISTS fec_committees (
     id UUID DEFAULT uuidv7() PRIMARY KEY,
     fec_cmte_id VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
@@ -440,7 +440,7 @@ CREATE TABLE fec_committees (
     UNIQUE(fec_cmte_id, report_year)
 );
 -- FEC Candidate Spendings table
-CREATE TABLE fec_candidate_spendings (
+CREATE TABLE IF NOT EXISTS fec_candidate_spendings (
     id UUID DEFAULT uuidv7() PRIMARY KEY,
     fec_sub_id VARCHAR NOT NULL,
     fec_cand_id VARCHAR NOT NULL,
@@ -456,7 +456,7 @@ CREATE TABLE fec_candidate_spendings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- FEC Committee Transactions table
-CREATE TABLE fec_committee_transactions (
+CREATE TABLE IF NOT EXISTS fec_committee_transactions (
     id UUID DEFAULT uuidv7() PRIMARY KEY,
     fec_sub_id VARCHAR NOT NULL,
     fec_cmte_id VARCHAR NOT NULL,
@@ -473,7 +473,7 @@ CREATE TABLE fec_committee_transactions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- FEC Individual Contributions table
-CREATE TABLE fec_individual_contributions (
+CREATE TABLE IF NOT EXISTS fec_individual_contributions (
     id UUID DEFAULT uuidv7() PRIMARY KEY,
     fec_sub_id VARCHAR NOT NULL,
     fec_cmte_id VARCHAR NOT NULL,
@@ -489,7 +489,7 @@ CREATE TABLE fec_individual_contributions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- FEC Operating Expenditures table
-CREATE TABLE fec_operating_expenditures (
+CREATE TABLE IF NOT EXISTS fec_operating_expenditures (
     id UUID DEFAULT uuidv7() PRIMARY KEY,
     fec_sub_id VARCHAR NOT NULL,
     fec_cmte_id VARCHAR NOT NULL,
@@ -504,20 +504,20 @@ CREATE TABLE fec_operating_expenditures (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- Indexes for FEC tables
-CREATE INDEX idx_fec_committees_id ON fec_committees(fec_cmte_id);
-CREATE INDEX idx_fec_committees_year ON fec_committees(report_year);
-CREATE INDEX idx_fec_candidate_spendings_cand_id ON fec_candidate_spendings(fec_cand_id);
-CREATE INDEX idx_fec_candidate_spendings_year ON fec_candidate_spendings(report_year);
-CREATE INDEX idx_fec_committee_transactions_cmte_id ON fec_committee_transactions(fec_cmte_id);
-CREATE INDEX idx_fec_committee_transactions_year ON fec_committee_transactions(report_year);
-CREATE INDEX idx_fec_individual_contributions_cmte_id ON fec_individual_contributions(fec_cmte_id);
-CREATE INDEX idx_fec_individual_contributions_year ON fec_individual_contributions(report_year);
-CREATE INDEX idx_fec_operating_expenditures_cmte_id ON fec_operating_expenditures(fec_cmte_id);
-CREATE INDEX idx_fec_operating_expenditures_year ON fec_operating_expenditures(report_year);
+CREATE INDEX IF NOT EXISTS idx_fec_committees_id ON fec_committees(fec_cmte_id);
+CREATE INDEX IF NOT EXISTS idx_fec_committees_year ON fec_committees(report_year);
+CREATE INDEX IF NOT EXISTS idx_fec_candidate_spendings_cand_id ON fec_candidate_spendings(fec_cand_id);
+CREATE INDEX IF NOT EXISTS idx_fec_candidate_spendings_year ON fec_candidate_spendings(report_year);
+CREATE INDEX IF NOT EXISTS idx_fec_committee_transactions_cmte_id ON fec_committee_transactions(fec_cmte_id);
+CREATE INDEX IF NOT EXISTS idx_fec_committee_transactions_year ON fec_committee_transactions(report_year);
+CREATE INDEX IF NOT EXISTS idx_fec_individual_contributions_cmte_id ON fec_individual_contributions(fec_cmte_id);
+CREATE INDEX IF NOT EXISTS idx_fec_individual_contributions_year ON fec_individual_contributions(report_year);
+CREATE INDEX IF NOT EXISTS idx_fec_operating_expenditures_cmte_id ON fec_operating_expenditures(fec_cmte_id);
+CREATE INDEX IF NOT EXISTS idx_fec_operating_expenditures_year ON fec_operating_expenditures(report_year);
 -- Optional: Link to Charities if EIN matches
 ALTER TABLE fec_committees
 ADD COLUMN charity_ein VARCHAR(9);
--- CREATE INDEX idx_fec_committees_charity_ein ON fec_committees(charity_ein);
+-- CREATE INDEX IF NOT EXISTS idx_fec_committees_charity_ein ON fec_committees(charity_ein);
 -- Similar for other tables if needed
 -- Zips table for geo-matching (loaded from compressed TSV in repo)
 CREATE TABLE IF NOT EXISTS Zips_raw (
