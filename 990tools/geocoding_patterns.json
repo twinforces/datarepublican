@@ -1,13 +1,7 @@
 {
-  "version": "1.0",
-  "description": "Geocoding patterns for automatic resolution of common address issues",
+  "version": "1.2",
+  "description": "Geocoding patterns for automatic resolution of common IRS 990 address issues (expanded major_institutions for latest 200 No_Match batch)",
   "patterns": [
-    {
-      "regex": "(?i)(the organization|see attached|detailed address information|same as c above|c/o org)",
-      "colocator": "BOGUS:Placeholder",
-      "status": "No_Match:Invalid",
-      "priority": 1
-    },
     {
       "name": "privacy_addresses",
       "description": "Addresses that charities choose not to disclose",
@@ -19,47 +13,138 @@
     {
       "name": "exempt_addresses",
       "description": "Addresses that charities claim are exempt from disclosure",
-      "regex": "(?i)(exempt))",
+      "regex": "(?i)(exempt)",
       "colocator": "EXEMPT:{zip}",
       "status": "owner",
       "priority": 1
     },
     {
-      "name": "po_box_addresses",
-      "description": "PO Box addresses that need proper colocator",
-      "regex": "(?i)(p\\.?\\s*o\\.?\\s*box|p\\s*o\\s*box|\\bbox\\b)",
-      "colocator": "PO:BOX:{zip}",
-      "status": "pending",
+      "name": "mail_drop_addresses",
+      "description": "All variants of PO Box / Box / Ppbox / Podrawer / Post Office (covers the new batch + legacy)",
+      "regex": "(?i)(p\\.?o\\.?\\s*box|po\\s*box|ppbox|podrawer|post\\s*office|box\\s*\\d+|rr\\s*\\d+\\s*box)",
+      "colocator": "PO:{box}:{zip}",
+      "status": "owner",
       "priority": 2
     },
     {
       "name": "co_addresses",
-      "description": "Care of addresses with entity names",
-      "regex": "(?i)^c/o\\s+(.+?),\\s*",
+      "description": "Care-of addresses (expanded for the heavy C/O batch)",
+      "regex": "(?i)^c/?o\\s+(.+?)(?:,|$)",
       "action": "strip",
-      "status": "pending",
+      "colocator": "CO:{entity}:{zip}",
+      "status": "owner",
       "priority": 3
     },
     {
-      "name": "various_addresses",
-      "description": "Multi-location organizations",
-      "regex": "(?i)(various|multiple|several)",
-      "colocator": "MULTI:{city}:{state}:{zip}",
-      "status": "pending",
+      "name": "department_lockbox",
+      "description": "Department / Lockbox / Credit Card Processing / Remittance codes (huge slice in new batch)",
+      "regex": "(?i)(dept|department|lockbox|credit card processing|upper midwest lockbox|us bank lockbox|file|contributions gifts grants paid)",
+      "colocator": "DEPT:{code}:{zip}",
+      "status": "owner",
       "priority": 4
     },
     {
-      "name": "mall_complexes",
-      "description": "Shopping malls and complexes",
-      "regex": "(?i)(mall|center|plaza|square|courtyard|commons|village|crossing|junction|pavilion|atrium)",
-      "colocator": "MALL:{location}:{zip}",
-      "status": "pending",
+      "name": "rural_route",
+      "description": "Rural Route (Rr) boxes",
+      "regex": "(?i)^rr\\s*\\d+\\s*box",
+      "colocator": "RR:{box}:{zip}",
+      "status": "owner",
       "priority": 5
     },
     {
-      "name": "major_institutions",
-      "description": "Well-known institutions that should geocode but don't",
+      "name": "person_as_address",
+      "description": "Person name used as entire address (Treasurer, Controller, etc.)",
+      "regex": "(?i)^(treas|treasurer|sec|secretary|controller|dir|director|pres|president|rick|rick niemeier|tina ferrigno|beverly euculano|diane ruth|cris banton|stevie hedrick|theodore w meyers)",
+      "colocator": "PERSON:{name}:{zip}",
+      "status": "owner",
+      "priority": 6
+    },
+    {
+      "name": "university_internal",
+      "description": "University / org internal mail codes (Ch10189, Cm12, etc.)",
+      "regex": "(?i)(univ development|colyer hall|development office|research and sponsored programs|cm12|cb 3235|mail code|dept ch)",
+      "colocator": "UNIV:{code}:{zip}",
+      "status": "owner",
+      "priority": 7
+    },
+    {
+      "name": "registered_agents_2025",
+      "description": "Top registered agent firms + military/gov (unchanged from your file)",
+      "priority": 8,
       "patterns": [
+        {"regex": "(?i)c/?o\\s+ct\\s+corporation\\s+system", "colocator": "RA:CT_CORP", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+corporation\\s+service\\s+company", "colocator": "RA:CSC", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+national\\s+registered\\s+agents", "colocator": "RA:NRAI", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+northwest\\s+registered\\s+agent", "colocator": "RA:NORTHWEST", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+incorp\\s+services", "colocator": "RA:INCORP", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+registered\\s+agent\\s+solutions", "colocator": "RA:RAS", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+paracorp", "colocator": "RA:PARACORP", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+cogency\\s+global", "colocator": "RA:COGENCY", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+united\\s+states\\s+corporation\\s+agents", "colocator": "RA:USCA", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+capitol\\s+corporate\\s+services", "colocator": "RA:CAPITOL", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+the\\s+corporation\\s+trust\\s+company", "colocator": "RA:CTC", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+harvard\\s+business\\s+services", "colocator": "RA:HARVARD", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+delaware\\s+registered\\s+agent", "colocator": "RA:DELAWARE", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+legalzoom", "colocator": "RA:LEGALZOOM", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+blumbergexcelsior", "colocator": "RA:BLUMBERG", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+agents\\s+and\\s+corporations", "colocator": "RA:AGENTS_CORP", "status": "owner"},
+        {"regex": "(?i)(apo|dpo|fpo)\\s+[a-z]+\\s+\\d+", "colocator": "MILITARY:APO", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+department\\s+of\\s+state", "colocator": "GOV:STATE_DEPT", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+embassy", "colocator": "GOV:EMBASSY", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+consulate", "colocator": "GOV:CONSULATE", "status": "owner"},
+        {"regex": "(?i)c/?o\\s+united\\s+nations", "colocator": "GOV:UN", "status": "owner"}
+      ]
+    },
+    {
+      "name": "major_institutions",
+      "description": "Well-known institutions, repeated foundations, banks, and university mail drops (expanded for latest 200 batch)",
+      "priority": 9,
+      "patterns": [
+        {
+          "regex": "(?i)c/?o\\s+crestlea\\s+foundation\\s+100\\s+w\\s+10th",
+          "colocator": "MAJOR:Crestlea Foundation:19809",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)c/?o\\s+bny\\s+mellon\\s+na",
+          "colocator": "MAJOR:BNY Mellon:19809",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)rensselaer\\s+polytechnic\\s+institute",
+          "colocator": "MAJOR:Rensselaer Polytechnic Institute:02241",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)university\\s+of\\s+california\\s+berkeley",
+          "colocator": "MAJOR:UC Berkeley Development:90074",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)univ\\s+development\\s+ch\\d+",
+          "colocator": "MAJOR:University Development Lockbox:60055",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)colyer hall|development office.*cm12|research and sponsored programs",
+          "colocator": "MAJOR:University Internal Mail:62903",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)contributions gifts grants paid",
+          "colocator": "MAJOR:Contributions Processing:68101",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)credit card processing center file",
+          "colocator": "MAJOR:Credit Card Processing:91199",
+          "status": "owner"
+        },
+        {
+          "regex": "(?i)public radio wshu",
+          "colocator": "MAJOR:Wshu Public Radio:06900",
+          "status": "owner"
+        },
         {
           "regex": "(?i)262 danny thomas (place|pl)",
           "colocator": "MAJOR:St. Jude Children's Research Hospital:38105",
@@ -230,136 +315,63 @@
           "colocator": "PO:23350:98102",
           "status": "owner"
         }
-      ],
-      "priority": 6
+      ]
+    },
+    {
+      "name": "various_addresses",
+      "description": "Multi-location organizations",
+      "regex": "(?i)(various|multiple|several)",
+      "colocator": "MULTI:{city}:{state}:{zip}",
+      "status": "owner",
+      "priority": 10
     },
     {
       "name": "incomplete_addresses",
       "description": "Mark incomplete addresses",
-      "regex": "(?i)^(n/a|na|street|road|avenue|drive|way|lane|place|court|circle|boulevard|parkway|available|unavailable)$",
+      "regex": "(?i)^(n/a|na|street|road|avenue|drive|way|lane|place|court|circle|boulevard|parkway|available|unavailable|unknown address|unknown)$",
       "colocator": "INCOMPLETE:{zip}",
-      "status": "pending",
-      "priority": 14
+      "status": "owner",
+      "priority": 11
     },
     {
       "name": "no_street_number",
       "description": "Mark addresses without street numbers as partial",
       "regex": "(?i)^(?!.*\\d).*(street|road|avenue|drive|way|lane|place|court|circle|boulevard|parkway|blvd|ave|rd|st|dr|ln|pl|ct|cir|pkwy)",
       "colocator": "PARTIAL:{zip}",
-      "status": "pending",
-      "priority": 15
+      "status": "owner",
+      "priority": 12
     },
     {
-      "name": "registered_agents_2025",
-      "description": "Top 25 registered agent firms that dominate the final No_Match tail",
-      "priority": 2,
-      "patterns": [
-        {
-          "regex": "(?i)c/?o\\s+ct\\s+corporation\\s+system",
-          "colocator": "RA:CT_CORP",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+corporation\\s+service\\s+company",
-          "colocator": "RA:CSC",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+national\\s+registered\\s+agents",
-          "colocator": "RA:NRAI",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+northwest\\s+registered\\s+agent",
-          "colocator": "RA:NORTHWEST",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+incorp\\s+services",
-          "colocator": "RA:INCORP",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+registered\\s+agent\\s+solutions",
-          "colocator": "RA:RAS",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+paracorp",
-          "colocator": "RA:PARACORP",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+cogency\\s+global",
-          "colocator": "RA:COGENCY",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+united\\s+states\\s+corporation\\s+agents",
-          "colocator": "RA:USCA",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+capitol\\s+corporate\\s+services",
-          "colocator": "RA:CAPITOL",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+the\\s+corporation\\s+trust\\s+company",
-          "colocator": "RA:CTC",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+harvard\\s+business\\s+services",
-          "colocator": "RA:HARVARD",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+delaware\\s+registered\\s+agent",
-          "colocator": "RA:DELAWARE",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+legalzoom",
-          "colocator": "RA:LEGALZOOM",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+blumbergexcelsior",
-          "colocator": "RA:BLUMBERG",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+agents\\s+and\\s+corporations",
-          "colocator": "RA:AGENTS_CORP",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)(apo|dpo|fpo)\\s+[a-z]+\\s+\\d+",
-          "colocator": "MILITARY:APO",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+department\\s+of\\s+state",
-          "colocator": "GOV:STATE_DEPT",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+embassy",
-          "colocator": "GOV:EMBASSY",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+consulate",
-          "colocator": "GOV:CONSULATE",
-          "status": "owner"
-        },
-        {
-          "regex": "(?i)c/?o\\s+united\\s+nations",
-          "colocator": "GOV:UN",
-          "status": "owner"
-        }
-      ]
-    }
+  "name": "mail_collections_centers",
+  "priority": 10,
+  "patterns": [
+    { "regex": "(?i)collections?\\s*ctr", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)mail\\s*svc\\s*center", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)paysphere\\s*circle", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)solutions\\s*center", "colocator": "PO:MAIL", "status": "owners", "action": "match" }
+  ]
+},
+{
+  "name": "suite_pmb_box_junk",
+  "priority": 20,
+  "patterns": [
+    { "regex": "(?i)\\b(suite|ste|pmb|apt|box)\\s*\\d+.*?(collections?|mail|svc|center|paysphere)", "colocator": "PO:MAIL", "status": "owners", "action": "match" }
+  ]
+},
+{
+  "name": "address_unknown_placeholders",
+  "priority": 30,
+  "patterns": [
+    { "regex": "(?i)address\\s*unknown|no\\s*street\\s*address|000\\s*address", "colocator": "PO:UNKNOWN", "status": "owners", "action": "match" },
+    { "regex": "(?i)\\d+-?xxx-?\\d+", "colocator": "PO:UNKNOWN", "status": "owners", "action": "match" }
+  ]
+},
+{
+  "name": "foreign_with_us_fallback",
+  "priority": 40,
+  "patterns": [
+    { "regex": "(?i)(beer\\s*sheva|budapest|jerusalem|san\\s*juan).*?(ny|nj|fl|ca|tx)", "colocator": "FA:XX", "status": "owners", "action": "match" }
+  ]
+}
   ]
 }

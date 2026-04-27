@@ -57,7 +57,7 @@ from contextlib import contextmanager
 sys.path.append(os.path.dirname(__file__))
 
 # Import all dataclasses from models package
-from models import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution
+from models import Address, ZipFile, XMLFile, Charity, Grant, Officer, Contractor, PoliticalContribution, IrsBmf
 from models.base import BaseModel
 from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_TIMEOUT,ENABLE_AUTO_CHECKPOINTS
 from logging_utils import log_error, log_debug, log_info, log_warning
@@ -412,7 +412,8 @@ class DatabaseOperations:
     @staticmethod
     def closePool():
         if DatabaseOperations._pool is None:
-            raise RuntimeError("Pool not initialized")
+            log_info("Pool not initialized")
+            return
         DatabaseOperations._pool.close()
         DatabaseOperations._pool = None
         
@@ -491,7 +492,7 @@ class DatabaseOperations:
 
             # Build cache from database schema with timing
             log_info("Building table metadata cache...")
-            tables = ['ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants', 'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding']
+            tables = ['ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants', 'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding', 'IrsBmf']
 
             total_start = time.time()
             for table in tables:
@@ -722,6 +723,7 @@ class DatabaseOperations:
         table_name_map = {
             'XMLFile': 'XmlFiles',
             'ZipFile': 'ZipFiles',
+            'IrsBmf': 'IrsBmf',
             'PoliticalContribution': 'PoliticalContributions',
             'Geocoding': 'Geocoding'
         }
@@ -1064,6 +1066,11 @@ class DatabaseOperations:
     def get_grants_without_ein(self) -> List[Grant]:
         """Get grants with unknown EINs for matching"""
         return self.select_dataclass(Grant, where_clause="recipient_ein IS NULL OR recipient_ein = ''")
+    
+    def get_last_bmf_ein(self) -> Optional[str]:
+        """Get the highest EIN already processed in IrsBmf table for resume."""
+        result = self.execute_query("SELECT MAX(ein) FROM IrsBmf").fetchone()
+        return result[0] if result and result[0] else None
 
     def GENERIC_INSERT(self, objects: List[BaseModel]) -> List[str]:
         """
@@ -1072,7 +1079,7 @@ class DatabaseOperations:
 
         This is the PRIMARY insert method for mixed object collections. It enforces
         the strict ownership hierarchy to maintain referential integrity:
-        Charity → Officer → Grant → Contractor → PoliticalContribution → Address
+        Charity →  IrsBmf → Officer → Grant → Contractor → PoliticalContribution → Address
 
         Args:
             objects: List of BaseModel instances to insert (mixed types allowed)
@@ -1098,7 +1105,7 @@ class DatabaseOperations:
 
         # Insert in ownership order: Charity first, then related objects, Address last
         # Order: Charity, Officer, Grant, Contractor, PoliticalContribution, Address
-        ownership_order = ['Charity', 'Officer', 'Grant', 'Contractor', 'PoliticalContribution', 'Address']
+        ownership_order = ['IrsBmf','Charity', 'Officer', 'Grant', 'Contractor', 'PoliticalContribution', 'Address']
         all_ids = []
 
         for obj_type in ownership_order:

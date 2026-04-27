@@ -550,3 +550,46 @@ SELECT zip,
 FROM Zips_raw
 WHERE country_code = 'US';
 CREATE INDEX IF NOT EXISTS idx_zips_zip ON Zips(zip);
+-- ============================================================================
+-- IRS BMF Table (full EO BMF data, excluding raw address fields)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS IrsBmf (
+    irsbmf_id UUID PRIMARY KEY,
+    -- UUID7 generated in Python
+    ein VARCHAR NOT NULL,
+    name VARCHAR,
+    ico VARCHAR,
+    group_code VARCHAR,
+    subsection VARCHAR,
+    affiliation BIGINT,
+    classification VARCHAR,
+    ruling VARCHAR,
+    deductibility BIGINT,
+    foundation VARCHAR,
+    activity VARCHAR,
+    organization BIGINT,
+    status VARCHAR,
+    tax_period BIGINT,
+    asset_cd BIGINT,
+    income_cd BIGINT,
+    filing_req_cd VARCHAR,
+    pf_filing_req_cd BIGINT,
+    acct_pd VARCHAR,
+    asset_amt DECIMAL(18, 2),
+    income_amt DECIMAL(18, 2),
+    revenue_amt DECIMAL(18, 2),
+    ntee_cd VARCHAR,
+    sort_name VARCHAR,
+    source_file VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+-- Indexes for fast lookup and resume paging
+CREATE INDEX IF NOT EXISTS idx_irsbmf_ein ON IrsBmf(ein);
+CREATE INDEX IF NOT EXISTS idx_irsbmf_name ON IrsBmf(name);
+CREATE INDEX IF NOT EXISTS idx_irsbmf_ntee ON IrsBmf(ntee_cd);
+CREATE INDEX IF NOT EXISTS idx_irsbmf_source ON IrsBmf(source_file);
+CREATE INDEX IF NOT EXISTS idx_irsbmf_created ON IrsBmf(created_at);
+-- Composite index useful for common queries
+CREATE INDEX IF NOT EXISTS idx_irsbmf_ein_name ON IrsBmf(ein, name);
+-- Optional: Index on status if you plan to filter active/inactive orgs
+-- CREATE INDEX IF NOT EXISTS idx_irsbmf_status     ON IrsBmf(status);

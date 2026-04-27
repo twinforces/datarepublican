@@ -46,6 +46,7 @@ except ImportError:
 # Import extracted modules
 from database_operations import DatabaseOperations
 from xml_processor import XMLProcessor
+from bmf_processor import BmfProcessor
 from geocoding_api_processor import GeocodingAPIProcessor
 from zip_processor import ZipProcessor
 from percentile_calculator import PercentileCalculator
@@ -137,6 +138,7 @@ class IRS990Processor(BaseProcessor):
         super().__init__(self.db_ops)
         self.zip_processor = ZipProcessor(self.db_ops, global_config.zips_dir)
         self.xml_processor = XMLProcessor(self.db_ops)
+        self.bmf_processor = BmfProcessor(self.db_ops)
         self.geolocation_processor = None # GeocodingAPIProcessor(self.db_ops)
         self.address_matcher = AddressMatcher(self.db_ops)
         self.percentile_calculator = PercentileCalculator(self.db_ops)
@@ -403,6 +405,10 @@ class IRS990Processor(BaseProcessor):
         if self.exit_processing:
             log_info("Shutdown requested before starting IRS ZIP fetch")
             return False
+        fetch_and_ingest_bmf_success = self.irs_fetch_processor.fetch_and_ingest_bmf()
+        if not fetch_and_ingest_bmf_success:
+            log_error("BMF ingest failed")
+            return False
         log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
         return self.irs_fetch_processor.fetch_irs_zips(start_year, end_year)
 
@@ -414,6 +420,21 @@ class IRS990Processor(BaseProcessor):
         log_info(f"Processing ZIP files from {start_year} to {end_year}")
         return self.zip_processor.process_zip_files(start_year, end_year)
 
+    def process_bmf_files(self):
+        """Process BMF files (step 4)"""
+        log_info("Processing BMF files and ingesting into database")
+        self.setup_status_gauges(interval=10.0)
+  
+        # The XMLProcessor already leverages key-value paging via XMLProducer inheriting from BaseProducer
+        # XMLProducer._get_work_batch uses last_xml_id for WHERE xml_id > last_xml_id ORDER BY xml_id LIMIT batch_size
+        # This ensures concurrent-safe batching without skips/duplicates
+        if self.exit_processing:
+            log_info("Shutdown requested before starting BMF processing")
+            return 0
+        result = self.bmf_processor.fetch_and_ingest(self.max_files)
+        self.processed_steps += 1
+        return result
+    
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
         log_info("Processing XML files and extracting data")
@@ -740,13 +761,13 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "xml", "address", "geolocate",
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "xml", "bmf","address", "geolocate",
                                            "photos", "match", "grant_match", "backfill", "percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
+    parser.add_argument("--start-step", choices=["irsfetch", "zip", "xml", "bmf","address", "geolocate",
                                                   "photos", "match", "grant_match", "backfill", "percentiles", "export"],
                            help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "xml", "address", "geolocate",
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "xml", "bmf","address", "geolocate",
                                                  "photos", "match", "grant_match", "backfill", "percentiles", "export"],
                            help="Stopping step for processing")
     parser.add_argument("--progress", choices=["files", "bytes"], default="files",
@@ -761,7 +782,7 @@ def main():
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["irsfetch", "zip", "xml", "address", "geolocate",
+    steps = ["irsfetch", "zip", "xml", "bmf","address", "geolocate",
              "photos", "match", "grant_match", "backfill", "percentiles", "export"]
 
     # Define step actions
@@ -769,6 +790,7 @@ def main():
         "irsfetch": lambda: processor.fetch_irs_zips(args.start_year, args.end_year),
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
         "xml": lambda: processor.process_xml_files(),
+        "bmf": lambda: processor.process_bmf_files(),
         "address": lambda: processor.deduplicate_addresses(),  # Deduplicate addresses and create master-child relationships
         "match": lambda: processor.match_grants(),
         "geolocate": lambda: processor.geolocate_addresses(),

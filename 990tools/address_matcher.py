@@ -51,24 +51,25 @@ class AddressMatcher:
             COUNT(*) AS total_grants,
             COUNT(CASE WHEN recipient_ein IS NOT NULL OR recipient_ein_backfilled IS NOT NULL THEN 1 END) AS grants_with_ein,
             ROUND(100.0 * COUNT(CASE WHEN recipient_ein IS NOT NULL OR recipient_ein_backfilled IS NOT NULL THEN 1 END) / COUNT(*), 2) AS pct_with_ein,
-            COUNT(DISTINCT COALESCE(grantee_name_conc,grantee_name_geo,grantee_name_bmf, grantee_name)) AS distinct_canonical_names
+            COUNT(DISTINCT COALESCE(grantee_name_conc,grantee_name_geo,grantee_name_bmf, grantee_name)) AS distinct_names,
             COUNT(DISTINCT grantee_name) AS distinct_original_names,
-            COUNT(DISTINCT grantee_name_bmf) AS distinct_bmf_names
-            COUNT(DISTINCT grantee_name_geo) AS distinct_geo_names
-            COUNT(DISTINCT grantee_name_conc) AS distinct_canonical_names
+            COUNT(DISTINCT grantee_name_bmf) AS distinct_bmf_names,
+            COUNT(DISTINCT grantee_name_geo) AS distinct_geo_names,
+            COUNT(DISTINCT grantee_name_conc) AS distinct_conc_names
             FROM Grants;
             """).fetchone()
         print(f"[{round}] Total grants: {result[0]:,}")
         print(f"[{round}] Grants with EIN: {result[1]:,}")
         print(f"[{round}] Percentage with EIN: {result[2]}%")
-        print(f"[{round}] Distinct canonical names: {result[3]:,}")
+        print(f"[{round}] Distinct COALESCE names: {result[3]:,}")
         print(f"[{round}] Distinct original names: {result[4]:,}")
         print(f"[{round}] Distinct BMF names: {result[5]:,}")
         print(f"[{round}] Distinct geo names: {result[6]:,}")
         print(f"[{round}] Distinct canonical names: {result[7]:,}")
 
+    
     def match_grants(self, dry_run: bool = False, batch_size: int = 50000) -> Dict[str, int]:
-        """Full pipeline: geo normalization → full name-based EIN consolidation."""
+        """Full pipeline: BMF pre-backfill → geo normalization → name-based EIN consolidation."""
         log_info("Starting full grant normalization + EIN backfill...")
 
         stats = {
@@ -81,7 +82,6 @@ class AddressMatcher:
             conn.execute("BEGIN TRANSACTION")
 
             try:
-                
                 # RULES:
                 # recipient_ein_backfilled = backfilled EIN based on any method (BMF, address match, name match)
                 # name flow grantee_name (original) → grantee_name_bmf (backfill from BMF matches) → grantee_name_geo (geo normalization) → grantee_name_conc (full name-based consolidation)
@@ -89,243 +89,333 @@ class AddressMatcher:
                 # grantee_name_geo = cleaned name from geo normalization step (computed from stripping names, finding shortest
                 # grantee_name_conc = cleaned name from full name-based consolidation step (your 6-step process
                 # final canonical name to use for matching is COALESCE(grantee_name_conc, grantee_name_geo, grantee_name_bmf, grantee_name)
-                
-                log_info("Step 0: BMF pre-backfill - expand known EINs then collapse to canonical name...")
+                if False:
+                    log_info("Step 0: BMF pre-backfill - expand known EINs then collapse to canonical name...")
 
-                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS recipient_ein_backfilled VARCHAR;")
-                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_bmf VARCHAR;")
-                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_geo VARCHAR;")
-                conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_conc VARCHAR;")
+                    # ====================== ALL COLUMNS FIRST ======================
+                    log_info("Creating all required columns...")
+                    conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS recipient_ein_backfilled VARCHAR;")
+                    conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_bmf VARCHAR;")
+                    conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_geo VARCHAR;")
+                    conn.execute("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS grantee_name_conc VARCHAR;")
 
-                prefixes = conn.execute("""
-                    SELECT DISTINCT LEFT(recipient_ein, 2) AS prefix
-                    FROM Grants 
-                    WHERE recipient_ein IS NOT NULL AND recipient_ein != ''
-                    ORDER BY prefix
-                """).fetchall()
+                    # ====================== 0. BMF PRE-BACKFILL ======================
+                    log_info("Step 0: BMF pre-backfill - expand known EINs then collapse...")
+                    self.dump_stats(conn, "Start of BMF Pre-Backfill")
 
-                for (prefix,) in prefixes:
-                    log_info(f"Processing EIN prefix {prefix}...")
+                    einprefixes = conn.execute("""
+                        SELECT DISTINCT LEFT(recipient_ein, 2) AS prefix
+                        FROM Grants 
+                        WHERE recipient_ein IS NOT NULL AND recipient_ein != ''
+                        ORDER BY prefix
+                    """).fetchall()
 
-                    conn.execute(f"""
-                        WITH known_names AS (
-                            SELECT DISTINCT 
-                                g2.recipient_ein AS ein,
-                                g2.grantee_name
-                            FROM Grants g2
-                            WHERE g2.recipient_ein LIKE '{prefix}%'
-                              AND g2.recipient_ein IS NOT NULL
-                              AND g2.recipient_ein != ''
-                        )
-                        UPDATE Grants g
-                        SET 
-                            grantee_name_bmf = b.NAME,
-                            recipient_ein_backfilled = b.EIN
-                        FROM known_names kn
-                        JOIN irs_eo_bmf b ON kn.ein = b.EIN
-                        WHERE g.grantee_name = kn.grantee_name
-                          AND g.recipient_ein LIKE '{prefix}%';
-                    """)
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_bmf_name ON Grants(grantee_name_bmf);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_backfill_ein ON Grants(recipient_ein_backfilled);")
+                    for (prefix,) in einprefixes:
+                        log_info(f"Processing EIN prefix {prefix}...")
 
-
-                self.dump_stats(conn, "After BMF Pre-Backfill");
-                
-                # ====================== 1. GEO NORMALIZATION ======================
-                log_info("Step 1: Geo-aware name normalization (batched IN)...")
-                # 1. Ensure columns exist FIRST
-                self.dump_stats(conn, "Before Geo Normalization")
-                conn.execute("UPDATE Grants SET grantee_name_geo = UPPER(grantee_name) WHERE grantee_name_geo IS NULL;")
-                self.dump_stats(conn, "After Case Normalization")
-                BATCH_SIZE = 1000   # sweet spot for DuckDB
-
-                for core, variants in self.rules.items():
-                    if not variants:
-                        continue
-                    
-                    log_info(f"Processing rule '{core}' with {len(variants):,} variants...")
-
-                    for i in range(0, len(variants), BATCH_SIZE):
-                        batch = variants[i:i + BATCH_SIZE]
-                        variant_list = "', '".join(v.replace("'", "''") for v in batch)
-                        
                         conn.execute(f"""
-                            UPDATE Grants 
-                            SET grantee_name_geo = '{core.replace("'", "''")}' 
-                            WHERE grantee_name_geo IS NULL 
-                              AND grantee_name_bmf IN ('{variant_list}')
+                            WITH known_names AS (
+                                SELECT DISTINCT 
+                                    g2.recipient_ein AS ein,
+                                    g2.grantee_name
+                                FROM Grants g2
+                                WHERE g2.recipient_ein LIKE '{prefix}%'
+                                AND g2.recipient_ein IS NOT NULL
+                                AND g2.recipient_ein != ''
+                            )
+                            UPDATE Grants g
+                            SET 
+                                grantee_name_bmf = UPPER(b.NAME),
+                                recipient_ein_backfilled = b.EIN
+                            FROM known_names kn
+                            JOIN irs_eo_bmf b ON kn.ein = b.EIN
+                            WHERE g.grantee_name = kn.grantee_name;
                         """)
-                self.dump_stats(conn, "After Geo Rules Normalization")
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
 
-                # Fallback: copy bmf (always uppercase) or original to geo if geo is still null after rules
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_bmf_name ON Grants(grantee_name_bmf);")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_backfill_ein ON Grants(recipient_ein_backfilled);")
+
+                    self.dump_stats(conn, "After BMF Pre-Backfill")
+
+                    # ====================== 1. GEO NORMALIZATION ======================
+                    log_info("Step 1: Geo-aware name normalization...")
+
+                    conn.execute("UPDATE Grants SET grantee_name_geo = UPPER(COALESCE(grantee_name_bmf, grantee_name)) WHERE grantee_name_geo IS NULL;")
+                    self.dump_stats(conn, "After Case Normalization")
+
+                    BATCH_SIZE = 1000
+
+                    for core, variants in self.rules.items():
+                        if not variants:
+                            continue
+                        
+                        log_info(f"Processing rule '{core}' with {len(variants):,} variants...")
+
+                        for i in range(0, len(variants), BATCH_SIZE):
+                            batch = variants[i:i + BATCH_SIZE]
+                            variant_list = "', '".join(v.replace("'", "''") for v in batch)
+                            
+                            conn.execute(f"""
+                                UPDATE Grants 
+                                SET grantee_name_geo = '{core.replace("'", "''").upper()}' 
+                                WHERE grantee_name_geo IS NULL 
+                                AND grantee_name_bmf IN ('{variant_list}')
+                            """)
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+
+                    self.dump_stats(conn, "After Geo Rules Normalization")
+                    # Fallback
+                    conn.execute("""
+                        UPDATE Grants 
+                        SET grantee_name_geo = UPPER(COALESCE(grantee_name_bmf, grantee_name))
+                        WHERE grantee_name_geo IS NULL
+                    """)
+
+                    # Small cleanups
+                    conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, ',\\s*$', '') WHERE grantee_name_geo IS NOT NULL")
+                    conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, 'B&GC', 'BOYS AND GIRLS CLUB', 'i') WHERE grantee_name_geo IS NOT NULL")
+                    conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, '\\bBSA\\b', 'BOY SCOUTS OF AMERICA', 'i') WHERE grantee_name_geo IS NOT NULL")
+                    self.dump_stats(conn, "After Geo Normalization+Case")
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_geo_name ON Grants(grantee_name_geo);")
+                    stats["geo_normalized"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE grantee_name_geo IS NOT NULL").fetchone()[0]
+                    log_info(f"Geo normalization complete: {stats['geo_normalized']:,} rows")
+
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+                    
+                    # ====================== Address Backfill ======================
+                    conn.execute("DROP TABLE IF EXISTS grant_update_map;")
+                    conn.execute("CREATE TEMP TABLE grant_update_map (grant_id UUID PRIMARY KEY, recipient_ein VARCHAR);")
+                    conn.execute("""
+                        INSERT INTO grant_update_map (grant_id, recipient_ein)
+                        SELECT 
+                            g.grant_id,
+                            ANY_VALUE(known.recipient_ein)
+                        FROM Grants g
+                        JOIN Addresses a 
+                            ON a.owner_id = g.grant_id 
+                        AND a.address_type = 'grant'
+                        JOIN (
+                            SELECT 
+                                COALESCE(g2.grantee_name_geo, g2.grantee_name) AS match_name,
+                                a2.canonical_address,
+                                g2.recipient_ein
+                            FROM Grants g2
+                            JOIN Addresses a2 
+                                ON a2.owner_id = g2.grant_id 
+                            AND a2.address_type = 'grant'
+                            WHERE g2.recipient_ein IS NOT NULL 
+                            AND g2.recipient_ein != ''
+                        ) known
+                        ON known.match_name = COALESCE(g.grantee_name_geo, g.grantee_name)
+                        AND known.canonical_address = a.canonical_address
+                        WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '')
+                        GROUP BY g.grant_id;
+                    """)
+
+                    updates = conn.execute("SELECT grant_id, recipient_ein FROM grant_update_map").fetchall()
+                    update_list = [{'grant_id': row[0], 'recipient_ein_backfilled': row[1]} for row in updates]
+                    stats['address_match_updated'] = self.db_ops.bulk_update('Grants', update_list, id_column='grant_id', batch_size=batch_size, commit=False)
+                    log_info(f"Pass 1 (name+address) {'would update' if dry_run else 'updated'}: {stats.get('address_match_updated', 0):,} grants")
+                    self.dump_stats(conn, "After Address Match Backfill")
+
+                    # ====================== 2. FULL NAME + EIN CONSOLIDATION ======================
+                    log_info("Step 2: Full name-based EIN consolidation (memory-friendly batched version)...")
+
+                    # 2.0 - Create base_name_ein in small batches
+                    conn.execute("DROP TABLE IF EXISTS base_name_ein;")
+                    conn.execute("""
+                        CREATE TABLE base_name_ein (
+                            original_name VARCHAR,
+                            recipient_ein VARCHAR,
+                            grant_count BIGINT,
+                            total_amount DECIMAL(18,2),
+                            shortest_name VARCHAR,
+                            grantee_name_conc VARCHAR
+                        );
+                    """)
+
+                    einprefixes = conn.execute("""
+                        SELECT DISTINCT LEFT(COALESCE(recipient_ein_backfilled, recipient_ein), 2) AS prefix
+                        FROM Grants 
+                        WHERE COALESCE(recipient_ein_backfilled, recipient_ein) IS NOT NULL
+                        AND COALESCE(recipient_ein_backfilled, recipient_ein) != ''
+                        ORDER BY prefix
+                    """).fetchall()
+
+                    for (prefix,) in einprefixes:
+                        log_info(f"Building base_name_ein for prefix {prefix}...")
+                        conn.execute(f"""
+                            INSERT INTO base_name_ein
+                            SELECT
+                                grantee_name_geo AS original_name,
+                                COALESCE(recipient_ein_backfilled, recipient_ein) AS recipient_ein,
+                                COUNT(*) AS grant_count,
+                                SUM(grant_amt) AS total_amount,
+                                NULL AS shortest_name,
+                                NULL AS grantee_name_conc
+                            FROM Grants
+                            WHERE grantee_name_geo IS NOT NULL
+                            AND LEFT(COALESCE(recipient_ein_backfilled, recipient_ein), 2) = '{prefix}'
+                            GROUP BY grantee_name_geo, COALESCE(recipient_ein_backfilled, recipient_ein);
+                        """)
+                        self.db_ops._intermediate_commit_and_checkpoint(conn, 0)
+
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_base_ein ON base_name_ein(recipient_ein);")
+
+                    # 2.2 - Shortest name per EIN (batched)
+                    conn.execute("DROP TABLE IF EXISTS temp_per_ein;")
+                    conn.execute("CREATE TEMP TABLE temp_per_ein (recipient_ein VARCHAR, shortest_name VARCHAR);")
+
+                    for (prefix,) in einprefixes:
+                        log_info(f"Ranking shortest name for prefix {prefix}...")
+                        conn.execute(f"""
+                            INSERT INTO temp_per_ein
+                            WITH ranked AS (
+                                SELECT
+                                    b.recipient_ein,
+                                    b.original_name AS grantee_name,
+                                    ROW_NUMBER() OVER (
+                                        PARTITION BY b.recipient_ein
+                                        ORDER BY array_length(regexp_split_to_array(b.original_name, '\\s+'), 1) ASC,
+                                                b.total_amount DESC
+                                    ) AS rn
+                                FROM base_name_ein b
+                                WHERE LEFT(b.recipient_ein, 2) = '{prefix}'
+                            )
+                            SELECT recipient_ein, grantee_name
+                            FROM ranked
+                            WHERE rn = 1;
+                        """)
+                        self.db_ops._intermediate_commit_and_checkpoint(conn, 0)
+
+                    # 2.3 - Push shortest_name back
+                    conn.execute("""
+                        UPDATE base_name_ein b
+                        SET shortest_name = t.shortest_name
+                        FROM temp_per_ein t
+                        WHERE b.recipient_ein = t.recipient_ein;
+                    """)
+
+                    # 2.4 - Apply prefix/suffix cleanup
+                    conn.execute("""
+                        UPDATE base_name_ein
+                        SET grantee_name_conc = CASE
+                            WHEN shortest_name LIKE 'THE %' THEN regexp_replace(shortest_name, '^THE ', '', 'i')
+                            WHEN shortest_name LIKE '% INC' THEN regexp_replace(shortest_name, ' INC$', '', 'i')
+                            WHEN shortest_name LIKE '% FOUNDATION' THEN regexp_replace(shortest_name, ' FOUNDATION$', '', 'i')
+                            WHEN shortest_name LIKE '% FOUNDATION INC' THEN regexp_replace(shortest_name, ' FOUNDATION INC$', '', 'i')
+                            WHEN shortest_name LIKE '% LLC' THEN regexp_replace(shortest_name, ' LLC$', '', 'i')
+                            WHEN shortest_name ~ ' (CORPORATION|CORP)$' THEN regexp_replace(shortest_name, ' (CORPORATION|CORP)$', '', 'i')
+                            WHEN shortest_name ~ ' ASSOCIATION( INC)?$' THEN regexp_replace(shortest_name, ' ASSOCIATION( INC)?$', '', 'i')
+                            WHEN shortest_name ~ ' (SCHOOL|SCHOOL DISTRICT)$' THEN regexp_replace(shortest_name, ' (SCHOOL|SCHOOL DISTRICT)$', '', 'i')
+                            WHEN shortest_name ~ ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$' THEN regexp_replace(shortest_name, ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$', '', 'i')
+                            WHEN shortest_name ~ ' CENTER( INC)?$' THEN regexp_replace(shortest_name, ' CENTER( INC)?$', '', 'i')
+                            ELSE shortest_name
+                        END;
+                    """)
+
+                    # 2.5 - Final mapping table (with DISTINCT ON to prevent duplicates)
+                    conn.execute("DROP TABLE IF EXISTS name_mapping;")
+                    conn.execute("""
+                        CREATE TABLE name_mapping AS
+                        SELECT DISTINCT ON (grantee_name_conc)
+                            grantee_name_conc AS match_name,
+                            ANY_VALUE(recipient_ein ORDER BY total_amount DESC) AS winner_ein
+                        FROM base_name_ein
+                        GROUP BY grantee_name_conc;
+                    """)
+
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, 0)
+                    log_info(f"name_mapping created with {conn.execute('SELECT COUNT(*) FROM name_mapping').fetchone()[0]:,} rows")
+
+                # 2.6: Slow but bulletproof – one grant at a time
+                log_info("Step 2.6: Slow but bulletproof backfill – one grant at a time...")
+
+                # Build the list of grants that need updating
+                conn.execute("DROP TABLE IF EXISTS grant_update_map;")
                 conn.execute("""
-                    UPDATE Grants 
-                    SET grantee_name_geo = COALESCE(grantee_name_bmf, UPPER(grantee_name))
-                    WHERE grantee_name_geo IS NULL
+                    CREATE TABLE grant_update_map (
+                        grant_id UUID PRIMARY KEY,
+                        winner_ein VARCHAR,
+                        new_conc_name VARCHAR
+                    );
                 """)
 
-                # Small cleanups
-                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, ',\\s*$', '') WHERE grantee_name_geo IS NOT NULL")
-                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, 'B&GC', 'BOYS AND GIRLS CLUB', 'i') WHERE grantee_name_geo IS NOT NULL")
-                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, '\s+BSA\s+', 'BOY SCOUTS OF AMERICA', 'i') WHERE grantee_name_geo IS NOT NULL")
-
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_geo_name ON Grants(grantee_name_geo);")
-                self.dump_stats(conn, "After Geo Normalization+Case+CLEANUPs")
-
-
-                stats["geo_normalized"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE grantee_name_geo IS NOT NULL").fetchone()[0]
-                log_info(f"Geo normalization complete: {stats['geo_normalized']:,} rows")
-
-                self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
-                
-                # if name and address matches, backfill EIN from known matches
-                conn.execute("DROP TABLE IF EXISTS grant_update_map;")
-                conn.execute("CREATE TEMP TABLE grant_update_map (grant_id UUID PRIMARY KEY, recipient_ein VARCHAR);")
                 conn.execute("""
-                    INSERT INTO grant_update_map (grant_id, recipient_ein)
+                    INSERT INTO grant_update_map (grant_id, winner_ein, new_conc_name)
                     SELECT 
                         g.grant_id,
-                        ANY_VALUE(known.recipient_ein)
+                        m.winner_ein,
+                        m.match_name
                     FROM Grants g
-                    JOIN Addresses a 
-                        ON a.owner_id = g.grant_id 
-                    AND a.address_type = 'grant'
-                    JOIN (
-                        SELECT 
-                            COALESCE(g2.grantee_name_geo, g2.grantee_name) AS match_name,   -- use geo if available, else original
-                            a2.canonical_address,
-                            g2.recipient_ein
-                        FROM Grants g2
-                        JOIN Addresses a2 
-                            ON a2.owner_id = g2.grant_id 
-                        AND a2.address_type = 'grant'
-                        WHERE g2.recipient_ein IS NOT NULL 
-                        AND g2.recipient_ein != ''
-                    ) known
-                    ON known.match_name = COALESCE(g.grantee_name_geo, g.grantee_name)      -- match on cleaned geo or original
-                    AND known.canonical_address = a.canonical_address
-                    WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '')
-                    GROUP BY g.grant_id;
+                    JOIN name_mapping m
+                      ON g.grantee_name_geo = m.match_name
+                    WHERE g.grantee_name_conc IS NULL;
                 """)
-                map_count1 = conn.execute("SELECT COUNT(*) FROM grant_update_map").fetchone()[0] or 0
                 
-                updates = conn.execute("SELECT grant_id, recipient_ein FROM grant_update_map").fetchall()
-                update_list = [{'grant_id': row[0], 'recipient_ein_backfilled': row[1]} for row in updates]
-                stats['address_match_updated'] = self.db_ops.bulk_update('Grants', update_list, id_column='grant_id', batch_size=batch_size, commit=False)
-                log_info(f"Pass 1 (name+address) {'would update' if dry_run else 'updated'}: {stats['address_match_updated']:,} grants")
-                self.dump_stats(conn, "After Address Match Backfill")
-
-
-                # ====================== 2. FULL NAME + EIN CONSOLIDATION (your 6-step process) ======================
-                log_info("Step 2: Full name-based EIN consolidation using grantee_name_geo...")
-
-                # Use your proven 6-step process, but on grantee_name_geo instead of raw grantee_name
-                # (I'll use your exact steps, adapted)
-
-                # Step 2.1: Build base_name_ein using grantee_name_geo
                 conn.execute("""
-                    CREATE OR REPLACE TABLE base_name_ein AS
-                    SELECT
-                        grantee_name_geo AS original_name,
-                        COALESCE(recipient_ein_backfilled, recipient_ein) AS recipient_ein,
-                        COUNT(*) AS grant_count,
-                        SUM(grant_amt) AS total_amount,
-                        CAST(NULL AS VARCHAR) AS shortest_name,
-                        CAST(NULL AS VARCHAR) AS grantee_name_conc
-                    FROM Grants
-                    WHERE grantee_name_geo IS NOT NULL
-                    GROUP BY grantee_name_geo, COALESCE(recipient_ein_backfilled, recipient_ein);
-                """)
+                    DELETE FROM grant_update_map 
+                    WHERE grant_id IN (
+                        '019d6408-f047-706e-9916-cd13c42ef0c4',
+                        '019d6409-f1c6-79c7-e076-73c6bd48cabc',
+                        '019d6408-eec3-76ff-577a-43e78a6b7354'
+                    );
+                """);
 
-                # Step 2.2: Collapse by EIN to get shortest name per EIN
-                conn.execute("DROP TABLE IF EXISTS temp_per_ein;")
-                conn.execute("""
-                    CREATE TEMPORARY TABLE IF NOT EXISTS temp_per_ein AS
-                        WITH base AS (
-                            SELECT
-                                COALESCE(recipient_ein_backfilled, recipient_ein) AS recipient_ein,
-                                grantee_name_geo,
-                                grant_amt
-                            FROM Grants
-                            WHERE COALESCE(recipient_ein_backfilled, recipient_ein) IS NOT NULL
-                            AND COALESCE(recipient_ein_backfilled, recipient_ein) != ''
-                        ),
-                        ranked AS (
-                            SELECT
-                                recipient_ein,
-                                grantee_name_geo AS grantee_name,
-                                ROW_NUMBER() OVER (
-                                    PARTITION BY recipient_ein
-                                    ORDER BY array_length(regexp_split_to_array(grantee_name_geo, '\\s+'), 1) ASC,
-                                            SUM(grant_amt) DESC
-                                ) AS rn
-                            FROM base
-                            GROUP BY recipient_ein, grantee_name_geo
-                        )
-                        SELECT
-                            recipient_ein,
-                            grantee_name AS shortest_name
-                        FROM ranked
-                        WHERE rn = 1;
-                """)
+                total_to_update = conn.execute("SELECT COUNT(*) FROM grant_update_map").fetchone()[0]
+                log_info(f"Prepared {total_to_update:,} grants for backfill")
 
-                # Step 2.3: Push shortest_name back
-                conn.execute("""
-                    UPDATE base_name_ein b
-                    SET shortest_name = t.shortest_name
-                    FROM temp_per_ein t
-                    WHERE b.recipient_ein = t.recipient_ein;
-                """)
+                updated_this_step = 0
+                last_grant_id = None
 
-                # Step 2.4: Apply prefix/suffix cleanup on shortest_name
-                conn.execute("""
-                    UPDATE base_name_ein
-                    SET grantee_name_conc = CASE
-                        WHEN shortest_name LIKE 'THE %' THEN regexp_replace(shortest_name, '^THE ', '', 'i')
-                        WHEN shortest_name LIKE '% INC' THEN regexp_replace(shortest_name, ' INC$', '', 'i')
-                        WHEN shortest_name LIKE '% FOUNDATION' THEN regexp_replace(shortest_name, ' FOUNDATION$', '', 'i')
-                        WHEN shortest_name LIKE '% FOUNDATION INC' THEN regexp_replace(shortest_name, ' FOUNDATION INC$', '', 'i')
-                        WHEN shortest_name LIKE '% LLC' THEN regexp_replace(shortest_name, ' LLC$', '', 'i')
-                        WHEN shortest_name ~ ' (CORPORATION|CORP)$' THEN regexp_replace(shortest_name, ' (CORPORATION|CORP)$', '', 'i')
-                        WHEN shortest_name ~ ' ASSOCIATION( INC)?$' THEN regexp_replace(shortest_name, ' ASSOCIATION( INC)?$', '', 'i')
-                        WHEN shortest_name ~ ' (SCHOOL|SCHOOL DISTRICT)$' THEN regexp_replace(shortest_name, ' (SCHOOL|SCHOOL DISTRICT)$', '', 'i')
-                        WHEN shortest_name ~ ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$' THEN regexp_replace(shortest_name, ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$', '', 'i')
-                        WHEN shortest_name ~ ' CENTER( INC)?$' THEN regexp_replace(shortest_name, ' CENTER( INC)?$', '', 'i')
-                        ELSE shortest_name
-                    END;
-                """)
+                while True:
+                    if last_grant_id is None:
+                        row = conn.execute("""
+                            SELECT grant_id, winner_ein, new_conc_name 
+                            FROM grant_update_map 
+                            ORDER BY grant_id 
+                            LIMIT 1
+                        """).fetchone()
+                    else:
+                        row = conn.execute("""
+                            SELECT grant_id, winner_ein, new_conc_name 
+                            FROM grant_update_map 
+                            WHERE grant_id > ?
+                            ORDER BY grant_id 
+                            LIMIT 1
+                        """, [last_grant_id]).fetchone()
 
-                # Step 2.5: Final mapping table
-                conn.execute("DROP TABLE IF EXISTS name_mapping;")
-                conn.execute("""
-                    CREATE TEMP TABLE name_mapping AS
-                    SELECT
-                        grantee_name_conc AS match_name,           -- use the final cleaned name
-                        ANY_VALUE(recipient_ein ORDER BY total_amount DESC) AS winner_ein
-                    FROM base_name_ein
-                    GROUP BY grantee_name_conc;
-                """)
+                    if not row:
+                        break
+                    
+                   
 
-                # Step 2.6: Backfill to Grants
+                    grant_id, winner_ein, new_conc_name = row
 
+                    conn.execute("""
+                        UPDATE Grants 
+                        SET 
+                            recipient_ein_backfilled = ?,
+                            grantee_name_conc = ?
+                        WHERE grant_id = ?;
+                    """, [winner_ein, new_conc_name, grant_id])
 
-                conn.execute("""
-                    UPDATE Grants g
-                    SET
-                        recipient_ein_backfilled = m.winner_ein,
-                        grantee_name_conc = m.match_name
-                    FROM name_mapping m
-                    WHERE COALESCE(g.grantee_name_conc, g.grantee_name_geo) = m.match_name;
-                """)
+                    updated_this_step += 1
+                    last_grant_id = grant_id
 
-                stats["name_normalized_updated"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE recipient_ein_backfilled IS NOT NULL").fetchone()[0] or 0
+                    if updated_this_step % 5000 == 0:
+                        log_info(f"Updated {updated_this_step:,} / {total_to_update:,} grants so far...")
 
-                self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
-                self.dump_stats(conn, "After Name Backfill")
+                    conn.commit()   # commit after every single grant
 
-                stats["total_updated"] = stats["name_normalized_updated"]
-                log_info(f"Full name-based EIN consolidation complete. Updated {stats['total_updated']:,} grants")
+                conn.execute("CHECKPOINT")
+                log_info("Final checkpoint done")
+
+                stats["name_normalized_updated"] = updated_this_step
+                log_info(f"Name-based backfill complete. Updated {updated_this_step:,} grants")
 
                 return stats
 

@@ -388,6 +388,7 @@ class IRSFetchProcessor(BaseProcessor):
         self.downloaded_zips = 0
   
         # Initialize producer and consumer
+        
         self.producer = IRSFetchProducer(self.db_ops, zips_dir)
         self.consumer = IRSFetchConsumer(self.db_ops, zips_dir)
   
@@ -534,8 +535,130 @@ class IRSFetchProcessor(BaseProcessor):
     def _recompress_zips(self):
         """Legacy method - now handled by consumer"""
         return self.consumer._recompress_zips(self.zips_dir)
+    
+    def fetch_and_ingest_bmf(self) -> bool:
+        """Download IRS EO BMF files using curl, gzip them with shell, then ingest from .gz"""
+        log_info("Starting IRS EO BMF download → gzip → ingest (using shell tools)...")
+
+        bmf_dir = os.path.join(self.zips_dir, "bmf")
+        os.makedirs(bmf_dir, exist_ok=True)
+
+        base_url = "https://www.irs.gov/pub/irs-soi/"
+        files = ["eo1.csv", "eo2.csv", "eo3.csv", "eo4.csv"]
+
+        try:
+            for filename in files:
+                url = base_url + filename
+                raw_path = os.path.join(bmf_dir, filename)
+                gz_path = raw_path + ".gz"
+
+                # 1. Download with curl if not already gzipped
+                if not os.path.exists(gz_path):
+                    log_info(f"Downloading {filename} with curl...")
+                    subprocess.run(["curl", "-L", "-o", raw_path, url], check=True)
+
+                    # 2. Gzip with shell gzip (fast and reliable)
+                    log_info(f"Compressing {filename} with gzip...")
+                    subprocess.run(["gzip", "-f", raw_path], check=True)   # -f forces overwrite
+
+                    log_info(f"Downloaded and gzipped {filename}")
+                else:
+                    log_info(f"Skipping {filename} — already gzipped")
+
+            # 3. Ingest directly from .gz files
+            log_info("Ingesting BMF files directly from .gz...")
+
+            with self.db_ops.acquire_write_conn() as conn:
+                # Create staging table from first file
+                first_gz = os.path.join(bmf_dir, files[0] + ".gz")
+                log_info(f"Creating staging table from {files[0]}.gz")
+                conn.execute(f"""
+                    CREATE OR REPLACE TABLE irs_eo_bmf_staging AS
+                    SELECT *, '{files[0]}' AS source_file 
+                    FROM read_csv_auto('{first_gz}', header=true, delim=',', quote='"', compression='gzip')
+                """)
+
+                # Append the remaining files
+                for filename in files[1:]:
+                    gz_path = os.path.join(bmf_dir, filename + ".gz")
+                    log_info(f"Appending {filename}.gz to staging...")
+                    conn.execute(f"""
+                        INSERT INTO irs_eo_bmf_staging
+                        SELECT *, '{filename}' AS source_file 
+                        FROM read_csv_auto('{gz_path}', header=true, delim=',', quote='"', compression='gzip')
+                    """)
+
+                # Create final clean table with proper types
+                log_info("Creating final clean irs_eo_bmf table...")
+                conn.execute("""
+                    CREATE OR REPLACE TABLE irs_eo_bmf AS
+                    SELECT
+                        EIN,
+                        NAME,
+                        ICO,
+                        STREET,
+                        CITY,
+                        STATE,
+                        ZIP,
+                        "GROUP" AS group_code,
+                        SUBSECTION,
+                        AFFILIATION,
+                        CLASSIFICATION,
+                        RULING,
+                        DEDUCTIBILITY,
+                        FOUNDATION,
+                        ACTIVITY,
+                        ORGANIZATION,
+                        STATUS,
+                        TAX_PERIOD,
+                        ASSET_CD,
+                        INCOME_CD,
+                        FILING_REQ_CD,
+                        PF_FILING_REQ_CD,
+                        ACCT_PD,
+                        TRY_CAST(ASSET_AMT AS DECIMAL(18,2)) AS asset_amt,
+                        TRY_CAST(INCOME_AMT AS DECIMAL(18,2)) AS income_amt,
+                        TRY_CAST(REVENUE_AMT AS DECIMAL(18,2)) AS revenue_amt,
+                        NTEE_CD,
+                        SORT_NAME,
+                        source_file
+                    FROM irs_eo_bmf_staging;
+                """)
+
+                # Add indexes
+                log_info("Creating indexes on irs_eo_bmf...")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_eo_ein ON irs_eo_bmf(EIN);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_eo_name ON irs_eo_bmf(NAME);")
+                conn.execute("""
+                    UPDATE irs_eo_bmf
+                    SET NAME = CASE
+                        WHEN NAME LIKE 'THE %' THEN regexp_replace(NAME, '^THE ', '', 'i')
+                        WHEN NAME LIKE '% INC' THEN regexp_replace(NAME, ' INC$', '', 'i')
+                        WHEN NAME LIKE '% FOUNDATION' THEN regexp_replace(NAME, ' FOUNDATION$', '', 'i')
+                        WHEN NAME LIKE '% FOUNDATION INC' THEN regexp_replace(NAME, ' FOUNDATION INC$', '', 'i')
+                        WHEN NAME LIKE '% LLC' THEN regexp_replace(NAME, ' LLC$', '', 'i')
+                        WHEN NAME ~ ' (CORPORATION|CORP)$' THEN regexp_replace(NAME, ' (CORPORATION|CORP)$', '', 'i')
+                        WHEN NAME ~ ' ASSOCIATION( INC)?$' THEN regexp_replace(NAME, ' ASSOCIATION( INC)?$', '', 'i')
+                        WHEN NAME ~ ' (SCHOOL|SCHOOL DISTRICT)$' THEN regexp_replace(NAME, ' (SCHOOL|SCHOOL DISTRICT)$', '', 'i')
+                        WHEN NAME ~ ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$' THEN regexp_replace(NAME, ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$', '', 'i')
+                        WHEN NAME ~ ' CENTER( INC)?$' THEN regexp_replace(NAME, ' CENTER( INC)?$', '', 'i')
+                        ELSE NAME
+                    END;
+                """)
+                conn.commit()
+                conn.checkpoint()
 
 
+            log_info("IRS EO BMF download → gzip → ingest completed successfully.")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            log_error(f"Shell command failed: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            log_error(f"BMF fetch and ingest failed: {e}", exc_info=True)
+            return False
+    
 def main():
     """Command-line interface for IRS fetch processor"""
     parser = argparse.ArgumentParser(description="IRS ZIP File Fetch and Recompress Processor")

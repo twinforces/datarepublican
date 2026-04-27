@@ -26,7 +26,7 @@ INTEGRATION:
 """
 
 from typing import Dict, List, Any, Optional, Generator
-from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address, Geocoding, ZipFile, XMLFile, AuthoritativeEin
+from models import Charity, Officer, Grant, Contractor, PoliticalContribution, Address, Geocoding, ZipFile, XMLFile, AuthoritativeEin,IrsBmf
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import log_info, log_error, log_warning, log_debug
 from datetime import datetime
@@ -64,6 +64,7 @@ class PendingDatabaseContext:
         self.xml_content = xml_content
         self.objects: Dict[str, List[Any]] = {
             'charity': [],
+            'irsbmf': [], # for IRS BMF records (not from XML, but collected during BMF processing)
             'officer': [],
             'grant': [],
             'contractor': [],
@@ -231,7 +232,7 @@ class PendingDatabaseContext:
 
                 # Insert any real objects first (normal for XML parsing, skipped in address dedup)
                 for obj_type in ['zipfile', 'xmlfile', 'charity', 'officer', 'grant',
-                                    'contractor', 'political_contribution', 'address', 'geocoding']:
+                                    'contractor', 'political_contribution', 'address', 'geocoding','irsbmf']:
                     objects = self.objects.get(obj_type, [])
                     if objects:   # <-- only call if there are actual objects
                         if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Inserting {len(objects)} {obj_type} objects")
