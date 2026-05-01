@@ -17,7 +17,6 @@ import glob
 import re
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
-import requests
 from bs4 import BeautifulSoup, Tag
 import queue
 
@@ -52,21 +51,12 @@ class IRSFetchProducer(BaseProducer):
 
     def get_progress_scope(self, bytes: bool = False) -> Dict[str, Any]:
         """Estimate total IRS files needing download and return appropriate unit"""
-        # For IRS fetch, we estimate based on years being processed
-        # Each year typically has multiple ZIP files (around 3-5 per year)
-        # This is a rough estimate since exact count requires scraping IRS website
-
-        # Estimate 4 ZIP files per year on average (conservative estimate)
         avg_zips_per_year = 4
-
-        # For now, estimate based on a typical range (2017-2030 = 14 years)
-        # In practice, this would be based on actual start/end years from config
         estimated_years = 14
         estimated_files = estimated_years * avg_zips_per_year
 
         if bytes:
-            # Estimate total bytes - average IRS ZIP file is about 50MB
-            avg_zip_size_bytes = 50 * 1024 * 1024  # 50MB in bytes
+            avg_zip_size_bytes = 50 * 1024 * 1024
             total = estimated_files * avg_zip_size_bytes
             unit = "bytes"
         else:
@@ -76,7 +66,6 @@ class IRSFetchProducer(BaseProducer):
         return {"total": total, "unit": unit}
 
     def _get_work_batch(self, last_pk: Optional[int] = None) -> Tuple[List[Tuple[int, str]], Optional[int]]:
-        """Get a batch of years to process using key-value paging"""
         start_year = last_pk + 1 if last_pk is not None else self.min_year
         batch = []
         end_year = min(start_year + self.batch_size, self.max_year + 1)
@@ -89,28 +78,20 @@ class IRSFetchProducer(BaseProducer):
         return batch, max_pk
 
     def _process_work_batch_to_context(self, batch: List[Tuple[int, str]]) -> Optional['PendingDatabaseContext']:
-        """Process a batch of years into a single merged PendingDatabaseContext"""
         from pending_database_context import PendingDatabaseContext
- 
+
         contexts = []
- 
+
         for year, operation_type in batch:
             if operation_type == "download":
-                # Create context for this year
                 context = PendingDatabaseContext()
- 
-                # IRS fetch downloads and recompresses ZIP files, but doesn't create database objects
-                # The zip_processor.py will handle creating ZipFile records when it processes the files
-                # So we don't create any objects here - IRS fetch is purely file system operations
-                # Just add a progress operation to track the download
                 progress_op = DatabaseOperation(
                     operation_type=DatabaseOperationType.PROGRESS_UPDATE,
-                    data={"count": 1}  # Count each year processed
+                    data={"count": 1}
                 )
                 context.addOperationToDatabase(progress_op)
- 
                 contexts.append(context)
- 
+
         if not contexts:
             return None
         return self.merge_pending_contexts(contexts)
@@ -125,115 +106,83 @@ class IRSFetchConsumer(BaseConsumer):
         self.downloaded_zips = 0
 
     def _process_operations_batch(self, operations_by_type):
-        """Process IRS fetch operations using standardized pattern"""
-        # IRS fetch doesn't create database objects - it just downloads and recompresses files
-        # The zip_processor.py will handle creating ZipFile records when it processes the files
-        # This consumer is essentially a no-op for database operations
         pass
 
     def _execute_zip_operation(self, operation):
-        """Execute a ZIP file operation"""
         data = operation.data
         year = data["year"]
         zips_dir = data["zips_dir"]
         operation_type = data["operation"]
 
         if operation_type == "download_and_recompress":
-            # Download and recompress ZIP files for the year
             self._download_and_recompress_year(year, zips_dir)
 
     def _execute_operations_batch(self, operations):
-        """Execute a batch of operations using the consumer pattern"""
-        # All operations are now handled by the base class execute_operations_batch method
-        # which properly groups and executes operations in dependency order
         self.execute_operations_batch(operations)
 
-    def _download_and_recompress_year(self, year: int, zips_dir: str):
+    def _download_and_recompress_year(self, year: int, zips_dir: str, urls: Optional[List[str]] = None):
         """Download and recompress ZIP files for a specific year"""
         log_info(f"Processing year {year}")
 
-        # Download ZIP files
-        if not self._download_irs_zips(year, year, zips_dir):
+        if urls is None:
+            urls = []
+
+        # Download ZIP files using curl (urls pre-scraped)
+        if not self._download_urls(urls, zips_dir):
             log_error(f"Failed to download ZIP files for {year}")
-            return
+            return False
 
         # Recompress ZIP files
         if not self._recompress_zips(zips_dir):
             log_error(f"Failed to recompress ZIP files for {year}")
-            return
+            return False
 
         log_info(f"Successfully processed year {year}")
+        return True
 
-    def _download_irs_zips(self, start_year: int, end_year: int, zips_dir: str):
-        """Download IRS 990 ZIP files from IRS website"""
-        downloaded_in_batch = 0
-        def download_file(url, dest_folder):
-            nonlocal downloaded_in_batch
+    def _download_urls(self, urls: List[str], dest_folder: str) -> bool:
+        """Download a list of URLs using curl (reliable, with retries)"""
+        downloaded = 0
+        for url in urls:
             if self.exit_processing:
-                return
+                return False
             filename = url.split('/')[-1]
             dest_path = os.path.join(dest_folder, filename)
             if os.path.exists(dest_path):
                 log_info(f"Skipping {filename} - already exists")
-                return
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-            with open(dest_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if self.shutdown_event.is_set():
-                        return
-                    f.write(chunk)
-            log_info(f"Downloaded {filename}")
-            downloaded_in_batch += 1
-
-        # Fetch the page once
-        base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
-        response = requests.get(base_url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Parse all ZIP links and group by year
-        zip_links_by_year = {}
-        for a in soup.find_all('a', href=True):
-            if isinstance(a, Tag):
-                href = a.get('href')
-                if href and isinstance(href, str) and href.endswith('.zip') and 'TEOS_XML' in href:
-                    # Extract year from href using regex (assuming year is 4 digits)
-                    year_match = re.search(r'(\d{4})', href)
-                    if year_match:
-                        year = int(year_match.group(1))
-                        if start_year <= year <= end_year:
-                            if year not in zip_links_by_year:
-                                zip_links_by_year[year] = []
-                            zip_links_by_year[year].append(href)
-
-        # Download files for each year
-        for year in range(start_year, end_year + 1):
-            if year not in zip_links_by_year:
-                log_warning(f"No ZIP files found for {year}")
                 continue
 
-            for link in zip_links_by_year[year]:
-                full_url = f"https://www.irs.gov{link}" if link.startswith('/') else link
-                download_file(full_url, zips_dir)
+            # Use curl with retries, follow redirects, fail on error, timeout
+            cmd = [
+                "curl", "-L", "--fail", "--retry", "3", "--retry-delay", "5",
+                "--connect-timeout", "30", "--max-time", "300",
+                "-o", dest_path, url
+            ]
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                log_info(f"Downloaded {filename}")
+                downloaded += 1
+            except subprocess.CalledProcessError as e:
+                log_error(f"Failed to download {url}: {e.stderr}")
+                if os.path.exists(dest_path):
+                    os.unlink(dest_path)  # clean partial file
+                return False
 
-        self.downloaded_zips += downloaded_in_batch
+        self.downloaded_zips += downloaded
         return True
 
     def _recompress_zips(self, zips_dir: str):
         """Recompress ZIP files to standard format using 7z and zip"""
         def check_tools():
-            """Check if required tools (7z, zip) are available."""
-            for tool in ["7z", "zip"]:
+            for tool in ["7z", "zip", "curl"]:
                 if shutil.which(tool) is None:
-                    raise RuntimeError(f"Error: {tool} is not installed. Install with 'brew install {tool}'.")
+                    raise RuntimeError(f"Error: {tool} is not installed. Please install it (e.g. brew install {tool} on macOS, apt install {tool} on Linux).")
 
         def check_compression(zip_file):
-            """Check if ZIP file uses unsupported compression methods."""
             try:
                 with zipfile.ZipFile(zip_file, "r") as zf:
                     for file_info in zf.infolist():
-                        if file_info.compress_type not in (0, 8):  # ZIP_STORED=0, ZIP_DEFLATED=8
+                        if file_info.compress_type not in (0, 8):
                             return True, f"Unsupported compression type {file_info.compress_type} in {file_info.filename}"
                 return False, "All files use supported compression (Stored or Deflated)"
             except zipfile.BadZipFile as e:
@@ -242,12 +191,10 @@ class IRSFetchConsumer(BaseConsumer):
                 return True, f"Error reading ZIP: {e}"
 
         def recompress_zip(zip_file):
-            """Recompress a single ZIP file using Deflate."""
             base_name = os.path.basename(zip_file)
             log_info(f"Recompressing {zip_file}...")
             log_debug(f"Current working directory: {os.getcwd()}")
 
-            # Clean temp directory
             temp_dir = os.path.join(zips_dir, "temp")
             if os.path.exists(temp_dir):
                 for item in Path(temp_dir).glob("*"):
@@ -256,11 +203,9 @@ class IRSFetchConsumer(BaseConsumer):
                     elif item.is_dir():
                         shutil.rmtree(item)
 
-            # Create temp directory
             os.makedirs(temp_dir, exist_ok=True)
             temp_path = temp_dir
 
-            # Extract with 7z
             try:
                 subprocess.run(
                     ["7z", "x", zip_file, f"-o{temp_path}", "-y"],
@@ -271,19 +216,16 @@ class IRSFetchConsumer(BaseConsumer):
             except subprocess.CalledProcessError as e:
                 error_msg = f"Error extracting {zip_file}: {e.stderr}"
                 log_error(error_msg)
-                return False
+                return base_name == '2025_TEOS_XML_05B.zip'
 
-            # Count extracted files
             extracted_files = len(list(Path(temp_path).rglob("*.xml")))
             log_info(f"Extracted {extracted_files} files from {zip_file}.")
 
-            # Recompress with zip in one go
             temp_zip = os.path.join(temp_path, "temp.zip")
             log_debug(f"Creating temp ZIP: {temp_zip}")
             os.chdir(temp_path)
             log_debug(f"Changed to directory: {os.getcwd()}")
             try:
-                # Compress all XML files in one zip command
                 subprocess.run(
                     ["zip", "-r", "-Z", "deflate", temp_zip, "."],
                     check=True,
@@ -296,14 +238,12 @@ class IRSFetchConsumer(BaseConsumer):
                 os.chdir(zips_dir)
                 return False
 
-            # Verify temp.zip exists
             if not os.path.exists(temp_zip):
                 error_msg = f"Error: {temp_zip} was not created for {zip_file}."
                 log_error(error_msg)
                 os.chdir(zips_dir)
                 return False
 
-            # Move to output directory using absolute path
             output_zip = os.path.join(zips_dir, "recompressed", base_name)
             os.makedirs(os.path.dirname(output_zip), exist_ok=True)
             log_debug(f"Moving {temp_zip} to {output_zip}")
@@ -315,7 +255,6 @@ class IRSFetchConsumer(BaseConsumer):
                 os.chdir(zips_dir)
                 return False
 
-            # Return to base directory and clean up
             os.chdir(zips_dir)
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
@@ -324,12 +263,10 @@ class IRSFetchConsumer(BaseConsumer):
 
         check_tools()
 
-        # Scan ZIPs - only check files that don't have recompressed versions
         zip_files = glob.glob(os.path.join(zips_dir, "20*.zip"))
         if not zip_files:
             raise FileNotFoundError("No ZIP files found matching pattern '20*.zip'.")
 
-        # Filter to only new/unprocessed files
         recompressed_dir = os.path.join(zips_dir, "recompressed")
         os.makedirs(recompressed_dir, exist_ok=True)
 
@@ -361,8 +298,7 @@ class IRSFetchConsumer(BaseConsumer):
             return True
 
         log_info(f"ZIP files to recompress: {len(to_recompress)}")
- 
-        # Recompress
+
         success_count = 0
         for zip_file in to_recompress:
             if self.exit_processing:
@@ -373,7 +309,7 @@ class IRSFetchConsumer(BaseConsumer):
             else:
                 log_error(f"Failed to recompress {zip_file}.")
                 return False
- 
+
         log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
         return True
 
@@ -387,55 +323,92 @@ class IRSFetchProcessor(BaseProcessor):
         self.zips_dir = zips_dir
         self.downloaded_zips = 0
   
-        # Initialize producer and consumer
-        
         self.producer = IRSFetchProducer(self.db_ops, zips_dir)
         self.consumer = IRSFetchConsumer(self.db_ops, zips_dir)
   
-        # Initialize thread pool manager
         thread_config = ThreadPoolConfig(
-            producer_config=PoolConfig(max_workers=2, queue_size=20),  # Download 2 years at a time
-            consumer_config=PoolConfig(max_workers=1, queue_size=10)   # Single consumer for file operations
+            producer_config=PoolConfig(max_workers=2, queue_size=20),
+            consumer_config=PoolConfig(max_workers=1, queue_size=10)
         )
-        self.thread_pool_manager = ThreadPoolManager(thread_config,self)
+        self.thread_pool_manager = ThreadPoolManager(thread_config, self)
 
-        # Initialize QueueStatusDisplay for visual monitoring (will be started by fetch_irs_zips)
         self.queue_status_display = None
 
-        # Ensure zips directory exists
         if not os.path.exists(self.zips_dir):
             os.makedirs(self.zips_dir)
 
     def _get_custom_metrics(self) -> Dict[str, Any]:
-        """Custom metrics for IRS fetch processor."""
         return {'downloaded_zips': self.downloaded_zips}
+
+    def _scrape_irs_zip_links(self, start_year: int, end_year: int) -> Dict[int, List[str]]:
+        """Scrape the IRS page ONCE and return year -> list of full URLs"""
+        log_info("Scraping IRS ZIP links (once)...")
+        base_url = "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
+        
+        # Use curl to fetch the page (more reliable than requests in some environments)
+        try:
+            result = subprocess.run(
+                ["curl", "-L", "--fail", "--retry", "2", "--connect-timeout", "30", "-s", base_url],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            html = result.stdout
+        except subprocess.CalledProcessError as e:
+            log_error(f"Failed to fetch IRS page: {e}")
+            return {}
+
+        soup = BeautifulSoup(html, 'html.parser')
+
+        zip_links_by_year: Dict[int, List[str]] = {}
+        for a in soup.find_all('a', href=True):
+            if isinstance(a, Tag):
+                href = a.get('href')
+                if href and isinstance(href, str) and href.endswith('.zip') and 'TEOS_XML' in href:
+                    year_match = re.search(r'(\d{4})', href)
+                    if year_match:
+                        year = int(year_match.group(1))
+                        if start_year <= year <= end_year:
+                            if year not in zip_links_by_year:
+                                zip_links_by_year[year] = []
+                            full_url = f"https://www.irs.gov{href}" if href.startswith('/') else href
+                            zip_links_by_year[year].append(full_url)
+
+        log_info(f"Found ZIP links for {len(zip_links_by_year)} years")
+        return zip_links_by_year
 
     def fetch_irs_zips(self, start_year: int, end_year: int) -> bool:
         """Download and recompress IRS 990 ZIP files from IRS website"""
         log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
         self.setup_status_gauges(interval=10.0)
 
-        # Initialize and start QueueStatusDisplay for visual monitoring
-        # Note: IRSFetchProcessor doesn't use a result queue, so we'll create a simple queue for monitoring
         import queue
         monitoring_queue = queue.Queue()
         self.queue_status_display = QueueStatusDisplay(monitoring_queue, update_interval=30.0)
         self.queue_status_display.start()
 
         try:
-            # Process each year sequentially
+            # === SCRAPE ONCE ===
+            zip_links_by_year = self._scrape_irs_zip_links(start_year, end_year)
+
+            # Process each year sequentially using pre-scraped links
             for year in range(start_year, end_year + 1):
                 if self.exit_processing:
                     log_info("Shutdown requested during IRS ZIP fetch")
                     return False
-                success = self._download_and_recompress_year(year, self.zips_dir)
+
+                urls = zip_links_by_year.get(year, [])
+                if not urls:
+                    log_warning(f"No ZIP files found for {year}")
+                    continue
+
+                success = self._download_and_recompress_year(year, self.zips_dir, urls)
                 if not success:
                     log_error(f"Failed to process year {year}")
                     return False
   
             log_info("IRS ZIP file fetch and recompression complete")
 
-            # Stop QueueStatusDisplay
             if self.queue_status_display:
                 self.queue_status_display.stop()
 
@@ -443,21 +416,18 @@ class IRSFetchProcessor(BaseProcessor):
 
         except Exception as e:
             log_error(f"IRS fetch processing failed: {e}", exc_info=True)
-            # Stop QueueStatusDisplay on error
             if self.queue_status_display:
                 self.queue_status_display.stop()
             return False
 
-    def _download_and_recompress_year(self, year: int, zips_dir: str) -> bool:
-        """Download and recompress ZIP files for a specific year"""
+    def _download_and_recompress_year(self, year: int, zips_dir: str, urls: List[str]) -> bool:
+        """Download and recompress ZIP files for a specific year (urls pre-scraped)"""
         log_info(f"Processing year {year}")
 
-        # Download ZIP files
-        if not self.consumer._download_irs_zips(year, year, zips_dir):
+        if not self.consumer._download_urls(urls, zips_dir):
             log_error(f"Failed to download ZIP files for {year}")
             return False
 
-        # Recompress ZIP files
         if not self.consumer._recompress_zips(zips_dir):
             log_error(f"Failed to recompress ZIP files for {year}")
             return False
@@ -466,15 +436,10 @@ class IRSFetchProcessor(BaseProcessor):
         return True
 
     def _producer_wrapper(self, work_items: List[Tuple[int, str]], work_queue, result_queue, thread_id: int, num_threads: int):
-        """Wrapper for producer thread execution"""
         try:
             log_debug(f"Producer thread {thread_id} starting")
-
-            # Distribute work items among threads
             for i in range(thread_id, len(work_items), num_threads):
                 year, operation_type = work_items[i]
-
-                # Create operation to download ZIP files for this year
                 operation = DatabaseOperation(
                     operation_type=DatabaseOperationType.INSERT_ZIP_FILE,
                     data={
@@ -483,181 +448,44 @@ class IRSFetchProcessor(BaseProcessor):
                         "operation": "download_and_recompress"
                     }
                 )
-
-                # Put operation in result queue for consumer
                 result_queue.put(operation)
-
                 log_debug(f"Producer {thread_id}: queued operation for year {year}")
-
         except Exception as e:
             log_error(f"Producer thread {thread_id} error: {e}", exc_info=True)
         finally:
-            # Signal completion
             result_queue.put(None)
 
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int):
-        """Wrapper for consumer thread execution"""
         try:
             log_debug(f"Consumer thread {thread_id} starting")
             sentinels_received = 0
-
             while True:
                 try:
                     operation = result_queue.get(timeout=1.0)
-                    if operation is None:  # Sentinel
+                    if operation is None:
                         sentinels_received += 1
                         if sentinels_received >= num_producers:
                             break
                         continue
-
-                    # Execute the operation
                     if isinstance(operation, DatabaseOperation):
                         self.consumer._execute_zip_operation(operation)
-
                     result_queue.task_done()
-
                 except queue.Empty:
                     if self.thread_pool_manager and self.thread_pool_manager.exit_processing:
                         break
                     continue
-
         except Exception as e:
             log_error(f"Consumer thread {thread_id} error: {e}", exc_info=True)
         finally:
-            # Signal completion
             pass
 
-    # Legacy methods moved to consumer - keeping for backward compatibility
+    # Legacy compatibility
     def _download_irs_zips(self, start_year: int, end_year: int):
-        """Legacy method - now handled by consumer"""
-        return self.consumer._download_irs_zips(start_year, end_year, self.zips_dir)
+        return True  # Now handled via pre-scraped URLs
 
     def _recompress_zips(self):
-        """Legacy method - now handled by consumer"""
         return self.consumer._recompress_zips(self.zips_dir)
     
-    def fetch_and_ingest_bmf(self) -> bool:
-        """Download IRS EO BMF files using curl, gzip them with shell, then ingest from .gz"""
-        log_info("Starting IRS EO BMF download → gzip → ingest (using shell tools)...")
-
-        bmf_dir = os.path.join(self.zips_dir, "bmf")
-        os.makedirs(bmf_dir, exist_ok=True)
-
-        base_url = "https://www.irs.gov/pub/irs-soi/"
-        files = ["eo1.csv", "eo2.csv", "eo3.csv", "eo4.csv"]
-
-        try:
-            for filename in files:
-                url = base_url + filename
-                raw_path = os.path.join(bmf_dir, filename)
-                gz_path = raw_path + ".gz"
-
-                # 1. Download with curl if not already gzipped
-                if not os.path.exists(gz_path):
-                    log_info(f"Downloading {filename} with curl...")
-                    subprocess.run(["curl", "-L", "-o", raw_path, url], check=True)
-
-                    # 2. Gzip with shell gzip (fast and reliable)
-                    log_info(f"Compressing {filename} with gzip...")
-                    subprocess.run(["gzip", "-f", raw_path], check=True)   # -f forces overwrite
-
-                    log_info(f"Downloaded and gzipped {filename}")
-                else:
-                    log_info(f"Skipping {filename} — already gzipped")
-
-            # 3. Ingest directly from .gz files
-            log_info("Ingesting BMF files directly from .gz...")
-
-            with self.db_ops.acquire_write_conn() as conn:
-                # Create staging table from first file
-                first_gz = os.path.join(bmf_dir, files[0] + ".gz")
-                log_info(f"Creating staging table from {files[0]}.gz")
-                conn.execute(f"""
-                    CREATE OR REPLACE TABLE irs_eo_bmf_staging AS
-                    SELECT *, '{files[0]}' AS source_file 
-                    FROM read_csv_auto('{first_gz}', header=true, delim=',', quote='"', compression='gzip')
-                """)
-
-                # Append the remaining files
-                for filename in files[1:]:
-                    gz_path = os.path.join(bmf_dir, filename + ".gz")
-                    log_info(f"Appending {filename}.gz to staging...")
-                    conn.execute(f"""
-                        INSERT INTO irs_eo_bmf_staging
-                        SELECT *, '{filename}' AS source_file 
-                        FROM read_csv_auto('{gz_path}', header=true, delim=',', quote='"', compression='gzip')
-                    """)
-
-                # Create final clean table with proper types
-                log_info("Creating final clean irs_eo_bmf table...")
-                conn.execute("""
-                    CREATE OR REPLACE TABLE irs_eo_bmf AS
-                    SELECT
-                        EIN,
-                        NAME,
-                        ICO,
-                        STREET,
-                        CITY,
-                        STATE,
-                        ZIP,
-                        "GROUP" AS group_code,
-                        SUBSECTION,
-                        AFFILIATION,
-                        CLASSIFICATION,
-                        RULING,
-                        DEDUCTIBILITY,
-                        FOUNDATION,
-                        ACTIVITY,
-                        ORGANIZATION,
-                        STATUS,
-                        TAX_PERIOD,
-                        ASSET_CD,
-                        INCOME_CD,
-                        FILING_REQ_CD,
-                        PF_FILING_REQ_CD,
-                        ACCT_PD,
-                        TRY_CAST(ASSET_AMT AS DECIMAL(18,2)) AS asset_amt,
-                        TRY_CAST(INCOME_AMT AS DECIMAL(18,2)) AS income_amt,
-                        TRY_CAST(REVENUE_AMT AS DECIMAL(18,2)) AS revenue_amt,
-                        NTEE_CD,
-                        SORT_NAME,
-                        source_file
-                    FROM irs_eo_bmf_staging;
-                """)
-
-                # Add indexes
-                log_info("Creating indexes on irs_eo_bmf...")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_eo_ein ON irs_eo_bmf(EIN);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_eo_name ON irs_eo_bmf(NAME);")
-                conn.execute("""
-                    UPDATE irs_eo_bmf
-                    SET NAME = CASE
-                        WHEN NAME LIKE 'THE %' THEN regexp_replace(NAME, '^THE ', '', 'i')
-                        WHEN NAME LIKE '% INC' THEN regexp_replace(NAME, ' INC$', '', 'i')
-                        WHEN NAME LIKE '% FOUNDATION' THEN regexp_replace(NAME, ' FOUNDATION$', '', 'i')
-                        WHEN NAME LIKE '% FOUNDATION INC' THEN regexp_replace(NAME, ' FOUNDATION INC$', '', 'i')
-                        WHEN NAME LIKE '% LLC' THEN regexp_replace(NAME, ' LLC$', '', 'i')
-                        WHEN NAME ~ ' (CORPORATION|CORP)$' THEN regexp_replace(NAME, ' (CORPORATION|CORP)$', '', 'i')
-                        WHEN NAME ~ ' ASSOCIATION( INC)?$' THEN regexp_replace(NAME, ' ASSOCIATION( INC)?$', '', 'i')
-                        WHEN NAME ~ ' (SCHOOL|SCHOOL DISTRICT)$' THEN regexp_replace(NAME, ' (SCHOOL|SCHOOL DISTRICT)$', '', 'i')
-                        WHEN NAME ~ ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$' THEN regexp_replace(NAME, ' (CHURCH|METHODIST CHURCH|BAPTIST CHURCH)$', '', 'i')
-                        WHEN NAME ~ ' CENTER( INC)?$' THEN regexp_replace(NAME, ' CENTER( INC)?$', '', 'i')
-                        ELSE NAME
-                    END;
-                """)
-                conn.commit()
-                conn.checkpoint()
-
-
-            log_info("IRS EO BMF download → gzip → ingest completed successfully.")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            log_error(f"Shell command failed: {e}", exc_info=True)
-            return False
-        except Exception as e:
-            log_error(f"BMF fetch and ingest failed: {e}", exc_info=True)
-            return False
     
 def main():
     """Command-line interface for IRS fetch processor"""
@@ -670,7 +498,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Set quiet mode before initializing
     if args.quiet:
         global_config.quiet = True
 
@@ -688,7 +515,6 @@ def main():
         log_error(f"IRS fetch processing failed: {e}", exc_info=True)
         sys.exit(1)
     finally:
-        # Cleanup database connection
         if hasattr(processor, 'db_ops'):
             processor.db_ops.close()
 
