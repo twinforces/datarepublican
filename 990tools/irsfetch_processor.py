@@ -191,75 +191,88 @@ class IRSFetchConsumer(BaseConsumer):
                 return True, f"Error reading ZIP: {e}"
 
         def recompress_zip(zip_file):
+            """Recompress a single ZIP file *in place* (overwrite original with standard version)."""
             base_name = os.path.basename(zip_file)
-            log_info(f"Recompressing {zip_file}...")
-            log_debug(f"Current working directory: {os.getcwd()}")
-
+            log_info(f"Recompressing {zip_file} in place...")
+            original_cwd = os.getcwd()
             temp_dir = os.path.join(zips_dir, "temp")
-            if os.path.exists(temp_dir):
-                for item in Path(temp_dir).glob("*"):
-                    if item.is_file():
-                        item.unlink()
-                    elif item.is_dir():
-                        shutil.rmtree(item)
-
-            os.makedirs(temp_dir, exist_ok=True)
             temp_path = temp_dir
-
-            try:
-                subprocess.run(
-                    ["7z", "x", zip_file, f"-o{temp_path}", "-y"],
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Error extracting {zip_file}: {e.stderr}"
-                log_error(error_msg)
-                return base_name == '2025_TEOS_XML_05B.zip'
-
-            extracted_files = len(list(Path(temp_path).rglob("*.xml")))
-            log_info(f"Extracted {extracted_files} files from {zip_file}.")
-
             temp_zip = os.path.join(temp_path, "temp.zip")
-            log_debug(f"Creating temp ZIP: {temp_zip}")
-            os.chdir(temp_path)
-            log_debug(f"Changed to directory: {os.getcwd()}")
+
             try:
-                subprocess.run(
-                    ["zip", "-r", "-Z", "deflate", temp_zip, "."],
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Error recompressing {zip_file}: {e.stderr}"
-                log_error(error_msg)
-                os.chdir(zips_dir)
+                # Clean and prepare temp directory
+                if os.path.exists(temp_dir):
+                    for item in Path(temp_dir).glob("*"):
+                        if item.is_file():
+                            item.unlink()
+                        elif item.is_dir():
+                            shutil.rmtree(item)
+                os.makedirs(temp_dir, exist_ok=True)
+
+                # Extract with 7z (supports all compression types)
+                try:
+                    subprocess.run(
+                        ["7z", "x", zip_file, f"-o{temp_path}", "-y"],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                except subprocess.CalledProcessError as e:
+                    error_msg = f"Error extracting {zip_file}: {e.stderr}"
+                    log_error(error_msg)
+                    return False
+
+                extracted_files = len(list(Path(temp_path).rglob("*.xml")))
+                log_info(f"Extracted {extracted_files} files from {zip_file}.")
+
+                # Recompress everything using standard Deflate
+                log_debug(f"Creating temp ZIP: {temp_zip}")
+                os.chdir(temp_path)
+                log_debug(f"Changed to directory: {os.getcwd()}")
+                try:
+                    subprocess.run(
+                        ["zip", "-r", "-Z", "deflate", temp_zip, "."],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                except subprocess.CalledProcessError as e:
+                    error_msg = f"Error recompressing {zip_file}: {e.stderr}"
+                    log_error(error_msg)
+                    return False
+
+                if not os.path.exists(temp_zip):
+                    error_msg = f"Error: {temp_zip} was not created for {zip_file}."
+                    log_error(error_msg)
+                    return False
+
+                # Move the new standard ZIP *into place* - overwriting the original incompatible one
+                log_debug(f"Moving {temp_zip} to {zip_file} (replacing original in place)")
+                try:
+                    shutil.move(temp_zip, zip_file)
+                except (OSError, shutil.Error) as e:
+                    error_msg = f"Error moving {temp_zip} to {zip_file}: {e}"
+                    log_error(error_msg)
+                    return False
+
+                log_info(f"Successfully recompressed {zip_file} in place (now Python-compatible)")
+                return True
+
+            except Exception as e:
+                log_error(f"Unexpected error during recompression of {zip_file}: {e}", exc_info=True)
                 return False
 
-            if not os.path.exists(temp_zip):
-                error_msg = f"Error: {temp_zip} was not created for {zip_file}."
-                log_error(error_msg)
-                os.chdir(zips_dir)
-                return False
-
-            output_zip = os.path.join(zips_dir, "recompressed", base_name)
-            os.makedirs(os.path.dirname(output_zip), exist_ok=True)
-            log_debug(f"Moving {temp_zip} to {output_zip}")
-            try:
-                shutil.move(temp_zip, output_zip)
-            except (OSError, shutil.Error) as e:
-                error_msg = f"Error moving {temp_zip} to {output_zip}: {e}"
-                log_error(error_msg)
-                os.chdir(zips_dir)
-                return False
-
-            os.chdir(zips_dir)
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
-            log_info(f"Successfully recompressed {zip_file} to recompressed/{base_name}")
-            return True
+            finally:
+                # ALWAYS restore original working directory and clean up temp dir (even on error)
+                try:
+                    os.chdir(original_cwd)
+                except Exception:
+                    pass
+                if os.path.exists(temp_dir):
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception:
+                        pass  # will be cleaned on next run
 
         check_tools()
 
@@ -267,24 +280,10 @@ class IRSFetchConsumer(BaseConsumer):
         if not zip_files:
             raise FileNotFoundError("No ZIP files found matching pattern '20*.zip'.")
 
-        recompressed_dir = os.path.join(zips_dir, "recompressed")
-        os.makedirs(recompressed_dir, exist_ok=True)
-
-        to_check = []
-        for zip_file in zip_files:
-            base_name = os.path.basename(zip_file)
-            recompressed_path = os.path.join(recompressed_dir, base_name)
-            if not os.path.exists(recompressed_path):
-                to_check.append(zip_file)
-
-        if not to_check:
-            log_info("All ZIP files already have recompressed versions. Skipping recompression.")
-            return True
-
-        log_info(f"Found {len(to_check)} ZIP files to check for recompression.")
+        log_info(f"Found {len(zip_files)} ZIP files to check for recompression.")
 
         to_recompress = []
-        for zip_file in to_check:
+        for zip_file in zip_files:
             log_debug(f"Checking {zip_file}...")
             needs_recompress, reason = check_compression(zip_file)
             if needs_recompress:
@@ -308,9 +307,9 @@ class IRSFetchConsumer(BaseConsumer):
                 success_count += 1
             else:
                 log_error(f"Failed to recompress {zip_file}.")
-                return False
+                # Continue processing remaining files (do not abort entire batch on one failure)
 
-        log_info(f"Recompression complete. Successfully recompressed {success_count} files.")
+        log_info(f"Recompression complete. Successfully recompressed {success_count} of {len(to_recompress)} files.")
         return True
 
 
