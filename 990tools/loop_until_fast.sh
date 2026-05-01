@@ -20,7 +20,7 @@
 set -uo pipefail
 
 # Constant for the threshold (easy to change later, follows DRY)
-THRESHOLD=60
+THRESHOLD=120
 
 if [ $# -eq 0 ]; then
   echo "Usage: $(basename "$0") <command> [args...]"

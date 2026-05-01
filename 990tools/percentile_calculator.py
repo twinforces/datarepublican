@@ -1,203 +1,283 @@
 #!/usr/bin/env python3
 """
-percentile_calculator.py - Percentile calculations for IRS 990 data
+percentile_calculator.py - Step 10: Compute denominator, _pct, and _ptile
 
-This module calculates percentile rankings for charities by organization type and tax year.
+Two separate, self-contained, restartable steps:
+  ratios      → Phase 1 (denominator + _pct columns) - fully self-contained
+  percentiles → Phase 2 (_ptile columns, memory-safe, one group at a time) - fully self-contained
+
+Uses full Charity objects via select_dataclass for robustness and debugging.
+Automatically resumes from where it left off (no need to manually pass start_after_*).
 """
 
 import logging
-from typing import List, Tuple, Dict
-from collections import defaultdict
-from tqdm import tqdm
+import queue
+import threading
+from typing import Optional, List, Tuple
 
-from database_operations import DatabaseOperations
-from logging_utils import start_progress_reporting, stop_progress_reporting, update_progress, set_progress_description
+from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
+from pending_database_context import PendingDatabaseContext
+from base_processor import BaseProcessor, WorkUnit
+from logging_utils import log_info, log_error
+from models import Charity
+from config import global_config
 
-# Set up logger
 logger = logging.getLogger(__name__)
 
 
-class PercentileCalculator:
-    """Handles percentile calculations for charity metrics"""
+class PercentileCalculator(BaseProcessor):
+    """Step 10: Full ratio + percentile calculation (self-contained + restartable)"""
 
     def __init__(self, db_ops: DatabaseOperations):
-        self.db_ops = db_ops
+        super().__init__(db_ops)
+        self.exit_processing = False
 
-    def calculate_percentiles(self) -> int:
-        """Calculate percentile rankings by org type and tax year (step 10)"""
-        print("Calculating percentile rankings")
+    # ============================================================
+    # STEP: ratios (Phase 1) - Self-contained, auto-resumes
+    # ============================================================
+    def compute_ratios(self, max_files: Optional[int] = None) -> int:
+        """
+        Compute denominator + all _pct columns.
+        Fully self-contained: automatically resumes from the last processed charity.
+        max_files: limit for this run (testing + DuckDB performance batches). If None, uses global_config.max_files.
+        """
+        if max_files is None:
+            max_files = global_config.max_files
 
-        # Get all charities grouped by org_type and tax_year
-        charities = self.db_ops.get_charities_for_percentiles()
-        logger.info(f"Retrieved {len(charities)} charity records for percentile calculation")
+        print("Step: ratios - Computing denominator and _pct columns...")
 
-        # Check for EIN duplicates - these are expected data characteristics, not bugs
-        # The get_latest.py script already handles selecting the latest XML file for duplicates
-        ein_counts = defaultdict(int)
-        for charity in charities:
-            ein_counts[charity[2]] += 1  # charity[2] is ein
+        # Self-contained: automatically find where we left off
+        start_after = self.db_ops.get_last_processed_charity_id()
+        if start_after:
+            print(f"  Resuming from charity_id > {start_after}")
 
-        duplicates = {ein: count for ein, count in ein_counts.items() if count > 1}
-        if duplicates:
-            logger.info(f"Found {len(duplicates)} EINs with multiple entries (expected for multi-year data): {list(duplicates.keys())[:10]}...")
+        work_queue: queue.Queue = queue.Queue(maxsize=200)
+        processed = 0
+        lock = threading.Lock()
 
-        # Group by org_type and tax_year
-        groups = defaultdict(lambda: defaultdict(list))
-        for org_type, tax_year, ein, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct in charities:
-            key = (org_type, tax_year)
-            groups[org_type][tax_year].append({
-                'ein': ein,
-                'comp_pct': comp_pct,
-                'travel_pct': travel_pct,
-                'conferences_pct': conferences_pct,
-                'grants_pct': grants_pct,
-                'foreign_expenses_pct': foreign_expenses_pct
-            })
+        def _feed_thread():
+            last_id = start_after
+            enqueued = 0
+            while not self.exit_processing:
+                batch, new_last_id = self.db_ops.get_charities_for_ratio_computation(
+                    last_charity_id=last_id, limit=5000
+                )
+                if not batch:
+                    break
 
-        logger.info(f"Grouped charities into {len(groups)} org types with {sum(len(years) for years in groups.values())} total groups")
+                for charity in batch:
+                    if self.exit_processing:
+                        break
+                    work_queue.put(WorkUnit.work_item(charity))
+                    enqueued += 1
+                    if max_files and enqueued >= max_files:
+                        break
 
-        total_groups = sum(len(years) for years in groups.values())
-        processed_groups = 0
+                if not new_last_id or (max_files and enqueued >= max_files):
+                    break
+                last_id = new_last_id
 
-        # Start thread-safe progress reporting
-        progress_reporter = start_progress_reporting(
-            total=total_groups,
-            desc="Calculating percentiles",
-            unit="group"
-        )
+            for _ in range(4):
+                work_queue.put(WorkUnit.sentinel(0))
 
-        # Calculate percentiles for each group
-        for org_type, years in groups.items():
-            for tax_year, org_charities in years.items():
-                if len(org_charities) < 2:
-                    processed_groups += 1
-                    update_progress(progress_reporter, 1)
-                    continue  # Need at least 2 for meaningful percentiles
+        def _process_work_item(charity: Charity) -> PendingDatabaseContext:
+            # Denominator logic: prefer receipt_amt (income), fallback to total_exp
+            denominator = None
+            if charity.receipt_amt and charity.receipt_amt > 0:
+                denominator = charity.receipt_amt
+            elif charity.total_exp and charity.total_exp > 0:
+                denominator = charity.total_exp
 
-                    # Extract values for each metric, filtering out NULL values and converting strings to floats
-                    comp_values = []
-                    for c in org_charities:
-                        if c['comp_pct'] is not None:
+            # Compute _pct values (safe division)
+            comp_pct = charity.officer_comp / denominator if denominator and charity.officer_comp else None
+            travel_pct = charity.travel_amt / denominator if denominator and charity.travel_amt else None
+            conferences_pct = charity.conferences_amt / denominator if denominator and charity.conferences_amt else None
+            grants_pct = charity.grants_to_others / denominator if denominator and charity.grants_to_others else None
+            foreign_pct = charity.foreign_expenses / denominator if denominator and charity.foreign_expenses else None
+
+            context = PendingDatabaseContext()
+            context.addOperationToDatabase(DatabaseOperation(
+                operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                data={
+                    'table': 'Charities',
+                    'updates': [{
+                        'charity_id': charity.charity_id,
+                        'denominator': denominator,
+                        'comp_pct': comp_pct,
+                        'travel_pct': travel_pct,
+                        'conferences_pct': conferences_pct,
+                        'grants_pct': grants_pct,
+                        'foreign_expenses_pct': foreign_pct,
+                    }],
+                    'id_column': 'charity_id'
+                }
+            ))
+            return context
+
+        # Producer/Consumer
+        producer = threading.Thread(target=_feed_thread, daemon=True)
+        producer.start()
+
+        while True:
+            work = work_queue.get()
+            if work.is_sentinel():
+                work_queue.task_done()
+                break
+
+            context = _process_work_item(work.data)
+            context.save_to_database(self.db_ops)
+
+            with lock:
+                processed += 1
+            work_queue.task_done()
+
+        producer.join()
+        print(f"Step 'ratios' complete: {processed} charities updated")
+        return processed
+
+    # ============================================================
+    # STEP: percentiles (Phase 2) - Self-contained, memory-safe, auto-resumes
+    # ============================================================
+    def compute_percentiles(self, max_groups: Optional[int] = None) -> int:
+        """
+        Compute _ptile columns - processes one (org_type, tax_year) "group" at a time.
+        
+        A "group" = all charities with the same org_type AND tax_year 
+        (e.g., all 501(c)(3) charities for tax year 2023).
+        
+        This is memory-safe because we only load one group into memory at a time.
+        Fully self-contained: automatically resumes from the last processed group.
+        max_groups: limit for this run (testing + DuckDB performance batches). If None, uses global_config.max_files.
+        """
+        if max_groups is None:
+            max_groups = global_config.max_files
+
+        print("Step: percentiles - Computing _ptile columns (one group at a time)...")
+
+        # Self-contained: automatically find where we left off
+        last_group = self.db_ops.get_last_processed_group()
+        start_after_org_type = None
+        start_after_tax_year = None
+        if last_group:
+            start_after_org_type, start_after_tax_year = last_group
+            print(f"  Resuming after group: {start_after_org_type} / {start_after_tax_year}")
+
+        last_org_type = start_after_org_type
+        last_tax_year = start_after_tax_year
+        processed = 0
+
+        while True:
+            groups = self.db_ops.get_charity_groups_for_percentiles(
+                last_org_type=last_org_type,
+                last_tax_year=last_tax_year,
+                limit=50
+            )
+
+            if not groups:
+                break
+
+            for org_type, tax_year in groups:
+                if self.exit_processing:
+                    break
+
+                # Fetch full Charity objects for this group (great for debugging)
+                charities = self.db_ops.get_charities_for_percentile_group(org_type, tax_year)
+
+                if len(charities) < 2:
+                    processed += 1
+                    last_org_type = org_type
+                    last_tax_year = tax_year
+                    continue
+
+                # Extract and sort values for each metric
+                metric_values = {}
+                for metric in ['comp', 'travel', 'conferences', 'grants', 'foreign_expenses']:
+                    pct_col = f"{metric}_pct"
+                    values = [getattr(c, pct_col) for c in charities if getattr(c, pct_col) is not None]
+                    metric_values[metric] = sorted([float(v) for v in values if v is not None])
+
+                # Compute percentiles for each charity
+                updates = []
+                for charity in charities:
+                    ptile_args = {}
+                    for metric in ['comp', 'travel', 'conferences', 'grants', 'foreign_expenses']:
+                        pct_col = f"{metric}_pct"
+                        ptile_col = f"{metric}_ptile"
+                        val = getattr(charity, pct_col)
+                        values = metric_values[metric]
+
+                        if val is not None and values:
                             try:
-                                val = float(c['comp_pct']) if isinstance(c['comp_pct'], str) else c['comp_pct']
-                                comp_values.append(val)
+                                v = float(val)
+                                ptile_args[ptile_col] = self._calculate_percentile(v, values)
                             except (ValueError, TypeError):
-                                continue
+                                ptile_args[ptile_col] = None
+                        else:
+                            ptile_args[ptile_col] = None
 
-                    travel_values = []
-                    for c in org_charities:
-                        if c['travel_pct'] is not None:
-                            try:
-                                val = float(c['travel_pct']) if isinstance(c['travel_pct'], str) else c['travel_pct']
-                                travel_values.append(val)
-                            except (ValueError, TypeError):
-                                continue
+                    updates.append({
+                        'charity_id': charity.charity_id,
+                        'comp_ptile': ptile_args.get('comp_ptile'),
+                        'travel_ptile': ptile_args.get('travel_ptile'),
+                        'conferences_ptile': ptile_args.get('conferences_ptile'),
+                        'grants_ptile': ptile_args.get('grants_ptile'),
+                        'foreign_expenses_ptile': ptile_args.get('foreign_expenses_ptile'),
+                    })
 
-                    conferences_values = []
-                    for c in org_charities:
-                        if c['conferences_pct'] is not None:
-                            try:
-                                val = float(c['conferences_pct']) if isinstance(c['conferences_pct'], str) else c['conferences_pct']
-                                conferences_values.append(val)
-                            except (ValueError, TypeError):
-                                continue
+                # Bulk update
+                if updates:
+                    self.db_ops.bulk_update('Charities', updates, id_column='charity_id', commit=False)
 
-                    grants_values = []
-                    for c in org_charities:
-                        if c['grants_pct'] is not None:
-                            try:
-                                val = float(c['grants_pct']) if isinstance(c['grants_pct'], str) else c['grants_pct']
-                                grants_values.append(val)
-                            except (ValueError, TypeError):
-                                continue
+                processed += 1
+                last_org_type = org_type
+                last_tax_year = tax_year
 
-                    foreign_values = []
-                    for c in org_charities:
-                        if c['foreign_expenses_pct'] is not None:
-                            try:
-                                val = float(c['foreign_expenses_pct']) if isinstance(c['foreign_expenses_pct'], str) else c['foreign_expenses_pct']
-                                foreign_values.append(val)
-                            except (ValueError, TypeError):
-                                continue
+                if max_groups and processed >= max_groups:
+                    break
 
+            if max_groups and processed >= max_groups:
+                break
 
-                    # Calculate percentiles for each charity
-                    for charity in org_charities:
-                        ein = charity['ein']
-
-                        # Compensation percentile
-                        comp_ptile = None
-                        if charity['comp_pct'] is not None and comp_values:
-                            try:
-                                comp_val = float(charity['comp_pct']) if isinstance(charity['comp_pct'], str) else charity['comp_pct']
-                                comp_values_sorted = sorted(comp_values)
-                                comp_ptile = self._calculate_percentile(comp_val, comp_values_sorted)
-                            except (ValueError, TypeError):
-                                comp_ptile = None
-
-                        # Travel percentile
-                        travel_ptile = None
-                        if charity['travel_pct'] is not None and travel_values:
-                            try:
-                                travel_val = float(charity['travel_pct']) if isinstance(charity['travel_pct'], str) else charity['travel_pct']
-                                travel_values_sorted = sorted(travel_values)
-                                travel_ptile = self._calculate_percentile(travel_val, travel_values_sorted)
-                            except (ValueError, TypeError):
-                                travel_ptile = None
-
-                        # Conferences percentile
-                        conferences_ptile = None
-                        if charity['conferences_pct'] is not None and conferences_values:
-                            try:
-                                conferences_val = float(charity['conferences_pct']) if isinstance(charity['conferences_pct'], str) else charity['conferences_pct']
-                                conferences_values_sorted = sorted(conferences_values)
-                                conferences_ptile = self._calculate_percentile(conferences_val, conferences_values_sorted)
-                            except (ValueError, TypeError):
-                                conferences_ptile = None
-
-                        # Grants percentile
-                        grants_ptile = None
-                        if charity['grants_pct'] is not None and grants_values:
-                            try:
-                                grants_val = float(charity['grants_pct']) if isinstance(charity['grants_pct'], str) else charity['grants_pct']
-                                grants_values_sorted = sorted(grants_values)
-                                grants_ptile = self._calculate_percentile(grants_val, grants_values_sorted)
-                            except (ValueError, TypeError):
-                                grants_ptile = None
-
-                        # Foreign expenses percentile
-                        foreign_ptile = None
-                        if charity['foreign_expenses_pct'] is not None and foreign_values:
-                            try:
-                                foreign_val = float(charity['foreign_expenses_pct']) if isinstance(charity['foreign_expenses_pct'], str) else charity['foreign_expenses_pct']
-                                foreign_values_sorted = sorted(foreign_values)
-                                foreign_ptile = self._calculate_percentile(foreign_val, foreign_values_sorted)
-                            except (ValueError, TypeError):
-                                foreign_ptile = None
-
-                        # Update database
-                        self.db_ops.update_charity_percentiles(
-                            ein, tax_year, comp_ptile, travel_ptile, conferences_ptile, grants_ptile, foreign_ptile
-                        )
-
-                    processed_groups += 1
-                    update_progress(progress_reporter, 1)
-                    print(f"Calculated percentiles for {org_type} {tax_year}: {len(org_charities)} charities")
-
-        # Stop progress reporting
-        stop_progress_reporting()
-
-        print(f"Percentile calculation complete: {processed_groups} groups processed")
-        return processed_groups
+        self.db_ops.commit()
+        print(f"Step 'percentiles' complete: {processed} groups processed")
+        return processed
 
     def _calculate_percentile(self, value: float, sorted_values: List[float]) -> float:
-        """Calculate percentile rank for a value in a sorted list"""
         if not sorted_values:
             return 0.0
-
-        # Find position
         for i, v in enumerate(sorted_values):
             if value <= v:
                 return (i / len(sorted_values)) * 100.0
+        return 100.0
 
-        return 100.0  # Value is higher than all others
+    # ============================================================
+    # Thin wrappers for irs990processor.py integration (matches lambda calls)
+    # ============================================================
+    def calculate_ratios(self) -> int:
+        """Wrapper for irs990processor.py - pulls max_files from global_config automatically"""
+        return self.compute_ratios()
+
+    def calculate_percentiles(self) -> int:
+        """Wrapper for irs990processor.py - pulls max_files from global_config automatically"""
+        return self.compute_percentiles()
+
+    def run(self, max_files: Optional[int] = None, max_groups: Optional[int] = None) -> dict:
+        """Main entry point - runs both steps in correct order (self-contained)"""
+        print("\n=== Step 10: Percentile Calculation ===")
+        
+        ratios = self.compute_ratios(max_files=max_files)
+        percentiles = self.compute_percentiles(max_groups=max_groups)
+
+        print(f"\nStep 10 Summary: {ratios} ratios + {percentiles} percentiles updated")
+        return {
+            'ratios_updated': ratios,
+            'percentiles_updated': percentiles
+        }
+
+
+if __name__ == "__main__":
+    from database_operations import DatabaseOperations
+    db = DatabaseOperations()
+    calc = PercentileCalculator(db)
+    result = calc.run()
+    print(result)

@@ -535,7 +535,7 @@ CREATE TABLE IF NOT EXISTS Zips_raw (
     accuracy INTEGER
 );
 COPY Zips_raw
-FROM 'US_zips.txt.gz' (
+FROM '/Volumes/Data/irs_zips/US_zips.txt.gz' (
         FORMAT CSV,
         DELIMITER '\t',
         HEADER FALSE,

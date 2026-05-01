@@ -156,6 +156,14 @@ class DuckDBPool:
             conn.commit()  # Ensure any pending transactions are resolved before yielding
             yield conn
             self.local_pools.health_ok = True
+        except duckdb.ConnectionException as e:
+            self.local_pools.conn.close()
+            self.local_pools.health_ok = False
+            log_warning(f"TID={tid} ConnectionException during read: {e} → reconnecting")
+            self.local_pools.conn = self._new_conn(read_only=True)
+            self.local_pools.health_ok = True
+
+            raise
         except Exception:
             self.local_pools.health_ok = False
             log_warning(f"TID={tid} Query failed → mark unhealthy")
@@ -1069,7 +1077,7 @@ class DatabaseOperations:
     
     def get_last_bmf_ein(self) -> Optional[str]:
         """Get the highest EIN already processed in IrsBmf table for resume."""
-        result = self.execute_query("SELECT MAX(ein) FROM IrsBmf").fetchone()
+        result = self.execute_query('SELECT MAX(ein) FROM "IrsBmf"').fetchone()
         return result[0] if result and result[0] else None
 
     def GENERIC_INSERT(self, objects: List[BaseModel]) -> List[str]:
@@ -2028,3 +2036,177 @@ class DatabaseOperations:
                 count = AuthoritativeEin.count + 1
         """, [name, colocator, ein])
         
+    def get_charities_for_ratio_computation(self, last_charity_id: Optional[str] = None, limit: int = 5000) -> Tuple[List[Tuple], Optional[str]]:
+        """Get batch of charities needing denominator/_pct computation (keyset pagination)"""
+        where = "denominator IS NULL OR denominator = 0"
+        if last_charity_id:
+            where += " AND charity_id > ?"
+            params = (last_charity_id, limit)
+        else:
+            params = (limit,)
+
+        query = f"""
+            SELECT charity_id, receipt_amt, total_exp, officer_comp, travel_amt, 
+                conferences_amt, grants_to_others, foreign_expenses
+            FROM Charities
+            WHERE {where}
+            ORDER BY charity_id
+            LIMIT ?
+        """
+        result = self.execute_query(query, params)
+        rows = result.fetchall()
+        last_id = rows[-1][0] if rows else None
+        return rows, last_id
+
+def update_charity_ratios(self, charity_id: str, denominator: Optional[float],
+                          comp_pct: Optional[float], travel_pct: Optional[float],
+                          conferences_pct: Optional[float], grants_pct: Optional[float],
+                          foreign_expenses_pct: Optional[float]):
+    """Update denominator + _pct columns"""
+    self.execute_query("""
+        UPDATE Charities SET
+            denominator = ?,
+            comp_pct = ?,
+            travel_pct = ?,
+            conferences_pct = ?,
+            grants_pct = ?,
+            foreign_expenses_pct = ?
+        WHERE charity_id = ?
+    """, (denominator, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct, charity_id))
+    self.commit()
+
+def get_charity_groups_for_percentiles(self, last_org_type: Optional[str] = None, 
+                                        last_tax_year: Optional[int] = None, 
+                                        limit: int = 50) -> List[Tuple]:
+    """Get (org_type, tax_year) groups that need _ptile computation (keyset pagination on groups)"""
+    where = "denominator > 0 AND comp_ptile IS NULL"
+    params = []
+    if last_org_type and last_tax_year:
+        where += " AND (org_type > ? OR (org_type = ? AND tax_year > ?))"
+        params = [last_org_type, last_org_type, last_tax_year]
+    params.append(limit)
+
+    query = f"""
+        SELECT DISTINCT org_type, tax_year
+        FROM Charities
+        WHERE {where}
+        ORDER BY org_type, tax_year
+        LIMIT ?
+    """
+    result = self.execute_query(query, tuple(params))
+    return result.fetchall()
+
+def compute_percentiles_for_group(self, org_type: str, tax_year: int):
+    """Compute _ptile columns for a single (org_type, tax_year) group using pure SQL"""
+    sql = """
+        WITH ranked AS (
+            SELECT 
+                charity_id,
+                PERCENT_RANK() OVER (ORDER BY comp_pct) * 100 AS comp_ptile,
+                PERCENT_RANK() OVER (ORDER BY travel_pct) * 100 AS travel_ptile,
+                PERCENT_RANK() OVER (ORDER BY conferences_pct) * 100 AS conferences_ptile,
+                PERCENT_RANK() OVER (ORDER BY grants_pct) * 100 AS grants_ptile,
+                PERCENT_RANK() OVER (ORDER BY foreign_expenses_pct) * 100 AS foreign_expenses_ptile
+            FROM Charities
+            WHERE org_type = ? AND tax_year = ? AND denominator > 0
+        )
+        UPDATE Charities c
+        SET 
+            comp_ptile = r.comp_ptile,
+            travel_ptile = r.travel_ptile,
+            conferences_ptile = r.conferences_ptile,
+            grants_ptile = r.grants_ptile,
+            foreign_expenses_ptile = r.foreign_expenses_ptile
+        FROM ranked r
+        WHERE c.charity_id = r.charity_id
+    """
+    self.execute_query(sql, (org_type, tax_year))
+    self.commit()
+    
+def get_charities_for_ratio_computation(self, last_charity_id: Optional[str] = None, 
+                                            limit: int = 5000) -> Tuple[List[Charity], Optional[str]]:
+        """Get batch of charities needing denominator/_pct computation (keyset pagination via where_clause)"""
+        where_clause = "denominator IS NULL OR denominator = 0"
+        params = ()
+        if last_charity_id:
+            where_clause += " AND charity_id > ?"
+            params = (last_charity_id,)
+
+        charities = self.select_dataclass(
+            Charity,
+            where_clause=where_clause,
+            params=params,
+            order_by="charity_id",
+            limit=limit
+        )
+
+        last_id = charities[-1].charity_id if charities else None
+        return charities, last_id
+
+def get_charity_groups_for_percentiles(self, last_org_type: Optional[str] = None,
+                                        last_tax_year: Optional[int] = None,
+                                        limit: int = 50) -> List[Tuple[str, int]]:
+    """Get distinct (org_type, tax_year) groups needing _ptile computation (keyset pagination)"""
+    where_clause = "denominator > 0 AND comp_ptile IS NULL"
+    params = []
+    if last_org_type and last_tax_year:
+        where_clause += " AND (org_type > ? OR (org_type = ? AND tax_year > ?))"
+        params = [last_org_type, last_org_type, last_tax_year]
+
+    query = f"""
+        SELECT DISTINCT org_type, tax_year
+        FROM Charities
+        WHERE {where_clause}
+        ORDER BY org_type, tax_year
+        LIMIT ?
+    """
+    params.append(limit)
+    result = self.execute_query(query, tuple(params))
+    return result.fetchall()
+
+def get_charities_for_percentile_group(self, org_type: str, tax_year: int) -> List[Charity]:
+    """Get all charities in a specific (org_type, tax_year) group for percentile computation"""
+    where_clause = "org_type = ? AND tax_year = ? AND denominator > 0"
+    return self.select_dataclass(
+        Charity,
+        where_clause=where_clause,
+        params=(org_type, tax_year),
+        order_by="charity_id"
+    )
+
+def update_charity_ratios(self, charity_id: str, denominator: Optional[float],
+                            comp_pct: Optional[float], travel_pct: Optional[float],
+                            conferences_pct: Optional[float], grants_pct: Optional[float],
+                            foreign_expenses_pct: Optional[float]):
+    """Update denominator + _pct columns for a single charity"""
+    self.execute_query("""
+        UPDATE Charities SET
+            denominator = ?,
+            comp_pct = ?,
+            travel_pct = ?,
+            conferences_pct = ?,
+            grants_pct = ?,
+            foreign_expenses_pct = ?
+        WHERE charity_id = ?
+    """, (denominator, comp_pct, travel_pct, conferences_pct, grants_pct, foreign_expenses_pct, charity_id))
+    self.commit()
+
+def get_last_processed_charity_id(self) -> Optional[str]:
+    """Helper: find the highest charity_id that already has a denominator set (for auto-resume)"""
+    result = self.execute_query("SELECT MAX(charity_id) FROM Charities WHERE denominator IS NOT NULL")
+    row = result.fetchone() if result else None
+    return row[0] if row and row[0] else None
+
+def get_last_processed_group(self) -> Optional[Tuple[str, int]]:
+    """Helper: find the last (org_type, tax_year) that has _ptile values (for auto-resume)"""
+    result = self.execute_query("""
+        SELECT org_type, tax_year
+        FROM Charities
+        WHERE comp_ptile IS NOT NULL
+        ORDER BY org_type DESC, tax_year DESC
+        LIMIT 1
+    """)
+    row = result.fetchone() if result else None
+    return (row[0], row[1]) if row else None
+
+    

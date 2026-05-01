@@ -405,10 +405,6 @@ class IRS990Processor(BaseProcessor):
         if self.exit_processing:
             log_info("Shutdown requested before starting IRS ZIP fetch")
             return False
-        fetch_and_ingest_bmf_success = self.irs_fetch_processor.fetch_and_ingest_bmf()
-        if not fetch_and_ingest_bmf_success:
-            log_error("BMF ingest failed")
-            return False
         log_info(f"Fetching IRS 990 ZIP files from {start_year} to {end_year}")
         return self.irs_fetch_processor.fetch_irs_zips(start_year, end_year)
 
@@ -714,6 +710,14 @@ class IRS990Processor(BaseProcessor):
         log_info("Calculating percentile rankings")
         return self.percentile_calculator.calculate_percentiles()
 
+    def calculate_ratios(self):
+        """Calculate percentages by org type and tax year (step 10)"""
+        if self.exit_processing:
+            log_info("Shutdown requested before starting percentile calculation")
+            return 0
+        log_info("Calculating percentile rankings")
+        return self.percentile_calculator.compute_ratios()
+
     def _calculate_percentile(self, value: float, sorted_values: List[float]) -> float:
         """Calculate percentile rank for a value in a sorted list"""
         # This method is now handled by percentile_calculator.py
@@ -761,14 +765,14 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "xml", "bmf","address", "geolocate",
-                                           "photos", "match", "grant_match", "backfill", "percentiles", "export"],
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml","address", "geolocate",
+                                           "photos", "match", "grant_match", "backfill", "ratios","percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip", "xml", "bmf","address", "geolocate",
-                                                  "photos", "match", "grant_match", "backfill", "percentiles", "export"],
+    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml","address", "geolocate",
+                                                  "photos", "match", "grant_match", "backfill", "ratios","percentiles", "export"],
                            help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "xml", "bmf","address", "geolocate",
-                                                 "photos", "match", "grant_match", "backfill", "percentiles", "export"],
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "address", "geolocate",
+                                                 "photos", "match", "grant_match", "backfill", "ratios", "percentiles", "export"],
                            help="Stopping step for processing")
     parser.add_argument("--progress", choices=["files", "bytes"], default="files",
                            help="Progress tracking type (default: files)")
@@ -782,8 +786,8 @@ def main():
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["irsfetch", "zip", "xml", "bmf","address", "geolocate",
-             "photos", "match", "grant_match", "backfill", "percentiles", "export"]
+    steps = ["irsfetch", "zip", "bmf","xml", "address", "match","geolocate",
+             "photos",  "grant_match", "backfill", "ratios","percentiles", "export"]
 
     # Define step actions
     step_actions = {
@@ -797,6 +801,7 @@ def main():
         "grant_match": lambda: processor.grant_match_processor.match_grants_by_address(),
         "photos": lambda: processor.process_officer_photos(),
         "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),
+        "ratios": lambda: processor.calculate_ratios(),
         "percentiles": lambda: processor.calculate_percentiles(),
         "export": lambda: processor.export_final_tsvs()
     }

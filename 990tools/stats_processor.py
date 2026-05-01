@@ -150,7 +150,7 @@ class StatsProcessor:
         """Get row counts for all tables"""
         tables = [
             'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
-            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding'
+            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding', 'BMF', 'IrsBmf'
         ]
 
         counts = {}
@@ -167,7 +167,7 @@ class StatsProcessor:
         """Get SUMMARIZE data for all tables"""
         tables = [
             'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
-            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding'
+            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding','BMF', 'IrsBmf'
         ]
 
         summaries = {}
