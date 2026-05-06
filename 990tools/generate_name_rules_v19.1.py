@@ -216,38 +216,37 @@ def detect_geo_prefix(name: str) -> Optional[str]:
     return None
 
 
-def generate_geo_collapse_rules(names: List[str]) -> Dict[str, Set[str]]:
-    """
-    Generate smart geo-collapse rules for BOTH patterns:
-    - <intro> <sep> <geo>  → canonical = <intro>
-    - <geo> <sep> <outro>  → canonical = <outro>
-    
-    This is the full guided reverse-engineering that was lost in v18.
-    """
-    geo_rules: Dict[str, Set[str]] = defaultdict(set)
-    suffix_count = 0
-    prefix_count = 0
-    
-    for name in names:
-        # Suffix case: "SALVATION ARMY OF NEW YORK" → "SALVATION ARMY"
-        intro = detect_geo_suffix(name)
-        if intro:
-            geo_rules[intro].add(name)
-            suffix_count += 1
+def generate_geo_collapse_rules(names: List[str]) -> Tuple[Dict[str, Set[str]], int, int]:
+        """
+        Generate smart geo-collapse rules for BOTH patterns:
+        - <intro> <sep> <geo>  → canonical = <intro>
+        - <geo> <sep> <outro>  → canonical = <outro>
         
-        # Prefix case: "NEW YORK - SALVATION ARMY" → "SALVATION ARMY"
-        outro = detect_geo_prefix(name)
-        if outro:
-            geo_rules[outro].add(name)
-            prefix_count += 1
-    
-    # Only keep rules with 2+ variants
-    final_rules = {k: v for k, v in geo_rules.items() if len(v) >= 2}
-    
-    # Store counts for later reporting (hacky but simple)
-    final_rules._suffix_count = suffix_count
-    final_rules._prefix_count = prefix_count
-    return final_rules
+        This is the full guided reverse-engineering that was lost in v18.
+        Returns (final_rules, suffix_count, prefix_count) so it works with the caller.
+        """
+        geo_rules: Dict[str, Set[str]] = defaultdict(set)
+        suffix_count = 0
+        prefix_count = 0
+        
+        for name in names:
+            # Suffix case: "SALVATION ARMY OF NEW YORK" → "SALVATION ARMY"
+            intro = detect_geo_suffix(name)
+            if intro:
+                geo_rules[intro].add(name)
+                suffix_count += 1
+            
+            # Prefix case: "NEW YORK - SALVATION ARMY" → "SALVATION ARMY"
+            outro = detect_geo_prefix(name)
+            if outro:
+                geo_rules[outro].add(name)
+                prefix_count += 1
+        
+        # Only keep rules with 2+ variants
+        final_rules = {k: v for k, v in geo_rules.items() if len(v) >= 2}
+        
+        return final_rules, suffix_count, prefix_count
+
 
 # ==================== END v19 GEO LOGIC ====================
 
@@ -735,6 +734,22 @@ if __name__ == "__main__":
     canonicals: Dict[str, Canonical] = {}
     name_to_ein: Dict[str, str] = {}
 
+    #BIG PHARMA SUBSIDY rollup (rolled up early per your request - tested before STAGE 3 rubicon at line 883)
+    #Captures all the pharma patient assistance, HIPPA redactions, SEE ATTACHMENT, VARIOUS NEEDY PATIENTS, 
+    #INDIVIDUAL PATIENT PROGRAMS, Drugs & Medicines, etc. rows for grant flow visualization and fraud detection.
+    try:
+        with open("big_pharma_subsidy.json", "r") as f:
+            subsidy_data = json.load(f)
+        for canon, data in subsidy_data.items():
+            PRIORITY_CANONICALS.append(canon)
+            if "patterns" in data:
+                if 'PRIORITY_PATTERNS' not in globals():
+                    PRIORITY_PATTERNS = {}
+                PRIORITY_PATTERNS[canon] = [re.compile(p, re.IGNORECASE) for p in data["patterns"]]
+            print(f"Loaded BIG PHARMA SUBSIDY canonical '{canon}' with {len(data.get('patterns', [])):,} patterns")
+    except Exception as e:
+        print(f"Warning: Could not load big_pharma_subsidy.json: {e}")
+
     # Seed priority canonicals FIRST (before data)
     # WHY: Priority canonicals should exist from the start so they attract variants
     #      and rise to the top during the is_priority sort.
@@ -865,6 +880,35 @@ if __name__ == "__main__":
                 del canonicals[cleaned]
             if to_merge:
                 print(f"  Merged {len(to_merge):,} additional variants into {simple}")
+                
+
+                
+    # v19: Generating smart <intro> <sep> <geo> collapse rules (after early dedup but before STAGE 3 rubicon per your request)
+	print("\n=== v19: Generating smart <intro> <sep> <geo> collapse rules ===")
+	all_original_names = list(set(
+		name for name in grantee_names + list(charity_grant_totals.keys()) + list(bmf_grant_totals.keys())
+	))
+	geo_collapse_rules, suffix_count, prefix_count = generate_geo_collapse_rules(all_original_names)
+	
+	suffix_catches = suffix_count
+	prefix_catches = prefix_count
+	print(f"  Suffix pattern (<intro> <sep> <geo>): {suffix_catches:,} names caught")
+	print(f"  Prefix pattern (<geo> <sep> <outro>): {prefix_catches:,} names caught")
+	print(f"Generated {len(geo_collapse_rules):,} smart geo-collapse rules (with 2+ variants)")
+	
+	# Merge geo rules into the canonicals before STAGE 3 testing
+	for intro, variants in geo_collapse_rules.items():
+		if intro not in canonicals:
+			canonicals[intro] = Canonical(
+				original=intro,
+				cleaned=intro,
+				is_priority=True
+			)
+		for v in variants:
+			canonicals[intro].add_variant(v)
+	print(f"After merging geo rules: {len(canonicals):,} total canonicals before STAGE 3")
+	canonicals = early_dedup_pass(canonicals)
+
 
     print(f"\n=== STAGE 3: Merging canonicals (PRIORITY first) ===")
 
@@ -1031,37 +1075,12 @@ if __name__ == "__main__":
         for core, rule in final_rules_list
     ]
 
-    # ==================== v19: Add smart geo-collapse rules ====================
-    print("\n=== v19: Generating smart <intro> <sep> <geo> collapse rules ===")
-    all_original_names = list(set(
-        name for name in distinct_grantee_names + list(charity_grant_totals.keys()) + list(bmf_grant_totals.keys())
-    ))
-    geo_collapse_rules = generate_geo_collapse_rules(all_original_names)
-    
-    suffix_catches = getattr(geo_collapse_rules, '_suffix_count', 0)
-    prefix_catches = getattr(geo_collapse_rules, '_prefix_count', 0)
-    print(f"  Suffix pattern (<intro> <sep> <geo>): {suffix_catches:,} names caught")
-    print(f"  Prefix pattern (<geo> <sep> <outro>): {prefix_catches:,} names caught")
-    print(f"Generated {len(geo_collapse_rules):,} smart geo-collapse rules (with 2+ variants)")
-    
-    # Merge geo rules into final output (they take precedence for their intros)
-    for intro, variants in geo_collapse_rules.items():
-        if intro not in output_data:
-            output_data[intro] = {'ein': '', 'variants': sorted(variants), 'source_count': len(variants)}
-        else:
-            # Merge variants
-            existing = set(output_data[intro].get('variants', []))
-            existing.update(variants)
-            output_data[intro]['variants'] = sorted(existing)
-            output_data[intro]['source_count'] = len(existing)
-    print(f"After merging geo rules: {len(output_data):,} total rules")
-
     print("\n=== Writing output ===")
     # Write as dict keyed by canonical (cleaner, preserves EIN + metadata)
     # NOTE: output_data already contains the merged geo rules from above
     with gzip.open(OUTPUT_JSON, 'wt', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2)
-    print(f"Saved {len(output_data):,} rules to {OUTPUT_JSON}")
+        json.dump(final_rules_list, f, indent=2)
+    print(f"Saved {len(final_rules_list):,} rules to {OUTPUT_JSON}")
 
     print("\nTop 15 rules:")
     for i, (core, rule) in enumerate(list(output_data.items())[:15]):
