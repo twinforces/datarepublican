@@ -1,22 +1,25 @@
 {
   "BIG PHARMA SUBSIDY": {
     "synthetic_ein": "99-7777777",
-    "description": "Rollup for all subsidy/aggregate/privacy rows (SEE ATTACHED, VARIOUS, HIPPA, PATIENT, Drugs & Medicines, etc.). Synthetic EIN for grant visualization and fraud detection.",
+    "description": "Rollup for all subsidy/aggregate/privacy rows (SEE ATTACHED, VARIOUS, HIPPA, PATIENT, Drugs & Medicines, etc.). Synthetic EIN for grant visualization and fraud detection. Added [ .] for punctuation robustness per user.",
     "patterns": [
-      "SEE (ATTACHMENT|SCHEDULE|ATTACHED|ATTACH)",
+      "SEE[ .]*(ATTACHMENT|SCHEDULE|ATTACHED|ATTACH)",
       "ATTACHMENT",
       "HIPPA",
       "HIPAA",
       "PATIENT",
+      "PATIENTS",
+      "ELIGIBLE[ .]*PATIENTS?",
+      "PATIENT[ .]*(ASSISTANCE|PROGRAM|PROGRAMS?)",
       "VARIOUS",
-      "DRUGS?\\s*&?\\s*MEDICINES?",
-      "INDIVIDUAL PATIENT PROGRAM",
-      "VARIOUS NEEDY PATIENTS",
-      "NEEDY PATIENTS",
-      "PATIENT ASSISTANCE",
-      "PATIENT PROGRAMS",
-      "SEE ATTACHED",
-      "SEE SCHEDULE"
+      "DRUGS?[ .&]*MEDICINES?",
+      "INDIVIDUAL[ .]*PATIENT[ .]*PROGRAM",
+      "VARIOUS[ .]*NEEDY[ .]*PATIENTS",
+      "NEEDY[ .]*PATIENTS",
+      "PATIENT[ .]*ASSISTANCE",
+      "PATIENT[ .]*PROGRAMS?",
+      "SEE[ .]*ATTACHED",
+      "SEE[ .]*SCHEDULE"
     ]
   }
 }

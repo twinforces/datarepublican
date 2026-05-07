@@ -753,7 +753,7 @@ def clean_name(name: str, geo_blacklist: Set[str], noise_words: Set[str]) -> str
       (e.g. "University of California" should keep "California")
     """
     # Strip everything inside parentheses (including the parens themselves)
-    name = re.sub(r"\s*\([^)]*\)", "", name)
+    name = re.sub(r"\s*\([^)]*\)", "", name)  # (x2) / (See Schedule #2) cases stripped to prevent zero-result greps and improve matching to canonical
 
     # Treat "# 123" or "#123" style suffixes as noise (e.g. "AMERICAN LEGION #140")
     name = re.sub(r"\s*#\s*\d+\b", "", name)
@@ -1077,7 +1077,7 @@ if __name__ == "__main__":
                     cleaned=cleaned,
                     ein=synthetic_ein,
                     is_priority=True,
-                    source_priority=5,
+                    source_priority=10,  # bumped so BIG PHARMA SUBSIDY always wins over partial matches like MAKE A WISH
                 )
             print(
                 f"Loaded BIG PHARMA SUBSIDY canonical '{canon}' with {len(data.get('patterns', [])):,} patterns and synthetic EIN {synthetic_ein}"
