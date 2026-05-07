@@ -1,0 +1,22 @@
+{
+  "BIG PHARMA SUBSIDY": {
+    "synthetic_ein": "99-7777777",
+    "description": "Rollup for all subsidy/aggregate/privacy rows (SEE ATTACHED, VARIOUS, HIPPA, PATIENT, Drugs & Medicines, etc.). Synthetic EIN for grant visualization and fraud detection.",
+    "patterns": [
+      "SEE (ATTACHMENT|SCHEDULE|ATTACHED|ATTACH)",
+      "ATTACHMENT",
+      "HIPPA",
+      "HIPAA",
+      "PATIENT",
+      "VARIOUS",
+      "DRUGS?\\s*&?\\s*MEDICINES?",
+      "INDIVIDUAL PATIENT PROGRAM",
+      "VARIOUS NEEDY PATIENTS",
+      "NEEDY PATIENTS",
+      "PATIENT ASSISTANCE",
+      "PATIENT PROGRAMS",
+      "SEE ATTACHED",
+      "SEE SCHEDULE"
+    ]
+  }
+}
