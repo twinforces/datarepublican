@@ -1448,6 +1448,23 @@ if __name__ == "__main__":
         for core, rule in final_rules_list
     ]
 
+
+    # Add back pharma sided names as variants under the single BIG PHARMA SUBSIDY canonical
+    # This fixes the bug where the full phrases were not appearing as covered in the analyzer even though the patterns are in the JSON
+    if "pharma_sided" in locals() and pharma_sided:
+        pharma_variants = sorted(pharma_sided.keys())
+        final_rules_list.append(
+            (
+                "BIG PHARMA SUBSIDY",
+                {
+                    "ein": "99-7777777",
+                    "variants": pharma_variants,
+                    "source_count": len(pharma_variants),
+                    "source": "pharma_siding",
+                },
+            )
+        )
+        print(f"Added BIG PHARMA SUBSIDY rollup with {len(pharma_variants):,} variants back to final output (siding bug fixed)")
     print("\n=== Writing output ===")
     # Write as dict keyed by canonical (cleaner, preserves EIN + metadata)
     # NOTE: output_data already contains the merged geo rules from above
@@ -1457,7 +1474,7 @@ if __name__ == "__main__":
 
     print("\nTop 15 rules:")
     for i, (core, rule) in enumerate(final_rules_list[:15]):
-        sample = rule.get("variants", [])[:2]
+        sample = (rule[1] if isinstance(rule, (tuple, list)) and len(rule) > 1 else rule).get("variants", [])[:2]
         print(
             f"  '{core}' (EIN: {rule.get('ein', '')}) → {len(rule.get('variants', [])):,} variants"
         )

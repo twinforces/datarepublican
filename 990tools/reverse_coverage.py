@@ -52,6 +52,23 @@ def main():
     print("Loading rules and data...")
     with gzip.open(rules_path, "rt", encoding="utf-8") as f:
         rules = json.load(f)
+
+    # Handle both old list format and new dict format (v19.3+)
+    if isinstance(rules, list):
+        pass  # already list
+    elif isinstance(rules, dict):
+        result = []
+        for k, v in rules.items():
+            if isinstance(v, dict):
+                variants = v.get("variants", [])
+            elif isinstance(v, list):
+                variants = v
+            else:
+                variants = []
+            variants = [str(v) for v in variants if isinstance(v, (str, int, float))]  # filter to strings to prevent TypeError on set.update with dicts
+            result.append({"canonical": k, "variants": variants})
+        rules = result
+
     
     # Assume rules is list of dicts with 'canonical' and 'variants' or similar.
     # Adjust structure based on actual file (from previous runs it appears to be list of objects).
