@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 """
-coverage_analyzer.py v1.4
+coverage_analyzer.py v1.4.1
 
-MacOS dictionary-enhanced analyzer for name canonicalization rules.
-- Uses /usr/share/dict/words (and friends) when available for real-word validation
-- Enforces minimum meaningful content in non-SIMPLES canonicals
-- Keeps reports small with --top-n
-
-Usage on Mac:
-  python 990tools/coverage_analyzer.py --rules name_rules_v19.1.json.gz --top-n 50
-
-The dictionary check is enabled by default on MacOS and can be disabled with --no-use-macos-dict.
+MacOS dictionary-enhanced analyzer - syntax fixed.
 """
 
 import argparse
@@ -55,7 +47,7 @@ def load_dictionary() -> Set[str]:
 
 def has_real_word(name: str, dictionary: Set[str]) -> bool:
     if not dictionary:
-        return True  # fallback if no dict
+        return True
     tokens = [t.lower() for t in name.replace("-", " ").replace("_", " ").split() if t]
     return any(t in dictionary or len(t) >= 4 for t in tokens)
 
@@ -151,7 +143,7 @@ def write_report(stats, probs, contam, families, outdir, top_n, dict_used):
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, "coverage_summary.md")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("# Coverage Analysis v1.4 (MacOS dictionary enhanced)\n\n")
+        f.write("# Coverage Analysis v1.4.1 (MacOS dictionary enhanced)\n\n")
         f.write(f"Total canonicals: {stats['total']:,} | Dictionary used: {dict_used}\n")
         f.write(f"Avg variants: {stats['avg_variants']} | Max: {stats['max_variants']}\n\n")
 
@@ -168,9 +160,11 @@ def write_report(stats, probs, contam, families, outdir, top_n, dict_used):
         for fam, d in families.items():
             f.write(f"{fam}: {d['count']} captured | e.g. {d.get('examples', [])}\n")
 
-        f.write("\n## Recommendations\n- Add short/non-word roots to generator blacklist.
-- Strengthen pharma siding with context patterns.
-- Re-run generator and analyzer after fixes.\n")
+        rec = ("\n## Recommendations\n"
+               "- Add short/non-word roots to generator blacklist.\n"
+               "- Strengthen pharma siding with context patterns.\n"
+               "- Re-run generator and analyzer after fixes.\n")
+        f.write(rec)
     print(f"Report written: {path}")
 
 
@@ -184,7 +178,7 @@ def main():
     ap.add_argument("--no-use-macos-dict", dest="use_macos_dict", action="store_false")
     args = ap.parse_args()
 
-    print("=== Coverage Analyzer v1.4 (MacOS dictionary) ===")
+    print("=== Coverage Analyzer v1.4.1 (MacOS dictionary) ===")
     dictionary = load_dictionary() if args.use_macos_dict else set()
     print(f"Dictionary mode: {'ON' if dictionary else 'OFF'}")
 
