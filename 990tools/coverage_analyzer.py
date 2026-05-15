@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-coverage_analyzer.py
+coverage_analyzer.py v1.3
 
-Standalone analyzer for the name canonicalization rules output.
-Run this locally against gzipped or plain JSON rules.
+Robust analyzer for large gzipped name canonicalization rules.
+- Handles many JSON shapes
+- Limits output size (top-N + max examples)
+- Good debug prints when structure is unexpected
 
-v1.2 - more robust loading for different export structures.
+Usage:
+  python 990tools/coverage_analyzer.py --rules name_rules_v19.1.json.gz --top-n 50
 """
 
 import argparse
@@ -13,204 +16,152 @@ import json
 import csv
 import os
 import gzip
-from collections import defaultdict, Counter
 from typing import Any, Dict, List, Set
 
-TARGET_FAMILIES = [
-    "BOY SCOUTS", "BOYSCOUTS", "BOY SCOUT OF AMERICA",
-    "ROTARY", "KIWANIS", "SIERRA CLUB", "CHAMBER OF COMMERCE",
-    "AMERICAN LEGION", "KNIGHTS OF COLUMBUS", "LOYAL ORDER OF MOOSE"
-]
+TARGET_FAMILIES = ["BOY SCOUTS", "ROTARY", "KIWANIS", "SIERRA CLUB",
+    "CHAMBER OF COMMERCE", "AMERICAN LEGION", "KNIGHTS OF COLUMBUS"]
 
-SUSPICIOUS_ROOTS = {
-    "1", "A", "THE", "AND", "OF", "FOR", "IN", "NEW", "CITY", "COUNTY",
-    "HIGH", "ST", "INC", "LLC", "ASSOCIATION", "FOUNDATION", "FUND",
-    "PROJECT", "RESCUE", "SOCIETY", "MINISTRIES", "INSTITUTE"
-}
+SUSPICIOUS_ROOTS = {"1", "A", "THE", "AND", "OF", "FOR", "IN", "NEW", "CITY", "COUNTY",
+    "HIGH", "ST", "INC", "LLC", "ASSOCIATION", "FOUNDATION"}
 
 SIMPLES_CONTAMINANTS = {"ATTACHED", "VARIOUS", "MISCELLANEOUS"}
-
-PHARMA_KEYWORDS = ["PHARMA", "PHARMACEUTICAL", "SUBSIDY", "DRUG", "MEDICINE",
-    "PFIZER", "MODERNA", "JOHNSON", "MERCK", "NOVARTIS"]
+PHARMA_KEYWORDS = ["PHARMA", "SUBSIDY", "DRUG"]
 
 
 def normalize_canonicals(raw: Any) -> List[Dict]:
-    """Turn whatever the JSON contained into a clean list of dicts with name/variants/ein."""
     if isinstance(raw, list):
-        if raw and isinstance(raw[0], str):
-            print("Detected list of strings - wrapping as canonicals with empty variants.")
-            return [{"name": str(item), "variants": [], "ein": None} for item in raw]
-        if raw and isinstance(raw[0], dict):
-            return raw
-        return [{"name": str(item), "variants": [], "ein": None} for item in raw]
+        if raw and isinstance(raw[0], (str, int)):
+            print("[normalize] list of primitives -> wrapping")
+            return [{"name": str(x), "variants": [], "ein": None} for x in raw]
+        return [c if isinstance(c, dict) else {"name": str(c)} for c in raw]
 
     if isinstance(raw, dict):
-        # Common patterns
-        for key in ["canonicals", "data", "items", "rules"]:
-            if key in raw and isinstance(raw[key], list):
-                print(f"Found list under key '{key}'")
-                return normalize_canonicals(raw[key])
-        # Single dict that looks like one canonical
-        if "name" in raw:
-            return [raw]
-        # Fallback: treat values as names if possible
-        vals = list(raw.values())
-        if vals and isinstance(vals[0], (str, dict)):
-            return normalize_canonicals(vals)
+        print(f"[normalize] dict with keys: {list(raw.keys())[:10]}... (total {len(raw)} keys)")
+        # Try common list containers
+        for k in ["canonicals", "data", "items", "rules", "entries", "results"]:
+            if k in raw and isinstance(raw[k], list):
+                print(f"[normalize] using key '{k}' with {len(raw[k])} items")
+                return normalize_canonicals(raw[k])
+        # If values look like canonical objects
+        sample_vals = list(raw.values())[:5]
+        if sample_vals and isinstance(sample_vals[0], dict) and "name" in sample_vals[0]:
+            print("[normalize] treating dict values as canonicals")
+            return list(raw.values())
+        # Fallback: treat keys as names
+        print("[normalize] treating dict keys as canonical names")
+        return [{"name": str(k), "variants": [], "ein": None} for k in list(raw.keys())[:100000]]
+
     return [{"name": str(raw), "variants": [], "ein": None}]
 
 
-def load_rules(rules_path: str) -> List[Dict]:
-    """Load and normalize gzipped or plain JSON rules."""
-    if not os.path.exists(rules_path):
-        raise FileNotFoundError(f"Rules file not found: {rules_path}")
-
-    is_gz = rules_path.endswith(".gz")
-    open_func = gzip.open if is_gz else open
+def load_rules(path: str) -> List[Dict]:
+    is_gz = path.endswith(".gz")
+    opener = gzip.open if is_gz else open
     mode = "rt" if is_gz else "r"
-
-    try:
-        with open_func(rules_path, mode, encoding="utf-8") as f:
-            data = json.load(f)
-        print(f"Loaded {'gzipped ' if is_gz else ''}JSON from {rules_path}")
-        canonicals = normalize_canonicals(data)
-        print(f"Normalized to {len(canonicals):,} canonical entries")
-        return canonicals
-    except Exception as e:
-        print(f"Primary JSON load failed ({e}). Trying line fallback...")
-        canonicals = []
-        with open_func(rules_path, mode, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"): continue
-                if "|" in line:
-                    parts = [p.strip() for p in line.split("|")]
-                    canonicals.append({
-                        "name": parts[0],
-                        "variants": [v.strip() for v in parts[1].split(",")] if len(parts) > 1 else [],
-                        "ein": parts[2] if len(parts) > 2 else None
-                    })
-        print(f"Fallback produced {len(canonicals):,} entries")
-        return canonicals
+    with opener(path, mode, encoding="utf-8") as f:
+        data = json.load(f)
+    print(f"Loaded {'gzipped ' if is_gz else ''}JSON")
+    canonicals = normalize_canonicals(data)
+    print(f"Normalized to {len(canonicals):,} canonical entries")
+    return canonicals
 
 
-def load_grantee_names(tsv_path: str) -> Set[str]:
-    if not tsv_path or not os.path.exists(tsv_path):
-        return set()
-    names = set()
-    with open(tsv_path, "r", encoding="utf-8") as f:
+def load_grantee_names(path: str) -> Set[str]:
+    if not path or not os.path.exists(path): return set()
+    s = set()
+    with open(path, "r", encoding="utf-8") as f:
         for row in csv.reader(f, delimiter="\t"):
-            if row: names.add(row[0].upper().strip())
-    print(f"Loaded {len(names):,} distinct grantee names")
-    return names
+            if row: s.add(row[0].upper().strip())
+    print(f"Loaded {len(s):,} grantee names")
+    return s
 
 
-def is_suspicious_root(name: str) -> bool:
-    name_upper = name.upper().strip()
-    if name_upper in SUSPICIOUS_ROOTS: return True
-    if len(name_upper) <= 2 and name_upper.isalnum(): return True
-    if len(name_upper.split()) == 1 and len(name_upper) < 4: return True
-    return False
+def is_broad(name: str) -> bool:
+    u = str(name).upper().strip()
+    return u in SUSPICIOUS_ROOTS or (len(u) <= 2 and u.isalnum()) or (len(u.split()) == 1 and len(u) < 4)
 
 
-def check_simples_contamination(canonicals: List[Dict]) -> Dict:
+def check_contamination(cans: List[Dict]) -> Dict:
     flags = []
-    for c in canonicals:
-        cname = str(c.get("name", "")).upper()
-        if cname in SIMPLES_CONTAMINANTS:
-            flags.append({"canonical": c.get("name"), "ein": c.get("ein"),
-                        "reason": "Should have been pharma_sided"})
-        for kw in PHARMA_KEYWORDS:
-            if kw in cname:
-                flags.append({"canonical": c.get("name"), "ein": c.get("ein"),
-                            "reason": f"Contains pharma keyword '{kw}'"})
-                break
-    return {"count": len(flags), "examples": flags[:20]}
+    for c in cans:
+        nm = str(c.get("name", "")).upper()
+        if nm in SIMPLES_CONTAMINANTS:
+            flags.append({"name": c.get("name"), "reason": "pharma_siding candidate"})
+        if any(kw in nm for kw in PHARMA_KEYWORDS):
+            flags.append({"name": c.get("name"), "reason": "pharma keyword"})
+    return {"count": len(flags), "examples": flags[:30]}
 
 
-def check_family_coverage(canonicals: List[Dict], grantee_names: Set[str]) -> Dict:
-    results = {}
-    for family in TARGET_FAMILIES:
-        family_upper = family.upper()
-        captured = [c.get("name") for c in canonicals
-                    if family_upper in str(c.get("name", "")).upper() or
-                       family_upper in str(c.get("variants", [])).upper()]
-        missed = []
-        if grantee_names:
-            for gname in list(grantee_names)[:30000]:
-                if family_upper in gname:
-                    if not any(family_upper in str(c.get("name", "")).upper() or
-                               family_upper in str(c.get("variants", [])).upper() for c in canonicals):
-                        missed.append(gname)
-        results[family] = {
-            "captured_count": len(captured),
-            "examples_captured": captured[:8],
-            "missed_sample": missed[:8] if missed else []
-        }
-    return results
+def check_families(cans: List[Dict], gnames: Set[str]) -> Dict:
+    out = {}
+    for fam in TARGET_FAMILIES:
+        fu = fam.upper()
+        caps = [c.get("name") for c in cans if fu in str(c.get("name", "")).upper()]
+        out[fam] = {"count": len(caps), "examples": caps[:8]}
+    return out
 
 
-def find_over_broad_roots(canonicals: List[Dict]) -> List[Dict]:
-    return [{
-        "root": c.get("name"),
-        "ein": c.get("ein"),
-        "variant_count": len(c.get("variants", [])),
-        "note": "Broad root - review"
-    } for c in canonicals if is_suspicious_root(str(c.get("name", "")))]
+def find_broad_roots(cans: List[Dict], top_n: int) -> List[Dict]:
+    broad = []
+    for c in cans:
+        if is_broad(c.get("name", "")):
+            broad.append({"name": c.get("name"), "variants": len(c.get("variants", []))})
+    return sorted(broad, key=lambda x: -x["variants"])[:top_n]
 
 
-def compute_basic_stats(canonicals: List[Dict]) -> Dict:
-    total = len(canonicals)
-    variant_counts = [len(c.get("variants", [])) for c in canonicals if isinstance(c, dict)]
-    avg = sum(variant_counts) / max(total, 1) if total else 0
+def compute_stats(cans: List[Dict]) -> Dict:
+    n = len(cans)
+    vcounts = [len(c.get("variants", [])) for c in cans]
     return {
-        "total_canonicals": total,
-        "avg_variants_per_canonical": round(avg, 2),
-        "max_variants": max(variant_counts) if variant_counts else 0,
-        "suspicious_root_count": len(find_over_broad_roots(canonicals))
+        "total": n,
+        "avg_variants": round(sum(vcounts)/max(n,1), 2),
+        "max_variants": max(vcounts) if vcounts else 0
     }
 
 
-def generate_report(stats, broad_roots, simples_flags, family_results, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    md_path = os.path.join(output_dir, "coverage_summary.md")
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write("# Name Canonicalization Coverage Analysis\n\n")
-        f.write(f"**Total canonicals:** {stats['total_canonicals']:,}\n")
-        f.write(f"**Avg variants per canonical:** {stats['avg_variants_per_canonical']}\n")
-        f.write(f"**Max variants:** {stats['max_variants']:,}\n\n")
-        f.write("## Over-broad Roots\n")
-        for item in (broad_roots or [])[:15]:
-            f.write(f"- {item.get('root')} (EIN {item.get('ein')}) - {item.get('note')} (variants: {item.get('variant_count')})\n")
-        f.write("\n## SIMPLES Contamination\n")
-        f.write(f"Flagged: {simples_flags.get('count', 0)}\n")
-        for ex in simples_flags.get('examples', [])[:10]:
-            f.write(f"- {ex.get('canonical')} - {ex.get('reason')}\n")
+def write_report(stats, broad, contam, families, outdir, top_n):
+    os.makedirs(outdir, exist_ok=True)
+    path = os.path.join(outdir, "coverage_summary.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# Coverage Analysis (top-N limited)\n\n")
+        f.write(f"Total canonicals: {stats['total']:,}\n")
+        f.write(f"Avg variants: {stats['avg_variants']} | Max: {stats['max_variants']}\n\n")
+
+        f.write(f"## Top {top_n} Broad Roots\n")
+        for b in broad:
+            f.write(f"- {b['name']} ({b['variants']} variants)\n")
+
+        f.write("\n## Contamination (SIMPLES + pharma)\n")
+        f.write(f"Flagged: {contam['count']}\n")
+        for ex in contam.get("examples", [])[:20]:
+            f.write(f"- {ex.get('name')} - {ex.get('reason')}\n")
+
         f.write("\n## Family Coverage\n")
-        for fam, d in family_results.items():
-            f.write(f"\n### {fam}\nCaptured: {d['captured_count']}\nExamples: {', '.join(map(str, d.get('examples_captured', [])[:5]))}\n")
-        f.write("\n## Recommendations\n- Fix broad roots and pharma siding first.\n- Strengthen patterns for families like BOY SCOUTS.\n")
-    print(f"Reports written to {output_dir}/coverage_summary.md")
+        for fam, d in families.items():
+            f.write(f"{fam}: {d['count']} captured | e.g. {d['examples']}\n")
+
+        f.write("\n## Next steps\nFix broad roots and contamination, then re-run.\n")
+    print(f"Report written: {path} (kept small)")
 
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--rules", required=True)
-    p.add_argument("--grantee_tsv", default="")
-    p.add_argument("--output_dir", default="./coverage_analysis")
-    args = p.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rules", required=True)
+    ap.add_argument("--grantee_tsv", default="")
+    ap.add_argument("--output_dir", default="./coverage_analysis")
+    ap.add_argument("--top-n", type=int, default=50, help="Limit broad roots & examples")
+    args = ap.parse_args()
 
-    print("=== Coverage Analyzer v1.2 ===")
-    canonicals = load_rules(args.rules)
-    grantee_names = load_grantee_names(args.grantee_tsv)
+    print("=== Coverage Analyzer v1.3 ===")
+    cans = load_rules(args.rules)
+    gnames = load_grantee_names(args.grantee_tsv)
 
-    print("Running checks...")
-    stats = compute_basic_stats(canonicals)
-    broad = find_over_broad_roots(canonicals)
-    simples = check_simples_contamination(canonicals)
-    families = check_family_coverage(canonicals, grantee_names)
+    stats = compute_stats(cans)
+    broad = find_broad_roots(cans, args.top_n)
+    contam = check_contamination(cans)
+    fams = check_families(cans, gnames)
 
-    generate_report(stats, broad, simples, families, args.output_dir)
+    write_report(stats, broad, contam, fams, args.output_dir, args.top_n)
     print("Done.")
 
 if __name__ == "__main__":
