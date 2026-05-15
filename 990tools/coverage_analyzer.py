@@ -6,6 +6,8 @@ Standalone analyzer for the name canonicalization rules output.
 Run this locally on your machine against the generated rules file (and optionally
 distinct_grantee_names.tsv) because the rules file is too large for the repo.
 
+Supports plain JSON or gzipped JSON (.json.gz).
+
 It surfaces:
 - Over-broad roots (e.g. '1', single chars, ultra-common words)
 - Under-covered families (BOY SCOUTS variants, etc.)
@@ -14,14 +16,13 @@ It surfaces:
 
 Usage example:
   python 990tools/coverage_analyzer.py \
-      --rules /path/to/your_rules.json \
+      --rules /path/to/your_rules.json.gz \
       --grantee_tsv /path/to/distinct_grantee_names.tsv \
       --output_dir ./analysis_output
 
 Then review the generated .md and .json reports and paste key sections back here.
 
 The script is intentionally dependency-light (stdlib only) and flexible on input format.
-Adjust the load_rules() function if your rules export is TSV/CSV/pickle instead of JSON.
 """
 
 import argparse
@@ -29,6 +30,7 @@ import json
 import csv
 import os
 import re
+import gzip
 from collections import defaultdict, Counter
 from typing import Any, Dict, List, Set, Tuple
 
@@ -59,36 +61,45 @@ PHARMA_KEYWORDS = [
 
 
 def load_rules(rules_path: str) -> Dict[str, Any]:
-    """Load rules. Tries JSON first. Extend here for other formats."""
+    """Load rules. Handles plain JSON or gzipped JSON (.json.gz). Extend for other formats."""
     if not os.path.exists(rules_path):
         raise FileNotFoundError(f"Rules file not found: {rules_path}")
 
+    is_gz = rules_path.endswith(".gz")
+
     try:
-        with open(rules_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        print(f"Loaded rules as JSON from {rules_path}")
+        if is_gz:
+            with gzip.open(rules_path, "rt", encoding="utf-8") as f:
+                data = json.load(f)
+            print(f"Loaded gzipped JSON rules from {rules_path}")
+        else:
+            with open(rules_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            print(f"Loaded rules as JSON from {rules_path}")
         return data
-    except json.JSONDecodeError:
-        print("JSON load failed. Trying line-based fallback (customize as needed)...")
-        # Fallback: very simple line parser. Customize for your actual format.
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error: {e}")
+        print("Falling back to simple line-based parser (customize load_rules() if needed)...")
+        # Fallback line parser - customize for your actual export format
         canonicals = []
-        with open(rules_path, "r", encoding="utf-8") as f:
+        open_func = gzip.open if is_gz else open
+        mode = "rt" if is_gz else "r"
+        with open_func(rules_path, mode, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                # Example heuristic: lines like "CANONICAL_NAME | variant1, variant2 | EIN"
-                if "|" in line:
+                if "|" in line:  # Example: CANONICAL | variant1,variant2 | EIN
                     parts = [p.strip() for p in line.split("|")]
                     if len(parts) >= 2:
                         canonicals.append({
                             "name": parts[0],
-                            "variants": parts[1].split(",") if len(parts) > 1 else [],
+                            "variants": [v.strip() for v in parts[1].split(",")] if len(parts) > 1 else [],
                             "ein": parts[2] if len(parts) > 2 else None
                         })
         return {"canonicals": canonicals}
     except Exception as e:
-        raise RuntimeError(f"Could not load rules file: {e}")
+        raise RuntimeError(f"Could not load rules file {rules_path}: {e}")
 
 
 def load_grantee_names(tsv_path: str) -> Set[str]:
@@ -111,7 +122,6 @@ def is_suspicious_root(name: str) -> bool:
         return True
     if len(name_upper) <= 2 and name_upper.isalnum():
         return True
-    # Very short or single-word ultra-common terms
     if len(name_upper.split()) == 1 and len(name_upper) < 4:
         return True
     return False
@@ -147,14 +157,15 @@ def check_family_coverage(canonicals: List[Dict], grantee_names: Set[str]) -> Di
         captured = []
         for c in canonicals:
             cname = c.get("name", "").upper()
-            if family_upper in cname or family_upper in str(c.get("variants", [])).upper():
+            variants_str = str(c.get("variants", [])).upper()
+            if family_upper in cname or family_upper in variants_str:
                 captured.append(c.get("name"))
-        # Simple missed detection if grantee names provided
         missed = []
         if grantee_names:
-            for gname in list(grantee_names)[:50000]:  # sample for speed
-                if family_upper in gname and not any(family_upper in str(captured).upper() for _ in [1]):
-                    missed.append(gname)
+            for gname in list(grantee_names)[:50000]:  # sample to keep it fast
+                if family_upper in gname:
+                    if not any(family_upper in str(c.get("name", "")).upper() or family_upper in str(c.get("variants", [])).upper() for c in canonicals):
+                        missed.append(gname)
         results[family] = {
             "captured_count": len(captured),
             "examples_captured": captured[:10],
@@ -175,14 +186,14 @@ def find_over_broad_roots(canonicals: List[Dict]) -> List[Dict]:
                 "variant_count": len(c.get("variants", [])),
                 "note": "Extremely broad root - review or add to blacklist"
             })
-    return broad[:50]  # top offenders
+    return broad[:50]
 
 
 def compute_basic_stats(canonicals: List[Dict]) -> Dict:
     """High-level numbers."""
     total = len(canonicals)
     variant_counts = [len(c.get("variants", [])) for c in canonicals]
-    avg_variants = sum(variant_counts) / max(total, 1)
+    avg_variants = sum(variant_counts) / max(total, 1) if total > 0 else 0
     max_variants = max(variant_counts) if variant_counts else 0
     return {
         "total_canonicals": total,
@@ -197,7 +208,6 @@ def generate_report(stats: Dict, broad_roots: List, simples_flags: Dict,
     """Write human + machine readable reports."""
     os.makedirs(output_dir, exist_ok=True)
 
-    # Markdown summary
     md_path = os.path.join(output_dir, "coverage_summary.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("# Name Canonicalization Coverage Analysis\n\n")
@@ -232,7 +242,6 @@ def generate_report(stats: Dict, broad_roots: List, simples_flags: Dict,
         f.write("- Add more specific patterns for under-covered families like BOY SCOUTS.\n")
         f.write("- Re-run generator after fixes and compare reports.\n")
 
-    # JSON for further processing
     json_path = os.path.join(output_dir, "analysis_flags.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({
@@ -249,12 +258,12 @@ def generate_report(stats: Dict, broad_roots: List, simples_flags: Dict,
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze name canonicalization rules for coverage and quality issues.")
-    parser.add_argument("--rules", required=True, help="Path to generated rules file (JSON preferred)")
+    parser.add_argument("--rules", required=True, help="Path to generated rules file (.json or .json.gz)")
     parser.add_argument("--grantee_tsv", default="", help="Optional path to distinct_grantee_names.tsv for missed variant detection")
     parser.add_argument("--output_dir", default="./coverage_analysis", help="Where to write reports")
     args = parser.parse_args()
 
-    print("=== Coverage Analyzer v1 ===")
+    print("=== Coverage Analyzer v1.1 (gz support) ===")
     rules_data = load_rules(args.rules)
     canonicals = rules_data.get("canonicals", rules_data) if isinstance(rules_data, dict) else rules_data
 
