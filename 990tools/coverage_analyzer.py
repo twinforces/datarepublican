@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-coverage_analyzer.py v1.5
+coverage_analyzer.py v1.6
 
-Correctly handles the actual rules JSON structure (dict of name -> list or dict with variants).
-Stricter numeric/ordinal detection + full processing (no artificial cap).
+Enforces the generator's intended 'at least 2 meaningful non-stop words' rule
+for non-SIMPLES canonicals using stop-word list + dictionary.
 """
 
 import argparse
@@ -25,6 +25,19 @@ PHARMA_KEYWORDS = ["ANTI-DRUG", "DRUG COURT", "ALCOHOLDRUG", "PHARMA SUBSIDY"]
 
 DICT_PATHS = ["/usr/share/dict/words", "/usr/share/dict/propernames"]
 
+# Common stop words that should not be standalone canonical roots
+STOP_WORDS = {
+    "the", "and", "of", "for", "in", "on", "to", "a", "an", "is", "are", "was", "were",
+    "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would",
+    "could", "should", "may", "might", "must", "shall", "can", "need", "dare", "ought",
+    "this", "that", "these", "those", "here", "there", "where", "when", "why", "how",
+    "all", "any", "both", "each", "few", "more", "most", "other", "some", "such",
+    "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "first", "second", "third", "fourth", "fifth", "last", "next", "new", "old",
+    "big", "small", "good", "bad", "great", "little", "own", "other", "many", "much"
+}
+
 
 def load_dictionary() -> Set[str]:
     words = set()
@@ -41,11 +54,13 @@ def load_dictionary() -> Set[str]:
     return words
 
 
-def has_real_word(name: str, dictionary: Set[str]) -> bool:
-    if not dictionary:
-        return True
+def count_meaningful_words(name: str, dictionary: Set[str]) -> int:
     tokens = [t.lower() for t in str(name).replace("-", " ").replace("_", " ").split() if t]
-    return any(t in dictionary or (len(t) >= 4 and any(c.isalpha() for c in t)) for t in tokens)
+    meaningful = 0
+    for t in tokens:
+        if t not in STOP_WORDS and (t in dictionary or len(t) >= 4):
+            meaningful += 1
+    return meaningful
 
 
 def is_problematic(name: str, dictionary: Set[str]) -> bool:
@@ -54,13 +69,13 @@ def is_problematic(name: str, dictionary: Set[str]) -> bool:
         return True
     if len(u) <= 3 and u.isalnum():
         return True
-    # numeric-heavy or address-like
     digits = sum(c.isdigit() for c in u)
     if digits > len(u) * 0.4:
         return True
     if any(p in u for p in ["1ST", "2ND", "3RD", "4TH", " E ", " W ", " N ", " S "]):
         return True
-    if not has_real_word(name, dictionary):
+    # Enforce minimum 2 meaningful non-stop words for non-SIMPLES
+    if count_meaningful_words(name, dictionary) < 2:
         return True
     return False
 
@@ -152,11 +167,11 @@ def write_report(stats, probs, contam, families, outdir, top_n, dict_used):
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, "coverage_summary.md")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("# Coverage Analysis v1.5 (correct structure + stricter heuristics)\n\n")
+        f.write("# Coverage Analysis v1.6 (enforces 2 meaningful non-stop words rule)\n\n")
         f.write(f"Total canonicals: {stats['total']:,} | Dictionary used: {dict_used}\n")
         f.write(f"Avg variants: {stats['avg_variants']} | Max: {stats['max_variants']}\n\n")
 
-        f.write(f"## Top {top_n} Problematic Roots (short / numeric / non-word)\n")
+        f.write(f"## Top {top_n} Problematic Roots (violating 2-word minimum or blacklisted)\n")
         for p in probs:
             f.write(f"- {p['name']} ({p['variants']} variants)\n")
 
@@ -170,9 +185,9 @@ def write_report(stats, probs, contam, families, outdir, top_n, dict_used):
             f.write(f"{fam}: {d['count']} captured | e.g. {d.get('examples', [])}\n")
 
         rec = ("\n## Recommendations\n"
-               "- Add short/non-word + numeric-heavy roots to generator blacklist.\n"
-               "- Port the hybrid (dictionary + numeric) guard into generator STAGE 1/3.\n"
-               "- Re-run generator and analyzer after fixes.\n")
+               "- The generator's dynamic blacklist / 2-word minimum is not catching these.\n"
+               "- Share relevant sections of generate_name_rules_v19.1.py so we can fix it at source.\n"
+               "- Re-run after generator fix.\n")
         f.write(rec)
     print(f"Report written: {path}")
 
@@ -187,7 +202,7 @@ def main():
     ap.add_argument("--no-use-macos-dict", dest="use_macos_dict", action="store_false")
     args = ap.parse_args()
 
-    print("=== Coverage Analyzer v1.5 ===")
+    print("=== Coverage Analyzer v1.6 ===")
     dictionary = load_dictionary() if args.use_macos_dict else set()
     print(f"Dictionary mode: {'ON' if dictionary else 'OFF'}")
 
