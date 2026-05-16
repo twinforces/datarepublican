@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-coverage_analyzer.py v1.4.1
+coverage_analyzer.py v1.5
 
-MacOS dictionary-enhanced analyzer - syntax fixed.
+Correctly handles the actual rules JSON structure (dict of name -> list or dict with variants).
+Stricter numeric/ordinal detection + full processing (no artificial cap).
 """
 
 import argparse
@@ -22,11 +23,7 @@ SUSPICIOUS_ROOTS = {"1", "A", "THE", "AND", "OF", "FOR", "IN", "NEW", "CITY", "C
 SIMPLES_CONTAMINANTS = {"ATTACHED", "VARIOUS", "MISCELLANEOUS"}
 PHARMA_KEYWORDS = ["ANTI-DRUG", "DRUG COURT", "ALCOHOLDRUG", "PHARMA SUBSIDY"]
 
-DICT_PATHS = [
-    "/usr/share/dict/words",
-    "/usr/share/dict/words.pre-dictionaries",
-    "/usr/share/dict/propernames"
-]
+DICT_PATHS = ["/usr/share/dict/words", "/usr/share/dict/propernames"]
 
 
 def load_dictionary() -> Set[str]:
@@ -39,7 +36,6 @@ def load_dictionary() -> Set[str]:
                         w = line.strip().lower()
                         if w and len(w) > 1:
                             words.add(w)
-                print(f"Loaded dictionary from {p} ({len(words):,} words so far)")
             except Exception:
                 pass
     return words
@@ -48,24 +44,48 @@ def load_dictionary() -> Set[str]:
 def has_real_word(name: str, dictionary: Set[str]) -> bool:
     if not dictionary:
         return True
-    tokens = [t.lower() for t in name.replace("-", " ").replace("_", " ").split() if t]
-    return any(t in dictionary or len(t) >= 4 for t in tokens)
+    tokens = [t.lower() for t in str(name).replace("-", " ").replace("_", " ").split() if t]
+    return any(t in dictionary or (len(t) >= 4 and any(c.isalpha() for c in t)) for t in tokens)
+
+
+def is_problematic(name: str, dictionary: Set[str]) -> bool:
+    u = str(name).upper().strip()
+    if u in SUSPICIOUS_ROOTS:
+        return True
+    if len(u) <= 3 and u.isalnum():
+        return True
+    # numeric-heavy or address-like
+    digits = sum(c.isdigit() for c in u)
+    if digits > len(u) * 0.4:
+        return True
+    if any(p in u for p in ["1ST", "2ND", "3RD", "4TH", " E ", " W ", " N ", " S "]):
+        return True
+    if not has_real_word(name, dictionary):
+        return True
+    return False
 
 
 def normalize_canonicals(raw: Any) -> List[Dict]:
-    if isinstance(raw, list):
-        if raw and isinstance(raw[0], (str, int)):
-            return [{"name": str(x), "variants": [], "ein": None} for x in raw]
-        return [c if isinstance(c, dict) else {"name": str(c)} for c in raw]
     if isinstance(raw, dict):
-        for k in ["canonicals", "data", "items", "rules", "entries"]:
-            if k in raw and isinstance(raw[k], list):
-                return normalize_canonicals(raw[k])
-        sample = list(raw.values())[:3]
-        if sample and isinstance(sample[0], dict) and "name" in sample[0]:
-            return list(raw.values())
-        return [{"name": str(k), "variants": [], "ein": None} for k in list(raw.keys())[:200000]]
-    return [{"name": str(raw), "variants": [], "ein": None}]
+        result = []
+        for key, val in raw.items():
+            name = key.strip('"')
+            if isinstance(val, list) and len(val) >= 2 and isinstance(val[1], dict):
+                info = val[1]
+            elif isinstance(val, dict):
+                info = val
+            else:
+                info = {}
+            result.append({
+                "name": name,
+                "variants": info.get("variants", []),
+                "ein": info.get("ein", ""),
+                "source_count": info.get("source_count", 0)
+            })
+        return result
+    if isinstance(raw, list):
+        return [c if isinstance(c, dict) else {"name": str(c), "variants": [], "ein": "", "source_count": 0} for c in raw]
+    return [{"name": str(raw), "variants": [], "ein": "", "source_count": 0}]
 
 
 def load_rules(path: str) -> List[Dict]:
@@ -90,17 +110,6 @@ def load_grantee_names(path: str) -> Set[str]:
     return s
 
 
-def is_problematic(name: str, dictionary: Set[str]) -> bool:
-    u = str(name).upper().strip()
-    if u in SUSPICIOUS_ROOTS:
-        return True
-    if len(u) <= 2 and u.isalnum():
-        return True
-    if not has_real_word(name, dictionary):
-        return True
-    return False
-
-
 def check_contamination(cans: List[Dict]) -> Dict:
     flags = []
     for c in cans:
@@ -109,7 +118,7 @@ def check_contamination(cans: List[Dict]) -> Dict:
             if kw in nm:
                 flags.append({"name": c.get("name"), "reason": "contextual pharma siding candidate"})
                 break
-    return {"count": len(flags), "examples": flags[:30]}
+    return {"count": len(flags), "examples": flags[:25]}
 
 
 def check_families(cans: List[Dict]) -> Dict:
@@ -143,11 +152,11 @@ def write_report(stats, probs, contam, families, outdir, top_n, dict_used):
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, "coverage_summary.md")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("# Coverage Analysis v1.4.1 (MacOS dictionary enhanced)\n\n")
+        f.write("# Coverage Analysis v1.5 (correct structure + stricter heuristics)\n\n")
         f.write(f"Total canonicals: {stats['total']:,} | Dictionary used: {dict_used}\n")
         f.write(f"Avg variants: {stats['avg_variants']} | Max: {stats['max_variants']}\n\n")
 
-        f.write(f"## Top {top_n} Problematic Roots (short / non-word / blacklisted)\n")
+        f.write(f"## Top {top_n} Problematic Roots (short / numeric / non-word)\n")
         for p in probs:
             f.write(f"- {p['name']} ({p['variants']} variants)\n")
 
@@ -161,8 +170,8 @@ def write_report(stats, probs, contam, families, outdir, top_n, dict_used):
             f.write(f"{fam}: {d['count']} captured | e.g. {d.get('examples', [])}\n")
 
         rec = ("\n## Recommendations\n"
-               "- Add short/non-word roots to generator blacklist.\n"
-               "- Strengthen pharma siding with context patterns.\n"
+               "- Add short/non-word + numeric-heavy roots to generator blacklist.\n"
+               "- Port the hybrid (dictionary + numeric) guard into generator STAGE 1/3.\n"
                "- Re-run generator and analyzer after fixes.\n")
         f.write(rec)
     print(f"Report written: {path}")
@@ -173,12 +182,12 @@ def main():
     ap.add_argument("--rules", required=True)
     ap.add_argument("--grantee_tsv", default="")
     ap.add_argument("--output_dir", default="./coverage_analysis")
-    ap.add_argument("--top-n", type=int, default=50)
+    ap.add_argument("--top-n", type=int, default=60)
     ap.add_argument("--use-macos-dict", action="store_true", default=platform.system() == "Darwin")
     ap.add_argument("--no-use-macos-dict", dest="use_macos_dict", action="store_false")
     args = ap.parse_args()
 
-    print("=== Coverage Analyzer v1.4.1 (MacOS dictionary) ===")
+    print("=== Coverage Analyzer v1.5 ===")
     dictionary = load_dictionary() if args.use_macos_dict else set()
     print(f"Dictionary mode: {'ON' if dictionary else 'OFF'}")
 
