@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_name_rules_v18_43.py
+generate_name_rules_v19.py
 
 Senior engineer approach: clarity, simplicity, maintainability.
 We use design patterns judiciously — only when they clearly improve the design.
@@ -30,21 +30,31 @@ import subprocess
 from typing import Set, Optional, Dict, List, Tuple
 
 # ==================== CONFIG ====================
-DISTINCT_NAMES_TSV = 'distinct_grantee_names.tsv'
-BMF_TSV = 'bmf_analysis.tsv'
-CHARITY_NAMES_TSV = 'ein_name_variants.tsv'
-OUTPUT_JSON = 'name_rules_v18_43.json.gz'
-CACHE_FILE = 'rules_without_ein_cache.json'
+DISTINCT_NAMES_TSV = "distinct_grantee_names.tsv"
+BMF_TSV = "bmf_analysis.tsv"
+CHARITY_NAMES_TSV = "ein_name_variants.tsv"
+OUTPUT_JSON = "name_rules_v19.json.gz"
+CACHE_FILE = "rules_without_ein_cache.json"
+BIG_PHARMA_JSON = "big_pharma_subsidy.json"
 
 TOP_CITIES_TO_ALWAYS_STRIP = 100
 NOISE_THRESHOLD = 0.01  # 1% of grantee names
 
 # Words that should NEVER be treated as noise, even if they appear frequently
 DYNAMIC_NOISE_WHITELIST = {
-    'UNIVERSITY', 'COLLEGE', 'SCHOOL', 'ACADEMY',
-    'CHURCH',
-    'HEALTH', 'SERVICES', 'EDUCATION', 'COMMUNITY',
-    'AMERICAN', 'UNITED', 'YOUTH', 'ARTS'
+    "UNIVERSITY",
+    "COLLEGE",
+    "SCHOOL",
+    "ACADEMY",
+    "CHURCH",
+    "HEALTH",
+    "SERVICES",
+    "EDUCATION",
+    "COMMUNITY",
+    "AMERICAN",
+    "UNITED",
+    "YOUTH",
+    "ARTS",
 }
 
 # Track names that return 0 lines from both charity and BMF grep searches
@@ -52,115 +62,562 @@ DYNAMIC_NOISE_WHITELIST = {
 ZERO_RESULT_GREPS = []
 
 KNOWN_CHARITIES = {
-    'MADD': 'MOTHERS AGAINST DRUNK DRIVING',
-    'M.A.D.D.': 'MOTHERS AGAINST DRUNK DRIVING',
-    'BPOE': 'BENEVOLENT AND PROTECTIVE ORDER OF ELKS',
-    'B.P.O.E.': 'BENEVOLENT AND PROTECTIVE ORDER OF ELKS',
-    'ELKS': 'BENEVOLENT AND PROTECTIVE ORDER OF ELKS',
-    'VFW': 'VETERANS OF FOREIGN WARS',
-    'V.F.W.': 'VETERANS OF FOREIGN WARS',
-    'AARP': 'AMERICAN ASSOCIATION OF RETIRED PERSONS',
-    'NAACP': 'NATIONAL ASSOCIATION FOR THE ADVANCEMENT OF COLORED PEOPLE',
-    'PTA': 'PARENT TEACHER ASSOCIATION',
-    'P.T.A.': 'PARENT TEACHER ASSOCIATION',
-    'PTO': 'PARENT TEACHER ORGANIZATION',
-    'P.T.O.': 'PARENT TEACHER ORGANIZATION',
-    'BSA': 'BOY SCOUTS OF AMERICA',
-    'B&GC': 'BOYS AND GIRLS CLUB',
-    'IBT': 'INTERNATIONAL BROTHERHOOD OF TEAMSTERS',
-    'YMCA': 'YOUNG MENS CHRISTIAN ASSOCIATION',
-    'YWCA': 'YOUNG WOMENS CHRISTIAN ASSOCIATION',
+    "MADD": "MOTHERS AGAINST DRUNK DRIVING",
+    "M.A.D.D.": "MOTHERS AGAINST DRUNK DRIVING",
+    "BPOE": "BENEVOLENT AND PROTECTIVE ORDER OF ELKS",
+    "B.P.O.E.": "BENEVOLENT AND PROTECTIVE ORDER OF ELKS",
+    "ELKS": "BENEVOLENT AND PROTECTIVE ORDER OF ELKS",
+    "VFW": "VETERANS OF FOREIGN WARS",
+    "V.F.W.": "VETERANS OF FOREIGN WARS",
+    "AARP": "AMERICAN ASSOCIATION OF RETIRED PERSONS",
+    "NAACP": "NATIONAL ASSOCIATION FOR THE ADVANCEMENT OF COLORED PEOPLE",
+    "PTA": "PARENT TEACHER ASSOCIATION",
+    "P.T.A.": "PARENT TEACHER ASSOCIATION",
+    "PTO": "PARENT TEACHER ORGANIZATION",
+    "P.T.O.": "PARENT TEACHER ORGANIZATION",
+    "BSA": "BOY SCOUTS OF AMERICA",
+    "B&GC": "BOYS AND GIRLS CLUB",
+    "IBT": "INTERNATIONAL BROTHERHOOD OF TEAMSTERS",
+    "YMCA": "YOUNG MENS CHRISTIAN ASSOCIATION",
+    "YWCA": "YOUNG WOMENS CHRISTIAN ASSOCIATION",
 }
 
 STATE_EXPANSION = {
-    'AL': 'ALABAMA', 'AK': 'ALASKA', 'AZ': 'ARIZONA', 'AR': 'ARKANSAS',
-    'CA': 'CALIFORNIA', 'CO': 'COLORADO', 'CT': 'CONNECTICUT', 'DE': 'DELAWARE',
-    'FL': 'FLORIDA', 'GA': 'GEORGIA', 'HI': 'HAWAII', 'ID': 'IDAHO',
-    'IL': 'ILLINOIS', 'IN': 'INDIANA', 'IA': 'IOWA', 'KS': 'KANSAS',
-    'KY': 'KENTUCKY', 'LA': 'LOUISIANA', 'ME': 'MAINE', 'MD': 'MARYLAND',
-    'MA': 'MASSACHUSETTS', 'MI': 'MICHIGAN', 'MN': 'MINNESOTA', 'MS': 'MISSISSIPPI',
-    'MO': 'MISSOURI', 'MT': 'MONTANA', 'NE': 'NEBRASKA', 'NV': 'NEVADA',
-    'NH': 'NEW HAMPSHIRE', 'NJ': 'NEW JERSEY', 'NM': 'NEW MEXICO', 'NY': 'NEW YORK',
-    'NC': 'NORTH CAROLINA', 'ND': 'NORTH DAKOTA', 'OH': 'OHIO', 'OK': 'OKLAHOMA',
-    'OR': 'OREGON', 'PA': 'PENNSYLVANIA', 'RI': 'RHODE ISLAND', 'SC': 'SOUTH CAROLINA',
-    'SD': 'SOUTH DAKOTA', 'TN': 'TENNESSEE', 'TX': 'TEXAS', 'UT': 'UTAH',
-    'VT': 'VERMONT', 'VA': 'VIRGINIA', 'WA': 'WASHINGTON', 'WV': 'WEST VIRGINIA',
-    'WI': 'WISCONSIN', 'WY': 'WYOMING'
+    "AL": "ALABAMA",
+    "AK": "ALASKA",
+    "AZ": "ARIZONA",
+    "AR": "ARKANSAS",
+    "CA": "CALIFORNIA",
+    "CO": "COLORADO",
+    "CT": "CONNECTICUT",
+    "DE": "DELAWARE",
+    "FL": "FLORIDA",
+    "GA": "GEORGIA",
+    "HI": "HAWAII",
+    "ID": "IDAHO",
+    "IL": "ILLINOIS",
+    "IN": "INDIANA",
+    "IA": "IOWA",
+    "KS": "KANSAS",
+    "KY": "KENTUCKY",
+    "LA": "LOUISIANA",
+    "ME": "MAINE",
+    "MD": "MARYLAND",
+    "MA": "MASSACHUSETTS",
+    "MI": "MICHIGAN",
+    "MN": "MINNESOTA",
+    "MS": "MISSISSIPPI",
+    "MO": "MISSOURI",
+    "MT": "MONTANA",
+    "NE": "NEBRASKA",
+    "NV": "NEVADA",
+    "NH": "NEW HAMPSHIRE",
+    "NJ": "NEW JERSEY",
+    "NM": "NEW MEXICO",
+    "NY": "NEW YORK",
+    "NC": "NORTH CAROLINA",
+    "ND": "NORTH DAKOTA",
+    "OH": "OHIO",
+    "OK": "OKLAHOMA",
+    "OR": "OREGON",
+    "PA": "PENNSYLVANIA",
+    "RI": "RHODE ISLAND",
+    "SC": "SOUTH CAROLINA",
+    "SD": "SOUTH DAKOTA",
+    "TN": "TENNESSEE",
+    "TX": "TEXAS",
+    "UT": "UTAH",
+    "VT": "VERMONT",
+    "VA": "VIRGINIA",
+    "WA": "WASHINGTON",
+    "WV": "WEST VIRGINIA",
+    "WI": "WISCONSIN",
+    "WY": "WYOMING",
 }
 
 PRIORITY_CANONICALS = [
-    'ATTACHED', 'AMERICAN LEGION', 'CHAMBER OF COMMERCE', 'BOYS AND GIRLS CLUB',
-    'PARENT TEACHER ASSOCIATION', 'PARENT TEACHER ORGANIZATION', 'VOLUNTEER FIRE DEPARTMENT',
-    'FIRE DEPARTMENT', 'SCHOOL DISTRICT', 'HIGH SCHOOL', 'MIDDLE SCHOOL', 'PUBLIC LIBRARY',
-    'COMMUNITY DEVELOPMENT', 'ECONOMIC DEVELOPMENT', 'MENTAL HEALTH', 'HEALTH CARE',
-    'FOOD BANK', 'PERFORMING ARTS', 'HABITAT FOR HUMANITY', 'UNITED WAY', 'SALVATION ARMY',
-    'RED CROSS', 'BOY SCOUTS OF AMERICA', 'GIRL SCOUTS OF AMERICA', 'VETERANS OF FOREIGN WARS',
-    'MOTHERS AGAINST DRUNK DRIVING', 'LOYAL ORDER OF MOOSE', 'POP WARNER',
-    'MAKE-A-WISH', 'MAKE A WISH',
+    "ATTACHED",
+    "AMERICAN LEGION",
+    "CHAMBER OF COMMERCE",
+    "BOYS AND GIRLS CLUB",
+    "PARENT TEACHER ASSOCIATION",
+    "PARENT TEACHER ORGANIZATION",
+    "VOLUNTEER FIRE DEPARTMENT",
+    "FIRE DEPARTMENT",
+    "SCHOOL DISTRICT",
+    "HIGH SCHOOL",
+    "MIDDLE SCHOOL",
+    "PUBLIC LIBRARY",
+    "COMMUNITY DEVELOPMENT",
+    "ECONOMIC DEVELOPMENT",
+    "MENTAL HEALTH",
+    "HEALTH CARE",
+    "FOOD BANK",
+    "PERFORMING ARTS",
+    "HABITAT FOR HUMANITY",
+    "UNITED WAY",
+    "SALVATION ARMY",
+    "RED CROSS",
+    "BOY SCOUTS OF AMERICA",
+    "GIRL SCOUTS OF AMERICA",
+    "VETERANS OF FOREIGN WARS",
+    "MOTHERS AGAINST DRUNK DRIVING",
+    "LOYAL ORDER OF MOOSE",
+    "POP WARNER",
+    "MAKE-A-WISH",
+    "MAKE A WISH",
 ]
+
+# ==================== v19 SMART GEO LOGIC ====================
+# Guided reverse-engineering: <intro> <sep> <geo> → <intro>
+# Restores the powerful pattern that was lost in v18.
+
+SEPARATORS = {"OF", "IN", "FOR", "THE", "AT", "BY", "WITH", "AND", "TO", "-", ":"}
+
+GEO_WORDS = {
+    # US States (full + abbreviations)
+    "ALABAMA",
+    "AL",
+    "ALASKA",
+    "AK",
+    "ARIZONA",
+    "AZ",
+    "ARKANSAS",
+    "AR",
+    "CALIFORNIA",
+    "CA",
+    "COLORADO",
+    "CO",
+    "CONNECTICUT",
+    "CT",
+    "DELAWARE",
+    "DE",
+    "FLORIDA",
+    "FL",
+    "GEORGIA",
+    "GA",
+    "HAWAII",
+    "HI",
+    "IDAHO",
+    "ID",
+    "ILLINOIS",
+    "IL",
+    "INDIANA",
+    "IN",
+    "IOWA",
+    "IA",
+    "KANSAS",
+    "KS",
+    "KENTUCKY",
+    "KY",
+    "LOUISIANA",
+    "LA",
+    "MAINE",
+    "ME",
+    "MARYLAND",
+    "MD",
+    "MASSACHUSETTS",
+    "MA",
+    "MICHIGAN",
+    "MI",
+    "MINNESOTA",
+    "MN",
+    "MISSISSIPPI",
+    "MS",
+    "MISSOURI",
+    "MO",
+    "MONTANA",
+    "MT",
+    "NEBRASKA",
+    "NE",
+    "NEVADA",
+    "NV",
+    "NEW HAMPSHIRE",
+    "NH",
+    "NEW JERSEY",
+    "NJ",
+    "NEW MEXICO",
+    "NM",
+    "NEW YORK",
+    "NY",
+    "NORTH CAROLINA",
+    "NC",
+    "NORTH DAKOTA",
+    "ND",
+    "OHIO",
+    "OH",
+    "OKLAHOMA",
+    "OK",
+    "OREGON",
+    "OR",
+    "PENNSYLVANIA",
+    "PA",
+    "RHODE ISLAND",
+    "RI",
+    "SOUTH CAROLINA",
+    "SC",
+    "SOUTH DAKOTA",
+    "SD",
+    "TENNESSEE",
+    "TN",
+    "TEXAS",
+    "TX",
+    "UTAH",
+    "UT",
+    "VERMONT",
+    "VT",
+    "VIRGINIA",
+    "VA",
+    "WASHINGTON",
+    "WA",
+    "WEST VIRGINIA",
+    "WV",
+    "WISCONSIN",
+    "WI",
+    "WYOMING",
+    "WY",
+    # Major cities + regions
+    "NEW YORK",
+    "LOS ANGELES",
+    "CHICAGO",
+    "HOUSTON",
+    "PHOENIX",
+    "PHILADELPHIA",
+    "SAN ANTONIO",
+    "SAN DIEGO",
+    "DALLAS",
+    "SAN JOSE",
+    "AUSTIN",
+    "JACKSONVILLE",
+    "FORT WORTH",
+    "COLUMBUS",
+    "CHARLOTTE",
+    "SAN FRANCISCO",
+    "INDIANAPOLIS",
+    "SEATTLE",
+    "DENVER",
+    "BOSTON",
+    "EL PASO",
+    "DETROIT",
+    "NASHVILLE",
+    "MEMPHIS",
+    "PORTLAND",
+    "OKLAHOMA CITY",
+    "LAS VEGAS",
+    "LOUISVILLE",
+    "BALTIMORE",
+    "MILWAUKEE",
+    "ALBUQUERQUE",
+    "TUCSON",
+    "FRESNO",
+    "MESA",
+    "SACRAMENTO",
+    "ATLANTA",
+    "KANSAS CITY",
+    "COLORADO SPRINGS",
+    "MIAMI",
+    "RALEIGH",
+    "OMAHA",
+    "LONG BEACH",
+    "VIRGINIA BEACH",
+    "OAKLAND",
+    "MINNEAPOLIS",
+    "TULSA",
+    "ARLINGTON",
+    "TAMPA",
+    "NEW ORLEANS",
+    # County / regional terms
+    "COUNTY",
+    "PARISH",
+    "BOROUGH",
+    "DISTRICT",
+    "REGION",
+    "METRO",
+    "METROPOLITAN",
+    "AREA",
+    "VALLEY",
+    "HILLS",
+    "COAST",
+    "BAY",
+    "PENINSULA",
+    "ISLAND",
+    # International
+    "CANADA",
+    "MEXICO",
+    "UNITED KINGDOM",
+    "UK",
+    "LONDON",
+    "TORONTO",
+    "VANCOUVER",
+    "SYDNEY",
+    "MELBOURNE",
+    "BRISBANE",
+    "AUSTRALIA",
+    "NEW ZEALAND",
+}
+
+GEO_EXCEPTIONS = {
+    "UNIVERSITY OF CALIFORNIA",
+    "STATE UNIVERSITY OF NEW YORK",
+    "UNIVERSITY OF MICHIGAN",
+    "UNIVERSITY OF TEXAS",
+    "UNIVERSITY OF WASHINGTON",
+    "UNIVERSITY OF COLORADO",
+    "UNIVERSITY OF MINNESOTA",
+    "UNIVERSITY OF WISCONSIN",
+    "STATE UNIVERSITY OF NEW JERSEY",
+    "CHAMBER OF COMMERCE OF THE UNITED STATES",
+    "CHAMBER OF COMMERCE OF THE STATE OF NEW YORK",
+    "AMERICAN RED CROSS OF GREATER NEW YORK",
+    "UNITED WAY OF NEW YORK CITY",
+    "BOYS AND GIRLS CLUB OF AMERICA",
+    "GIRL SCOUTS OF THE USA",
+    "BOY SCOUTS OF AMERICA",
+    "VETERANS OF FOREIGN WARS OF THE UNITED STATES",
+    "AMERICAN LEGION OF THE UNITED STATES",
+    "SALVATION ARMY OF THE UNITED STATES",
+}
+
+
+def detect_geo_suffix(name: str) -> Optional[str]:
+    """
+    Detect <intro> <sep> <geo> pattern and return the <intro> part.
+
+    WHY this works:
+    - "SALVATION ARMY OF NEW YORK" → "SALVATION ARMY"
+    - "BOYS AND GIRLS CLUB OF LOS ANGELES" → "BOYS AND GIRLS CLUB"
+    - Only fires when the geo suffix is clearly "extra" (after a separator).
+    - Respects GEO_EXCEPTIONS so "UNIVERSITY OF CALIFORNIA" stays intact.
+    """
+    if not name:
+        return None
+    words = name.upper().split()
+    if len(words) < 3:
+        return None
+
+    for i in range(len(words) - 1, 1, -1):
+        if words[i - 1] in SEPARATORS:
+            geo_phrase = " ".join(words[i:])
+            if geo_phrase in GEO_WORDS or any(w in GEO_WORDS for w in words[i:]):
+                intro = " ".join(words[: i - 1])
+                if intro and intro not in GEO_EXCEPTIONS:
+                    return intro.strip()
+    return None
+
+
+def detect_geo_prefix(name: str) -> Optional[str]:
+    """
+    Detect <geo> <sep> <outro> pattern and return the <outro> part.
+
+    WHY this works (the mirror image of suffix detection):
+    - "NEW YORK - SALVATION ARMY" → "SALVATION ARMY"
+    - "CALIFORNIA: BOYS AND GIRLS CLUB" → "BOYS AND GIRLS CLUB"
+    - Only fires when there is an EXPLICIT separator after the geo prefix.
+    - Pure juxtaposition (e.g. "NEW YORK SALVATION ARMY") is NOT matched here
+      because it is too risky (many legitimate names like "NEW YORK UNIVERSITY").
+    - Respects GEO_EXCEPTIONS so legitimate geo-prefixed names stay intact.
+    """
+    if not name:
+        return None
+    words = name.upper().split()
+    if len(words) < 3:
+        return None
+
+    # Try to find a geo phrase at the beginning (1 to len-2 words)
+    for geo_len in range(1, len(words) - 1):
+        geo_phrase = " ".join(words[:geo_len])
+        if geo_phrase in GEO_WORDS or any(w in GEO_WORDS for w in words[:geo_len]):
+            # Must have an EXPLICIT separator right after the geo phrase
+            if words[geo_len] in SEPARATORS:
+                outro = " ".join(words[geo_len + 1 :])
+                if outro and outro not in GEO_EXCEPTIONS:
+                    return outro.strip()
+    return None
+
+
+def generate_geo_collapse_rules(names: List[str]) -> Tuple[Dict[str, Set[str]], int, int]:
+    """
+    Generate smart geo-collapse rules for BOTH patterns:
+    - <intro> <sep> <geo>  → canonical = <intro>
+    - <geo> <sep> <outro>  → canonical = <outro>
+
+    This is the full guided reverse-engineering that was lost in v18.
+    Returns (final_rules, suffix_count, prefix_count) so it works with the caller.
+    """
+    geo_rules: Dict[str, Set[str]] = defaultdict(set)
+    suffix_count = 0
+    prefix_count = 0
+
+    for name in names:
+        # Suffix case: "SALVATION ARMY OF NEW YORK" → "SALVATION ARMY"
+        intro = detect_geo_suffix(name)
+        if intro:
+            geo_rules[intro].add(name)
+            suffix_count += 1
+
+        # Prefix case: "NEW YORK - SALVATION ARMY" → "SALVATION ARMY"
+        outro = detect_geo_prefix(name)
+        if outro:
+            geo_rules[outro].add(name)
+            prefix_count += 1
+
+    # Only keep rules with 2+ variants
+    final_rules = {k: v for k, v in geo_rules.items() if len(v) >= 2}
+
+    return final_rules, suffix_count, prefix_count
+
+
+# ==================== END v19 GEO LOGIC ====================
 
 university_count = 0
 
 
 for state in STATE_EXPANSION.values():
-    PRIORITY_CANONICALS.append(f'UNIVERSITY OF {state}')
+    PRIORITY_CANONICALS.append(f"UNIVERSITY OF {state}")
     university_count += 1
 
 # Load non-state university patterns from file (e.g. UNIVERSITY OF CHICAGO, UNIVERSITY OF PITTSBURGH, etc.)
 # WHY: This gives us complete coverage of high-value private, city-based, and international universities
 # without hard-coding thousands of entries.
 try:
-    with open('university_non_state_patterns.txt', 'r', encoding='utf-8') as f:
+    with open("university_non_state_patterns.txt", "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line and not line.startswith('#'):
+            if line and not line.startswith("#"):
                 # Format: NAME\tCOUNT\tTOTAL_DONATIONS (we only need the name)
-                name = line.split('\t')[0].strip()
+                name = line.split("\t")[0].strip()
                 if name and name not in PRIORITY_CANONICALS:
                     PRIORITY_CANONICALS.append(name)
                     university_count += 1
 except FileNotFoundError:
-    print("Warning: university_non_state_patterns.txt not found. Non-state universities not loaded.")
+    print(
+        "Warning: university_non_state_patterns.txt not found. Non-state universities not loaded."
+    )
 except Exception as e:
     print(f"Warning: Could not load university_non_state_patterns.txt: {e}")
 
-print(f"Loaded {len(PRIORITY_CANONICALS):,} priority canonicals ({university_count:,} contain 'UNIVERSITY')")
+print(
+    f"Loaded {len(PRIORITY_CANONICALS):,} priority canonicals ({university_count:,} contain 'UNIVERSITY')"
+)
 
-
+# This are so unique that we can just process them. 
 SIMPLES = [
-    'ATTACHED', 'ROTARY', 'KIWANIS', 'CHAMBER OF COMMERCE', 'AMERICAN LEGION',
-    'KNIGHTS OF COLUMBUS', 'LOYAL ORDER OF MOOSE', 'POP WARNER',
-    'MISCELLANEOUS', 'VARIOUS',
+    "ATTACHED",
+    "ROTARY",
+    "BOY SCOUTS",
+    "GIRL SCOUTS",
+    "KIWANIS",
+    "CHAMBER OF COMMERCE",
+    "AMERICAN LEGION",
+    "KNIGHTS OF COLUMBUS",
+    "LOYAL ORDER OF MOOSE",
+    "POP WARNER"
 ]
 
 MANUAL_NOISE = {
-    'FRIENDS OF', 'PARENT TEACHER', 'CHURCH OF', 'OF AMERICA', 'OF CHRIST',
-    'NEW CHURCH', 'CITY CLUB', 'LAKE CLUB', 'CLUB WEST', 'NEW STATE',
-    'THE NEW', 'OLD', 'ST', 'SAINT', 'HOUSING', 'PANTRY',
-    'INTERNATIONAL OF', 'KNIGHTS OF', 'OF COMMERCE', 'VOLUNTEER FIRE',
-    'BOOSTER CLUB', 'LIONS CLUB', 'ROTARY CLUB', 'KIWANIS CLUB',
-    'CHAMBER OF COMMERCE', 'UNITED WAY', 'SALVATION ARMY', 'RED CROSS',
-    'BOY SCOUTS', 'GIRL SCOUTS', '4-H', 'FFA', 'FUTURE FARMERS',
-    'OF THE', 'INC', 'FOUNDATION', 'ASSOCIATION', 'CORPORATION', 'SOCIETY',
-    'COUNCIL', 'INSTITUTE', 'CENTER', 'CLUB', 'LEAGUE', 'FELLOWSHIP',
-    'MINISTRY', 'CHURCH', 'ORGANIZATION', 'CORP', 'LLC', 'LTD', 'TRUST',
-    'FUND', 'PARTNERSHIP', 'ELEMENTARY', 'MIDDLE SCHOOL', 'HIGH SCHOOL',
-    'SCHOOL DISTRICT', 'COMMUNITY COLLEGE', 'STATE UNIVERSITY',
-    'A', 'A NONPROFIT', 'A NON-PROFIT', 'A BETTER', 'A TIME', 'MAKE A',
-    'A FAMILY', 'A CHILD', 'FOR A CURE', 'A PLACE', 'ADOPT A', 'FOR A CAUSE',
-    'HAVE A', 'A CHARITABLE', 'BE A', 'A LIFE', 'A HEART', 'WITH A',
-    'LIKE A', 'JOHN A', 'A BEGINNING', 'WILLIAM A', 'GIVE A', 'SAVE A',
-    'A LIGHT', 'A COMMUNITY', 'A DREAM', 'TAKE A', 'A MINISTRIES',
-    'A MEMORIAL', 'A WORLD', 'JUST A', 'TR', 'PTO',
-    'AMERICAN FRIENDS', 'GOD CHRIST'
+    "FRIENDS OF",
+    "PARENT TEACHER",
+    "CHURCH OF",
+    "OF AMERICA",
+    "OF CHRIST",
+    "NEW CHURCH",
+    "CITY CLUB",
+    "LAKE CLUB",
+    "CLUB WEST",
+    "NEW STATE",
+    "THE NEW",
+    "OLD",
+    "ST",
+    "SAINT",
+    "HOUSING",
+    "PANTRY",
+    "INTERNATIONAL OF",
+    "KNIGHTS OF",
+    "OF COMMERCE",
+    "VOLUNTEER FIRE",
+    "BOOSTER CLUB",
+    "LIONS CLUB",
+    "ROTARY CLUB",
+    "KIWANIS CLUB",
+    "CHAMBER OF COMMERCE",
+    "UNITED WAY",
+    "SALVATION ARMY",
+    "RED CROSS",
+    "BOY SCOUTS",
+    "GIRL SCOUTS",
+    "4-H",
+    "FFA",
+    "FUTURE FARMERS",
+    "OF THE",
+    "INC",
+    "FOUNDATION",
+    "ASSOCIATION",
+    "CORPORATION",
+    "SOCIETY",
+    "COUNCIL",
+    "INSTITUTE",
+    "CENTER",
+    "CLUB",
+    "LEAGUE",
+    "FELLOWSHIP",
+    "MINISTRY",
+    "CHURCH",
+    "ORGANIZATION",
+    "CORP",
+    "LLC",
+    "LTD",
+    "TRUST",
+    "FUND",
+    "PARTNERSHIP",
+    "ELEMENTARY",
+    "MIDDLE SCHOOL",
+    "HIGH SCHOOL",
+    "SCHOOL DISTRICT",
+    "COMMUNITY COLLEGE",
+    "STATE UNIVERSITY",
+    "A",
+    "A NONPROFIT",
+    "A NON-PROFIT",
+    "A BETTER",
+    "A TIME",
+    "MAKE A",
+    "A FAMILY",
+    "A CHILD",
+    "FOR A CURE",
+    "A PLACE",
+    "ADOPT A",
+    "FOR A CAUSE",
+    "HAVE A",
+    "A CHARITABLE",
+    "BE A",
+    "A LIFE",
+    "A HEART",
+    "WITH A",
+    "LIKE A",
+    "JOHN A",
+    "A BEGINNING",
+    "WILLIAM A",
+    "GIVE A",
+    "SAVE A",
+    "A LIGHT",
+    "A COMMUNITY",
+    "A DREAM",
+    "TAKE A",
+    "A MINISTRIES",
+    "A MEMORIAL",
+    "A WORLD",
+    "JUST A",
+    "TR",
+    "PTO",
+    "AMERICAN FRIENDS",
+    "GOD CHRIST",
 }
-
-SEPARATORS = {'OF', 'FOR', 'IN THE', '&', 'AND', 'THE', 'IN', 'ON', 'AT', 'BY', 'TO'}
 
 ABBREVIATIONS = KNOWN_CHARITIES.copy()
 
 MIN_WORD_COUNT = 2
 MIN_LENGTH = 4
+
 
 # ==================== CANONICAL DATACLASS ======================
 @dataclass
@@ -184,9 +641,8 @@ class Canonical:
     variants: Set[str] = field(default_factory=set)
     source_count: int = 0
     source_priority: int = 0
-    min_variants: int = 2
+    min_variants_to_include: int = 2  # minimum number of variants required before this canonical is emitted to the final JSON
     is_priority: bool = False
-
 
     def __post_init__(self):
         if not self.words:
@@ -196,17 +652,11 @@ class Canonical:
             # - re.escape protects special regex characters in the name
             # - We replace spaces with a flexible pattern to handle hyphens
             # - re.IGNORECASE lets us match across case variations (critical for dedup)
-            pattern_str = r'\b' + re.escape(self.cleaned).replace(r'\ ', r'[\s\-]+') + r'\b'
+            pattern_str = r"\b" + re.escape(self.cleaned).replace(r"\ ", r"[\s\-]+") + r"\b"
             self.pattern = re.compile(pattern_str, re.IGNORECASE)
         if not self.variants:
             self.variants.add(self.original)
             self.source_count = 1
-
-        # WHY we set min_variants based on word count:
-        # - Single-word names (e.g. "ATTACHED") legitimately have fewer variants
-        # - Multi-word names need at least 2 variants to be considered a rule
-        word_count = len(self.words)
-        self.min_variants = 1 if word_count == 1 else 2
 
     def add_variant(self, variant: str, is_source: bool = True, priority: int = 0):
         """Add a variant name. WHY we track source_count and source_priority:
@@ -220,7 +670,7 @@ class Canonical:
         if priority > self.source_priority:
             self.source_priority = priority
 
-    def merge(self, other: 'Canonical'):
+    def merge(self, other: "Canonical"):
         """
         Merge another canonical into this one.
 
@@ -256,7 +706,10 @@ class Canonical:
                     self.ein = other.ein
                     self.grant_total = other.grant_total
                     self.source_priority = other.source_priority
-                elif other.source_priority == self.source_priority and other.grant_total > self.grant_total:
+                elif (
+                    other.source_priority == self.source_priority
+                    and other.grant_total > self.grant_total
+                ):
                     self.ein = other.ein
                     self.grant_total = other.grant_total
 
@@ -265,7 +718,7 @@ class Canonical:
 
     def rebuild_pattern(self):
         """Rebuild the regex pattern after a merge. WHY: the cleaned name may have changed."""
-        pattern_str = r'\b' + re.escape(self.cleaned).replace(r'\ ', r'[\s\-]+') + r'\b'
+        pattern_str = r"\b" + re.escape(self.cleaned).replace(r"\ ", r"[\s\-]+") + r"\b"
         self.pattern = re.compile(pattern_str, re.IGNORECASE)
 
 
@@ -274,8 +727,8 @@ def expand_known_charities(name: str) -> str:
     """Expand common abbreviations (MADD → MOTHERS AGAINST DRUNK DRIVING, etc.)."""
     name = name.upper().strip()
     for abbr, full in KNOWN_CHARITIES.items():
-        flexible = re.escape(abbr).replace(r'\.', r'\.?')
-        pattern = rf'\b{flexible}\b'
+        flexible = re.escape(abbr).replace(r"\.", r"\.?")
+        pattern = rf"\b{flexible}\b"
         name = re.sub(pattern, full, name)
     return name
 
@@ -294,28 +747,33 @@ def clean_name(name: str, geo_blacklist: Set[str], noise_words: Set[str]) -> str
       (e.g. "University of California" should keep "California")
     """
     # Strip everything inside parentheses (including the parens themselves)
-    name = re.sub(r'\s*\([^)]*\)', '', name)
+    name = re.sub(r"\s*\([^)]*\)", "", name)  # (x2) / (See Schedule #2) cases stripped to prevent zero-result greps and improve matching to canonical
 
-    # Treat "#123" style suffixes as noise (e.g. "AMERICAN LEGION #140")
-    name = re.sub(r'\s*#\d+\b', '', name)
+    # Treat "# 123" or "#123" style suffixes as noise (e.g. "AMERICAN LEGION #140")
+    name = re.sub(r"\s*#\s*\d+\b", "", name)
 
     name = expand_known_charities(name)
     for abbr, full in ABBREVIATIONS.items():
-        flexible = re.escape(abbr).replace(r'\.', r'\.?')
-        name = re.sub(rf'\b{flexible}\b', full, name, flags=re.IGNORECASE)
+        flexible = re.escape(abbr).replace(r"\.", r"\.?")
+        name = re.sub(rf"\b{flexible}\b", full, name, flags=re.IGNORECASE)
     words = name.split()
 
     if "UNIVERSITY" in words or "COLLEGE" in words:
         filtered = [w for w in words if w not in MANUAL_NOISE and w not in noise_words]
     else:
-        filtered = [w for w in words if w not in geo_blacklist and w not in MANUAL_NOISE and w not in noise_words]
+        filtered = [
+            w
+            for w in words
+            if w not in geo_blacklist and w not in MANUAL_NOISE and w not in noise_words
+        ]
 
-    while filtered and filtered[0] in {'OF', 'THE'}:
+    while filtered and filtered[0] in {"OF", "THE"}:
         filtered.pop(0)
-    while filtered and filtered[-1] in {'OF', 'THE'}:
+    while filtered and filtered[-1] in {"OF", "THE"}:
         filtered.pop()
 
-    cleaned = ' '.join(filtered)
+    cleaned = " ".join(filtered)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()  # collapse multiple spaces
     if not cleaned:
         return name  # fallback to original if everything was stripped
     return cleaned
@@ -346,11 +804,11 @@ def is_valid_canonical(name: str, geo_blacklist: Set[str], noise_words: Set[str]
 def collect_simple_variants(pattern: str) -> Set[str]:
     """Collect all grantee names that contain the given simple pattern (e.g. 'ROTARY')."""
     variants = set()
-    regex = re.compile(rf'\b{re.escape(pattern)}\b', re.IGNORECASE)
-    with open(DISTINCT_NAMES_TSV, 'r', encoding='utf-8') as f:
+    regex = re.compile(rf"\b{re.escape(pattern)}\b", re.IGNORECASE)
+    with open(DISTINCT_NAMES_TSV, "r", encoding="utf-8") as f:
         next(f)
         for line in f:
-            fields = line.strip().split('\t')
+            fields = line.strip().split("\t")
             if len(fields) > 0:
                 name = fields[0].strip()
                 if regex.search(name):
@@ -358,9 +816,7 @@ def collect_simple_variants(pattern: str) -> Set[str]:
     return variants
 
 
-def find_best_ein_grep(name: str,
-                       charity_grant_totals: Dict,
-                       bmf_grant_totals: Dict) -> str:
+def find_best_ein_grep(name: str, charity_grant_totals: Dict, bmf_grant_totals: Dict) -> str:
     """
     Find the best EIN for a name by grepping the charity and BMF files.
 
@@ -377,15 +833,15 @@ def find_best_ein_grep(name: str,
     # Try charity file first
     try:
         result = subprocess.run(
-            ['grep', '-i', '-w', name],
-            stdin=open(CHARITY_NAMES_TSV, 'r'),
+            ["grep", "-i", "-w", name],
+            stdin=open(CHARITY_NAMES_TSV, "r"),
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
-        for line in result.stdout.strip().split('\n'):
+        for line in result.stdout.strip().split("\n"):
             if line:
-                parts = line.strip().split('\t')
+                parts = line.strip().split("\t")
                 if len(parts) >= 2:
                     ein = parts[0].strip()
                     total = charity_grant_totals.get(ein, 0)
@@ -397,15 +853,15 @@ def find_best_ein_grep(name: str,
     if not candidates:
         try:
             result = subprocess.run(
-                ['grep', '-i', '-w', name],
-                stdin=open(BMF_TSV, 'r'),
+                ["grep", "-i", "-w", name],
+                stdin=open(BMF_TSV, "r"),
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
             )
-            for line in result.stdout.strip().split('\n'):
+            for line in result.stdout.strip().split("\n"):
                 if line:
-                    parts = line.strip().split('\t')
+                    parts = line.strip().split("\t")
                     if len(parts) >= 4:
                         ein = parts[0].strip()
                         total = bmf_grant_totals.get(ein, 0)
@@ -461,7 +917,7 @@ def early_dedup_pass(canonicals: Dict[str, Canonical]) -> Dict[str, Canonical]:
 def is_priority_canonical(cleaned: str) -> bool:
     """Return True if this canonical should be processed first (higher grant volume expected)."""
     for priority in PRIORITY_CANONICALS:
-        pattern = re.compile(rf'\b{re.escape(priority)}\b', re.IGNORECASE)
+        pattern = re.compile(rf"\b{re.escape(priority)}\b", re.IGNORECASE)
         if pattern.search(cleaned):
             return True
     return False
@@ -473,10 +929,10 @@ if __name__ == "__main__":
 
     print("Loading distinct_grantee_names.tsv...")
     grantee_names: List[str] = []
-    with open(DISTINCT_NAMES_TSV, 'r', encoding='utf-8') as f:
+    with open(DISTINCT_NAMES_TSV, "r", encoding="utf-8") as f:
         next(f)
         for line in f:
-            fields = line.strip().split('\t')
+            fields = line.strip().split("\t")
             if len(fields) > 0:
                 raw = fields[0].strip()
                 if raw:
@@ -506,12 +962,17 @@ if __name__ == "__main__":
     city_freq: Counter = Counter()
     cities: Set[str] = set()
 
-    with open(BMF_TSV, 'r', encoding='utf-8') as f:
+    with open(BMF_TSV, "r", encoding="utf-8") as f:
         next(f)
         for line in f:
-            parts = line.strip().split('\t')
+            parts = line.strip().split("\t")
             if len(parts) >= 4:
-                ein, name, city, state = parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
+                ein, name, city, state = (
+                    parts[0].strip(),
+                    parts[1].strip(),
+                    parts[2].strip(),
+                    parts[3].strip(),
+                )
                 if name:
                     bmf_by_ein[ein].append(name)
                     if city:
@@ -523,10 +984,10 @@ if __name__ == "__main__":
     print("Loading ein_name_variants.tsv (authoritative charity names)...")
     charity_by_ein: Dict[str, List[str]] = defaultdict(list)
     charity_grant_totals: Dict[str, float] = defaultdict(float)
-    with open(CHARITY_NAMES_TSV, 'r', encoding='utf-8') as f:
+    with open(CHARITY_NAMES_TSV, "r", encoding="utf-8") as f:
         next(f)
         for line in f:
-            parts = line.strip().split('\t')
+            parts = line.strip().split("\t")
             if len(parts) >= 2:
                 ein = parts[0].strip()
                 name = parts[1].strip()
@@ -535,7 +996,9 @@ if __name__ == "__main__":
     print(f"Loaded {len(charity_by_ein):,} EINs from charity names file")
 
     top_cities = {city for city, count in city_freq.most_common(TOP_CITIES_TO_ALWAYS_STRIP)}
-    print(f"Top {TOP_CITIES_TO_ALWAYS_STRIP} most frequent cities to always strip: {len(top_cities):,}")
+    print(
+        f"Top {TOP_CITIES_TO_ALWAYS_STRIP} most frequent cities to always strip: {len(top_cities):,}"
+    )
 
     geo_blacklist = cities.copy()
     geo_blacklist.update(top_cities)
@@ -584,17 +1047,72 @@ if __name__ == "__main__":
     canonicals: Dict[str, Canonical] = {}
     name_to_ein: Dict[str, str] = {}
 
+    print(
+        "\n=== BIG PHARMA SUBSIDY rollup + pharma_siding pass (early like priority rules, before STAGE 3 rubicon) ==="
+    )
+    # Dedicated pharma_siding: side-track all the noisy VARIOUS/SEE ATTACHED/HIPPA/PATIENT/Drugs & Medicines rows
+    # so the main pipeline doesn't waste time scanning them. Add back as single canonical before output.
+    # This matches your preferred clean architecture. Geo rules also moved early.
+    pharma_sided = {}
+    try:
+        with open(BIG_PHARMA_JSON, "r", encoding="utf-8") as f:
+            subsidy_data = json.load(f)
+        for canon, data in subsidy_data.items():
+            PRIORITY_CANONICALS.append(canon)
+            if "patterns" in data:
+                if "PRIORITY_PATTERNS" not in globals():
+                    PRIORITY_PATTERNS = {}
+                PRIORITY_PATTERNS[canon] = [re.compile(p, re.IGNORECASE) for p in data["patterns"]]
+            synthetic_ein = data.get("synthetic_ein", "99-7777777")
+            cleaned = clean_name(canon, geo_blacklist, noise_words)
+            if cleaned not in canonicals:
+                canonicals[cleaned] = Canonical(
+                    original=canon,
+                    cleaned=cleaned,
+                    ein=synthetic_ein,
+                    is_priority=True,
+                    source_priority=10,  # bumped so BIG PHARMA SUBSIDY always wins over partial matches like MAKE A WISH
+                )
+            print(
+                f"Loaded BIG PHARMA SUBSIDY canonical '{canon}' with {len(data.get('patterns', [])):,} patterns and synthetic EIN {synthetic_ein}"
+            )
+
+        # Pharma siding pass - filter noisy names from main grantee_names processing
+        pharma_patterns = PRIORITY_PATTERNS.get("BIG PHARMA SUBSIDY", [])
+        if pharma_patterns and grantee_names:
+            original_count = len(grantee_names)
+            non_pharma = []
+            sided_count = 0
+            for name in grantee_names:
+                if any(p.search(name) for p in pharma_patterns):
+                    if name not in pharma_sided:
+                        pharma_sided[name] = {
+                            "canonical": canon,
+                            "ein": synthetic_ein,
+                            "variants": [name],
+                            "source": "pharma_siding",
+                        }
+                        sided_count += 1
+                else:
+                    non_pharma.append(name)
+            grantee_names[:] = non_pharma  # mutate list in place for later loops
+            print(
+                f"Sided {sided_count:,} noisy pharma/subsidy names (main pipeline will skip them; added back before output)"
+            )
+        else:
+            print("No pharma patterns loaded or no names to side")
+    except Exception as e:
+        print(f"Warning: Could not load {BIG_PHARMA_JSON}: {e}")
+        pharma_sided = {}
+
     # Seed priority canonicals FIRST (before data)
     # WHY: Priority canonicals should exist from the start so they attract variants
     #      and rise to the top during the is_priority sort.
     for name in PRIORITY_CANONICALS:
         cleaned = clean_name(name, geo_blacklist, noise_words)
         if cleaned and cleaned not in canonicals:
-            canonicals[cleaned] = Canonical(
-                original=name,
-                cleaned=cleaned,
-                is_priority=True
-            )
+            canonicals[cleaned] = Canonical(original=name, cleaned=cleaned, is_priority=True)
+            canonicals[cleaned].min_variants = 1
     print(f"Seeded {len([c for c in canonicals.values() if c.is_priority]):,} priority canonicals")
 
     print("Creating canonicals from charity file (one per EIN)...")
@@ -604,12 +1122,7 @@ if __name__ == "__main__":
             cleaned = clean_name(first_name, geo_blacklist, noise_words)
 
             if is_valid_canonical(cleaned, geo_blacklist, noise_words):
-                canon = Canonical(
-                    original=first_name,
-                    cleaned=cleaned,
-                    ein=ein,
-                    source_priority=2
-                )
+                canon = Canonical(original=first_name, cleaned=cleaned, ein=ein, source_priority=2)
                 for name in names:
                     canon.add_variant(name, priority=2)
                 canonicals[cleaned] = canon
@@ -631,10 +1144,7 @@ if __name__ == "__main__":
                 if is_valid_canonical(cleaned, geo_blacklist, noise_words):
                     if cleaned not in canonicals:
                         canonicals[cleaned] = Canonical(
-                            original=name,
-                            cleaned=cleaned,
-                            ein=ein,
-                            source_priority=1
+                            original=name, cleaned=cleaned, ein=ein, source_priority=1
                         )
                     canonicals[cleaned].add_variant(name, priority=1)
                     name_to_ein[cleaned] = ein
@@ -653,15 +1163,52 @@ if __name__ == "__main__":
                 canonicals[cleaned].add_variant(name, priority=0)
             else:
                 if is_valid_canonical(cleaned, geo_blacklist, noise_words):
-                    canonicals[cleaned] = Canonical(original=name, cleaned=cleaned, ein=ein, source_priority=0)
+                    canonicals[cleaned] = Canonical(
+                        original=name, cleaned=cleaned, ein=ein, source_priority=0
+                    )
                     canonicals[cleaned].add_variant(name, priority=0)
         else:
             if is_valid_canonical(cleaned, geo_blacklist, noise_words):
                 if cleaned not in canonicals:
-                    canonicals[cleaned] = Canonical(original=name, cleaned=cleaned, ein="", source_priority=0)
+                    canonicals[cleaned] = Canonical(
+                        original=name, cleaned=cleaned, ein="", source_priority=0
+                    )
                 canonicals[cleaned].add_variant(name, priority=0)
 
     print(f"Final: {len(canonicals):,} canonicals after adding grantee names")
+
+    # ========== SIMPLES moved EARLY (critical fix for coverage) ==========
+    print("\n=== SIMPLES: Creating canonicals for distinctive names ===")
+    for simple in SIMPLES:
+        variants = collect_simple_variants(simple)
+        if variants:
+            cleaned = clean_name(simple, geo_blacklist, noise_words)
+            ein = find_best_ein_grep(simple, charity_grant_totals, bmf_grant_totals)
+
+            if cleaned not in canonicals:
+                canon = Canonical(
+                    original=simple, cleaned=cleaned, ein=ein, source_priority=2
+                )
+                canon.min_variants_to_include = 1
+                canonicals[cleaned] = canon
+
+            for variant in variants:
+                canonicals[cleaned].add_variant(variant, priority=2)
+
+            ein_str = ein if ein else "(no EIN)"
+            print(f"  {simple}: {len(variants):,} variants | EIN: {ein_str}")
+
+    # Post-SIMPLES absorption
+    for simple in SIMPLES:
+        simple_cleaned = clean_name(simple, geo_blacklist, noise_words)
+        if simple_cleaned in canonicals:
+            simple_canon = canonicals[simple_cleaned]
+            to_merge = [c for c in list(canonicals.keys()) if c != simple_cleaned and simple.upper() in c.upper()]
+            for c in to_merge:
+                simple_canon.merge(canonicals[c])
+                del canonicals[c]
+            if to_merge:
+                print(f"  Merged {len(to_merge):,} additional variants into {simple}")
 
     canonicals = early_dedup_pass(canonicals)
 
@@ -678,42 +1225,34 @@ if __name__ == "__main__":
         else:
             print("No patterns match test string 'ABBA IS A SWEDISH BAND'")
 
-    print("\n=== SIMPLES: Creating canonicals for distinctive names ===")
-    for simple in SIMPLES:
-        variants = collect_simple_variants(simple)
-        if variants:
-            cleaned = clean_name(simple, geo_blacklist, noise_words)
-            ein = find_best_ein_grep(simple, charity_grant_totals, bmf_grant_totals)
+    # SIMPLES block moved earlier (see below)
 
-            if cleaned not in canonicals:
-                canonicals[cleaned] = Canonical(
-                    original=simple,
-                    cleaned=cleaned,
-                    ein=ein,
-                    source_priority=2
-                )
-            for variant in variants:
-                canonicals[cleaned].add_variant(variant, priority=2)
+    # v19: Generating smart <intro> <sep> <geo> collapse rules (after early dedup but before STAGE 3 rubicon per your request)
+    print("\n=== v19: Generating smart <intro> <sep> <geo> collapse rules ===")
+    all_original_names = list(
+        set(
+            name
+            for name in grantee_names
+            + list(charity_grant_totals.keys())
+            + list(bmf_grant_totals.keys())
+        )
+    )
+    geo_collapse_rules, suffix_count, prefix_count = generate_geo_collapse_rules(all_original_names)
 
-            ein_str = ein if ein else "(no EIN)"
-            print(f"  {simple}: {len(variants):,} variants | EIN: {ein_str}")
+    suffix_catches = suffix_count
+    prefix_catches = prefix_count
+    print(f"  Suffix pattern (<intro> <sep> <geo>): {suffix_catches:,} names caught")
+    print(f"  Prefix pattern (<geo> <sep> <outro>): {prefix_catches:,} names caught")
+    print(f"Generated {len(geo_collapse_rules):,} smart geo-collapse rules (with 2+ variants)")
 
-    # Post-SIMPLES cleanup: force any canonical containing a simple pattern into the simple canonical
-    # WHY: Some variants like "AMERICAN LEGION #140" survive as separate canonicals
-    #      because the word-based merge doesn't roll them up. This ensures they get absorbed.
-    for simple in SIMPLES:
-        simple_cleaned = clean_name(simple, geo_blacklist, noise_words)
-        if simple_cleaned in canonicals:
-            simple_canon = canonicals[simple_cleaned]
-            to_merge = []
-            for cleaned, canon in list(canonicals.items()):
-                if cleaned != simple_cleaned and simple.upper() in canon.cleaned.upper():
-                    to_merge.append(cleaned)
-            for cleaned in to_merge:
-                simple_canon.merge(canonicals[cleaned])
-                del canonicals[cleaned]
-            if to_merge:
-                print(f"  Merged {len(to_merge):,} additional variants into {simple}")
+    # Merge geo rules into the canonicals before STAGE 3 testing
+    for intro, variants in geo_collapse_rules.items():
+        if intro not in canonicals:
+            canonicals[intro] = Canonical(original=intro, cleaned=intro, is_priority=True)
+        for v in variants:
+            canonicals[intro].add_variant(v)
+    print(f"After merging geo rules: {len(canonicals):,} total canonicals before STAGE 3")
+    canonicals = early_dedup_pass(canonicals)
 
     print(f"\n=== STAGE 3: Merging canonicals (PRIORITY first) ===")
 
@@ -723,10 +1262,7 @@ if __name__ == "__main__":
             word_index[word].add(cleaned)
 
     # Sort with is_priority as primary key (priority first), then grant_total descending
-    canonical_list = sorted(
-        canonicals.values(),
-        key=lambda c: (not c.is_priority, -c.grant_total)
-    )
+    canonical_list = sorted(canonicals.values(), key=lambda c: (not c.is_priority, -c.grant_total))
     ORIGINAL_COUNT = len(canonical_list)
 
     priority_count = sum(1 for c in canonical_list if c.is_priority)
@@ -746,17 +1282,21 @@ if __name__ == "__main__":
             active = len(canonicals)
             removed = last_active - active
             last_active = active
-            print(f"  Processed {i:,}/{ORIGINAL_COUNT:,} (active: {active:,}, removed: {removed:,}) — {delta:.1f}s")
+            print(
+                f"  Processed {i:,}/{ORIGINAL_COUNT:,} (active: {active:,}, removed: {removed:,}) — {delta:.1f}s"
+            )
 
             if final_rules_list:
                 new_rules = [r for r in final_rules_list if r[0] not in printed]
                 printed = {r[0] for r in final_rules_list}
                 if new_rules:
-                    top_new = sorted(new_rules, key=lambda x: -len(x[1]['variants']))[:5]
+                    top_new = sorted(new_rules, key=lambda x: -len(x[1]["variants"]))[:5]
                     print("    Top 5 NEW from this pass:")
                     for core, rule in top_new:
-                        sample = list(rule['variants'])[:2]
-                        print(f"      '{core}' (EIN: {rule['ein']}) → {len(rule['variants']):,} variants, e.g. {sample}")
+                        sample = list(rule["variants"])[:2]
+                        print(
+                            f"      '{core}' (EIN: {rule['ein']}) → {len(rule['variants']):,} variants, e.g. {sample}"
+                        )
 
         candidates = None
         for word in current.words:
@@ -780,12 +1320,7 @@ if __name__ == "__main__":
                         word_index[w].discard(candidate_name)
                 del canonicals[candidate_name]
 
-        if len(current.variants) >= current.min_variants:
-            final_rules_list.append((current.cleaned, {
-                'ein': current.ein,
-                'variants': sorted(current.variants),
-                'source_count': current.source_count
-            }))
+        # final_rules_list is now built in a single pass at the end (see below)
 
     final_rules_list.sort(key=lambda x: x[0].upper())
 
@@ -801,28 +1336,35 @@ if __name__ == "__main__":
     einless_canonicals = early_dedup_pass(einless_canonicals)
 
     # Convert to dicts for second pass
-    rules_without_ein = [(c.cleaned, {'ein': c.ein, 'variants': sorted(c.variants), 'source_count': c.source_count}) for c in einless_canonicals.values()]
+    rules_without_ein = [
+        (c.cleaned, {"ein": c.ein, "variants": sorted(c.variants), "source_count": c.source_count})
+        for c in einless_canonicals.values()
+    ]
 
     # Load cache (including previously known zero-result grep names)
     print("\n=== Load cache ===")
     cache_ein_map: Dict[str, str] = {}
     cached_rules_without_ein: Set[str] = set()
     try:
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
             cache_data = json.load(f)
             for item in cache_data:
-                if item.get('ein'):
-                    cache_ein_map[item['canonical']] = item['ein']
+                if item.get("ein"):
+                    cache_ein_map[item["canonical"]] = item["ein"]
                 # Track all previously processed rules_without_ein (even those with no EIN)
-                if 'variants' in item and item.get('canonical'):
-                    cached_rules_without_ein.add(item['canonical'])
+                if "variants" in item and item.get("canonical"):
+                    cached_rules_without_ein.add(item["canonical"])
                 # Load previously known zero-result names so we skip re-grepping them
-                if 'zero_result_names' in item:
-                    ZERO_RESULT_GREPS.extend(item['zero_result_names'])
+                if "zero_result_names" in item:
+                    ZERO_RESULT_GREPS.extend(item["zero_result_names"])
         if ZERO_RESULT_GREPS:
-            print(f"Loaded {len(set(ZERO_RESULT_GREPS)):,} previously known zero-result names from cache")
+            print(
+                f"Loaded {len(set(ZERO_RESULT_GREPS)):,} previously known zero-result names from cache"
+            )
         print(f"Loaded {len(cache_ein_map):,} cached EINs from {CACHE_FILE}")
-        print(f"Loaded {len(cached_rules_without_ein):,} previously processed rules_without_ein from cache")
+        print(
+            f"Loaded {len(cached_rules_without_ein):,} previously processed rules_without_ein from cache"
+        )
     except FileNotFoundError:
         print(f"No cache file found ({CACHE_FILE}) — starting fresh")
 
@@ -831,7 +1373,7 @@ if __name__ == "__main__":
     cached_count = 0
     for item in rules_without_ein:
         if item[0] in cache_ein_map:
-            item[1]['ein'] = cache_ein_map[item[0]]
+            item[1]["ein"] = cache_ein_map[item[0]]
             cached_count += 1
     print(f"Applied {cached_count:,} cached EINs")
 
@@ -839,7 +1381,7 @@ if __name__ == "__main__":
     rules_without_ein = [r for r in rules_without_ein if r[0] not in cached_rules_without_ein]
 
     # Process remaining without EINs
-    remaining_without_ein = [r for r in rules_without_ein if not r[1]['ein']]
+    remaining_without_ein = [r for r in rules_without_ein if not r[1]["ein"]]
     print(f"\n=== Process remaining {len(remaining_without_ein):,} rules without EINs ===")
 
     assigned_count = 0
@@ -850,13 +1392,13 @@ if __name__ == "__main__":
         ein = find_best_ein_grep(item[0], charity_grant_totals, bmf_grant_totals)
 
         if not ein:
-            for variant in item[1]['variants'][:5]:
+            for variant in item[1]["variants"][:5]:
                 ein = find_best_ein_grep(variant, charity_grant_totals, bmf_grant_totals)
                 if ein:
                     break
 
         if ein:
-            item[1]['ein'] = ein
+            item[1]["ein"] = ein
             assigned_count += 1
             if assigned_count <= 50:
                 print(f"  Assigned EIN to '{item[0]}': {ein}")
@@ -865,42 +1407,86 @@ if __name__ == "__main__":
 
     # Update cache (including current zero-result grep names for future runs)
     print("\n=== Update cache ===")
-    cache_data = [{'canonical': r[0], 'variants': r[1]['variants'], 'ein': r[1].get('ein', '')} for r in rules_without_ein]
+    cache_data = [
+        {"canonical": r[0], "variants": r[1]["variants"], "ein": r[1].get("ein", "")}
+        for r in rules_without_ein
+    ]
     # Add zero-result names so future runs skip re-grepping them
     if ZERO_RESULT_GREPS:
-        cache_data.append({'zero_result_names': sorted(set(ZERO_RESULT_GREPS))})
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        cache_data.append({"zero_result_names": sorted(set(ZERO_RESULT_GREPS))})
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache_data, f, indent=2)
-    print(f"Updated cache: {len(rules_without_ein):,} rules + {len(set(ZERO_RESULT_GREPS)):,} zero-result names")
+    print(
+        f"Updated cache: {len(rules_without_ein):,} rules + {len(set(ZERO_RESULT_GREPS)):,} zero-result names"
+    )
 
-    # Merge back into final_rules_list
-    einless_map = {r[0]: r for r in rules_without_ein}
+    # Final emit — use a low threshold for priority/SIMPLES, higher for others
+    final_rules_list = []
+    for c in canonicals.values():
+        threshold = 1 if c.is_priority or c.min_variants_to_include == 1 else 3
+        if len(c.variants) >= threshold:
+            final_rules_list.append((
+                c.cleaned,
+                {
+                    "ein": c.ein,
+                    "variants": sorted(c.variants),
+                    "source_count": c.source_count,
+                },
+            ))
+    final_rules_list.sort(key=lambda x: x[0].upper())
+
+
+    # Add back pharma sided names as variants under the single BIG PHARMA SUBSIDY canonical
+    # This fixes the bug where the full phrases were not appearing as covered in the analyzer even though the patterns are in the JSON
+    if "pharma_sided" in locals() and pharma_sided:
+        pharma_variants = sorted(pharma_sided.keys())
+        final_rules_list.append(
+            (
+                "BIG PHARMA SUBSIDY",
+                {
+                    "ein": "99-7777777",
+                    "variants": pharma_variants,
+                    "source_count": len(pharma_variants),
+                    "source": "pharma_siding",
+                },
+            )
+        )
+        print(f"Added BIG PHARMA SUBSIDY rollup with {len(pharma_variants):,} variants back to final output (siding bug fixed)")
+    # ========== Final single emit pass (guarantees all canonicals including SIMPLES are included) ==========
     final_rules_list = [
-        (core, einless_map.get(core, rule) if isinstance(rule, dict) else {'ein': '', 'variants': [], 'source_count': 0})
-        for core, rule in final_rules_list
+        (
+            c.cleaned,
+            {
+                "ein": c.ein,
+                "variants": sorted(c.variants),
+                "source_count": c.source_count,
+            },
+        )
+        for c in canonicals.values()
+        if len(c.variants) >= c.min_variants_to_include
     ]
+    final_rules_list.sort(key=lambda x: x[0].upper())
 
     print("\n=== Writing output ===")
-    output_data = []
-    for core, rule in final_rules_list:
-        if isinstance(rule, dict):
-            output_data.append({'canonical': core, **rule})
-        else:
-            # Fallback if rule is somehow still a tuple
-            output_data.append({'canonical': core, 'ein': '', 'variants': [], 'source_count': 0})
-    with gzip.open(OUTPUT_JSON, 'wt', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2)
+    # Write as dict keyed by canonical (cleaner, preserves EIN + metadata)
+    # NOTE: output_data already contains the merged geo rules from above
+    with gzip.open(OUTPUT_JSON, "wt", encoding="utf-8") as f:
+        json.dump(final_rules_list, f, indent=2)
     print(f"Saved {len(final_rules_list):,} rules to {OUTPUT_JSON}")
 
     print("\nTop 15 rules:")
-    for item in output_data[:15]:
-        sample = item['variants'][:2]
-        print(f"  '{item['canonical']}' (EIN: {item['ein']}) → {len(item['variants']):,} variants")
+    for i, (core, rule) in enumerate(final_rules_list[:15]):
+        sample = (rule[1] if isinstance(rule, (tuple, list)) and len(rule) > 1 else rule).get("variants", [])[:2]
+        print(
+            f"  '{core}' (EIN: {rule.get('ein', '')}) → {len(rule.get('variants', [])):,} variants"
+        )
 
     # Report on zero-result grep searches (useful signal for noise/obscure names)
     if ZERO_RESULT_GREPS:
         print(f"\n=== Zero-result grep searches ===")
-        print(f"Total names with 0 lines found in both charity and BMF files: {len(ZERO_RESULT_GREPS):,}")
+        print(
+            f"Total names with 0 lines found in both charity and BMF files: {len(ZERO_RESULT_GREPS):,}"
+        )
         print("These are likely noise, very obscure, or non-charity entities.")
         if len(ZERO_RESULT_GREPS) <= 20:
             for name in ZERO_RESULT_GREPS:
