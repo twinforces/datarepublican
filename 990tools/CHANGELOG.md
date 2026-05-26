@@ -5,6 +5,23 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-05 (Category + TUI Success Arc)
+
+### Major New Tools & Workflow
+- Added `category_splitter.py` — repeatable bucketing of the master name list into churches/pharma (and extensible) slices with emitted seeds for TUI pre-bless. Enables targeted Splink instead of one giant run.
+- Added `church_major_resolver.py` — repeatable extraction of major church networks (modeled on university resolver, using TUI normalization for collapse).
+- Added `extract_pharma_no_eins.py` — pulls true no-EIN pharma rows from the full raw TSV for Splink experimentation on redactions.
+- Docs created for all three + updates to core tools (see `docs/RECENTGOALS.md` and per-script .md files).
+
+### Core Tool Hardening (the "inspect" wins)
+- `splink_pattern_miner.py`: New `--blocking-strategy` flag (`sig_name|redaction|loose|none`). "none" strategy delivered perfect redaction canonical clusters (ATTACH/ATTACHMENT/STATEMENT variants) that previous blocking fragmented.
+- `review_suggestions_tui.py`: Global normalized deduplication (no more adjacent-only misses), aggressive early cleanup (THE/geo/plural), UPPER forcing, and critical safety rescan + absorption on every "M" modify. Eliminated the long-standing "<name> vs THE <name>" duplicate class and made modify operations actually clean the queue.
+
+### Hygiene & Process
+- All work executed under the Ringmaster discipline from `coding-bootstrap.md` (Obsidian): full role file reads on switches, hygiene checkpoints (this changelog + RECENTGOALS.md + docs/ for new .py) at every transition/success point.
+- Created `docs/RECENTGOALS.md` as the living scratchpad.
+- This checkpoint marks a major success point suitable for new sessions to bootstrap from the docs/.
+
 ## [Unreleased] - 2025-10-16
 
 ### Performance Improvements

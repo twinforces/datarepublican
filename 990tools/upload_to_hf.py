@@ -44,7 +44,7 @@ def main():
     tables = [
         "Charities", "Grants", "Officers", "Addresses", "Contributions",
         "Contractors", "IrsBmf", "Backfill",
-        "Geocoding", "XmlFiles", "ZipFiles", "PipelineProgress",
+        "Geocoding", "XmlFiles", "ZipFiles", "Zips",
         "fec_committees", "fec_candidate_spendings", "fec_committee_transactions",
         "fec_individual_contributions", "fec_operating_expenditures"
     ]
