@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created `docs/RECENTGOALS.md` as the living scratchpad.
 - This checkpoint marks a major success point suitable for new sessions to bootstrap from the docs/.
 
+### Pharma Bucket Completion (May 2026)
+- Major hardening of the pharma redaction/subsidy pattern list in `big_pharma_subsidy.json` (compressed to ~42 compact, regex-aware patterns while improving coverage).
+- Added strong, high-signal anchors including "UPON REQUEST", "AVAILABLE UPON REQUEST", "GRANTS? (PAID|APPROVED)", "20\\d\\d GRANTS", "SEE (DETAIL|LIST)", and many others surfaced from high-value pure no-EIN review.
+- Completed targeted Splink + TUI review workflow on the high-value pure no-EIN pharma slice (multiple runs with `sig_name` and `none` blocking strategies, using `--redaction-patterns` in the TUI).
+- Curated additional redaction patterns from review sessions and moved generic phrases ("VARIOUS ... ORGANIZATIONS", "VOLUNTEERS", year-based grants variants, etc.) into the subsidy list.
+- Added "STICHTING" as a simple canonical in `priority_canonicals.json`.
+- Established and used bucket-isolated approved files (`approved_pure_no_ein_high_value_*.json`) for clean separation during review.
+- All changes follow full hygiene (updated RECENTGOALS.md + this changelog + clean commit at the success point). User explicitly declared the pharma bucket complete.
+
 ## [Unreleased] - 2025-10-16
 
 ### Performance Improvements

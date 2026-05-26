@@ -1,0 +1,3884 @@
+{
+  "metadata": {
+    "total_records": 29277,
+    "clusters_found": 22417,
+    "with_colocator": false,
+    "sample_size": null,
+    "source": "clean_tsv",
+    "blocking_strategy": "sig_name",
+    "loose_colocator_non_null": 0,
+    "colocator_non_null": 0
+  },
+  "suggestions": [
+    {
+      "type": "canonical_name",
+      "pattern": "BOYS & GIRLS CLUB OF BOSTON",
+      "cluster_id": 1363,
+      "cluster_size": 84,
+      "support": 0.01,
+      "example_variants": [
+        "BOYS & GIRLS CLUB OF BOSTON",
+        "BOYS AND GIRLS CLUBS OF METROPOLITAN BALTIMORE INCORPORATED",
+        "BOYS & GIRLS CLUBS OF SAN LEANDRO",
+        "BOYS AND GIRLS CLUBS OF GREATER NORTHWEST INDIANA INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NEW YORK U",
+      "cluster_id": 329,
+      "cluster_size": 79,
+      "support": 0.03,
+      "example_variants": [
+        "THE NEW YORK STEM CELL FOUNDATION INC",
+        "NEW YORK CLIMATE EXCHANGE INC",
+        "NEW YORK U",
+        "NEW YORK-PRESBYTERIAN HOSPITAL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CHILDREN'S HOSPITAL LOS ANGELES FED ID #95-1690977",
+      "cluster_id": 201,
+      "cluster_size": 77,
+      "support": 0.01,
+      "example_variants": [
+        "CHILDREN'S HOSPITAL LOS ANGELES FED ID #95-1690977",
+        "CHILDREN'S HOSPITAL CORPORATION FBO BOSTON CHILDREN'S HOSPITAL",
+        "CHILDREN'S MUSEUM OF NORTHWEST ARKANSAS",
+        "CHILDREN'S HOSPITAL PITTSBURGH FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED WAY OF CENT JERSEY",
+      "cluster_id": 1504,
+      "cluster_size": 68,
+      "support": 0.03,
+      "example_variants": [
+        "UNITED WAY - YOURCAUSE PROCESSING",
+        "UNITED WAY CHARITIES",
+        "UNITED WAY AGENCIES",
+        "UNITED WAY WORLDWIDE DONOR ADVISED FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FIDELITY CHARITABLE GIFT TRUST",
+      "cluster_id": 30,
+      "cluster_size": 63,
+      "support": 0.03,
+      "example_variants": [
+        "FIDELITY CHARITABLE GIVING FUND",
+        "FIDELITY CHARITABLE GIFT FUND - TAUPO",
+        "FIDELITY CHARITABLE TRUST",
+        "FIDELITY CHARITABLE DONOR ADVISED FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN FRIENDS SERVICE CENTER",
+      "cluster_id": 920,
+      "cluster_size": 60,
+      "support": 0.03,
+      "example_variants": [
+        "AMERICAN FRIENDS OF JEWISH HOSPITALS AND EDUCATION CENTERS OF BRAZIL",
+        "AMERICAN FRIENDS OF ROYAL FOUNDATION",
+        "AMERICAN FRIENDS OF B NAI LEVY",
+        "AMERICAN FRIENDS OF SHEBA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED NATIONS CAPITAL DEVELOPMENT FUND",
+      "cluster_id": 161,
+      "cluster_size": 52,
+      "support": 0.06,
+      "example_variants": [
+        "UNITED NATIONS FUND FOR INTL PTNRSHPS",
+        "UNITED NATIONS FUND FOR INTERNATIONAL PARTNERSHIPS",
+        "UNITED NATIONS CHILDREN'S FUND",
+        "UNITED NATIONS ENTITY FOR GENDER EQUALITY AND THE EMPOWERMENT OF WOMEN"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE NATURE CONSERVANCY GIFT",
+      "cluster_id": 3131,
+      "cluster_size": 42,
+      "support": 0.05,
+      "example_variants": [
+        "NATURE CONSERVANCY (CO)",
+        "NATURE CONSERVANCY-CONNECTICUT",
+        "NATURE CONSERVANCY - ARIZONA",
+        "THE NATURE CONSERVANCY - ARIZONA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JEWISH FEDERATION OF SOUTH PALM",
+      "cluster_id": 1306,
+      "cluster_size": 40,
+      "support": 0.05,
+      "example_variants": [
+        "JEWISH FEDERATION OF PITTSBURGH",
+        "JEWISH FEDERATION AGENCIES",
+        "JEWISH FEDERATION OF GREATER HSBG",
+        "JEWISH FEDERATION OF GREATER LOSANGELES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SCHWAB CHARITABLE DONOR-ADVISED FUND",
+      "cluster_id": 5,
+      "cluster_size": 33,
+      "support": 0.06,
+      "example_variants": [
+        "SCHWAB CHARITABLE (DONOR ADVISED FUND)",
+        "SCHWAB CHARITABLE DONOR-ADVISED FUND",
+        "SCHWAB CHARITABLE DONOR ADVISED FUND",
+        "SCHWAB CHARITABLE FUND (MARK ZANKEL CHARITABLE FUND)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "VANGUARD CHARITABLE ENDOWMENT FUND",
+      "cluster_id": 199,
+      "cluster_size": 31,
+      "support": 0.06,
+      "example_variants": [
+        "VANGUARD CHARITABLE ENDOWMENT FUND",
+        "VANGUARD CHARITABLE ENDOWMENT",
+        "VANGUARD CHARITABLE ENDOWNMENT PROGRAM",
+        "VANGUARD CHARITABLE DAF"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JEWISH COMMUNITY FOUNDATION SAN DIEGO",
+      "cluster_id": 744,
+      "cluster_size": 29,
+      "support": 0.07,
+      "example_variants": [
+        "JEWISH COMMUNITY FOUNDATION SAN DIEGO",
+        "JEWISH COMMUNITY FOUNDATION OF OC",
+        "JEWISH COMMUNITY FOUNDATION OF GREATER LOS ANGELES",
+        "JEWISH COMMUNITY FEDERATION & ENDOWNMENT FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "support": 0.04,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA ON BEHALF OF ITS MERCED CAMPUS"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "THE REGENTS OF THE UNIVERSITY",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "lift": 99.0,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "lift": 99.0,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "REGENTS - UNIVERSITY",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "lift": 99.0,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "REGENTS OF UNIVERSITY OF CA",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "lift": 99.0,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "REGENTS OF THE UNIVERSITY",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "lift": 99.0,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "REGENTS OF THE UNIVERSITY OF CALIFORNIA",
+      "cluster_id": 67,
+      "cluster_size": 28,
+      "lift": 99.0,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA SAN FRANCISCO THE",
+        "THE REGENTS OF THE UNIVERSITY OF CALIFORNIA (UNIVE",
+        "REGENTS OF THE UNIVERSITY OF CALIFORNIA LOS ANGELES THE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SALVATION ARMY OF BROWARD",
+      "cluster_id": 1160,
+      "cluster_size": 27,
+      "support": 0.07,
+      "example_variants": [
+        "SALVATION ARMY NATIONAL CORPO",
+        "SALVATION ARMY - SAN JOSE",
+        "SALVATION ARMY NEW YORK CITY",
+        "SALVATION ARMY - SAN FRANCISCO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SAN FRANCISCO DEPARTMENT OF CHILDREN YOUTH AND THEIR FAMILIES",
+      "cluster_id": 367,
+      "cluster_size": 27,
+      "support": 0.04,
+      "example_variants": [
+        "SAN FRANCISCO DEPARTMENT OF CHILDREN YOUTH AND THEIR FAMILIES",
+        "SAN FRANCISCO RECREATION & PARKS",
+        "SAN FRANCISCO UNIFIED SCHOOL DISTRICT - STUDENT NUTRITION SERVICES",
+        "SAN FRANCISCO PARK ALLIANCE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE SALVATION ARMY WEST PALM BEACH CORPS",
+      "cluster_id": 902,
+      "cluster_size": 27,
+      "support": 0.04,
+      "example_variants": [
+        "THE SALVATION ARMY WEST PALM BEACH CORPS",
+        "THE SALVATION ARMY GREENVILLE COUNTY",
+        "THE SALVATION ARMY TERRITORIAL HEADQUARTERS",
+        "THE SALVATION ARMY WEST POLK COUNTY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "HABITAT FOR HUMANITY OF MINNESOTA INC",
+      "cluster_id": 3417,
+      "cluster_size": 27,
+      "support": 0.04,
+      "example_variants": [
+        "HABITAT FOR HUMANITY OF MINNESOTA INC",
+        "HABITAT FOR HUMANITY OMAHA",
+        "HABITAT FOR HUMANITY PENNYRILE",
+        "HABITAT FOR HUMANITY SAN FRANCISCO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TEACH FOR AMERICA LAS VEGAS",
+      "cluster_id": 2521,
+      "cluster_size": 26,
+      "support": 0.04,
+      "example_variants": [
+        "TEACH FOR AMERICA LAS VEGAS",
+        "TEACH FOR AMERICA LOS ANGELES",
+        "TEACH FOR AMERICA HOUSTON",
+        "TEACH FOR AMERICA - BAY AREA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "LOS ANGELES COUNTY DEPARTMENT OF ARTS AND CULTURE",
+      "cluster_id": 2261,
+      "cluster_size": 24,
+      "support": 0.08,
+      "example_variants": [
+        "LOS ANGELES CTY MUS OF NAT HIST",
+        "LOS ANGELES COUNTY - UNIVERSITY OF SOUTHERN CALIFO",
+        "LOS ANGELES COUNTY DEPARTMENT OF ARTS AND CULTURE",
+        "LOS ANGELES COUNTY DEVELOPMENT AUTHORITY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JOHNS HOPKINS UNIVERSITY & MEDICINE",
+      "cluster_id": 2113,
+      "cluster_size": 24,
+      "support": 0.04,
+      "example_variants": [
+        "JOHNS HOPKINS UNIVERSITY & MEDICINE",
+        "JOHNS HOPKINS U",
+        "JOHNS HOPKINS BLOOMBERG SCH OF PUB HLT",
+        "JOHNS HOPKINS UNIVERSITIY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CENTRO DE ESTUDIOS DE DERECHO JUSTICIA Y SOCIEDAD",
+      "cluster_id": 1397,
+      "cluster_size": 23,
+      "support": 0.09,
+      "example_variants": [
+        "CENTRO DE ESTUDIOS DE DERECHO JUSTICIA Y SOCIEDAD",
+        "CENTRO DE CULTURAS INDIGENAS DEL PERU",
+        "CENTRO DE ESTUDOS DAS RELACOES DO TRABALHO E DA DESIGUALDADE",
+        "CENTRO DE TRABAJADORES UNIDOS EN LA LUCHA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED WAY OF METRO CHICAGO INC",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "support": 0.04,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)",
+        "UNITED WAY OF ASHEVILLE AND BUNCOMBE COUNTY INCORPORATED"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY OF THE LAKESHORE UNITED WAY",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY OF ASHEVILLE",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY OF MASSACHUSETTS BAY",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY OF",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY - GREATER MILWAUKEE",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNITED WAY OF MIDDLE TENN",
+      "cluster_id": 1479,
+      "cluster_size": 23,
+      "lift": 99.0,
+      "example_variants": [
+        "UNITED WAY OF METRO CHICAGO INC",
+        "UNITED WAY OF MONONGALIA & PRESTON COUNTY",
+        "UNITED WAY OF THE GREATER LEHIGH VALLEY (UWGLV)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COLUMBIA UNIVERSITY DEPT OF OPTHALMOLOGY",
+      "cluster_id": 976,
+      "cluster_size": 22,
+      "support": 0.09,
+      "example_variants": [
+        "COLUMBIA UNIVERSITY MEDICAL COLLEGE",
+        "COLUMBIA UNIVERSITY GRADUATE SCHOOL",
+        "COLUMBIA UNIVERSITY SCHOOL OF GENERAL STUDIES",
+        "COLUMBIA UNIVERSITY OFFICE OF GLOBAL INITATIVES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITY FOUNDATION OF GREATER FLINT",
+      "cluster_id": 141,
+      "cluster_size": 22,
+      "support": 0.05,
+      "example_variants": [
+        "COMMUNITY FOUNDATION OF GREATER FLINT",
+        "COMMUNITY FOUNDATION GREATER BIRMINGHAM",
+        "COMMUNITY FOUNDATION OF GREATER NEW HAVEN",
+        "COMMUNITY FOUNDATION FOR GREATER ATLANTA FBO REDEFINED ATLANTA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PLANNED PARENTHOOD OF SNE",
+      "cluster_id": 4266,
+      "cluster_size": 22,
+      "support": 0.05,
+      "example_variants": [
+        "PLANNED PARENTHOOD OF SNE",
+        "PLANNED PARENTHOOD ROCKY MTNS INC",
+        "PLANNED PARENTHOOD FOUNDATION",
+        "PLANNED PARENTHOOD FED OF AMER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITY FDN OF GREATER MEMPHIS",
+      "cluster_id": 33,
+      "cluster_size": 21,
+      "support": 0.05,
+      "example_variants": [
+        "COMMUNITY FDN OF GREATER MEMPHIS",
+        "COMMUNITY FDN ALLIANCE INC",
+        "COMMUNITY FDN OF BLOOMINGTON&MONROE",
+        "COMMUNITY FDN OF HOWARD CO INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "WOMEN'S FUND OF OMAHA",
+      "cluster_id": 467,
+      "cluster_size": 21,
+      "support": 0.05,
+      "example_variants": [
+        "WOMEN'S FUND OF OMAHA",
+        "WOMEN'S INTERNATIONAL NETWORK FOR GUATEMALAN SOLUTIONS INC",
+        "WOMEN'S EMPOWERMENT THROUGH LITERACY & LEADERSHIP",
+        "WOMEN'S FUND ASIA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INSTITUTO DE LIDERAZGO SIMONE DE BEAUVOIR",
+      "cluster_id": 1541,
+      "cluster_size": 20,
+      "support": 0.1,
+      "example_variants": [
+        "INSTITUTO DE SALUD GLOBAL BARCELONA",
+        "INSTITUTO DE FORMACION FE Y VIDA",
+        "INSTITUTO DE PESQUISAS ECOLOGICAS",
+        "INSTITUTO DE LIDERAZGO SIMONE DE BEAUVOIR AC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "HARVARD UNIVERSITY PRESIDENT AND FELLOWS",
+      "cluster_id": 695,
+      "cluster_size": 20,
+      "support": 0.05,
+      "example_variants": [
+        "HARVARD UNIVERSITY PRESIDENT AND FELLOWS",
+        "HARVARD UNIVERSITY-SRO OUTSIDE",
+        "HARVARD UNIVERSITY (PRESIDENTS AND FELLOWS OF HARVARD COLLEGE)",
+        "HARVARD UNIVERSITY KENNEDY SCHOOL OF GOVERMENT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "STANFORD UNIVERSITY OFFICE OF DEVELOPMENT",
+      "cluster_id": 4262,
+      "cluster_size": 19,
+      "support": 0.11,
+      "example_variants": [
+        "STANFORD UNIVERSITY BOARD OF TRUSTEES OF THE LELA",
+        "STANFORD UNIVERSITY BOARD OF TRUSTEES OF THE LELAN",
+        "STANFORD UNIVERSITY - GSB",
+        "STANFORD UNIVERSITY DEVELOPMENT SERVCES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ROMAN CATHOLIC ARCHDIOCESE",
+      "cluster_id": 1220,
+      "cluster_size": 19,
+      "support": 0.05,
+      "example_variants": [
+        "ROMAN CATHOLIC ARCHDIOCESE",
+        "ROMAN CATHOLIC CHURCH OF DIOCESE OF PHOENIX",
+        "ROMAN CATHOLIC BISHOP",
+        "ROMAN CATHOLIC DIOCESE OF OGDENSBURG"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FIDELITY INVESTMENTS CHAR",
+      "cluster_id": 593,
+      "cluster_size": 18,
+      "support": 0.11,
+      "example_variants": [
+        "FIDELITY INVESTMENTS CHARITABLE GIFT FUND - THE WILLOW TREE FUND",
+        "FIDELITY INVESTMENTS CHAR",
+        "FIDELITY INVESTMENTS DONOR ADVISED FUNDS",
+        "FIDELITY INVESTMENTS CHARITABLE GIFT FUND - ECHO FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NEW JERSEY YMCA ST ALLIAN",
+      "cluster_id": 3219,
+      "cluster_size": 18,
+      "support": 0.11,
+      "example_variants": [
+        "NEW JERSEY FUTURE",
+        "NEW JERSEY ECONOMIC DEVELOPMENT AUTHORITY",
+        "NEW JERSEY ARTS AND CULTURE RENEWAL FUND",
+        "NEW JERSEY YMCA ST ALLIAN"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CATHOLIC CHARITIES OF FT WORTH INC",
+      "cluster_id": 2846,
+      "cluster_size": 18,
+      "support": 0.06,
+      "example_variants": [
+        "CATHOLIC CHARITIES OF FT WORTH INC",
+        "CATHOLIC CHARITIES - BALTIMORE",
+        "CATHOLIC CHARITIES - MAIME GEORGE COMMUNITY CENTER (SB)",
+        "CATHOLIC CHARITIES AND COMMUNITIES OF DENVER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BOY SCOUTS OF AMERICA FOUNDATION",
+      "cluster_id": 6278,
+      "cluster_size": 18,
+      "support": 0.06,
+      "example_variants": [
+        "BOY SCOUTS OF AMERICA FOUNDATION",
+        "BOY SCOUTS OF AMERICA - HEART OF AMERICA COUNCIL",
+        "BOY SCOUTS OF AMERICA ATLANTA AREA COUNCIL",
+        "BOY SCOUTS OF AMERICA-GREATER ST LOUIS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN ENDOWMENT FUND",
+      "cluster_id": 582,
+      "cluster_size": 17,
+      "support": 0.06,
+      "example_variants": [
+        "AMERICAN ENDOWMENT FUND",
+        "AMERICAN ENDOWMENT FOUNDATION FBO MT ONWARD CHARITABLE FUND",
+        "AMERICAN ENDOWMENT",
+        "AMERICAN ENDOWMENT FOUNDATION (APPLEWOOD DONOR ADVISED FUND)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "YALE UNIVERSITY TEMPLE WING",
+      "cluster_id": 1156,
+      "cluster_size": 17,
+      "support": 0.06,
+      "example_variants": [
+        "YALE UNIVERSITY TEMPLE WING",
+        "YALE UNIVERSITY - OFFICE OF SPONSORED PROJECTS",
+        "YALE UNIVERSITY SCHOOL OF MEDICINE -CTR EMOTIONAL INTELLIGENCE",
+        "YALE UNIVERSITY DEVELOPME"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN RED CROSS OF GREATER CLEVELAND",
+      "cluster_id": 6653,
+      "cluster_size": 17,
+      "support": 0.06,
+      "example_variants": [
+        "AMERICAN RED CROSS OF GREATER CLEVELAND",
+        "AMERICAN RED CROSS - MASSACHUSETTS",
+        "AMERICAN RED CROSS N CA COASTAL REGION",
+        "AMERICAN RED CROSS - KANSAS CAPITOL AREA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MORGAN STANLEY GIFT DAF",
+      "cluster_id": 478,
+      "cluster_size": 16,
+      "support": 0.12,
+      "example_variants": [
+        "MORGAN STANLEY DAF ACCOUNT",
+        "MORGAN STANLEY GIFT DAF",
+        "MORGAN STANLEY GLOBAL IMPACT FUNDING TRUST (GIFT)",
+        "MORGAN STANLEY DONOR ADVISED FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED STATES IAS MEMBERS' TRUST",
+      "cluster_id": 538,
+      "cluster_size": 16,
+      "support": 0.06,
+      "example_variants": [
+        "UNITED STATES IAS MEMBERS' TRUST",
+        "UNITED STATES IAS MEMBERS TRUST",
+        "UNITED STATES DEPARTMENT OF AGRICULTURE AGRICULTURAL RESEARCH SERVICE",
+        "UNITED STATES ARTIST"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GOLDMAN SACHS GIVES",
+      "cluster_id": 270,
+      "cluster_size": 15,
+      "support": 0.13,
+      "example_variants": [
+        "GOLDMAN SACHS PHILANTHROPHY FUND",
+        "GOLDMAN SACHS PHILANTHROPY FUND ALBANY NY",
+        "GOLDMAN SACHS GIVES",
+        "GOLDMAN SACHS PHILANTHROPY FUND - SILVERBERG DAF"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CHARLES SCHWAB",
+      "cluster_id": 321,
+      "cluster_size": 15,
+      "support": 0.13,
+      "example_variants": [
+        "CHARLES SCHWAB",
+        "CHARLES SCHWAB CHARITABLE FUND",
+        "CHARLES SCHWAB FBO LINDA W O'HARA",
+        "CHARLES SCHWAB DONOR ADVISED FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CO BANK OF AMERICA",
+      "cluster_id": 551,
+      "cluster_size": 15,
+      "support": 0.07,
+      "example_variants": [
+        "CO BANK OF AMERICA",
+        "BANK OF AMERICA CHARITABLE",
+        "BANK OF AMERICA CHARITABLE GIFT",
+        "BANK OF AMERICA CHARITABLE FUND - KYM'S ANGEL FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "LEGACY HERITAGE PROJECT ACCELERATE",
+      "cluster_id": 979,
+      "cluster_size": 15,
+      "support": 0.07,
+      "example_variants": [
+        "LEGACY HERITAGE PROJECT ACCELERATE",
+        "LEGACY HERITAGE PROGRAMMING IV LLC - LEGACY HERITAGE ONBOARD PROGRAM",
+        "LEGACY HERITAGE PROGRAMMING VIII LLC (LHP8)- PRESIDE",
+        "LEGACY HERITAGE BETTER TOGETHER PROGRAM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL PHILANTHROPIC TRUST (DONOR ADVISED TRUST)",
+      "cluster_id": 1178,
+      "cluster_size": 15,
+      "support": 0.07,
+      "example_variants": [
+        "NATIONAL PHILANTHROPIC TRUST (DONOR ADVISED TRUST)",
+        "NATIONAL PHILANTHROPIC TRUST - SIOCHAIN FOUNDATION (DONOR-ADVISED FUND)",
+        "NATIONAL PHILANTHROPIC TRUST - JP MORGAN CHARITABLE GIVING FUND",
+        "NATIONAL PHILANTHROPIC TRUST (UBS OPTIMUS)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "support": 0.07,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY",
+        "BOYS & GIRLS CLUB OF W SAN GABRIEL VALLEY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS AND GIRLS CLUBS",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS AND GIRLS CLUB",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS&GIRLS CLUB",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS & GIRLS CLUBS OF",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS & GIRLS CLUBS",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS & GIRLS CLUB",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "BOYS AND GIRLS RANCHES",
+      "cluster_id": 2447,
+      "cluster_size": 15,
+      "lift": 99.0,
+      "example_variants": [
+        "BOYS AND GIRLS CLUB OF LARIMER COUNTY",
+        "BOYS AND GIRLS RANCHES OF ALABAMA",
+        "BOYS & GIRLS CLUB OF DALLAS COUNTY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MAYO CLINIC DEPT OF DEVELOPMENT",
+      "cluster_id": 2525,
+      "cluster_size": 14,
+      "support": 0.14,
+      "example_variants": [
+        "MAYO CLINIC - FLORIDA",
+        "MAYO CLINIC ROSWITZERLANDSTER",
+        "MAYO CLINIC DEPT OF DEVELOPMENT",
+        "MAYO CLINIC (ROCHESTER)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FIRST BAPTIST CHURCH OF FREMONT",
+      "cluster_id": 130,
+      "cluster_size": 14,
+      "support": 0.07,
+      "example_variants": [
+        "FIRST BAPTIST CHURCH OF FREMONT",
+        "FIRST BAPTIST CHURCH OF EL RENO",
+        "FIRST BAPTIST CHURCH - PALMETTO",
+        "FIRST BAPTIST CHURCH DULUTH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TEXAS A&M UNIVERSITY KINGSVILLE FDN",
+      "cluster_id": 1820,
+      "cluster_size": 14,
+      "support": 0.07,
+      "example_variants": [
+        "TEXAS A&M UNIVERSITY KINGSVILLE FDN",
+        "TEXAS A&M U HLT SCI CTR",
+        "TEXAS A&M UNIVERSITY-KINGSVILLE FOUNDATION INC",
+        "TEXAS A&M-CORPUS CHRISTI FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SAN ANTONIO AFR AM CMTY ARCHIVE&MUS",
+      "cluster_id": 5197,
+      "cluster_size": 14,
+      "support": 0.07,
+      "example_variants": [
+        "SAN ANTONIO AFR AM CMTY ARCHIVE&MUS",
+        "SAN ANTONIO FIRE (SAFD)",
+        "SAN ANTONIO MUSEUM OF ART",
+        "SAN ANTONIO BOTANICAL GARDEN"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ST JOHN'S BREAD & LIFE PROGRAM",
+      "cluster_id": 8962,
+      "cluster_size": 14,
+      "support": 0.07,
+      "example_variants": [
+        "ST JOHN'S BREAD & LIFE PROGRAM",
+        "ST JOHN'S PREPATORY SCHOOL",
+        "ST JOHN'S HEALTH CARE FOUNDATION",
+        "ST JOHN'S MEDICAL CENTER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL INSTITUTE OF INFORMATION TECHNOLOGY BANGALORE",
+      "cluster_id": 567,
+      "cluster_size": 13,
+      "support": 0.15,
+      "example_variants": [
+        "INTERNATIONAL INSTITUTE OF INFORMATION TECHNOLOGY BANGALORE",
+        "INTERNATIONAL INSTITUTE FOR SUSTAINABLE DEVELOPMENT",
+        "INTERNATIONAL INSTITUTE FOR ENVIRONMENT AND DEVELOPMENT",
+        "INTERNATIONAL INSTITUTE FOR SUSTAINABLE DEVELOPMENT (IISD)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CALIFORNIA U OF SAN FRANCISCO",
+      "cluster_id": 2256,
+      "cluster_size": 13,
+      "support": 0.15,
+      "example_variants": [
+        "CALIFORNIA U OF SAN FRANCISCO",
+        "CALIFORNIA U OF SAN FRANCISCO CTR FOR HL",
+        "CALIFORNIA U OF BERKELEY",
+        "CALIFORNIA U OF SAN FRANCISCO OFF OF SPO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "REGENTS OF THE UNIVERSITY OF NEBRASKA OMAHA",
+      "cluster_id": 390,
+      "cluster_size": 13,
+      "support": 0.08,
+      "example_variants": [
+        "REGENTS OF THE UNIVERSITY OF NEBRASKA OMAHA",
+        "REGENTS OF THE UNIVERSITY OF NEBRASKA LINCOLN",
+        "REGENTS OF THE UNIVERSITY OF SAN FRANCISCO",
+        "REGENTS OF THE UNIVERSITY OF NEBRASKA KEARNEY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL INSTITUTE OF MENTAL HEALTH GIFT FUND",
+      "cluster_id": 1826,
+      "cluster_size": 13,
+      "support": 0.08,
+      "example_variants": [
+        "NATIONAL INSTITUTE OF MENTAL HEALTH GIFT FUND",
+        "NATIONAL INSTITUTE FOR MEDICAL RESEARCH",
+        "NATIONAL INSTITUTE FOR EXCELLENCE IN TEACHING",
+        "NATIONAL INSTITUTE OF URBAN AFFAIRS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITIES IN SCHOOLS - CENTRAL TEXAS",
+      "cluster_id": 2344,
+      "cluster_size": 13,
+      "support": 0.08,
+      "example_variants": [
+        "COMMUNITIES IN SCHOOLS - CENTRAL TEXAS",
+        "COMMUNITIES IN SCHOOLS NEVADA",
+        "COMMUNITIES IN SCHOOLS OF GEORGIA",
+        "COMMUNITIES IN SCHOOLS OF JACKSONVILLE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "RONALD MCDONALD HOUSE NY",
+      "cluster_id": 3510,
+      "cluster_size": 13,
+      "support": 0.08,
+      "example_variants": [
+        "RONALD MCDONALD HOUSE NY",
+        "RONALD MCDONALD HOUSE GHV",
+        "RONALD MCDONALD HOUSE CNJ",
+        "RONALD MCDONALD HOUSE CHARITIES OF NORTHEASTERN OHIO INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JEWISH FAMILY SERVICE OF GREATER DALLAS INC",
+      "cluster_id": 408,
+      "cluster_size": 12,
+      "support": 0.17,
+      "example_variants": [
+        "JEWISH FAMILY & CHILDREN SERVICES",
+        "JEWISH FAMILY SERVICE ASSOCIATION OF CLEVELAND OHI",
+        "JEWISH FAMILY SERVICE SEATTLE",
+        "JEWISH FAMILY & CHILDREN'S SERVICES OF PITTSBURGH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN JEWISH JOIN DIST COMMITTEE",
+      "cluster_id": 4019,
+      "cluster_size": 12,
+      "support": 0.17,
+      "example_variants": [
+        "THE AMERICAN JEWISH COMMITTEE",
+        "AMERICAN JEWISH JOINT DIST-LEADERSHIP",
+        "AMERICAN JEWISH JOINT DISTRIBUTIONCOMMITTEE INC",
+        "THE AMERICAN JEWISH JOINT DISTRIBUTION COMMITTEE INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DONOR ADVISED FUND",
+      "cluster_id": 32,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "DONOR ADVISED FUND",
+        "DONOR ADVISED FUND AT THE COMMUNITY",
+        "DONOR-ADVISED FUND AT FIDUCIARY CHARITABLE FOUNDATION DBA FIDUCIARY TRUST",
+        "DONOR-ADVISED FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BOARD OF TRUSTEES OF THE LELAND STANFORD JUNIOR UNIVERSITY THE",
+      "cluster_id": 53,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "BOARD OF TRUSTEES OF THE LELAND STANFORD JUNIOR UNIVERSITY THE",
+        "THE BOARD OF TRUSTEES - LELAND STANFORD JR UNIV",
+        "BOARD OF TRUSTEES OF THE UNIVERSITY OF ILLINOIS THE",
+        "THE BOARD OF TRUSTEES OF THE LELAND STANFORD JUNIOR UNIVERSITY (STANFORD)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MINISTRY OF HEALTH BURKINA FASO",
+      "cluster_id": 162,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "MINISTRY OF HEALTH BURKINA FASO",
+        "MINISTRY OF HEALTH AND SOCIAL ACTION SENEGAL",
+        "MINISTRY OF HEALTH RWANDA",
+        "MINISTRY OF HEALTH REPUBLIC OF RWANDA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL COUNCIL OF YMCA OF THE USA",
+      "cluster_id": 179,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "NATIONAL COUNCIL OF YMCA OF THE USA",
+        "NATIONAL COUNCIL ON PROBLEM GAMBLING",
+        "NATIONAL COUNCIL FOR WORKFORCE EDUCATION",
+        "NATIONAL COUNCIL OF APPLIED ECONOMIC RESEARCH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL PLANNED PARENTHOOD FEDERATION EUROPEAN NETWORK",
+      "cluster_id": 966,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "INTERNATIONAL PLANNED PARENTHOOD FEDERATION EUROPEAN NETWORK",
+        "INTERNATIONAL PLANNED PARENTHOOD FEDERATION WESTERN HEMISPHERE REGION (DBA",
+        "INTERNATIONAL PLANNED PARENTHOOD FEDERATION WORLWIDE",
+        "INTERNATIONAL PLANNED PARENTHOOD FEDERATION-WORLDWIDE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE NEW VENTURE FUND",
+      "cluster_id": 1542,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "THE NEW VENTURE FUND",
+        "NEW VENTURE FUND FBO MEDIA DEMOCRACY FUND",
+        "NEW VENTURE FUND",
+        "NEW VENTURE FUND-COMMUNITIES FOR JUST SCHOOLS FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SAN DIEGO STATE UNIVERSITY FDTN (KPBS)",
+      "cluster_id": 1830,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "SAN DIEGO STATE UNIVERSITY FDTN (KPBS)",
+        "SAN DIEGO CATHOLIC ACCOUNT FOR PARISHES AND SCHOOLS",
+        "SAN DIEGO FOUNDATION THE",
+        "SAN DIEGO BOTANICAL GARDENS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CHILDRENS HOSPITAL OF WISCONSIN FOUNDATION",
+      "cluster_id": 2979,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "CHILDRENS HOSPITAL OF WISCONSIN FOUNDATION",
+        "CHILDRENS HOSPITAL OF PGH FDN",
+        "CHILDRENS HOSPITAL CORP DBA BOSTON CHILDRENS HOSPI",
+        "CHILDRENS HOSPITAL FDN INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FUNDACION PARA LA SOSTENIBILIDAD Y LA EQUIDAD (ALI",
+      "cluster_id": 3959,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "FUNDACION PARA LA SOSTENIBILIDAD Y LA EQUIDAD (ALI",
+        "FUNDACION PARA EL IMPLUSO DE LA EDUCACION Y CULTURA REIMAGINA",
+        "FUNDACION PARA LA CONSERVACION Y EL DESARROLLO SOSTENIBLE",
+        "FUNDACION PARA EL DESARROLLO DEL SISTEMA NACIONAL DE AREAS PROTEGIDAS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "KAVLI INSTITUTE FOR NANOSCIENCE AT DELFT UNIVERSITY OF TECHNOLOGY",
+      "cluster_id": 5295,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "KAVLI INSTITUTE FOR NANOSCIENCE AT DELFT UNIVERSITY OF TECHNOLOGY",
+        "KAVLI INSTITUTE FOR NANOSCALE DISCOVERY AT OXFORD (KAVLI INSD)",
+        "KAVLI INSTITUTE FOR BRAIN AND MIND AT UCSD",
+        "KAVLI INSTITUTE FOR PARTICLE ASTROPHYSICS AND COSMOLOGY AT STANFORD UNIVERS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CLEVELAND CLINIC - PLEDGE 7M",
+      "cluster_id": 6208,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "CLEVELAND CLINIC - PLEDGE 7M",
+        "CLEVELAND CLINIC - EMERGENCY ROOM",
+        "CLEVELAND CLINIC - HILLCREST CANCER CENTER",
+        "CLEVELAND CLINIC - GENOMIC MEDICINE INSTITUTE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL CENTER ON INSTITUTIONS",
+      "cluster_id": 6280,
+      "cluster_size": 12,
+      "support": 0.08,
+      "example_variants": [
+        "NATIONAL CENTER ON INSTITUTIONS",
+        "NATIONAL CENTER FOR VICTIMS OF CRIME INC NATIONAL COMPASSION FUND LLC",
+        "NATIONAL CENTER FOR MISSING AND",
+        "NATIONAL CENTER FOR CIVIL AND HUMAN RIGHTS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PRESIDENT & FELLOWS OF HARVARD COLLEGE RSO ACCOUN",
+      "cluster_id": 34,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "PRESIDENT & FELLOWS OF HARVARD COLLEGE RSO ACCOUN",
+        "PRESIDENT & FELLOWS OF HARVARD UNIVERSITY",
+        "PRESIDENT AND FELLOWS OF HARVARD COLLEGE FOR PUBLIC SERVICE IMPACT FUND",
+        "PRESIDENT AND FELLOWS OF HARVARD COLLEGE (HARVARD UNIVERSITY)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CORNELL UNIVERSITY (WEILL CORNELL MEDICINE)",
+      "cluster_id": 233,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "CORNELL UNIVERSITY (WEILL CORNELL MEDICINE)",
+        "CORNELL UNIVERSITY (WEILL CORNELL SCHOOL OF MEDICINE)",
+        "CORNELL UNIVERSITY THE LABORATORY OF ORNITHOLOGY",
+        "CORNELL UNIVERSITY-ARTS & SCIENCES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JEWISH COMMUNAL FUND #4681",
+      "cluster_id": 445,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "JEWISH COMMUNAL FUND #4681",
+        "JEWISH COMMUNAL FUND DAF",
+        "JEWISH COMMUNAL FUND - ACCT XXX-XX-XXXX",
+        "THE JEWISH COMMUNAL FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITY FDN OF ST JOSEPH COUNTY",
+      "cluster_id": 711,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "COMMUNITY FDN OF ST JOSEPH COUNTY",
+        "COMMUNITY FDN OF ELKHART COUNTY",
+        "COMMUNITY FDN OF JACKSON COUNTY",
+        "COMMUNITY FDN OF HOWARD COUNTY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "KANSAS CITY KS COMMUNITY COLLEGE",
+      "cluster_id": 761,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "KANSAS CITY KS COMMUNITY COLLEGE",
+        "KANSAS CITY UNIVERSITY OF MEDICINE & BIOSCIENCES",
+        "KANSAS CITY MUSEUM",
+        "KANSAS CITY REPERTORY THEATRE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "YOUNG MEN'S CHRISTIAN ASSOCIATION OF FLINT",
+      "cluster_id": 927,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "YOUNG MEN'S CHRISTIAN ASSOCIATION OF FLINT",
+        "YOUNG MEN AND YOUNG WOMENS HEBREW ASSOCIATION",
+        "YOUNG MEN'S & YOUNG WOMEN'S HEBREW ASSOC",
+        "THE YOUNG MEN'S CHRISTIAN ASSOC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FORT WORTH MUSEUM OF SCIENCE",
+      "cluster_id": 1968,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "FORT WORTH MUSEUM OF SCIENCE",
+        "FORT WORTH MUESUM OF",
+        "FORT WORTH ISD (FWISD)",
+        "FORT WORTH ZOOLOGICAL ASSOCIATION INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BAPTIST HEALTH RICHMOND",
+      "cluster_id": 2086,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "BAPTIST HEALTH RICHMOND",
+        "BAPTIST HEALTH PADUCAH FOUNDATION",
+        "BAPTIST HEALTH FOUNDATION - WOLFSON CHILDREN'S HOSPITAL - BURN & WOUND CARE",
+        "BAPTIST HEALTH FOUNDATIO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BIG BROTHERS BIG SISTERS FDN",
+      "cluster_id": 2561,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "BIG BROTHERS BIG SISTERS FDN",
+        "BIG BROTHERS BIG SISTERS OF BROWARD INC",
+        "BIG BROTHERS BIG SISTERS OF OC",
+        "BIG BROTHERS BIG SISTERS OF NE INDIANA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "YOUNG MENS CHRISTIAN ASSOCIATION OF GREATER ST PETERSBURG",
+      "cluster_id": 3704,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "YOUNG MENS CHRISTIAN ASSOCIATION OF GREATER ST PETERSBURG",
+        "YOUNG MENS CHRISTIAN ASSOCIATION OF GREATER PITTSBURGH",
+        "YOUNG MENS CHRISTIAN ASSOCIATION OF MIDLAND TEXAS",
+        "YOUNG MENS CHRISTIAN ASSOC OF BIG SPRING TX"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JUNIOR ACHIEVEMENT - ROCKY MOUNTAIN INCORPORATED",
+      "cluster_id": 4611,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "JUNIOR ACHIEVEMENT - ROCKY MOUNTAIN INCORPORATED",
+        "JUNIOR ACHIEVEMENT INDIA SERVICES",
+        "JUNIOR ACHIEVEMENT OF THE PALM BEACHES",
+        "JUNIOR ACHIEVEMENT OF GEORGIA CLAYTON CO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NEW MEXICO U OF HLT SCIS CTR SCH OF MED",
+      "cluster_id": 6391,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "NEW MEXICO U OF HLT SCIS CTR SCH OF MED",
+        "NEW MEXICO FARMERS MARKETING ASSOCIATION",
+        "NEW MEXICO PHILHARMONIC FOUNDATION",
+        "NEW MEXICO U OF"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FIRST PRESBYTERIAN CHURCH OF MCKINNEY",
+      "cluster_id": 7488,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "FIRST PRESBYTERIAN CHURCH OF MCKINNEY",
+        "FIRST PRESBYTERIAN CHURCH PGH",
+        "FIRST PRESBYTERIAN CHURCH-JAMAICA",
+        "FIRST PRESBYTERIAN CHURCH ORLANDO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "EPISCOPAL DIOCESE OF SPOKANE INC",
+      "cluster_id": 8031,
+      "cluster_size": 11,
+      "support": 0.09,
+      "example_variants": [
+        "EPISCOPAL DIOCESE OF SPOKANE INC",
+        "EPISCOPAL DIOCESE OF ALBANY",
+        "EPISCOPAL CORP OF DIOCESE OF IOWA",
+        "EPISCOPAL DIOCESE OF SW VIRGINIA"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "COMMUNITY FDN",
+      "cluster_id": 711,
+      "cluster_size": 11,
+      "lift": 99.0,
+      "example_variants": [
+        "COMMUNITY FDN OF ST JOSEPH COUNTY",
+        "COMMUNITY FDN OF ELKHART COUNTY",
+        "COMMUNITY FDN OF JACKSON COUNTY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "LIVING CITIES",
+      "cluster_id": 3001,
+      "cluster_size": 10,
+      "support": 0.2,
+      "example_variants": [
+        "LIVING CITIES",
+        "LIVING CITIES INC NATIONAL COMMUNITY DEVELOPMENT INITIATIVE",
+        "LIVING CITIES INC THE NATIONAL COMMUNITY DEVELOPMENT INITIATIVE",
+        "LIVING CITIES BLENDED CATALYST FUND LLC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL FUND FOR CHRISTIAN SCIENCE NURSING",
+      "cluster_id": 85,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "NATIONAL FUND FOR CHRISTIAN SCIENCE NURSING",
+        "NATIONAL CHRISTIAN FOUNDATION DAF",
+        "NATIONAL CHRISTIAN FDN INDIANA",
+        "NATIONAL CHRISTIAN CHARITABLE FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INDIAN INSTITUTE OF SCIENCE",
+      "cluster_id": 1809,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "INDIAN INSTITUTE OF SCIENCE",
+        "INDIAN INSTITUTE OF TECHNOLOGY MADRAS",
+        "INDIAN INSTITUTE FOR HUMAN SETTLEMENTS",
+        "INDIAN INSTITUTE OF TECHNOLOGY BOMBAY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MS GIFT PM BARTON FAMILY FUND",
+      "cluster_id": 2163,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "MS GIFT PM BARTON FAMILY FUND",
+        "MS GIFT PM BARTON FAM FUND",
+        "MS GIFT DONOR ADVISED FUND",
+        "MS GIFT - RICHARD H DRIEHAUS LEGACY FUND - DAF"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL CENTER FOR LIVING AQUATIC RESOURCES MANAGEMENT INC",
+      "cluster_id": 2251,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "INTERNATIONAL CENTER FOR LIVING AQUATIC RESOURCES MANAGEMENT INC",
+        "INTERNATIONAL CENTER INC",
+        "INTERNATIONAL CENTER FOR NOT-FOR-PROFIT LAW INC",
+        "INTERNATIONAL CENTER FOR NOT FOR PROFIT LAW INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ST VINCENT DE PAUL DIOCESE PHOENIX",
+      "cluster_id": 2332,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "ST VINCENT DE PAUL DIOCESE PHOENIX",
+        "ST VINCENT DE PAUL VILLAGE INC DBA FATHER JOE'S VILLAGES",
+        "ST VINCENT DE PAUL RGNL SEMINARY",
+        "ST VINCENT DE PAUL OF SAN MATEO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL MUSEUM OF JEWISH HISTORY",
+      "cluster_id": 4782,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "NATIONAL MUSEUM OF JEWISH HISTORY",
+        "NATIONAL MUSEUM AFRICAN AMER MUSIC",
+        "NATIONAL MUSEUM AMER JEWISH HISTORY",
+        "NATIONAL MUSEUM OF THE AMERICAN INDIAN"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED METHODIST CHURCH-LOS ALTOS",
+      "cluster_id": 5456,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "UNITED METHODIST CHURCH-LOS ALTOS",
+        "UNITED METHODIST CHURCH PUBL HOUSE",
+        "UNITED METHODIST CAMP RETREAT MINISTRY",
+        "UNITED METHODIST YOUTHVILLE INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ST MARY'S DOMINICAN SCHOOL",
+      "cluster_id": 6955,
+      "cluster_size": 10,
+      "support": 0.1,
+      "example_variants": [
+        "ST MARY'S DOMINICAN SCHOOL",
+        "ST MARY'S HEALTH SYSTEM",
+        "ST MARY'S HALL",
+        "ST MARY'S DINING ROOM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "LONDON SCHOOL OF HYGIENE AND TROPICAL MEDICINE",
+      "cluster_id": 72,
+      "cluster_size": 9,
+      "support": 0.22,
+      "example_variants": [
+        "LONDON SCHOOL OF HYGIENE AND TROPICAL MEDICINE",
+        "LONDON SCHOOL OF ECONOMICS AND POLITICAL SCIENCE",
+        "THE LONDON SCHOOL OF ECONOMICS AND POLITICAL SCIENCE",
+        "LONDON SCHOOL OF ECONOMICS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL CENTRE OF INSECT PHYSIOLOGY AND ECOLOGY",
+      "cluster_id": 225,
+      "cluster_size": 9,
+      "support": 0.22,
+      "example_variants": [
+        "INTERNATIONAL CENTRE FOR DIARRHOEAL DISEASE RESEARCH BANGLADESH",
+        "INTERNATIONAL CENTRE OF INSECT PHYSIOLOGY AND ECOLOGY",
+        "INTERNATIONAL CENTRE FOR RESEARCH IN AGROFORESTRY",
+        "INTERNATIONAL CENTRE FOR GENETIC ENGINEERING AND BIOTECHNOLOGY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "VARIOUS CHARITABLE ORGANIZATIONS",
+      "cluster_id": 411,
+      "cluster_size": 9,
+      "support": 0.22,
+      "example_variants": [
+        "VARIOUS CHARITABLE ORGANIZATIONS",
+        "VARIOUS CHARITABLE ACTIVITIES",
+        "VARIOUS CHARITABLE ORGS",
+        "VARIOUS - CHARITABLE SPONSORSHIPS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CEDARS SINAI HOSPITAL",
+      "cluster_id": 514,
+      "cluster_size": 9,
+      "support": 0.22,
+      "example_variants": [
+        "CEDARS-SINAI MEDICAL CENTER",
+        "CEDARS SINAI HOSPITAL",
+        "CEDARS-SINAI MEDICAL CENTER BOARD",
+        "CEDARS SINAI MED CTR"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "EMORY UNIVERSITY RSPH",
+      "cluster_id": 175,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "EMORY UNIVERSITY RSPH",
+        "EMORY UNIVERSITY- GIN",
+        "EMORY UNIVERSITY - GOIZUETA BUSINESS SCHO",
+        "EMORY UNIVERSITY (FOUNDATION)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INDIANA UNIVERSITY HEALTH FDN",
+      "cluster_id": 1422,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "INDIANA UNIVERSITY HEALTH FDN",
+        "INDIANA UNIVERSITY HEALTH FOUNDATION",
+        "INDIANA UNIVERSITY (AMPATH PROJECT)",
+        "INDIANA UNIVERSITY - AMPATH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FEDERATION OF JEWISH COMMUNITIES (FJC) OF THE CIS",
+      "cluster_id": 1649,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "FEDERATION OF JEWISH COMMUNITIES (FJC) OF THE CIS",
+        "FEDERATION OF JEWISH COMMINITIES",
+        "FEDERATION OF JEWISH COMMUNIT",
+        "FEDERATION OF JEWISH COMMUNITIES OF THE CIS INC KHARKOV JEWISH COMMUNITY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CHURCH OF JESUS CHRIST OF LDS PHILANTHROPIES",
+      "cluster_id": 2066,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "CHURCH OF JESUS CHRIST OF LDS PHILANTHROPIES",
+        "CHURCH OF JESUS CHRIST LATTER DAY",
+        "CHURCH OF JESUS CHRIST LDS",
+        "THE CHURCH OF JESUS CHRIST OF LATER DAY SAINTS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TEXAS TECH UNIVERSITY - COLLEGE OF VISUAL AND PERFORMING ARTS",
+      "cluster_id": 2360,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "TEXAS TECH UNIVERSITY - COLLEGE OF VISUAL AND PERFORMING ARTS",
+        "TEXAS TECH UNIVERSITY FOUNDATION",
+        "TEXAS TECH UNIVERSITY - COLLEGE OF EDUCATION",
+        "TEXAS TECH UNIVERSITY HEALTH SCIENCES CENTER LUBBOCK"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UTAH STATE UNIVJMH BUS SCH",
+      "cluster_id": 2468,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "UTAH STATE UNIVJMH BUS SCH",
+        "UTAH STATE UNIVERSITY - JMH BUS SCHOOL",
+        "UTAH STATE UNIVERSITY - LWA INSTITUTE",
+        "UTAH STATE UNIVERSITY - QUINNEY COLLEGE OF NATURAL RESOURCES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITIES FOUNDATION OF TEXAS (CEDAR HILL AND DESOTO ISD STEM)",
+      "cluster_id": 2510,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "COMMUNITIES FOUNDATION OF TEXAS (CEDAR HILL AND DESOTO ISD STEM)",
+        "COMMUNITIES FOUNDATION OF TEXAS FOR EDUCATE TEXAS",
+        "COMMUNITIES FOUNDATION OF TEXAS (RICHARDSON ISD)",
+        "COMMUNITIES FOUNDATION OF TEXAS-EDUCATE TEXAS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GOODWILL INDUSTRIES INTERNATIONAL I",
+      "cluster_id": 3410,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "GOODWILL INDUSTRIES INTERNATIONAL I",
+        "GOODWILL INDUSTRIES OF CENTRAL MICHIGANS HEARTLAND INC",
+        "GOODWILL INDUSTRIES OF HAWAII",
+        "GOODWILL INDUSTRIES INTERNATIONAL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ALZHEIMER'S DISEASE AND RELATED DISORDER ASSOCIATION INC",
+      "cluster_id": 3991,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "ALZHEIMER'S DISEASE AND RELATED DISORDER ASSOCIATION INC",
+        "ALZHEIMER'S DISEASE AND RELATED DISORDERS ASSOC INC",
+        "ALZHEIMER'S & RELATED DISORDERS",
+        "ALZHEIMER'S ASSOCIATION OF FLORIDA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MENTAL HEALTH INNOVATIONS",
+      "cluster_id": 4184,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "MENTAL HEALTH INNOVATIONS",
+        "MENTAL HEALTH ASSOC FOR CHIN",
+        "MENTAL HEALTH CTR OF EAST CENTRAL KANSAS",
+        "MENTAL HEALTH OF GREATER HOUSTON"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GEORGETOWN UNIVERSITY GIVING",
+      "cluster_id": 5905,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "GEORGETOWN UNIVERSITY GIVING",
+        "GEORGETOWN UNIVERSITY OFFICE OF RESEARCH SERVICES",
+        "GEORGETOWN UNIVERSITY-REGENTS STEM SCHOLARS PROGRAM",
+        "GEORGETOWN UNIVERSITY SCHOLARSHIP FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CRISTO REY - ORLANDO HIGH SCHOOL",
+      "cluster_id": 9217,
+      "cluster_size": 9,
+      "support": 0.11,
+      "example_variants": [
+        "CRISTO REY - ORLANDO HIGH SCHOOL",
+        "CRISTO REY JESUIT SCHOOL",
+        "CRISTO REY NEW YORK",
+        "CRISTO REY JESUIT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UC DAVIS (REGENTS)",
+      "cluster_id": 580,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "UC DAVIS (REGENTS)",
+        "UC DAVIS SCHOOL OF VET MEDICINE",
+        "UC DAVIS REGENTS",
+        "UC DAVIS SCHOOL OF VETERINARY MEDICINE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CHANCELLOR MASTERS AND SCHOLARS OF THE UNIVERSIT",
+      "cluster_id": 779,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "CHANCELLOR MASTERS AND SCHOLARS OF THE UNIVERSITY OF OXFORD",
+        "THE CHANCELLOR MASTERS AND SCHOLARS OF THE UNIVERSITY OF CAMBRIDGE",
+        "CHANCELLOR MASTERS AND SCHOLARS OF THE UNIVERSIT",
+        "CHANCELLOR MASTERS & SCHOLARS OF THE UNIVERSITY OF OXFORD"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AFRICAN INSTITUTE FOR MATHEMATICAL SCIENCES - NEXT EINSTEIN INITIATIVE FOUN",
+      "cluster_id": 1102,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "AFRICAN INSTITUTE FOR DEVELOPMENT POLICY",
+        "AFRICAN INSTITUTE FOR DEVELOPMENT POLICY RESEARCH",
+        "AFRICAN INSTITUTE FOR MATHEMATICAL SCIENCES",
+        "AFRICAN INSTITUTE FOR MATHEMATICAL SCIENCES - NEXT EINSTEIN INITIATIVE (RW"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CALIFORNIA INSTITUTE FOR REGENERATIVE MEDICINE",
+      "cluster_id": 1289,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "CALIFORNIA INSTITUTE OF ADVANCED MANAGEMENT",
+        "CALIFORNIA INSTITUTE OF TECHNO",
+        "CALIFORNIA INSTITUTE OF ARTS",
+        "CALIFORNIA INSTITUTE OF TECHNOLOGY (TAX ID # 95-1643307)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE AFRICAN WOMEN'S DEVELOPMENT FUND",
+      "cluster_id": 2092,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "AFRICAN WOMEN'S DEVELOPMENT FUND",
+        "THE AFRICAN WOMEN'S DEVELOPMENT FUND",
+        "AFRICAN WOMEN FISHING PROCESSORS AND TRADERS NETWORK ASSOCIATION",
+        "AFRICAN WOMEN'S DEVELOPMENT &COMMUNICATION NETWORK"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "URGENT ACTION FUND AFRICA",
+      "cluster_id": 2826,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "URGENT ACTION FUND AFRICA",
+        "URGENT ACTION FUND - AFRICA",
+        "URGENT ACTION FUND ASIA & PACIFIC",
+        "URGENT ACTION FUND-AFRICA (UAF-AFRICA)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ORANGE COUNTY ASIAN AND PACIFIC ISLANDER COMMUNITY ALLIANCE",
+      "cluster_id": 5188,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "ORANGE COUNTY TEACHERS OF THE YEAR",
+        "ORANGE COUNTY COMMUNITY FOUNDATION FUND MUFD",
+        "ORANGE COUNTY BAR FOUNDATION",
+        "ORANGE COUNTY ASIAN AND PACIFIC ISLANDER COMMUNITY ALLIANCE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "WASHINGTON STATE HEALTH CARE AUTHORITY",
+      "cluster_id": 5323,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "WASHINGTON STATE",
+        "WASHINGTON STATE OFFICE OF THE GOVERNOR",
+        "WASHINGTON STATE DEPARTMENT OF SOCIAL AND HEALTH SERVICES",
+        "WASHINGTON STATE OPPORTUNITY SCHOLARSHIP (WSOS)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ASIAN AMERICAN PACIFIC ISLANDERS IN PHILANTHROPY",
+      "cluster_id": 6935,
+      "cluster_size": 8,
+      "support": 0.25,
+      "example_variants": [
+        "ASIAN AMERICAN EQUITY OPPORTUNITY FUND",
+        "ASIAN AMERICAN POWER NETWORK EDUCATION FUNDCENTER FOR EMPOWERED POLITICS",
+        "ASIAN AMERICAN PACIFIC ISLANDERS IN PHILANTHROPY",
+        "ASIAN AMERICAN WRITERS' WORKSHOP"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TRUSTEES OF COLUMBIA UNIVERSITY IN THE CITY OF NEW YORK THE",
+      "cluster_id": 81,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "TRUSTEES OF COLUMBIA UNIVERSITY IN THE CITY OF NEW YORK THE",
+        "TRUSTEES OF COLUMBIA UNIVERSITY IN THE CITY OF NEW YORK - COLUMBIA LAW SCHO",
+        "TRUSTEES OF COLUMBIA UNIVERSITY IN NYC",
+        "TRUSTEES OF COLUMBIA UNVERSITY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "OPEN DOORS SUB SAHARAN AFRICA",
+      "cluster_id": 103,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "OPEN DOORS SUB SAHARAN AFRICA",
+        "OPEN DOORS MIDDLE EAST",
+        "OPEN DOORS LATIN AMERICA",
+        "OPEN DOORS SOUTHEAST ASIA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BROWN UNIVERSITY - DIVISION OF ADVANCEMENT",
+      "cluster_id": 361,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "BROWN UNIVERSITY - DIVISION OF ADVANCEMENT",
+        "BROWN UNIVERSITY DONOR ADVISED FUND",
+        "BROWN UNIVERSITY PERFORMING ARTS BUILDING",
+        "BROWN UNIVERSITY OF PROVIDENCE CONTROLLERS OFFICE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NORTHWESTERN UNIVERSITY-KELLOGG",
+      "cluster_id": 379,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "NORTHWESTERN UNIVERSITY-KELLOGG",
+        "NORTHWESTERN UNIVERSITY FOR FEINBERG SCHOOL OF MEDICINE OFFICE DEVELOPMENT",
+        "NORTHWESTERN UNIVERSITY-KELLOGG SCHOOL OF MANAGEMENT",
+        "NORTHWESTERN UNIVERSITY - DEERING LIBRARY FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN ONLINE GIVING FOUNDATION (AOGF)",
+      "cluster_id": 394,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "AMERICAN ONLINE GIVING FOUNDATION (AOGF)",
+        "AMERICAN ONLINE GIVING FOUNDATION (BENEVITY)",
+        "AMERICAN ONLINE GIVING FOUNDATION INC DBA BENEVITY COMMUNITY IMPACT FUND",
+        "AMERICAN ONLINE GIVING FOUNDATION INC (AOGF)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SCHOOL DISTRICT OF THE CITY OF FLINT",
+      "cluster_id": 628,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "SCHOOL DISTRICT OF THE CITY OF FLINT",
+        "SCHOOL DISTRICT OF WISCONSIN DELLS",
+        "SCHOOL DISTRICT NO 1J MULTNOMAH COUNTY OREGON",
+        "SCHOOL DISTRICT #67"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INSTITUT DE FORMULATION DES VACCINS (CH) SA",
+      "cluster_id": 679,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "INSTITUT DE FORMULATION DES VACCINS (CH) SA",
+        "INSTITUT DE RECHERCHE EN SCIENCES DE LA SANTE",
+        "INSTITUT DE CARDIOLOGIE DE MONTREAL",
+        "INSTITUT DE CIENCIES FOTONIQUES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "YOUNG LIFE - WFR",
+      "cluster_id": 856,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "YOUNG LIFE - WFR",
+        "YOUNG LIFE COLORADO",
+        "YOUNG LIFE CAPERNAUM PROJECT",
+        "YOUNG LIFE - NATIONAL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PROTESTANT EPISCOPAL CATHEDRAL FDN",
+      "cluster_id": 1017,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "PROTESTANT EPISCOPAL CATHEDRAL FDN",
+        "PROTESTANT EPISCOPAL THEO SEMINARY",
+        "PROTESTANT EPISCOPAL CHURCH DIOCESE",
+        "PROTESTANT EPISCOPAL CATHEDRAL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITY DEVELOPMENT CORP OF BENTONVILLE BELLA VISTA",
+      "cluster_id": 1917,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "COMMUNITY DEVELOPMENT CORP OF BENTONVILLE BELLA VISTA",
+        "COMMUNITY DEVELOPMENT BLOCK GRANT",
+        "COMMUNITY DEVELOPMENT FINANCE ASSOCIATION",
+        "COMMUNITY DEVELOPMENT ADVOCATES DETROIT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UT SOUTHWESTERN CENTER FOR BRAIN HEALTH",
+      "cluster_id": 2003,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "UT SOUTHWESTERN CENTER FOR BRAIN HEALTH",
+        "UT SOUTHWESTERN",
+        "UT SOUTHWESTERN - RED BIRD PROJECT",
+        "UT SOUTHWESTERN - DR BEUTLER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE JAMES B HUNT JR INSTITUTE FOR EDUCATIONAL LEADERSHIP AND POLICY FOUNDAT",
+      "cluster_id": 2074,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "THE JAMES B HUNT JR INSTITUTE FOR EDUCATIONAL LEADERSHIP AND POLICY FOUNDAT",
+        "JAMES B HUNT JR INSTITUTE FOR EDUCATIONAL LEADERSHIP AND POLICY FOUNDATIO",
+        "JAMES B HUNT JR INSTITUTE FOR EDUCATIONAL LEADERSHIP AND POLICY",
+        "JAMES B HUNT JR INSTITUTE FOR EDUCATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "OKLAHOMA STATE FAIR INC",
+      "cluster_id": 2233,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "OKLAHOMA STATE FAIR INC",
+        "OKLAHOMA STATE UNIVERSITY FOUNDATION DUE BY 12312024",
+        "OKLAHOMA STATE UNIVERSITY FOUNDATION DUE BY 123124",
+        "OKLAHOMA STATE UNIVERSITY FOUNDATION DUE BY 123129"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CALIFORNIA STATE UNIVERSITY AT FRESNO",
+      "cluster_id": 2476,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "CALIFORNIA STATE UNIVERSITY AT FRESNO",
+        "CALIFORNIA STATE UNIVERSITY EAST BAY FOUNDATION",
+        "CALIFORNIA STATE UNIVERSITY AT FULLERTON",
+        "CALIFORNIA STATE SUMMER SCHOOL FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICA'S PROMISE ALLIAN FOR YOUTH",
+      "cluster_id": 2523,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "AMERICA'S PROMISE ALLIAN FOR YOUTH",
+        "AMERICA'S AUTOMOTIVE TRUST",
+        "AMERICA'S FRONTIER FUND",
+        "AMERICA'S FOOD FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COOPERATIVE FOR ASSISTANCE FOR RELIEF EVERYWHERE INC (CARE)",
+      "cluster_id": 3196,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "COOPERATIVE FOR ASSISTANCE FOR RELIEF EVERYWHERE INC (CARE)",
+        "COOPERATIVE FOR ASSISTANCE AND RELIEF EVERYWHERE INC (DBA CARE)",
+        "COOPERATIVE FOR ASSISTANCE AND REL",
+        "COOPERATIVE FOR ASSISTANCE AND RE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CENTER FOR HEALTH HUMAN RIGHTS AND DEVELOPMENT",
+      "cluster_id": 4198,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "CENTER FOR HEALTH HUMAN RIGHTS AND DEVELOPMENT",
+        "CENTER FOR HEALTH CARE STRATEGIES SUPPORTING ORGANIZATION INC",
+        "CENTER FOR HEALTH CARE SERVICE",
+        "CENTER FOR HEALTH POLICY DEVELOPMENT NATIONAL ACADEMY FOR STATE HEALTH PO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DUKE UNIVERSITY OF LAW SCHOOL",
+      "cluster_id": 4258,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "DUKE UNIVERSITY OF LAW SCHOOL",
+        "DUKE UNIVERSITY - DIVINITY SCHOOL",
+        "DUKE UNIVERSITY - BASS CONNECTIONS",
+        "DUKE UNIVERSITY TALENT IDENTIFICATION PROGRAM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SOUTHERN CALIFORNIA GRANTMAKERS FBO ANGELENO PROJECT",
+      "cluster_id": 4790,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "SOUTHERN CALIFORNIA GRANTMAKERS FBO ANGELENO PROJECT",
+        "SOUTHERN CALIFORNIA GRANTMAKERS FBO CENTER FOR STRATEGIC PARTNERSHIPS",
+        "SOUTHERN CALIFORNIA SCHL OF THEO",
+        "SOUTHERN CALIFORNIA LIBRARY FOR SOCIAL STUDIES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "HAWAI'I GOOD FOOD ALLIANCE",
+      "cluster_id": 4893,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "HAWAI'I GOOD FOOD ALLIANCE",
+        "HAWAI'I PUBLIC TELEVISION FOUNDATION",
+        "HAWAI'I INVESTMENT READY",
+        "HAWAI'I CONSERVATION ALLIANCE FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MASSACHUSETTS GENERAL HOSPITAL DEPARTMENT OF PSYCHIATRY",
+      "cluster_id": 6545,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "MASSACHUSETTS GENERAL HOSPITAL DEPARTMENT OF PSYCHIATRY",
+        "MASSACHUSETTS GENERAL HOSPITAL XXX-XX-XXXX",
+        "MASSACHUSETTS GENERAL HOSPITAL HOME BASE PROGRAM",
+        "MASSACHUSETTS GENERAL HOSPITALMASS GENERAL DEVELOPMENT OFFICE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GRAND RAPIDS INTERNATIONAL FELLOWSHIP",
+      "cluster_id": 7326,
+      "cluster_size": 8,
+      "support": 0.12,
+      "example_variants": [
+        "GRAND RAPIDS INTERNATIONAL FELLOWSHIP",
+        "GRAND RAPIDS SYMPHONY ENDOWMENT",
+        "GRAND RAPIDS FIRST CHURCH",
+        "GRAND RAPIDS CIVIC THEATER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "STICHTING EUROPEAN CLIMATE FOUNDATION",
+      "cluster_id": 12,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "STICHTING EUROPEAN CLIMATE FOUNDATION",
+        "STICHTING EUROPEAN JOURNALISM CENTRE",
+        "STICHTING EUROPEAN CLINICAL RESEARCH ALLIANCE FOR INFECTIOUS DISEASES",
+        "THE STICHTING EUROPEAN CLIMATE FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "LINCOLN CENTER FOR PERFORMING ARTS",
+      "cluster_id": 114,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "LINCOLN CENTER FOR PERFORMING ARTS",
+        "LINCOLN CENTER- GEFFEN HALL",
+        "LINCOLN CENTER PERFORMING ARTS",
+        "LINCOLN CENTER EDUCATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BLACKBAUD GIVING FUND",
+      "cluster_id": 344,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "BLACKBAUD GIVING FUND",
+        "BLACKBAUD GIVING FUND - YOURCAUSE",
+        "BLACKBAUD GIVING FUND (YOURCAUSE LLC)",
+        "BLACKBAUD GIVING FUNDYOURCAUSE LLC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AFRICAN POPULATION AND HEALTH RESEARCH CENTER INC",
+      "cluster_id": 349,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "AFRICAN POPULATION & HEALTH RESEARCH CENTER INC",
+        "AFRICAN POPULATION AND HEALTH RESEARCH CENTER INC",
+        "AFRICAN POPULATION HEALTH AND RESEARCH CENTER",
+        "AFRICAN POPULATION HEALTH & RESEARCH CENTER INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NEO PHILANTHROPY - STATE INFRASTRUCTURE FUND",
+      "cluster_id": 1357,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "NEO PHILANTHROPY FOR STATE INFRASTRUCTURE FUND (SIF)",
+        "NEO PHILANTHROPY - STATE INFRASTRUCTURE FUND",
+        "NEO PHILANTHROPY FBO MORE EQUITABLE DEMOCRACY",
+        "NEO PHILANTHROPY YOUTH ENGAGEMENT FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "VARIOUS NON-PROFIT ORGANIZATIONS",
+      "cluster_id": 1507,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "VARIOUS NON-PROFIT ORGANIZATIONS",
+        "VARIOUS NON-PROFITS LOCATED",
+        "VARIOUS NON-PROFITS",
+        "VARIOUS NON-PROFIT ORGANIZATI"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BAYLOR SCOTT & WHITE HEALTH FOUNDATION",
+      "cluster_id": 1625,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "BAYLOR SCOTT & WHITE HEALTHCARE",
+        "BAYLOR SCOTT AND WHITE ALL SAINTS HEALTH",
+        "BAYLOR SCOTT & WHITE FOUNDATION",
+        "BAYLOR SCOTT AND WHITE IRVING FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CREIGHTON UNIVERSITY - ARRUPE",
+      "cluster_id": 1986,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "CREIGHTON UNIVERSITY - ARRUPE",
+        "CREIGHTON UNIVERSITY COLLABORATIVE CARE COMPLEX",
+        "CREIGHTON UNIVERSITY ARIZONA HEALTH EDUCATION ALLIANCE",
+        "CREIGHTON UNIVERSITY FBO FINANCIAL HOPE COLLABORATIVE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DUKE U",
+      "cluster_id": 2199,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "DUKE U",
+        "DUKE U SCH OF MED",
+        "DUKE U OFF OF RSH SUPP",
+        "DUKE U GLOBAL HLT INST"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PUBLIC HLT INST",
+      "cluster_id": 2696,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "PUBLIC HLT INST",
+        "PUBLIC HLT LAW CTR",
+        "PUBLIC HLT FDN ENTERPRISES",
+        "PUBLIC HLT ACCREDITATION BD"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "STICHTING GLOBAL VOICES",
+      "cluster_id": 3692,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "STICHTING THE GLOBAL CENTER ON ADAPTATION",
+        "STICHTING GLOBAL VOICES",
+        "STICHTING GLOBAL FORUM ON CYBER EXPERTISE",
+        "STICHTING GLOBAL DIALOGUE ON SEAFOOD TRACEABILITY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL ASSN OF COMM HLT CTRS",
+      "cluster_id": 3875,
+      "cluster_size": 7,
+      "support": 0.29,
+      "example_variants": [
+        "NATIONAL ASSN OF COMM HLT CTRS",
+        "NATIONAL ASSN OF COS RSH FDN",
+        "NATIONAL ASSN OF EVANGELICALS",
+        "NATIONAL ASSN FOR MENTAL HEALTH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "IMPERIAL COLLEGE OF SCIENCE TECHNOLOGY AND MEDICINE",
+      "cluster_id": 50,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "IMPERIAL COLLEGE OF SCIENCE TECHNOLOGY AND MEDICINE",
+        "IMPERIAL COLLEGE",
+        "IMPERIAL COLLEGE LONDON",
+        "THE IMPERIAL COLLEGE OF SCIENCE TECHNOLOGY AND MEDICINE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MASS GENERAL BRIGHAM FOR THE BRIGHAM AND WOMEN'S HOSPITAL",
+      "cluster_id": 466,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "MASS GENERAL BRIGHAM FOR THE BRIGHAM AND WOMEN'S HOSPITAL",
+        "MASS GENERAL BRIGHAM FOR THE MASSACHUSETTS GENERAL HOSPITAL",
+        "MASS GENERAL HOSPITAL (STOCK)",
+        "MASS GENERAL BRIGHAM INCORPORATED XXX-XX-XXXX (BRIGHAM AND WOMEN'S)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JP MORGAN CHARITABLE GIVING FUND NATIONAL PHILANTHROPIC TRUST KENNEDY F",
+      "cluster_id": 714,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "JP MORGAN CHARITABLE GIVING FUND NATIONAL PHILANTHROPIC TRUST KENNEDY F",
+        "JP MORGAN CHARITABLE FUND",
+        "JP MORGAN CHARITABLE GIVING FUND",
+        "JP MORGAN CHASE PHILANTHROPY FUND DAF - RICHARD KENDALL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PENNSYLVANIA STATE UNIVERSITY THE",
+      "cluster_id": 756,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "PENNSYLVANIA STATE UNIVERSITY THE",
+        "PENNSYLVANIA STATE UNIVERSITY - NEW KENSINGTON THE",
+        "PENNSYLVANIA STATE UNVERSITY",
+        "THE PENNSYLVANIA STATE UNIVERSITY - NEW KENSINGTON"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "VOLUNTEERS OF AMERICA OF INDIANA",
+      "cluster_id": 836,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "VOLUNTEERS OF AMERICA OF INDIANA",
+        "VOLUNTEERS OF AMERICA MICHIGAN",
+        "VOLUNTEERS OF AMERICA WWA",
+        "VOLUNTEERS OF AMERICA SOUTHEAST LA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "OUR LADY OF VICTORY MISSIONARY",
+      "cluster_id": 1225,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "OUR LADY OF VICTORY MISSIONARY",
+        "OUR LADY OF PEACE CATHOLIC CHURCH",
+        "OUR LADY OF ASSUMPTION CATHOLIC SCHOOL",
+        "OUR LADY QUEEN OF THE AMERICAS CHURCH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CHARITIES AID FOUNDATION OF AMERICA (CAF)",
+      "cluster_id": 2059,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "CHARITIES AID FOUNDATION OF AMERICA (CAF)",
+        "CHARITIES AID FOUNDATION AMERICA CAF AMERICA",
+        "CHARITIES AID FDN AM",
+        "CHARITIES AID FOUNDATION AMERI"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MOUNT SINAI DEPT OF SURGERY",
+      "cluster_id": 2529,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "MOUNT SINAI DEPT OF SURGERY",
+        "MOUNT SINAI HOSPITAL MIAMI",
+        "MOUNT SINAI ADOLESCENT HEALTH CENTER",
+        "MOUNT SINAI PARENTING CENTER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN NATIONAL STANDARDS INSTITUTE INC",
+      "cluster_id": 2925,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "AMERICAN NATIONAL STANDARDS INSTITUTE INC",
+        "AMERICAN NATIONAL RED CROSS-HARVEY",
+        "AMERICAN NATIONAL RED CROSS (461619)",
+        "AMERICAN NATIONAL RED CROSS & ITS CONSTITUENT CHAPTERS AND BRANCHES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL ASSOCIATION OF LATINO ARTS AND CULTURE",
+      "cluster_id": 3540,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "NATIONAL ASSOCIATION OF LATINO ARTS AND CULTURE",
+        "THE NATIONAL ASSOCIATION OF LATINO ARTS AND CULTUR",
+        "THE NATIONAL ASSOCIATION OF LATINO ARTS AND CULTURE",
+        "NATIONAL ASSOCIATION FOR LATINO COMM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NEW ENGLAND JEWISH ACADEMY AKA HHNE",
+      "cluster_id": 3912,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "NEW ENGLAND JEWISH ACADEMY AKA HHNE",
+        "NEW ENGLAND FOUNDATION FOR THE ARTS INC",
+        "NEW ENGLAND PSYCHOANALYTIC SOCIETY CHARITABLE FUND",
+        "NEW ENGLAND CENTER & HOME FOR VETERANS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SACRED HEART CATHEDRAL PREPARATORY - SF",
+      "cluster_id": 4417,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "SACRED HEART CATHEDRAL PREPARATORY - SF",
+        "SACRED HEART CARE CENTER",
+        "SACRED HEART JRSR HIGH SCHOOL - SALINA",
+        "SACRED HEART HOME INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TIDES CENTER (PROJECT NAME NEXT CHAPTER)",
+      "cluster_id": 5463,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "TIDES CENTER (PROJECT NAME NEXT CHAPTER)",
+        "TIDES CENTER FBO ABRIENDO PUERTASOPENING DOORS",
+        "TIDES CENTER",
+        "TIDES CENTER OBO COMMUNITY JUSTICE REFORM COALITION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SOUTHERN AFRICAN DEVELOPMENT COMMUNITY BANKING ASSOCIATION",
+      "cluster_id": 5952,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "SOUTHERN AFRICAN DEVELOPMENT COMMUNITY BANKING ASSOCIATION",
+        "SOUTHERN AFRICAN RESEARCH AND INNOVATION MANAGEMENT ASSOCIATION NPC",
+        "THE SOUTHERN AFRICAN HUMAN RIGHTS LITIGATION CENTRE TRUST",
+        "SOUTHERN AFRICAN INSTITUTE FOR POLICY AND RESEARCH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL MATH STARS INC",
+      "cluster_id": 6289,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "NATIONAL MATH STARS INC",
+        "NATIONAL MATH AND SCIENCE INITIATIVE - GRAND PRAIRE ISD",
+        "NATIONAL MATH AND SCIENCE INITIATIVE - CEDAR HILL DESOTO DUNCANVILLE AND",
+        "NATIONAL MATH SCIENCE INITIATIVE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NOTRE DAME DU LAC",
+      "cluster_id": 6613,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "NOTRE DAME DU LAC",
+        "NOTRE DAME PREPARATORY HIGH",
+        "NOTRE DAME SCHOLARSHIP FUND",
+        "NOTRE DAME SEMINARY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NYU LANGONE - IMCG MELANOMA PROJECT",
+      "cluster_id": 7067,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "NYU LANGONE - IMCG MELANOMA PROJECT",
+        "NYU LANGONE HEALTH CO OFFICE OF DEVELOP",
+        "NYU LANGONE HEALTH PLEDGE",
+        "NYU LANGONE - FACES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "RAYMOND JAMES CHARITABLE FUND-NORMAN FAMILY FUND",
+      "cluster_id": 7442,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "RAYMOND JAMES CHARITABLE FUND-NORMAN FAMILY FUND",
+        "RAYMOND JAMES CHARITABLE (ANNIE DUNNE FUND)",
+        "RAYMOND JAMES DONOR ADVISED FUND",
+        "RAYMOND JAMES CHARITABLE DONOR ADVISED FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "RUTGERS UNIVERSITY NEWARK",
+      "cluster_id": 7566,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "RUTGERS UNIVERSITY NEWARK",
+        "RUTGERS UNIVERSITY-NEWARK CAMPUS",
+        "RUTGERS UNIVERSITY FOUNDATION-RWJMS #204116",
+        "RUTGERS UNIVERSITY RUTGERS LAW SCHOOL ALUMNI ASSOCIATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FUNDACION DE BENEFICENCIA COLUNGA CHILE",
+      "cluster_id": 8014,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "FUNDACION DE BENEFICENCIA COLUNGA CHILE",
+        "FUNDACION DE BENEFICIENCIA",
+        "FUNDACION DE LAS AMRICAS PARA EL DESARROLLO-PARTNERS OF THE AMERICAS",
+        "FUNDACION DE LAS AMERICAS PARA EL DESARROLLO-PARTNERS OF THE AMERICAS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL COALITION OF BLACKS FOR",
+      "cluster_id": 9457,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "NATIONAL COALITION OF BLACKS FOR",
+        "NATIONAL COALITION OF HUMAN RIGHTS DEFENDERS RT",
+        "NATIONAL COALITION OF HUMAN RIGHTS DEFENDERS UGANDA",
+        "NATIONAL COALITION FOR ASIAN PACIF"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "HABITAT FOR HUMANITY CAPITAL DISTRICT",
+      "cluster_id": 13200,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "HABITAT FOR HUMANITY CAPITAL DISTRICT",
+        "HABITAT FOR HUMANITY LAKE COUNTY IL INC",
+        "HABITAT FOR HUMANITY OHIO COUNTY",
+        "HABITAT FOR HUMANITY NEW YORK CITY AND WESTCHESTER COUNTY INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DANA FARBER CANCER INSTITUTE THE JIMMY FUND",
+      "cluster_id": 13646,
+      "cluster_size": 7,
+      "support": 0.14,
+      "example_variants": [
+        "DANA FARBER CANCER INSTITUTE THE JIMMY FUND",
+        "DANA FARBER JIMMY FUND",
+        "DANA-FARBER CANCER INSTITUE",
+        "DANA-FARBER CANCER INSTIT"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "HABITAT FOR HUMANITY NEW YORK CITY",
+      "cluster_id": 13200,
+      "cluster_size": 7,
+      "lift": 99.0,
+      "example_variants": [
+        "HABITAT FOR HUMANITY CAPITAL DISTRICT",
+        "HABITAT FOR HUMANITY LAKE COUNTY IL INC",
+        "HABITAT FOR HUMANITY OHIO COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "HABITAT",
+      "cluster_id": 13200,
+      "cluster_size": 7,
+      "lift": 99.0,
+      "example_variants": [
+        "HABITAT FOR HUMANITY CAPITAL DISTRICT",
+        "HABITAT FOR HUMANITY LAKE COUNTY IL INC",
+        "HABITAT FOR HUMANITY OHIO COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "HABITAT FOR HUMANITY",
+      "cluster_id": 13200,
+      "cluster_size": 7,
+      "lift": 99.0,
+      "example_variants": [
+        "HABITAT FOR HUMANITY CAPITAL DISTRICT",
+        "HABITAT FOR HUMANITY LAKE COUNTY IL INC",
+        "HABITAT FOR HUMANITY OHIO COUNTY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SEE",
+      "cluster_id": 395,
+      "cluster_size": 6,
+      "support": 0.5,
+      "example_variants": [
+        "SEE",
+        "SEE INC",
+        "SEE FOUNDATION",
+        "SEE THE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL UNION OF SUPERIORS GENERAL (UISG)",
+      "cluster_id": 901,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "INTERNATIONAL UNION FOR CONSERVATION OF NATURE AND",
+        "INTERNATIONAL UNION OF SUPERIORS GENERAL",
+        "INTERNATIONAL UNION FOR THE SCIENTIFIC STUDY OF POPULATION",
+        "INTERNATIONAL UNION OF SUPERIORS GENERAL (UISG)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PEKING UNIVERSITY",
+      "cluster_id": 983,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "PEKING UNIVERSITY",
+        "PEKING UNIVERSITY EDUCATIONAL FOUNDATION USA",
+        "PEKING UNIVERSITY EDUCATION FOUNDATION",
+        "PEKING UNIVERSITY HEALTH-SCIENCE CENTER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN CANCER SOC",
+      "cluster_id": 1786,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "AMERICAN CANCER SOC",
+        "AMERICAN CANCER SOCIETY - GA",
+        "AMERICAN CANCER SOCIETY INC - GEOR",
+        "AMERICAN CANCER SOCIETY KANSAS CITY METRO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE AFRICAN AMERICAN POLICY FORUM INC",
+      "cluster_id": 2221,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "THE AFRICAN AMERICAN POLICY FORUM INC",
+        "AFRICAN AMERICAN POLICY FORUM INC",
+        "AFRICAN AMERICAN ALLIANCE OF CDFI CEOS I",
+        "AFRICAN AMERICAN CULTURAL CENTER (DBA AUGUST WILSON CULTURAL CENTER)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GULF COAST COMMUNITY FDN",
+      "cluster_id": 2944,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "GULF COAST COMMUNITY FOUNDATION",
+        "GULF COAST CENTER FOR LAW",
+        "GULF COAST CORP & MW TRAINING",
+        "GULF COAST COMMUNITY FDN"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE TRUSTEES OF THE UNIVERSITY OF PENN",
+      "cluster_id": 3142,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "TRUSTEES OF UNIVERSITY OF PENNSYLVANNIA",
+        "THE TRUSTEES OF THE UNIVERSITY PENNSYLVANIA",
+        "THE TRUSTEES OF THE UNIVERSITY OF PENN",
+        "TRUSTEES OF THE UNIVERSITY OF PENNSYLVANIA - PENN MEDICINE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "VARIOUS GRANTS",
+      "cluster_id": 3385,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "VARIOUS GRANTS",
+        "VARIOUS GRANTS UNDER 5000 PER",
+        "VARIOUS GRANTS & DONATIONS",
+        "VARIOUS GRANTS - 5000"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PENNSYLVANIA U OF",
+      "cluster_id": 3396,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "PENNSYLVANIA U OF",
+        "PENNSYLVANIA U OF ANNENBERG SCH FOR COMM",
+        "PENNSYLVANIA U OF GRAD SCH OF EDUC",
+        "PENNSYLVANIA U OF SCH OF ARTS & SCIS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GRUPO DE ANALISIS PARA EL DESARROLLO",
+      "cluster_id": 3488,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "GRUPO DE ANALISIS PARA EL DESARROLLO",
+        "GRUPO DE INFORMACION EN REPRODUCCION ELEGIDA",
+        "GRUPO DE INFORMACION EN REPRODUCCION ELEGIDA AC",
+        "GRUPO DE CAMBIO CLIMATICO PARA LATINOAMERICA Y EL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "OPEN SOCIETY INSTITUTE ASSISTANCE FOUNDATION - TAJ",
+      "cluster_id": 3748,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "OPEN INSTITUTE TRUST",
+        "OPEN SOCIETY INSTITUTE ASSISTANCE FOUNDATION - TAJ",
+        "OPEN SOCIETY INSTITUTE - SOFIA FOUNDATION",
+        "OPEN INSTITUTE INTERNATIONAL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ROYAL INSTITUTE OF INTERNATIONAL AFFAIRS",
+      "cluster_id": 4500,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "ROYAL INSTITUTE OF INTERNATIONAL AFFAIRS",
+        "THE ROYAL INSTITUTE OF INTERNATIONAL AFFAIRS (AKA CHATHAM HOUSE)",
+        "THE ROYAL INSTITUTE OF INTERNATIONAL AFFAIRS",
+        "ROYAL INSTITUTE FOR INTERNATIONAL AFFAIRS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL COMMITTEE ON UNITED STATES - CHINA RELATIONS INC",
+      "cluster_id": 5099,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "NATIONAL COMMITTEE FOR MATERNAL AND NEONATAL HEALTH",
+        "NATIONAL COMMITTEE ON AMERICAN FOREIGN POLICY",
+        "NATIONAL COMMITTEE ON UNITED STATES - CHINA RELATIONS INC",
+        "NATIONAL COMMITTEE ON RESPONSIVE PHILANTHROPY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SOUTHERN CA U OF ANNENBERG SCH FOR COMM",
+      "cluster_id": 5643,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "SOUTHERN CA GRANTMAKERS",
+        "SOUTHERN CA U OF ANNENBERG SCH FOR COMM",
+        "SOUTHERN CA U OF",
+        "SOUTHERN CA PUBLIC RADIO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "YMCA OF GREATER OMAHA",
+      "cluster_id": 6006,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "YMCA OF GREATER PEORIA",
+        "YMCA OF GREATER ATLANTA",
+        "YMCA OF GREATER PITTBURGH",
+        "YMCA OF GREATER TRI-VALLEY ROME"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AFRICAN CENTRE FOR LEADERSHIP STRATEGY AND DEVELOPMENT",
+      "cluster_id": 9591,
+      "cluster_size": 6,
+      "support": 0.33,
+      "example_variants": [
+        "AFRICAN CENTRE FOR LEADERSHIP STRATEGY AND DEVELOPMENT",
+        "AFRICAN CENTRE FOR TREATMENT AND REHABILITATION OF TORTURE VICTIMS",
+        "AFRICAN CENTRE FOR PARLIAMENTARY AFFAIRS",
+        "AFRICAN CENTRE FOR MEDIA & INFORMATION LITERACY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNIVERSITY OF TEXAS AT AUSTIN DEPT OF INTERCOLLEGIATE ATHLETICS",
+      "cluster_id": 305,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "UNIVERSITY OF TEXAS AT AUSTIN DEPT OF INTERCOLLEGIATE ATHLETICS",
+        "UNIVERSITY OF TEXAS AT AUSTIN THE",
+        "UNIVERSITY OF TEXAS AT AUSTIN - MCCOMBS SCHOOL OF BUSINESS",
+        "UNIVERSITY OF TEXAS AT AUSTIN - TEXAS CHALLENGE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "RECTOR AND VISITORS OF THE UNIVERSITY OF VIRGINIA THE",
+      "cluster_id": 328,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "RECTOR AND VISITORS OF THE UNIVERSITY OF VIRGINIA THE",
+        "RECTOR & VISITORS-UNIV OF VIRGINIA",
+        "THE RECTOR & VISITORS OF THE UNIVERISITY OF VIRGINIA",
+        "RECTOR AND VISITORS OF THE UVA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MT SINAI SCHOOL OF MEDICINE - SEAVER AUTISM CENTER",
+      "cluster_id": 788,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "MT SINAI SCHOOL OF MEDICINE - SEAVER AUTISM CENTER",
+        "MT SINAI HEALTH FOUNDATION",
+        "MT SINAI ADOLESCENT HEALTH CENTER",
+        "MT SINAI HEALTH CARE FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SANTA BARBARA SCHOOL DISTRICT",
+      "cluster_id": 1341,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "SANTA BARBARA SCHOOL DISTRICT",
+        "SANTA BARBARA CITY COLLEGE FOUNDATION",
+        "SANTA BARBARA SPECIAL ENFORCEMENT TEAM SUPPORT",
+        "SANTA BARBARA NEIGHBORHOOD CLINIC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE HENRY FORD (EDISON INSTITUTE)",
+      "cluster_id": 1527,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "THE HENRY FORD (EDISON INSTITUTE)",
+        "HENRY FORD HEALTH SERVICES",
+        "THE HENRY FORD MUSEUM",
+        "HENRY FORD ESTATE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PALM BEACH COMMUNITY FOUNDATION",
+      "cluster_id": 1650,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "PALM BEACH COMMUNITY FOUNDATION",
+        "PALM BEACH COUNTY FLORIDA",
+        "PALM BEACH UNITED WAY",
+        "PALM BEACH POLICE & FIRE FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ATRIUM HEALTH FOUNDATION - 2016 - LCI (II)",
+      "cluster_id": 1816,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "ATRIUM HEALTH FOUNDATION - 2016 - LCI (II)",
+        "ATRIUM HEALTH FOUNDATION - 2010 - LEVINE CANCER INSTITUTE",
+        "ATRIUM HEALTH FOUNDATION - 2023 - LEVINE CANCER INSTITUTE (III)",
+        "ATRIUM HEALTH FOUNDATION - 2022 - SANDRA & LEON LEVINE AUDITORIUM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GS DONOR ADVISED PHILANTHROPY FUND FOR WEALTH MANAGEMENT INC",
+      "cluster_id": 1902,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "GS DONOR ADVISED PHILANTHROPY FUND FOR WEALTH MANAGEMENT INC",
+        "GS DONOR ADVISED PHILANTHROPY FUND FOR WEALTH MGMT",
+        "GS DONOR ADVISED PHILANTHROPY FUND - STOCK",
+        "GS DONOR ADVISED PHILANTHROPY FUND FOR WEALTH MANA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE ASSOCIATED JEWISH COMMUNITY FEDERATION OF BALTIMORE INC",
+      "cluster_id": 2025,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "THE ASSOCIATED JEWISH COMMUNITY FEDERATION OF BALTIMORE INC",
+        "THE ASSOCIATED JEWISH COMMUNITY FEDERATION",
+        "ASSOCIATED JEWISH COMMUNITY FEDERATION",
+        "THE ASSOCIATED JEWISH COMMUNITY FED"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SAVE THE CHILDREN 3",
+      "cluster_id": 2118,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "SAVE THE CHILDREN 3",
+        "SAVE THE CHILDREN ITALIA",
+        "SAVE THE CHILDREN SINGLE STEP",
+        "SAVE THE CHILDREN FEDERATION INC (464186)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PRINCE'S TRUST USA",
+      "cluster_id": 2416,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "PRINCE'S TRUST USA",
+        "THE PRINCE'S TRUST",
+        "PRINCE'S TRUST AMERICA INC",
+        "THE PRINCE'S FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ASIAN AND PACIFIC ISLANDER AMERCIAN HEALTH FORUM",
+      "cluster_id": 2777,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "ASIAN AND PACIFIC ISLANDER AMERCIAN HEALTH FORUM",
+        "ASIAN & PACIFIC ISLANDER AMERICAN VOTE",
+        "ASIAN PACIFIC PARTNERS FOR EMPOWERMENT",
+        "ASIAN & PACIFIC ISL AM HLT FORUM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNIVERSITY OF NORTH CAROLINA - CHAPEL HILL FPG CHILD DEVELOPMENT INST",
+      "cluster_id": 2908,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "UNIVERSITY OF NORTH CAROLINA - CHAPEL HILL FPG CHILD DEVELOPMENT INST",
+        "UNIVERSITY OF NORTH CAROLINA AT CHAPEL HILLTHE ARTS & SCIENCES FOUNDATION",
+        "UNIVERSITY OF NORTH CAROLINA FOUND",
+        "UNIVERSITY OF NORTH CAROLINA SYSTEM OFFICE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GEORGE MASON UNIVERSITY FDN",
+      "cluster_id": 4300,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "GEORGE MASON UNIVERSITY FDN",
+        "GEORGE MASON UNIVERSITY FDTN - THE MERCATUS CENTER",
+        "GEORGE MASON UNIVERSITY FDTN",
+        "GEORGE MASON U"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "OHIO STATE UNIVERSITY FOUNDATION - WEARY FDTN ENDOWED CHAIR #484070",
+      "cluster_id": 4515,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "OHIO STATE UNIVERSITY FOUNDATION - WEARY FDTN ENDOWED CHAIR #484070",
+        "OHIO STATE UNIVERSITY COLLEGE OF",
+        "OHIO STATE UNIVERSITY HEMOPHILIA CENTER",
+        "OHIO STATE UNIVERISTY FOUNDATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CENTER FOR NEW AMERICAN MEDIA",
+      "cluster_id": 4754,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "CENTER FOR NEW AMERICAN MEDIA",
+        "CENTER FOR NEW YORK CITY AFFAIRS AT THE NEW SCHOOL",
+        "CENTER FOR A NEW AMERICAN SECURITY INC",
+        "CENTER FOR A NEW AMERICAN SOCIETY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JEWISH FEDERATION OF METROPOLITAN CHICAGO (AKA JEWISH UNITED FUNDJEWISH FED",
+      "cluster_id": 6192,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "JEWISH FEDERATION OF METROPOLITAN CHICAGO (AKA JEWISH UNITED FUNDJEWISH FED",
+        "JEWISH FEDERATION OF METROPOLITAN CHICAGO DONOR ADVISED FUND",
+        "JEWISH FEDERATION OF NORTHEASTERN NY",
+        "JEWISH FEDERATION OF METROPOLITAN CHICAGO (DBA JEWISH UNITED FUNDJEWISH FE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "USC EDUCATIONAL FOUNDATION - MCNAIR SCHOLARSHIP",
+      "cluster_id": 6417,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "USC EDUCATIONAL FOUNDATION - MCNAIR SCHOLARSHIP",
+        "USC EDUCATIONAL FOUNDATION - MCNAIR SCHOLARS",
+        "USC EDUCATIONAL FOUNDATION - MCNAIR SCHOLARSHIP FU",
+        "USC EDUCATIONAL FOUNDATION - COLUMBIA ATHLETICS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SMITHSONIAN INSTITUTION - SMITHSONIAN AMERICAN ART MUSEUM",
+      "cluster_id": 6683,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "SMITHSONIAN INSTITUTION - SMITHSONIAN AMERICAN ART MUSEUM",
+        "SMITHSONIAN INSTITUTION NATIONAL AIR AND SPACE MUSEUM",
+        "SMITHSONIAN INSTITUTION NATIONAL MUSEUM OF AFRICAN AMERICAN HISTORY AND CUL",
+        "SMITHSONIAN INSTITUTION (461860)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COVID-19 SOLIDARITY RESPONSE FUND FOR WHO (VIA UN FOUNDATION)",
+      "cluster_id": 6951,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "COVID-19 SOLIDARITY RESPONSE FUND FOR WHO (VIA UN FOUNDATION)",
+        "COVID 19 PHL FUND",
+        "COVID-19 DONATIONS",
+        "COVID 19 FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATIONAL NETWORK OF ABORTION FUNDS TEA FUND",
+      "cluster_id": 7541,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "NATIONAL NETWORK OF ABORTION FUNDS TEA FUND",
+        "NATIONAL NETWORK OF ABORTION FUNDS WEST FUND",
+        "NATIONAL NETWORK OF ABORTION FUNDS TEA",
+        "NATIONAL NETWORK OF ABORTION FUNDS LILITH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COLORADO STATE UNIVERSITY RESEARCH FOUNDATION (DBA CSU STRATA)",
+      "cluster_id": 8075,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "COLORADO STATE UNIVERSITY RESEARCH FOUNDATION (DBA CSU STRATA)",
+        "COLORADO STATE UNIVERSITY - GRANTS",
+        "COLORADO STATE UNIVERSITY-PUEBLO FOUNDATION",
+        "COLORADO STATE UNIVERSITY - SCHOLARSHIPS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "EDUCATION SERVICE CENTER REGION XIII",
+      "cluster_id": 8365,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "EDUCATION SERVICE CENTER REGION XIII",
+        "EDUCATION SERVICE CENTER REGION IV OF TEXAS",
+        "EDUCATION SERVICE CENTER REGION 10",
+        "EDUCATION SERVICE CENTER- REGION 1"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ASOCIACION CIVIL DIALOGOS",
+      "cluster_id": 9019,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "ASOCIACION CIVIL DIALOGOS",
+        "ASOCIACION CIVIL POR LA IGUALDAD Y LA JUSTICIA",
+        "ASOCIACION CIVIL CENTRO DE ESTUDIOS LEGALES Y SOCIALES",
+        "ASOCIACION CIVIL LUCARIS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNIVERSITY OF CALIFORNIA SAN FRANCISCO FOUNDATION AMEND",
+      "cluster_id": 9083,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO FOUNDATION AMEND",
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO - UC REGE",
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO JASON K SELLO",
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO DR JACK TAUNTON"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AMERICAN MUSEUM OF NATURAL HISTORY INC",
+      "cluster_id": 10446,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "AMERICAN MUSEUM OF NATURAL HISTORY INC",
+        "AMERICAN MUSEUM OF NATIONAL HISTORY (AMNH)",
+        "AMERICAN MUSEUM NATURAL HISTORY",
+        "AMERICAN MUSEUM OF NATIONAL HISTORY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TEXAS CHRISTIAN UNIVERSIT",
+      "cluster_id": 11625,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "TEXAS CHRISTIAN UNIVERSIT",
+        "TEXAS CHRISTIAN UNIVERSITY BRITE DIVINITY SCHOOL",
+        "TEXAS CHRISTIAN U",
+        "TEXAS CHRISTIAN UNIVERSITY COLLEGE ADVISING CORPS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED JEWISH CHARITIES OF GREATER CHARLOTTE INC - 2023 - GENERAL SUPPORT",
+      "cluster_id": 14399,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "UNITED JEWISH CHARITIES OF GREATER CHARLOTTE INC - 2023 - GENERAL SUPPORT",
+        "UNITED JEWISH CHARITIES OF GREATER CHARLOTTE INC - 2022 - GENERAL SUP",
+        "UNITED JEWISH CHARITIES OF GREATER CHARLOTTE INC - 2020 - GENERAL SUPPORT",
+        "UNITED JEWISH CHARITIES OF GREATER CHARLOTTE INC - 2021 - GENERAL SUPPORT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ARIZONA STATE UNIVERSITY FOUNDATION FOR A NEW AMER",
+      "cluster_id": 16949,
+      "cluster_size": 6,
+      "support": 0.17,
+      "example_variants": [
+        "ARIZONA STATE UNIVERSITY FOUNDATION FOR A NEW AMER",
+        "ARIZONA STATE UNIVERSITY FOUNDATION FOR NEW AMERICAN UNIVERSITY",
+        "ARIZONA STATE UNIVERSITY FOUNDATIONMAYO",
+        "ARIZONA STATE UNIVERSITY FOUNDATION FOR A NEW AMERICAN FOUNDATION"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "JEWISH FEDERATION",
+      "cluster_id": 6192,
+      "cluster_size": 6,
+      "lift": 99.0,
+      "example_variants": [
+        "JEWISH FEDERATION OF METROPOLITAN CHICAGO (AKA JEWISH UNITED FUNDJEWISH FED",
+        "JEWISH FEDERATION OF METROPOLITAN CHICAGO DONOR ADVISED FUND",
+        "JEWISH FEDERATION OF NORTHEASTERN NY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "UNIVERSITY",
+      "cluster_id": 9083,
+      "cluster_size": 6,
+      "lift": 99.0,
+      "example_variants": [
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO FOUNDATION AMEND",
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO - UC REGE",
+        "UNIVERSITY OF CALIFORNIA SAN FRANCISCO JASON K SELLO"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE UK ONLINE GIVING FOUNDATION",
+      "cluster_id": 279,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "THE UK ONLINE GIVING FOUNDATION",
+        "UK ONLINE GIVING FOUNDATION",
+        "THE UK ONLINE GIVING FOUNDATION INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INSTITUT PASTEUR DE DAKAR",
+      "cluster_id": 368,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "INSTITUT PASTEUR DE DAKAR",
+        "INSTITUT PASTEUR",
+        "INSTITUT PASTEUR OF DAKAR",
+        "INSTITUT PASTEUR DE TUNIS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL BUDGET PARTNERSHIP",
+      "cluster_id": 400,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "INTERNATIONAL BUDGET PARTNERSHIP",
+        "INTERNATIONAL BUDGET PARTNERSHIP (IBP)",
+        "INTERNATIONAL BUDGET PARTNERSHIP KENYA",
+        "INTERNATIONAL BUDGET PARTNERSHIP SOUTH AFRICA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AFRICAN DEVELOPMENT BANK",
+      "cluster_id": 442,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "AFRICAN DEVELOPMENT BANK",
+        "AFRICAN DEVELOPMENT SOLUTIONS (ADESO)",
+        "AFRICAN DEVELOPMENT SOLUTIONS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL SCHOLARSHIP & TUITION SERVICES",
+      "cluster_id": 456,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "INTERNATIONAL SCHOLARSHIP & TUITION SERVICES",
+        "INTERNATIONAL SCHOLARSHIP & TUITION",
+        "INTERNATIONAL SCHOLARSHIP & TUITION SERVICES ACCOUNTING OFFICE",
+        "INTERNATIONAL SCHOLARSHIP AND TUITION SERVICES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CENTER ON BUDGET & POL PRIORITIES",
+      "cluster_id": 463,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "CENTER ON BUDGET & POL PRIORITIES",
+        "CENTER FOR BUDGET & POLICY PRIORITIES",
+        "CENTER ON BUDGET AND POLICY PRIORTITIES",
+        "CENTER FOR BUDGET POLICIES & PRIORITIES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GEORGE WASHINGTON U",
+      "cluster_id": 608,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "GEORGE WASHINGTON UNIVERSITY THE",
+        "GEORGE WASHINGTON U",
+        "GEORGE WASHINGTON",
+        "GEORGE WASHINGTON U SCH OF PUB HLT & HLT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "JOHN E ANDRUS MEMORIAL INC",
+      "cluster_id": 934,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "JOHN E ANDRUS MEMORIAL INC",
+        "JOHN E HERMAN PUBLIC FUND",
+        "JOHN E ALEXANDER YMCA COMMUNITY CE",
+        "JOHN E ALEXANDER SOUTH WOOD COUNTY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "STICHTING WOMEN WIN",
+      "cluster_id": 1118,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "STICHTING WOMEN WIN",
+        "STICHTING WOMEN ON WINGS",
+        "STICHTING WOMEN'S GLOBAL NETWORK FOR REPRODUCTIVE RIGHTS",
+        "STICHTING WOMEN'S INITIATIVES FOR GENDER JUSTICE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GEORGIA STATE FINANCING AND INVESTMENT COMMISSION",
+      "cluster_id": 1144,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "GEORGIA STATE FINANCING AND INVESTMENT COMMISSION",
+        "GEORGIA STATE UNIVERSITY RESEARCH FOUNDA",
+        "GEORGIA STATE UNIVERSITY RESEARCH FNDTN",
+        "GEORGIA STATE UNIVERSITY FOUNDATION - GEORGIA INTERNATIONAL LAW ENFORCEMENT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CENTER FOR STUDY OF SCIENCE TECHNOLOGY AND POLICY",
+      "cluster_id": 1656,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "CENTER FOR STUDY OF SCIENCE TECHNOLOGY AND POLICY",
+        "CENTER FOR THE STUDY OF THE INTERNATIONAL ECONOMY",
+        "CENTER FOR THE STUDY OF THE PRESIDENCY AND CONGRESS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "RUTGERS ST U OF NJ NEW BRUNSWICK",
+      "cluster_id": 1775,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "RUTGERS ST U OF NJ CTR FOR ST HLT POL",
+        "RUTGERS ST U OF NJ NEW BRUNSWICK",
+        "RUTGERS ST U OF NJ INST FOR HLT HLT CARE",
+        "RUTGERS ST U OF NJ BLOUSTEIN SCH OF PLNG"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SOUTHERN AFRICA TRUST",
+      "cluster_id": 1839,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "SOUTHERN AFRICA TRUST",
+        "SOUTHERN AFRICA LITIGATION CENTRE TRUST",
+        "SOUTHERN AFRICA MALARIA ELIMINATION EIGHT INITIATIVE SECRETARIAT",
+        "SOUTHERN AFRICA RESOURCE WATCH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "BAYLOR COLLEGE OF MEDICINE INTERNATIONAL PEDIATRIC AIDS INITIATIVE",
+      "cluster_id": 1867,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "BAYLOR COLLEGE OF MEDICINE INTERNATIONAL PEDIATRIC AIDS INITIATIVE",
+        "BAYLOR COLLEGE OF MEDICINE - DENEEN LABORATORY",
+        "BAYLOR COLLEGE OF MEDICINE FOUNDATION SWAZILAND",
+        "BAYLOR COLLEGE OF MEDINE - SWAZILAND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNIVERSITY OF UTAH COLLEGE OF NURSING",
+      "cluster_id": 2057,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "UNIVERSITY OF UTAH COLLEGE OF NURSING",
+        "UNIVERSITY OF UTAH COLLEGE OF EDUCATION",
+        "UNIVERSITY OF UTAH - COLLEGE OF ENGINEERING",
+        "UNIVERSITY OF UTAH COLLEGE OF FINE ARTS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FRIDA YOUNG FEMINIST FUND",
+      "cluster_id": 2292,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "FRIDA THE YOUNG FEMINIST FUND",
+        "FRIDA YOUNG FEMINIST FUND",
+        "FRIDA - THE YOUNG FEMINIST FUND",
+        "FRIDA-THE YOUNG FEMINIST FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "WORLD VISION AND WATER FOR PEOPLE",
+      "cluster_id": 2667,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "WORLD VISION AND WATER FOR PEOPLE",
+        "WORLD VISION THRIVE",
+        "WORLD VISION UNDESIGNATED FOSTER GRANT",
+        "WORLD VISION INCORPORATED"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE UNION FOR CONTEMPORARY ART INC",
+      "cluster_id": 2702,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "THE UNION FOR CONTEMPORARY ART",
+        "UNION FOR CONTEMPORARY ART",
+        "THE UNION FOR CONTEMPORARY ART INC",
+        "UNION FOR CONTEMPORARY ART INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NORTH CAROLINA U OF CHAPEL HILL",
+      "cluster_id": 3415,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "NORTH CAROLINA U OF CHAPEL HILL",
+        "NORTH CAROLINA U OF AT CHAPEL HILL OFF",
+        "NORTH CAROLINA U OF CHAPEL HILL HSR CT",
+        "NORTH CAROLINA U OF CHAPEL HILL GILLINGS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DATA AND SOCIETY RESEARCH INSTITUTE",
+      "cluster_id": 3822,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "DATA AND SOCIETY RESEARCH INSTITUTE",
+        "DATA & SOCIETY RESEARCH INSTITUTE INC",
+        "DATA RESEARCH AND MAPPING CONSULT LTD",
+        "DATA & SOCIETY RESEARCH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "NATURAL RESOURCES DEFENSE CNCL",
+      "cluster_id": 3830,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "NATURAL RESOURCES DEFENSE COUN",
+        "NATURAL RESOURCES DEFENSE CNCL",
+        "NATURAL RESOURCES DEFENSE COUNCIL (NRDC)",
+        "NATURAL RESOURCES DEFENSE COUNCIL FOR WILDLIFE AND LAND CONSERVATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MEXICAN AMERICAN LEGAL DEFENSE AND EDUCATIONAL FUND INC",
+      "cluster_id": 4111,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "MEXICAN AMERICAN LEGAL DEFENSE AND EDUCATIONAL FUND INC",
+        "MEXICAN AMERICAN LEGAL DEFENSE AND EDUCATIONAL FUN",
+        "MEXICAN AMERICAN DEVELOPMENT ASSOCIATION",
+        "MEXICAN AMERICAN LEGAL DEFENSE EDUCATIONAL FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MAKE A WISH SOUTH FLORIDA",
+      "cluster_id": 4419,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "MAKE A WISH METRO NEW YORK",
+        "MAKE A WISH SOUTH FLORIDA",
+        "MAKE A WISH METRO NY",
+        "MAKE A WISH SOUTHERN FLORIDA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FONDATION POUR L'INSTITUT DE HAUTES ETUDES INTERNA",
+      "cluster_id": 5221,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "FONDATION POUR L'INSTITUT DE HAUTES ETUDES INTERNA",
+        "FONDATION POUR LINSTITUT DE HAUTES ETUDES INTERNATIONALES ET DU DEVELOPPEME",
+        "FONDATION POUR LE LEADERSHIP ET L EXCELLENCE",
+        "FONDATION POUR L'INSTITUT DE HAUTES ETUDES INTERNATIONALES ET DU DEVELOPPEM"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INSTITUTO INTERNACIONAL DE EDUCACAO DO BRASIL",
+      "cluster_id": 5700,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "INSTITUTO INTERNACIONAL DE EDUCACAO DO BRASIL",
+        "INSTITUTO INTERNACIONAL DE RECURSOS RENOVABLES AC",
+        "INSTITUTO INTERNACIONAL DE RESPONSABILIDAD SOCIAL",
+        "INSTITUTO INTERNACIONAL ARAYARA DE EDUCACAO E CULTURA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "COMMUNITY FOUNDATION FOR THE CENTRAL SAVANNAH RIVER AREA",
+      "cluster_id": 6062,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "COMMUNITY FOUNDATION FOR CENTRAL SAVANNAH RIVER AREA",
+        "COMMUNITY FOUNDATION OF CENTRAL",
+        "COMMUNITY FOUNDATION FOR THE CENTRAL SAVANNAH RIVER AREA",
+        "COMMUNITY FOUNDATION OF CENTRAL BLUE RIDGE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ESCR-NET (INTERNATIONAL NETWORK FOR ECONOMIC SOCI",
+      "cluster_id": 6777,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "ESCR-NET-INTERNATIONAL NETWORK FOR ECONOMIC SOCIAL AND CULTURAL INC",
+        "ESCR-NET-INTERNATIONAL NETWORK FOR ECONOMIC SOCIAL AND CULTURAL RIGHTS INC",
+        "ESCR-NET (INTERNATIONAL NETWORK FOR ECONOMIC SOCI",
+        "ESCR NET INTERNATIONAL NETWORK FOR ECONOMIC SOCIAL"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ARAB COMMUNITY CENTER FOR ECONOMIC AND SOCIAL SERV",
+      "cluster_id": 6889,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "ARAB COMMUNITY CENTER FOR ECONOMIC AND SOCIAL SERV",
+        "ARAB COMMUNITY CENTER FOR ECONOMIC & SOCIAL SERVICES",
+        "ARAB COMMUNITY CENTER FOR ECONOMIC & SOCIAL SVCS",
+        "ARAB COMMUNITY CENTER FOR ECONOMIC & SOCIAL SERVICES (ACCESS)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "FIRST (FOR THE INSPIRATION AND RECOGNITION OF SCIENCE AND TECHNOLOGY)",
+      "cluster_id": 7784,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "FOUNDATION FOR THE INSPIRATION & RECOGNITION OF SCIENCE & TECHNOLOGY",
+        "FOR INSPIRATION AND RECOGNITION OF SCIENCE AND TECHNOLOGY (FIRST)",
+        "FIRST (FOR THE INSPIRATION AND RECOGNITION OF SCIENCE AND TECHNOLOGY)",
+        "FOR INSPIRATION AND RECOGNITION OF SCIENCE AND TECHNOLOGY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "OPEN DATA INSTITUTE",
+      "cluster_id": 8737,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "OPEN DATA WATCH",
+        "OPEN DATA INSTITUTE (ODI)",
+        "OPEN DATA INSTITUTE",
+        "OPEN DATA INSTITUTE LIMITED"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "ASOCIACION DE COMUNIDADES FORESTALES DE PETEN",
+      "cluster_id": 9887,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "ASOCIACION DE COMUNIDADES FORESTALES DE PETEN",
+        "ASOCIACION DE PERIODISMO DE INVESTIGACION OJO PUBLICO",
+        "ASOCIACION DE CABILDOS INDIGENAS DEL NORTE DEL CAUCA",
+        "ASOCIACION DE FORESTERIA COMUNITARIA DE GUATEMALA UT'Z CHE'"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GIRL SCOUTS OF AMERICA - SAN JACINTO COUNCIL",
+      "cluster_id": 16077,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "GIRL SCOUTS OF THE US OF AMERICA",
+        "GIRL SCOUTS OF AMERICA - SAN JACINTO COUNCIL",
+        "GIRL SCOUTS OF THE COASTAL PINES",
+        "GIRL SCOUTS OF KENTUCKY'S WILDERNESS ROAD"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL LESBIAN GAY BISEXUAL TRANS AND IN",
+      "cluster_id": 16960,
+      "cluster_size": 5,
+      "support": 0.4,
+      "example_variants": [
+        "INTERNATIONAL LESBIAN AND GAY ASSOCIATION",
+        "INTERNATIONAL LESBIAN GAY BISEXUAL TRANS AND IN",
+        "THE INTERNATIONAL LESBIAN GAY BISEXUAL TRANS AND INTERSEX ASSOCIATION (IL",
+        "INTERNATIONAL LESBIAN GAY BISEXUAL TRANS AND INTERSEX ASSOCIATION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "WITS HEALTH CONSORTIUM (PTY) LTD",
+      "cluster_id": 46,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "WITS HEALTH CONSORTIUM (PTY) LTD",
+        "WITS HEALTH CONSORTIUM",
+        "WITS HEALTH CONSORTIUM - GAUTENG",
+        "WITS HEALTH CONSORTIUM (SOWETO)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DOUGLAS COUNTY SCHOOL DISTRICT # 001",
+      "cluster_id": 139,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "DOUGLAS COUNTY SCHOOL DISTRICT # 001",
+        "DOUGLAS COUNTY NE",
+        "DOUGLAS COUNTY SCHOOL DISTRICT #001",
+        "DOUGLAS COUNTY LIBRARY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "PEF - ISRAEL ENDOWMENT FD",
+      "cluster_id": 167,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "PEF - ISRAEL ENDOWMENT FD",
+        "PEF ISRAEL ENDOW FUNDS",
+        "PEF ISRAEL ENDOWMENT FDS",
+        "PEF ISRAEL ENDOWMWNT FUNDS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "AFRICAN UNION DEVELOPMENT AGENCY - NEW PARTNERSHIP FOR AFRICAS DEVELOPMENT",
+      "cluster_id": 350,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "AFRICAN UNION DEVELOPMENT AGENCY - NEW PARTNERSHIP FOR AFRICAS DEVELOPMENT",
+        "AFRICAN UNION DEVELOPMENT AGENCY NEW PARTNERSHIP FOR AFRICA'S DEVELOPMENT",
+        "AFRICAN UNION - INTERAFRICAN BUREAU FOR ANIMAL RESOURCES",
+        "AFRICAN UNION"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL DEVELOPMENT RESEARCH CENTRE",
+      "cluster_id": 492,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "INTERNATIONAL DEVELOPMENT RESEARCH CENTRE",
+        "INTERNATIONAL DEVELOPMENT ASSOCIATION",
+        "INTERNATIONAL DEVELOPMENT ECONOMICS ASSOCIATES",
+        "INTERNATIONAL DEVELOPMENT RESEARCH CENTRE CENTRE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "INTERNATIONAL FEDERATION OF THE RED CROSS AND RED CRESCENT SOCIETIES",
+      "cluster_id": 634,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "INTERNATIONAL FEDERATION OF THE RED CROSS AND RED CRESCENT SOCIETIES",
+        "INTERNATIONAL FEDERATION OF GYNECOLOGY AND OBSTETRICS",
+        "INTERNATIONAL FEDERATION OF RED CROSS AND RED CRES",
+        "INTERNATIONAL FEDERATION OF RED CROSS AND RED CRESCENT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "STICHTING FOUNDATION FOR INTERNATIONAL LAW FOR THE ENVIRONMENT (FILE)",
+      "cluster_id": 917,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "STICHTING FOUNDATION FOR INTERNATIONAL LAW FOR THE ENVIRONMENT (FILE)",
+        "STICHTING FOUNDATION FOR INTERNATIONAL LAW FOR THE ENVIRONMENT",
+        "STICHTING FOUNDATION FOR INTERNATIONAL LAW",
+        "STICHTING FOUNDATION FOR INTERNATIONAL LAW FOR ENVIRONMENT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "TAX JUSTICE NETWORK AFRICA LIMITED",
+      "cluster_id": 957,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "TAX JUSTICE NETWORK AFRICA LIMITED",
+        "TAX JUSTICE NETWORK LIMITED",
+        "TAX JUSTICE NETWORK",
+        "TAX JUSTICE NETWORK-AFRICA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNC CHAPEL HILL - SCHOLARSHIP PROGRAM",
+      "cluster_id": 987,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "UNC CHAPEL HILL - SCHOLARSHIP PROGRAM",
+        "UNC- CHAPEL HILL COLLEGE OF ARTS AND SCI",
+        "UNC-CHAPEL HILL SCHOOL OF",
+        "UNC CHAPEL HILL - GILLINGS SCHOOL OF PUBLIC HEALTH"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "GREATER KANSAS CITY FBO SCOTT H WARD",
+      "cluster_id": 1027,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "GREATER KANSAS CITY FBO SCOTT H WARD",
+        "GREATER KANSAS CITY FBO THOMAS S WARD",
+        "GREATER KANSAS CITY",
+        "GREATER KANSAS CITY CHARITABLE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "MEMORIAL SLOAN-KETTERING CANCER CENTER THE SOCIET",
+      "cluster_id": 1088,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "MEMORIAL SLOAN-KETTERING CANCER CENTER THE SOCIET",
+        "MEMORIAL SLOAN KETTERING CANCER NEW YORK",
+        "MEMORIAL SLOAN-KETTERING CANCER",
+        "MEMORIAL SLOAN KETTERING CENTER"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE LENFEST INSTITUTE FOR JOURNALISM SPECIAL ASSETS FUND OF TPF",
+      "cluster_id": 1281,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "THE LENFEST INSTITUTE FOR JOURNALISM SPECIAL ASSETS FUND OF TPF",
+        "LENFEST INSTITUTE FOR JOURNALISM",
+        "LENFEST INSTITUTE FOR JOURNALISM LLC",
+        "LENFEST INSTITUTE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "VARIOUS 501(C)(3) ORGANIZATIONS",
+      "cluster_id": 1308,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "VARIOUS 501(C)(3) ORGANIZATIONS",
+        "VARIOUS 501(C)(3) ORGS",
+        "VARIOUS 501 C 3 ORGANIZATIONS",
+        "VARIOUS 501(C)(3) PUBLIC CHARITIES"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE UNIVERSITY OF NOTRE DAME",
+      "cluster_id": 1366,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "THE UNIVERSITY OF NOTRE DAME",
+        "UNIVERSITY OF NOTRE DAME DU LAC",
+        "UNIVERSITY OF NOTRE DAME",
+        "THE UNIVERSITY OF NOTRE DAME DU LAC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THOMAS JEFFERSON UNIVERSITY - VICKIE & JACK INST FOR NEUROSCIENCE",
+      "cluster_id": 1448,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "THOMAS JEFFERSON UNIVERSITY - VICKIE & JACK INST FOR NEUROSCIENCE",
+        "THOMAS JEFFERSON UNIVERSITY - RAPHAEL CENTER FOR NEURORESTORATION",
+        "THOMAS JEFFERSON UNIVERSITY HOSP",
+        "THOMAS JEFFERSON UNIVERSITY TJU"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "CATHOLIC RELIEF SERVICES US CONFERENCE OF CATHOLIC BISHOPS INCORPORATED",
+      "cluster_id": 1690,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "CATHOLIC RELIEF SERVICES US CONFERENCE OF CATHOLIC BISHOPS INCORPORATED",
+        "CATHOLIC RELIEF SERVICES PATHWAYS LATIN AMERICA",
+        "CATHOLIC RELIEF SERVICES--USCCB",
+        "CATHOLIC RELIEF SERVICES UNDESIGNATED FOSTER GRANT"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNIVERSITY OF PUERTO RICO AT RO PIEDRAS",
+      "cluster_id": 1751,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "UNIVERSITY OF PUERTO RICO AT RO PIEDRAS",
+        "UNIVERSITY OF PUERTO RICO AT MAYAGEZ",
+        "UNIVERSITY OF PUERTO RICO AT MAYAGUEEZ",
+        "UNIVERSITY OF PUERTO RICO AT CAYEY"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNIVERSITY OF CALIFORNIA SF FOUNDATION - DR EDWARD CHANG",
+      "cluster_id": 1997,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "UNIVERSITY OF CALIFORNIA SF FOUNDATION - DR EDWARD CHANG",
+        "UNIVERSITY OF CALIFORNIA SF FOUNDATION - DEPARTMENT OF PSYCHIATRY",
+        "UNIVERSITY OF CALIFORNIA SF FOUNDATION - DEP OF PSYCHIATRY",
+        "UNIVERSITY OF CALIFORNIA SF FOUNDATION (DEPARTMENT OF NEUROLOGY)"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "WILLIAM J CLINTON FOUNDATION",
+      "cluster_id": 2018,
+      "cluster_size": 5,
+      "support": 0.2,
+      "example_variants": [
+        "WILLIAM J CLINTON FOUNDATION",
+        "WILLIAM J BRENNAN CENTER FOR JUSTICE INC",
+        "WILLIAM J PALMER PARKS FOUNDATION I",
+        "WILLIAM J PALMER PARKS FOUNDATION INC"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "metadata": {
+    "total_records": 29290,
+    "clusters_found": 28407,
+    "with_colocator": false,
+    "sample_size": null,
+    "source": "clean_tsv",
+    "blocking_strategy": "none",
+    "loose_colocator_non_null": 0,
+    "colocator_non_null": 0
+  },
+  "suggestions": [
+    {
+      "type": "canonical_name",
+      "pattern": "SEE",
+      "cluster_id": 399,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "SEE"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "UNITED NATIONS CAPITAL DEVELOPMENT FUND",
+      "cluster_id": 438,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "UNITED NATIONS CAPITAL DEVELOPMENT FUND"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "THE CENTER FOR REPRODUCTIVE RIGHTS INC",
+      "cluster_id": 1059,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "THE CENTER FOR REPRODUCTIVE RIGHTS INC"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "2020 GRANTS",
+      "cluster_id": 1110,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "2020 GRANTS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "SCHOLARSHIPS",
+      "cluster_id": 3231,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "SCHOLARSHIPS"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "DEVELOPMENT ALTERNATIVES WITH WOMEN FOR A NEW ERA",
+      "cluster_id": 6237,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "DEVELOPMENT ALTERNATIVES WITH WOMEN FOR A NEW ERA"
+      ]
+    },
+    {
+      "type": "canonical_name",
+      "pattern": "EDUCATIONAL SERVICE CENTER OF CUYAHOGA COUNTY",
+      "cluster_id": 11775,
+      "cluster_size": 3,
+      "support": 1.0,
+      "example_variants": [
+        "EDUCATIONAL SERVICE CENTER OF CUYAHOGA COUNTY"
+      ]
+    },
+    {
+      "type": "geo_suffix",
+      "pattern": "EDUCATIONAL SERVICE CENTER",
+      "cluster_id": 11775,
+      "cluster_size": 3,
+      "lift": 99.0,
+      "example_variants": [
+        "EDUCATIONAL SERVICE CENTER OF CUYAHOGA COUNTY",
+        "EDUCATIONAL SERVICE CENTER OF CUYAHOGA COUNTY",
+        "EDUCATIONAL SERVICE CENTER OF CUYAHOGA COUNTY"
+      ]
+    }
+  ]
+}
