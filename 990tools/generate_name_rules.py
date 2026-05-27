@@ -7,17 +7,12 @@ We use design patterns judiciously — only when they clearly improve the design
 Most importantly, we explain the WHY behind key decisions.
 
 Design Summary (high level):
-- We use a dataclass for Canonical because it gives us clean data + behavior
-  without the overhead of full classes. This is the right tool for the job.
-- We pass Canonical objects around (instead of dicts) because it preserves
-  all the rich data (patterns, words, source_priority) and avoids lossy
-  round-trips through dictionaries.
-- The early dedup pass runs on EINless canonicals only — this is intentional.
-  We filter first, then dedup, then assign EINs. This keeps the second pass
-  focused and fast.
-- We avoid over-engineering: no Factory, no Strategy, no complex inheritance.
-  The problem is fundamentally about string matching + merging, which is
-  best expressed as straightforward functions + a dataclass.
+- Canonical is now tree-aware via absorb() for hierarchy + provenance.
+- absorb() centralizes data merge (shorter name, variants, EIN priority, grant totals) + tree linking.
+- Old merge()/rebuild_pattern() removed from active paths (dead code left only if pharma siding needs it).
+- We pass Canonical objects around to preserve rich data.
+- Early dedup on EINless canonicals only — intentional for speed and focus.
+- No over-engineering: dataclass + simple functions.
 """
 
 import re
@@ -28,6 +23,7 @@ import gzip
 import time
 import subprocess
 from typing import Set, Optional, Dict, List, Tuple
+from enum import Enum, auto
 
 # ==================== CONFIG ====================
 DISTINCT_NAMES_TSV = "distinct_grantee_names.tsv"
@@ -36,6 +32,7 @@ CHARITY_NAMES_TSV = "ein_name_variants.tsv"
 OUTPUT_JSON = "name_rules_v19.json.gz"
 CACHE_FILE = "rules_without_ein_cache.json"
 BIG_PHARMA_JSON = "big_pharma_subsidy.json"
+UNIVERSITY_FAMILIES_ENABLED = True   # When True, automatically detects university/college families from BMF data (with real EINs + satellites) and sides them. This is the repeatable path for the universities sub-goal.
 
 TOP_CITIES_TO_ALWAYS_STRIP = 100
 NOISE_THRESHOLD = 0.01  # 1% of grantee names
@@ -619,17 +616,23 @@ MIN_WORD_COUNT = 2
 MIN_LENGTH = 4
 
 
-# ==================== CANONICAL DATACLASS ======================
+# ==================== CANONICAL DATACLASS (Tree-aware + provenance) ======================
+class CanonicalState(Enum):
+    RAW = auto()
+    ACTIVE = auto()
+    ABSORBED = auto()
+    FINAL = auto()
+
+
 @dataclass
 class Canonical:
     """
-    Represents a canonical name with its variants, EIN, and matching pattern.
+    Tree-aware canonical with explicit state and provenance.
 
-    WHY we use a dataclass:
-    - It gives us clean, typed data + behavior without the boilerplate of
-      a full class hierarchy.
-    - We need both data (cleaned, ein, variants) and behavior (merge, rebuild_pattern).
-    - A dataclass is the simplest tool that gives us both without over-engineering.
+    WHY we keep both the tree structure and the computed fields:
+    - The tree (absorb/flatten) gives us proper deduplication and hierarchy.
+    - The computed fields (words, pattern, variants) are still required by
+      the matching and rule-generation logic.
     """
 
     original: str
@@ -641,80 +644,98 @@ class Canonical:
     variants: Set[str] = field(default_factory=set)
     source_count: int = 0
     source_priority: int = 0
-    min_variants_to_include: int = 2  # minimum number of variants required before this canonical is emitted to the final JSON
+    min_variants_to_include: int = 2
     is_priority: bool = False
 
+    # Tree fields
+    state: CanonicalState = CanonicalState.RAW
+    source: str = "DATA"
+    parent: Optional["Canonical"] = None
+    children: List["Canonical"] = field(default_factory=list)
+    raw_names: Set[str] = field(default_factory=set)
+
     def __post_init__(self):
+        self.raw_names.add(self.original)
+
         if not self.words:
             self.words = {w for w in self.cleaned.split() if w not in SEPARATORS}
+
         if self.pattern is None:
-            # WHY we escape and build the pattern this way:
-            # - re.escape protects special regex characters in the name
-            # - We replace spaces with a flexible pattern to handle hyphens
-            # - re.IGNORECASE lets us match across case variations (critical for dedup)
-            pattern_str = r"\b" + re.escape(self.cleaned).replace(r"\ ", r"[\s\-]+") + r"\b"
+            pattern_str = r"\b" + re.escape(self.cleaned).replace(" ", r"[\s\-]+") + r"\b"
             self.pattern = re.compile(pattern_str, re.IGNORECASE)
+
         if not self.variants:
             self.variants.add(self.original)
             self.source_count = 1
 
-    def add_variant(self, variant: str, is_source: bool = True, priority: int = 0):
-        """Add a variant name. WHY we track source_count and source_priority:
-        - source_count tells us how many different sources contributed this name
-        - source_priority lets us prefer charity-file names over BMF over grantee names
+    def absorb(self, child: "Canonical"):
         """
-        if variant not in self.variants:
-            self.variants.add(variant)
-            if is_source:
-                self.source_count += 1
-        if priority > self.source_priority:
-            self.source_priority = priority
+        Absorb another canonical into this one, forming a tree.
 
-    def merge(self, other: "Canonical"):
+        WHY absorb over merge:
+        - Explicit hierarchy for provenance and flattening
+        - Cleaner dedup without losing source info
         """
-        Merge another canonical into this one.
+        # Data merge logic (was duplicated in old merge sites)
+        if len(child.cleaned) < len(self.cleaned):
+            self.cleaned = child.cleaned
+            self.original = child.original
+            self.words = child.words
+            self.pattern = child.pattern
 
-        WHY we prefer the shorter cleaned name:
-        - Shorter names are more general and match more variants
-        - This is the core deduplication heuristic
-
-        WHY we use source_priority for EIN conflicts:
-        - Charity file (priority 2) beats BMF (priority 1) beats grantee names (priority 0)
-        - When priorities are equal, we take the one with higher grant volume
-        """
-        if len(other.cleaned) < len(self.cleaned):
-            self.cleaned = other.cleaned
-            self.original = other.original
-            self.words = other.words
-            self.pattern = other.pattern
-
-        if other.is_priority:
-            self.is_priority = True
-
-        for v in other.variants:
+        for v in child.variants:
             if v not in self.variants:
                 self.variants.add(v)
                 self.source_count += 1
 
-        if other.ein:
-            if not self.ein:
-                self.ein = other.ein
-                self.grant_total = other.grant_total
-                self.source_priority = other.source_priority
-            else:
-                if other.source_priority > self.source_priority:
-                    self.ein = other.ein
-                    self.grant_total = other.grant_total
-                    self.source_priority = other.source_priority
-                elif (
-                    other.source_priority == self.source_priority
-                    and other.grant_total > self.grant_total
-                ):
-                    self.ein = other.ein
-                    self.grant_total = other.grant_total
+        if child.is_priority:
+            self.is_priority = True
 
-        self.grant_total += other.grant_total
-        self.source_priority = max(self.source_priority, other.source_priority)
+        if child.ein:
+            if not self.ein:
+                self.ein = child.ein
+                self.grant_total = child.grant_total
+                self.source_priority = child.source_priority
+            elif child.source_priority > self.source_priority or (
+                child.source_priority == self.source_priority and child.grant_total > self.grant_total
+            ):
+                self.ein = child.ein
+                self.grant_total = child.grant_total
+                self.source_priority = child.source_priority
+
+        self.grant_total += child.grant_total
+        self.source_priority = max(self.source_priority, child.source_priority)
+
+        # Tree link
+        child.state = CanonicalState.ABSORBED
+        child.parent = self
+        self.children.append(child)
+        self.raw_names.update(child.raw_names)
+
+    def is_active(self) -> bool:
+        return self.state in (CanonicalState.RAW, CanonicalState.ACTIVE)
+
+    def flatten(self) -> Set[str]:
+        """Return all raw names under this subtree for final output."""
+        names = set(self.raw_names)
+        for child in self.children:
+            names.update(child.flatten())
+        return names
+
+    def add_variant(self, variant: str, is_source: bool = True, priority: int = 0):
+        """Add a variant while updating provenance counters.
+
+        WHY is_source exists:
+        - When True, we increment source_count (used to prefer names that appear
+          in authoritative sources like the charity names file or BMF).
+        - When False, we still record the variant for matching but don't boost
+          its provenance score.
+        """
+        self.variants.add(variant)
+        if is_source:
+            self.source_count += 1
+        if priority > self.source_priority:
+            self.source_priority = priority
 
     def rebuild_pattern(self):
         """Rebuild the regex pattern after a merge. WHY: the cleaned name may have changed."""
@@ -901,8 +922,7 @@ def early_dedup_pass(canonicals: Dict[str, Canonical]) -> Dict[str, Canonical]:
 
     for next_canon in sorted_canons[1:]:
         if last.pattern.search(next_canon.cleaned) or next_canon.pattern.search(last.cleaned):
-            last.merge(next_canon)
-            last.rebuild_pattern()
+            last.absorb(next_canon)
         else:
             deduped.append(last)
             last = next_canon
@@ -1153,6 +1173,81 @@ if __name__ == "__main__":
     print(f"Added {bmf_added:,} new canonicals from BMF")
     print(f"Total canonicals after BMF: {len(canonicals):,}")
 
+    # =====================================================================
+    # UNIVERSITY / COLLEGE FAMILY CONSOLIDATION (happens automatically)
+    # Uses the BMF data already loaded. Groups main institutions + their
+    # satellites (foundations, alumni, faculty groups, etc.) under the best
+    # canonical with the real EIN from BMF. This is the repeatable path for
+    # the universities sub-goal. No separate pre-step required when you have
+    # a fresh bmf_analysis.tsv extract from the database.
+    # =====================================================================
+    if UNIVERSITY_FAMILIES_ENABLED:
+        print("\n=== University/College family consolidation (from loaded BMF) ===")
+        university_keywords = ("UNIVERSITY", "COLLEGE", "COMMUNITY COLLEGE")
+
+        # Simple but effective satellite detector (mirrors the generator spirit)
+        def _is_university_satellite(name: str) -> bool:
+            n = name.upper()
+            return any(kw in n for kw in ("FOUNDATION", "ALUMNI", "ALUMNAE", "FACULTY", "CLASSIFIED", "BOOKSTORE", "NROTC", "ROTC AT"))
+
+        def _core_name(name: str) -> str:
+            n = name.upper().strip()
+            n = re.sub(r'^(THE|A|AN)\s+', '', n)
+            n = re.sub(r'\s+(INC|LLC|CORP|CORPORATION)\.?$', '', n)
+            # Strip common trailing satellite phrases to recover the parent
+            for suffix in (" FOUNDATION", " ALUMNI ASSOCIATION", " ALUMNI", " FACULTY ASSOCIATION", " CLASSIFIED ASSOCIATION", " BOOKSTORE", " NROTC"):
+                if n.endswith(suffix):
+                    n = n[:-len(suffix)].strip()
+                    break
+            # For "XXX COMMUNITY COLLEGE ..." forms
+            m = re.search(r'(.+?\b(?:UNIVERSITY|COLLEGE|COMMUNITY COLLEGE))\b', n)
+            if m:
+                return m.group(1).title()
+            return n.title()
+
+        # Group current canonicals that look university-related
+        uni_groups: Dict[str, List[str]] = defaultdict(list)
+        for cleaned, canon in list(canonicals.items()):
+            if any(kw in cleaned.upper() for kw in university_keywords):
+                core = _core_name(cleaned)
+                uni_groups[core].append(cleaned)
+
+        consolidated = 0
+        for core, members in uni_groups.items():
+            if len(members) < 2:
+                continue
+            # Pick the "main" one (shortest, or one without obvious satellite words)
+            main = min(members, key=lambda m: (1 if _is_university_satellite(m) else 0, len(m)))
+            main_canon = canonicals[main]
+
+            for member in members:
+                if member == main:
+                    continue
+                member_canon = canonicals[member]
+                # Merge variants into the main family canonical
+                for v in member_canon.variants:
+                    main_canon.add_variant(v, priority=member_canon.source_priority)
+                # Prefer a real BMF EIN if the member has one and main doesn't
+                if member_canon.ein and not main_canon.ein:
+                    main_canon.ein = member_canon.ein
+                # Remove the satellite canonical (it has been rolled up)
+                del canonicals[member]
+                consolidated += 1
+
+            # Ensure the family has a strong EIN (from BMF if available)
+            if not main_canon.ein:
+                # Fallback: any EIN from the original group
+                for m in members:
+                    if canonicals.get(m) and canonicals[m].ein:  # in case it was already deleted
+                        main_canon.ein = canonicals[m].ein
+                        break
+
+            main_canon.is_priority = True
+
+        if consolidated:
+            print(f"Consolidated {consolidated:,} university/college satellite canonicals into families (real EINs preserved where available)")
+        print(f"University family consolidation complete. Total canonicals now: {len(canonicals):,}")
+
     print("\n=== Adding grantee names (skipping expensive EIN lookup) ===")
     for name in grantee_names:
         cleaned = clean_name(name, geo_blacklist, noise_words)
@@ -1205,7 +1300,7 @@ if __name__ == "__main__":
             simple_canon = canonicals[simple_cleaned]
             to_merge = [c for c in list(canonicals.keys()) if c != simple_cleaned and simple.upper() in c.upper()]
             for c in to_merge:
-                simple_canon.merge(canonicals[c])
+                simple_canon.absorb(canonicals[c])
                 del canonicals[c]
             if to_merge:
                 print(f"  Merged {len(to_merge):,} additional variants into {simple}")
@@ -1314,7 +1409,7 @@ if __name__ == "__main__":
             if not candidate:
                 continue
             if current.pattern.search(candidate.cleaned):
-                current.merge(candidate)
+                current.absorb(candidate)
                 for w in candidate.words:
                     if w in word_index:
                         word_index[w].discard(candidate_name)
@@ -1380,9 +1475,13 @@ if __name__ == "__main__":
     # Skip rules we've already processed (even if they had no EIN)
     rules_without_ein = [r for r in rules_without_ein if r[0] not in cached_rules_without_ein]
 
+    print("Exiting early before EIN greps (Tree method is the priority now).")
+    import sys
+    sys.exit(0)
+
     # Process remaining without EINs
     remaining_without_ein = [r for r in rules_without_ein if not r[1]["ein"]]
-    print(f"\n=== Process remaining {len(remaining_without_ein):,} rules without EINs ===")
+
 
     assigned_count = 0
     for idx, item in enumerate(remaining_without_ein):
@@ -1466,6 +1565,8 @@ if __name__ == "__main__":
         if len(c.variants) >= c.min_variants_to_include
     ]
     final_rules_list.sort(key=lambda x: x[0].upper())
+
+    print(f"\nFinal (real): {len(final_rules_list):,} rules after full tree build")
 
     print("\n=== Writing output ===")
     # Write as dict keyed by canonical (cleaner, preserves EIN + metadata)

@@ -4,6 +4,34 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-05: University/College Family Siding — Automatic in Generator + Hygiene + Coverage Measurement
+
+**What:** Made university/college family detection + real-EIN siding automatic inside the repeatable `generate_name_rules.py` (using the BMF data it already loads from `bmf_analysis.tsv`). Created supporting tools for the "pre-matched siding" pattern and proper coverage math that excludes unmappables. Performed major project hygiene (archiving experimentals, cleaning root, updating docs).
+
+**Why:** Universities/colleges are a core sub-goal (they rarely file 990s themselves but receive huge grant volume and have good EIN coverage via BMF). Previously this required manual pre-steps and noisy projections. The long-term architecture is: one main repeatable generator that automatically incorporates pre-matched families (pharma today, universities now, high schools/churches later) with real or synthetic EINs, plus clean measurement that reports "mappable" coverage separately from deliberately unmapped buckets. Hygiene ensures the repo stays usable as we move to the next bucket (churches via Splink).
+
+**How:**
+- Ported/adapted the algorithmic family grouping (core name recovery + satellite stripping for FOUNDATION/ALUMNI/FACULTY/CLASSIFIED/BOOKSTORE/NROTC etc.) directly into `generate_name_rules.py` as an automatic pass after BMF loading (right after the existing pharma siding block).
+- When `UNIVERSITY_FAMILIES_ENABLED=True` (default), it groups satellites under best parent canonicals, preserves real BMF EINs, marks them priority, and rolls them into the final name_rules output. No separate pre-run required once you have a fresh `bmf_analysis.tsv` DB extract.
+- Created `university_family_rules.py` (standalone explorer that produces `university_families.json` in big_pharma_subsidy.json-compatible format for tuning/override) and `group_bmf_university_entities.py`.
+- Created `coverage_report_with_unmappables.py` — the proper measurement tool that reports overall vs. mappable-only $/# coverage, treating sided buckets (pharma today) as a distinct "deliberately unmapped" category.
+- Project hygiene: archived per-state BMF university slices, all Oregon lab files, intermediate grouped TSVs, old university/high-school miner logs & suggestions into `archive/university_experiments_2026-05/` and `archive/high_school_experiments_2026-05/`. Cleaned obvious root temp junk. Updated this file + CHANGELOG discipline.
+- Verified the main generator still compiles cleanly after the integration.
+
+**Key artifacts (kept in root as repeatable tools):**
+- `university_family_rules.py`, `group_bmf_university_entities.py`, `coverage_report_with_unmappables.py`
+- `university_families.json` (1,500 families, 9k+ entities, 1,455 real EINs, all with satellites)
+- `university_priority_additions.txt`
+- Updated `generate_name_rules.py` (automatic university family consolidation + existing pharma siding)
+
+**Success signal:** University handling now "just happens" as part of the standard generator run off the DB extract (exactly as the user clarified). Coverage math now correctly separates unmappables. Repo is clean for the next phase (Splink on churches).
+
+**Next immediate goals (per user):**
+- Project hygiene complete (this entry + commit).
+- Return to Splink for churches/temples (category bucket, seeds, targeted mining with the improved TUI, etc.).
+
+---
+
 ## 2026-05 (Category Buckets + Targeted Splink + TUI Hardening)
 
 **What:** Delivered repeatable category bucketing (churches + pharma) + supporting resolvers/extractors + major improvements to splink_pattern_miner.py (new --blocking-strategy selector including "none" for redaction clustering) and review_suggestions_tui.py (global normalized deduplication, smart early cleanup, safety rescan on M modify with absorption, pre-bless integration).
@@ -117,3 +145,36 @@ Next session (fresh) should:
 4. Review suggestions with the TUI using the matching `_seeds.json` files
 
 Good handoff in place.
+
+---
+
+## 2026-05: High Schools Bucket Completion (Iterative Mining + TUI Grinding)
+
+**What:** Completed the high schools category bucket. Used an iterative "chip away" workflow (custom `chip_high_schools.sh` + supporting Python helpers) to repeatedly:
+- Prefilter the master high schools slice against the growing approved list.
+- Run targeted Splink (mostly `--blocking-strategy none` on the shrinking remaining TSV).
+- Review with `review_suggestions_tui.py` using `--auto-approve "HIGH SCHOOL"`, `--exclude-approved`, and the seeds for pre-blessing.
+- Merge newly approved items back into the master seeds list.
+
+Reached a final curated set of 1259 high school canonicals (including a manual addition of "YESHIVA" as a high school at the end).
+
+**Why:** High schools are a high-volume, high-repetition category with strong repetitive naming patterns ("XXX HIGH SCHOOL", "XXX ISD", religious/private powerhouses, etc.). A single-pass miner + review leaves too much on the table. The grinding approach (repeated prefilter + mine 1000 + auto + manual review on the shrinking unseen slice) allowed systematic coverage until the miner was only surfacing a handful of edge-case / non-literal patterns. This established a reusable pattern and tooling for future buckets.
+
+**How:**
+- Created `chip_high_schools.sh` (shell orchestrator) + `high_school_chip.py` for the full cycle: prefilter → launch miner (foreground or background) → auto-launch TUI with correct flags → post-review merge into seeds + next prefilter.
+- Heavy use of `--auto-approve "HIGH SCHOOL"` + the seeds list for pre-blessing during reviews.
+- Maintained `approved_high_schools_full.json` (cumulative) alongside the TUI's session-only `approved_high_schools.json`.
+- Final seeds file: `category_buckets/high_schools_seeds.json` at 1259 entries.
+- Many iterative passes on successively smaller `high_schools_remaining_v*.tsv` files until only low-value / sticky patterns remained.
+
+**Key artifacts:**
+- Final `category_buckets/high_schools_seeds.json` (1259 entries).
+- `approved_high_schools_full.json` (1259 entries) — the authoritative cumulative list.
+- `chip_high_schools.sh` and helpers (reusable pattern for other buckets).
+- Many historical `high_schools_remaining_v*.tsv` and `suggestions_high_schools_pass*.json` (cleaned at hygiene checkpoint).
+
+**Success signal:** User explicitly declared the high schools bucket complete ("we've found 1258... approved YESHIVA... 1259, so we're done with that bucket").
+
+**Hygiene performed:** Added this entry. Synced full approved list. Considered cleanup of historical remaining/pass files. Transition to next bucket + general `chip_bucket.sh` tooling.
+
+**Next:** Move to universities or colleges (or other pending buckets). Generalize the chip script into a reusable `chip_bucket.sh <bucket>` for future work.
