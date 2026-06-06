@@ -58,8 +58,7 @@ function doSearch(lastInput, firstInput, summaryDiv) {
   }
 }
 
-// Stable rainbow-style color for a string (org or person name)
-// Steals the spirit of browse/models.js getColorForEIN + interpolateBand
+// Stable rainbow-style color (inspired by browse/models.js + interpolateRainbow)
 function getColorForName(str) {
   if (!str) return '#64748b';
   let hash = 0;
@@ -67,12 +66,11 @@ function getColorForName(str) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
   const t = (Math.abs(hash) % 1000) / 1000;
-  // Use d3's rainbow for nice distinct colors (similar to browse's interpolateRainbow usage)
   return d3.interpolateRainbow(t);
 }
 
 // =====================================================
-// D3 Visual Layer - Long March with Fellow Travelers
+// D3 Visual Layer - Long March with d3.pack() + Fellow Travelers
 // =====================================================
 
 function renderLongMarchViz(peopleList) {
@@ -93,53 +91,47 @@ function renderLongMarchViz(peopleList) {
     return;
   }
 
-  // === Two-pass fellow traveler logic ===
-  // Pass 1: collect all orgs the primary person was in
+  // === Two-pass fellow traveler detection ===
   const primaryOrgs = new Set();
   Object.values(primary.orgsByYear).forEach(orgList => {
     orgList.forEach(o => primaryOrgs.add(o.organization));
   });
 
-  // Pass 2: find other people who were in any of those orgs in overlapping years
   const fellowTravelers = [];
   const seen = new Set([primary.fullname.toLowerCase()]);
 
   for (const p of allPeople) {
     if (seen.has(p.fullname.toLowerCase())) continue;
 
-    let sharesOrgAndYear = false;
+    let shares = false;
     for (const [year, orgList] of Object.entries(p.orgsByYear)) {
       if (!primary.orgsByYear[year]) continue;
-      const primaryOrgsThisYear = new Set(primary.orgsByYear[year].map(o => o.organization));
-      for (const o of orgList) {
-        if (primaryOrgsThisYear.has(o.organization)) {
-          sharesOrgAndYear = true;
-          break;
-        }
+      const primarySet = new Set(primary.orgsByYear[year].map(o => o.organization));
+      if (orgList.some(o => primarySet.has(o.organization))) {
+        shares = true;
+        break;
       }
-      if (sharesOrgAndYear) break;
     }
-
-    if (sharesOrgAndYear) {
+    if (shares) {
       fellowTravelers.push(p);
       seen.add(p.fullname.toLowerCase());
     }
   }
 
-  const width = Math.max(container.clientWidth, 980);
-  const height = 520;
-  const margin = { top: 50, right: 40, bottom: 70, left: 60 };
+  const width = Math.max(container.clientWidth, 1100);
+  const height = 620;
+  const margin = { top: 55, right: 30, bottom: 55, left: 50 };
+  const columnWidth = 95;
 
   const svg = d3.select(container)
     .append('svg')
     .attr('width', width)
-    .attr('height', height)
-    .attr('class', 'longmarch-viz');
+    .attr('height', height);
 
   const xScale = d3.scalePoint()
     .domain(years)
-    .range([margin.left, width - margin.right])
-    .padding(0.6);
+    .range([margin.left + 30, width - margin.right - 30])
+    .padding(0.5);
 
   // Timeline axis
   svg.append('g')
@@ -150,81 +142,102 @@ function renderLongMarchViz(peopleList) {
   // Title
   svg.append('text')
     .attr('x', width / 2)
-    .attr('y', 26)
+    .attr('y', 28)
     .attr('text-anchor', 'middle')
     .style('font-size', '15px')
     .style('font-weight', '600')
     .text(`${primary.fullname} — Long March${fellowTravelers.length ? ` + ${fellowTravelers.length} fellow traveler(s)` : ''}`);
 
-  // Render each year column
+  // Draw packed circles per year using d3.pack()
   years.forEach(year => {
     const x = xScale(year);
-    const g = svg.append('g').attr('transform', `translate(${x}, 0)`);
 
-    // Year label
-    g.append('text')
-      .attr('x', 0)
-      .attr('y', margin.top - 10)
+    // Collect items for this year
+    const items = [];
+
+    // Primary person's orgs (larger)
+    (primary.orgsByYear[year] || []).forEach(org => {
+      items.push({
+        name: org.organization,
+        size: 140,
+        type: 'primary',
+        color: getColorForName(org.organization)
+      });
+    });
+
+    // Fellow travelers' orgs this year (smaller)
+    fellowTravelers.forEach(ft => {
+      (ft.orgsByYear[year] || []).forEach(org => {
+        const primaryOrgsThisYear = new Set((primary.orgsByYear[year] || []).map(o => o.organization));
+        if (primaryOrgsThisYear.has(org.organization)) {
+          items.push({
+            name: `${ft.fullname} @ ${org.organization}`,
+            size: 55,
+            type: 'fellow',
+            color: getColorForName(ft.fullname)
+          });
+        }
+      });
+    });
+
+    if (items.length === 0) return;
+
+    // Build hierarchy for packing
+    const root = d3.hierarchy({ name: String(year), children: items })
+      .sum(d => d.size);
+
+    const packLayout = d3.pack()
+      .size([columnWidth, 280])
+      .padding(4);
+
+    const packed = packLayout(root);
+
+    const yearGroup = svg.append('g')
+      .attr('transform', `translate(${x - columnWidth / 2}, ${margin.top + 10})`);
+
+    // Draw packed circles
+    yearGroup.selectAll('circle.node')
+      .data(packed.leaves())
+      .enter()
+      .append('circle')
+      .attr('class', 'node')
+      .attr('cx', d => d.x)
+      .attr('cy', d => d.y)
+      .attr('r', d => d.r)
+      .attr('fill', d => d.data.color)
+      .attr('stroke', d => d.data.type === 'primary' ? '#1e2937' : '#64748b')
+      .attr('stroke-width', d => d.data.type === 'primary' ? 2.5 : 1)
+      .attr('opacity', d => d.data.type === 'primary' ? 1 : 0.9);
+
+    // Labels (only for primary or short names)
+    yearGroup.selectAll('text.label')
+      .data(packed.leaves().filter(d => d.data.type === 'primary' || d.r > 18))
+      .enter()
+      .append('text')
+      .attr('class', 'label')
+      .attr('x', d => d.x)
+      .attr('y', d => d.y + d.r + 12)
+      .attr('text-anchor', 'middle')
+      .style('font-size', d => d.data.type === 'primary' ? '10px' : '8px')
+      .style('fill', '#334155')
+      .text(d => {
+        const label = d.data.name.split(' @ ')[0]; // for fellow format
+        return label.length > 16 ? label.slice(0, 14) + '…' : label;
+      });
+
+    // Year header
+    yearGroup.append('text')
+      .attr('x', columnWidth / 2)
+      .attr('y', -5)
       .attr('text-anchor', 'middle')
       .style('font-size', '13px')
       .style('font-weight', '600')
       .text(year);
-
-    // Primary person's orgs this year (larger, prominent)
-    const primaryOrgsThisYear = primary.orgsByYear[year] || [];
-    primaryOrgsThisYear.forEach((org, i) => {
-      const y = margin.top + 50 + (i * 78);
-
-      g.append('circle')
-        .attr('cx', 0)
-        .attr('cy', y)
-        .attr('r', 26)
-        .attr('fill', getColorForName(org.organization))
-        .attr('stroke', '#1e2937')
-        .attr('stroke-width', 2.5)
-        .style('cursor', 'pointer');
-
-      g.append('text')
-        .attr('x', 0)
-        .attr('y', y + 42)
-        .attr('text-anchor', 'middle')
-        .style('font-size', '10px')
-        .style('fill', '#334155')
-        .text(org.organization.length > 18 ? org.organization.slice(0,16)+'…' : org.organization);
-    });
-
-    // Fellow travelers in the same orgs this year (smaller, lighter)
-    fellowTravelers.forEach((ft, ftIndex) => {
-      const ftOrgsThisYear = ft.orgsByYear[year] || [];
-      ftOrgsThisYear.forEach((org, i) => {
-        // Only show if they share an org with primary this year
-        const shares = primaryOrgsThisYear.some(po => po.organization === org.organization);
-        if (!shares) return;
-
-        const y = margin.top + 50 + (primaryOrgsThisYear.length * 78) + (ftIndex * 38) + (i * 38);
-
-        g.append('circle')
-          .attr('cx', 0)
-          .attr('cy', y)
-          .attr('r', 14)
-          .attr('fill', getColorForName(ft.fullname))
-          .attr('stroke', '#64748b')
-          .attr('stroke-width', 1)
-          .attr('opacity', 0.85);
-
-        g.append('text')
-          .attr('x', 0)
-          .attr('y', y + 28)
-          .attr('text-anchor', 'middle')
-          .style('font-size', '9px')
-          .style('fill', '#475569')
-          .text(ft.fullname.length > 14 ? ft.fullname.slice(0,12)+'…' : ft.fullname);
-      });
-    });
   });
 
-  // Prominent arcs for the primary person's path
+  // Prominent arcs for primary person's path (above the packed groups)
   if (years.length > 1) {
+    const arcY = margin.top + 35;
     for (let i = 0; i < years.length - 1; i++) {
       const y1 = years[i];
       const y2 = years[i + 1];
@@ -232,28 +245,27 @@ function renderLongMarchViz(peopleList) {
       const x2 = xScale(y2);
 
       const path = d3.path();
-      path.moveTo(x1, margin.top + 76);
+      path.moveTo(x1, arcY);
       const midX = (x1 + x2) / 2;
-      path.quadraticCurveTo(midX, margin.top + 20, x2, margin.top + 76);
+      path.quadraticCurveTo(midX, arcY - 65, x2, arcY);
 
       svg.append('path')
         .attr('d', path.toString())
         .attr('fill', 'none')
         .attr('stroke', '#f59e0b')
-        .attr('stroke-width', 3)
-        .attr('stroke-opacity', 0.85)
-        .attr('stroke-dasharray', '6 3');
+        .attr('stroke-width', 3.5)
+        .attr('stroke-opacity', 0.9)
+        .attr('stroke-dasharray', '7 3');
     }
   }
 
   // Legend
-  const legendY = height - 28;
   svg.append('text')
     .attr('x', margin.left)
-    .attr('y', legendY)
+    .attr('y', height - 22)
     .style('font-size', '11px')
     .style('fill', '#64748b')
-    .text('Large colored circles = primary person’s organizations • Smaller circles = fellow travelers in same org/year • Dashed arcs = primary person’s movement');
+    .text('Packed circles per year (larger = primary person) • Rainbow colors by name • Dashed arcs = primary person movement • Smaller circles = fellow travelers in same org/year');
 }
 
 // Boot
