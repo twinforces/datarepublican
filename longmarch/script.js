@@ -1,5 +1,5 @@
 // longmarch/script.js
-import { ingestTSV, searchPeople, getSummary } from './model.js';
+import { ingestTSV, searchPeople, getSummary, people as allPeople } from './model.js';
 
 // Sample data (replace with real .tsv.gz later)
 const SAMPLE_TSV = `lastname	firstname	fullname	organization	title	year
@@ -34,7 +34,8 @@ function doSearch(lastInput, firstInput, summaryDiv) {
 
   if (!last) {
     summaryDiv.classList.add('hidden');
-    document.getElementById('viz-placeholder').classList.remove('hidden');
+    const ph = document.getElementById('viz-placeholder');
+    if (ph) ph.classList.remove('hidden');
     return;
   }
 
@@ -47,45 +48,87 @@ function doSearch(lastInput, firstInput, summaryDiv) {
   `;
   summaryDiv.classList.remove('hidden');
 
-  // Wire viz button
   const vizBtn = document.getElementById('vizBtn');
   if (vizBtn) {
     vizBtn.onclick = () => renderLongMarchViz(matches);
   }
 
-  // Auto-render if exactly one strong match (common case)
   if (matches.length === 1) {
     renderLongMarchViz(matches);
   }
 }
 
+// Stable rainbow-style color for a string (org or person name)
+// Steals the spirit of browse/models.js getColorForEIN + interpolateBand
+function getColorForName(str) {
+  if (!str) return '#64748b';
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const t = (Math.abs(hash) % 1000) / 1000;
+  // Use d3's rainbow for nice distinct colors (similar to browse's interpolateRainbow usage)
+  return d3.interpolateRainbow(t);
+}
+
 // =====================================================
-// D3 Visual Layer - Long March Timeline + Arcs
+// D3 Visual Layer - Long March with Fellow Travelers
 // =====================================================
 
 function renderLongMarchViz(peopleList) {
   const container = document.getElementById('viz-container');
   const placeholder = document.getElementById('viz-placeholder');
   if (placeholder) placeholder.classList.add('hidden');
-
-  container.innerHTML = ''; // clear previous
+  container.innerHTML = '';
 
   if (!peopleList || peopleList.length === 0) {
     container.innerHTML = '<p class="text-center text-gray-500 p-8">No people to visualize.</p>';
     return;
   }
 
-  // For first sketch: focus on the first (or only) person
-  const person = peopleList[0];
-  const years = person.sortedYears;
+  const primary = peopleList[0];
+  const years = primary.sortedYears;
   if (years.length === 0) {
-    container.innerHTML = '<p class="text-center text-gray-500 p-8">No year data for this person.</p>';
+    container.innerHTML = '<p class="text-center text-gray-500 p-8">No year data.</p>';
     return;
   }
 
-  const width = Math.max(container.clientWidth, 900);
-  const height = 480;
-  const margin = { top: 40, right: 40, bottom: 60, left: 60 };
+  // === Two-pass fellow traveler logic ===
+  // Pass 1: collect all orgs the primary person was in
+  const primaryOrgs = new Set();
+  Object.values(primary.orgsByYear).forEach(orgList => {
+    orgList.forEach(o => primaryOrgs.add(o.organization));
+  });
+
+  // Pass 2: find other people who were in any of those orgs in overlapping years
+  const fellowTravelers = [];
+  const seen = new Set([primary.fullname.toLowerCase()]);
+
+  for (const p of allPeople) {
+    if (seen.has(p.fullname.toLowerCase())) continue;
+
+    let sharesOrgAndYear = false;
+    for (const [year, orgList] of Object.entries(p.orgsByYear)) {
+      if (!primary.orgsByYear[year]) continue;
+      const primaryOrgsThisYear = new Set(primary.orgsByYear[year].map(o => o.organization));
+      for (const o of orgList) {
+        if (primaryOrgsThisYear.has(o.organization)) {
+          sharesOrgAndYear = true;
+          break;
+        }
+      }
+      if (sharesOrgAndYear) break;
+    }
+
+    if (sharesOrgAndYear) {
+      fellowTravelers.push(p);
+      seen.add(p.fullname.toLowerCase());
+    }
+  }
+
+  const width = Math.max(container.clientWidth, 980);
+  const height = 520;
+  const margin = { top: 50, right: 40, bottom: 70, left: 60 };
 
   const svg = d3.select(container)
     .append('svg')
@@ -93,121 +136,124 @@ function renderLongMarchViz(peopleList) {
     .attr('height', height)
     .attr('class', 'longmarch-viz');
 
-  // Year scale (horizontal timeline)
   const xScale = d3.scalePoint()
     .domain(years)
     .range([margin.left, width - margin.right])
-    .padding(0.5);
+    .padding(0.6);
 
-  // Draw timeline axis
+  // Timeline axis
   svg.append('g')
     .attr('transform', `translate(0, ${height - margin.bottom})`)
     .call(d3.axisBottom(xScale).tickFormat(d => d))
-    .selectAll('text')
-    .style('font-size', '12px');
+    .selectAll('text').style('font-size', '12px');
 
   // Title
   svg.append('text')
     .attr('x', width / 2)
-    .attr('y', 24)
+    .attr('y', 26)
     .attr('text-anchor', 'middle')
-    .style('font-size', '16px')
+    .style('font-size', '15px')
     .style('font-weight', '600')
-    .text(`${person.fullname} — Long March Through Institutions`);
+    .text(`${primary.fullname} — Long March${fellowTravelers.length ? ` + ${fellowTravelers.length} fellow traveler(s)` : ''}`);
 
-  // For each year, draw org circles (simple vertical stack for sketch; packing comes next)
-  const yearGroups = svg.selectAll('.year-group')
-    .data(years)
-    .enter()
-    .append('g')
-    .attr('class', 'year-group')
-    .attr('transform', d => `translate(${xScale(d)}, 0)`);
+  // Render each year column
+  years.forEach(year => {
+    const x = xScale(year);
+    const g = svg.append('g').attr('transform', `translate(${x}, 0)`);
 
-  yearGroups.each(function(year) {
-    const orgs = person.orgsByYear[year] || [];
-    const g = d3.select(this);
+    // Year label
+    g.append('text')
+      .attr('x', 0)
+      .attr('y', margin.top - 10)
+      .attr('text-anchor', 'middle')
+      .style('font-size', '13px')
+      .style('font-weight', '600')
+      .text(year);
 
-    // Vertical position for circles in this year column
-    const yStart = margin.top + 60;
-    const spacing = 70;
+    // Primary person's orgs this year (larger, prominent)
+    const primaryOrgsThisYear = primary.orgsByYear[year] || [];
+    primaryOrgsThisYear.forEach((org, i) => {
+      const y = margin.top + 50 + (i * 78);
 
-    orgs.forEach((org, i) => {
-      const y = yStart + (i * spacing);
-
-      // Circle for the org
       g.append('circle')
         .attr('cx', 0)
         .attr('cy', y)
-        .attr('r', 22)
-        .attr('fill', '#3b82f6')
-        .attr('stroke', '#1e40af')
-        .attr('stroke-width', 2)
-        .style('cursor', 'pointer')
-        .on('mouseover', function() {
-          d3.select(this).attr('fill', '#60a5fa');
-        })
-        .on('mouseout', function() {
-          d3.select(this).attr('fill', '#3b82f6');
-        });
+        .attr('r', 26)
+        .attr('fill', getColorForName(org.organization))
+        .attr('stroke', '#1e2937')
+        .attr('stroke-width', 2.5)
+        .style('cursor', 'pointer');
 
-      // Org name label
       g.append('text')
         .attr('x', 0)
-        .attr('y', y + 38)
+        .attr('y', y + 42)
         .attr('text-anchor', 'middle')
-        .style('font-size', '11px')
-        .style('fill', '#374151')
-        .text(org.organization.length > 22 ? org.organization.slice(0, 20) + '…' : org.organization);
+        .style('font-size', '10px')
+        .style('fill', '#334155')
+        .text(org.organization.length > 18 ? org.organization.slice(0,16)+'…' : org.organization);
+    });
 
-      // Year label above
-      if (i === 0) {
+    // Fellow travelers in the same orgs this year (smaller, lighter)
+    fellowTravelers.forEach((ft, ftIndex) => {
+      const ftOrgsThisYear = ft.orgsByYear[year] || [];
+      ftOrgsThisYear.forEach((org, i) => {
+        // Only show if they share an org with primary this year
+        const shares = primaryOrgsThisYear.some(po => po.organization === org.organization);
+        if (!shares) return;
+
+        const y = margin.top + 50 + (primaryOrgsThisYear.length * 78) + (ftIndex * 38) + (i * 38);
+
+        g.append('circle')
+          .attr('cx', 0)
+          .attr('cy', y)
+          .attr('r', 14)
+          .attr('fill', getColorForName(ft.fullname))
+          .attr('stroke', '#64748b')
+          .attr('stroke-width', 1)
+          .attr('opacity', 0.85);
+
         g.append('text')
           .attr('x', 0)
-          .attr('y', margin.top + 30)
+          .attr('y', y + 28)
           .attr('text-anchor', 'middle')
-          .style('font-size', '13px')
-          .style('font-weight', '600')
-          .text(year);
-      }
+          .style('font-size', '9px')
+          .style('fill', '#475569')
+          .text(ft.fullname.length > 14 ? ft.fullname.slice(0,12)+'…' : ft.fullname);
+      });
     });
   });
 
-  // Draw curved arcs connecting the person's path across years
+  // Prominent arcs for the primary person's path
   if (years.length > 1) {
     for (let i = 0; i < years.length - 1; i++) {
       const y1 = years[i];
       const y2 = years[i + 1];
-
       const x1 = xScale(y1);
       const x2 = xScale(y2);
 
-      // Simple vertical center for first org in each year (can be improved with better positioning)
-      const yPos1 = margin.top + 60;
-      const yPos2 = margin.top + 60;
-
-      // Curved path (arc-like)
       const path = d3.path();
-      path.moveTo(x1, yPos1);
+      path.moveTo(x1, margin.top + 76);
       const midX = (x1 + x2) / 2;
-      path.quadraticCurveTo(midX, yPos1 - 80, x2, yPos2);
+      path.quadraticCurveTo(midX, margin.top + 20, x2, margin.top + 76);
 
       svg.append('path')
         .attr('d', path.toString())
         .attr('fill', 'none')
         .attr('stroke', '#f59e0b')
-        .attr('stroke-width', 2.5)
-        .attr('stroke-opacity', 0.7)
-        .attr('stroke-dasharray', '4 2');
+        .attr('stroke-width', 3)
+        .attr('stroke-opacity', 0.85)
+        .attr('stroke-dasharray', '6 3');
     }
   }
 
   // Legend
-  svg.append('g')
-    .attr('transform', `translate(${margin.left}, ${height - 25})`)
-    .append('text')
+  const legendY = height - 28;
+  svg.append('text')
+    .attr('x', margin.left)
+    .attr('y', legendY)
     .style('font-size', '11px')
-    .style('fill', '#6b7280')
-    .text('Orange dashed arcs = person\'s movement between institutions over time');
+    .style('fill', '#64748b')
+    .text('Large colored circles = primary person’s organizations • Smaller circles = fellow travelers in same org/year • Dashed arcs = primary person’s movement');
 }
 
 // Boot
