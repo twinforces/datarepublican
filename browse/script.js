@@ -241,7 +241,6 @@ function renderPopup() {
 // show and hide controls implementation
 window.collapseControls = function () {
   document.documentElement.style.setProperty("--controls-shown", "none");
-  document.documentElement.style.setProperty("--controls-shown-grid", "none");
   document.documentElement.style.setProperty("--controls-hidden", "block");
   console.log("Controls shown");
 };
@@ -249,7 +248,7 @@ window.collapseControls = function () {
 window.expandControls = function () {
   document.documentElement.style.setProperty("--controls-shown", "block");
   document.documentElement.style.setProperty("--controls-hidden", "none");
-  console.log("Controls hidden");
+  console.log("controls hidden");
 };
 // Show Presets and Hide Presets implementations
 window.showControls = function () {
@@ -1399,8 +1398,6 @@ function flashNode(dataId) {
     .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
     .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
     .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
-    .fadeTo(200, 1.0) // Fade back to 100% opacity in 200ms
-    .fadeTo(200, 0.3) // Fade to 30% opacity in 200ms
     .fadeTo(200, 1.0); // Fade back to 100% opacity in 200ms
 }
 
@@ -1891,12 +1888,12 @@ function renderFocusedSankey(
   );
 
   const post = encodeURIComponent(
-    `Hey, @twinforces @datarepublican, Check this out because:`
+    `Hey, @GrumpyTechBro @datarepublican, Check this out because:`
   );
   const url = encodeURIComponent(window.location.href);
   const hashtags = encodeURIComponent("DRBadNGOs");
   $("#PostBox").html(
-    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&hashtags=${hashtags}&via=twinforces" 
+    `<a href="https://x.com/intent/tweet?url=${url}&text=${post}&hashtags=${hashtags}&via=GrumpyTechBro" 
     target="_blank"  
     title="Share on X" 
     class="x-share-button">&#x1D54F;</a>`
