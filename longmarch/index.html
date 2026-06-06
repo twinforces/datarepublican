@@ -17,10 +17,16 @@ title: Long March Through the Institutions
     <!-- Populated by script -->
   </div>
 
-  <div id="viz-container" class="border rounded bg-white min-h-[400px] p-4">
-    <!-- D3 timeline + packed circles + arcs will go here -->
-    <p class="text-center text-gray-500">Visualization coming soon. Search above to see summary results.</p>
+  <div id="viz-container" class="border rounded bg-white min-h-[520px] p-4 relative overflow-auto">
+    <!-- D3 visualization injected here by script.js -->
+    <p id="viz-placeholder" class="text-center text-gray-500 pt-8">Search above to render the long march visualization.</p>
+  </div>
+
+  <div class="mt-2 text-xs text-gray-500">
+    Timeline shows years active. Circles = organizations in that year. Curved arcs connect the same person's path across institutions.
   </div>
 </div>
 
+<!-- D3 v7 (used across the site) -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <script type="module" src="./script.js"></script>
