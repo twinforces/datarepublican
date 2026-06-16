@@ -1,9 +1,14 @@
 # 990tools Session Bootstrap
 
-**Last updated:** 2026-05 (Pharma bucket completion checkpoint)
+**Last updated:** 2026-06 (EINless pipeline integration milestone)
 
-## Current Focus
-We are doing targeted Splink discovery on coherent name categories instead of one giant run on the full master list. This is the "hybrid of a hybrid" approach.
+> **Note:** For the current phase, prefer `issue_bootstrap.md` — it is authoritative for einless + pipeline work. This file retains the 2026-05 category/Splink context.
+
+## Current Focus (June 2026)
+EINless phonebook integration is complete in the main pipeline (`--step einless`). Production run backfilled 3.7M grants. Next: continue from `--start-step match` and wire hard-tail einless learnings into address_matcher / grant_match / generate_name_rules.
+
+## Previous Focus (May 2026)
+We were doing targeted Splink discovery on coherent name categories instead of one giant run on the full master list. This is the "hybrid of a hybrid" approach.
 
 Major recent work:
 - Created `category_splitter.py` + supporting tools (church_major_resolver, extract_pharma_no_eins, etc.)

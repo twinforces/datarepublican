@@ -5,6 +5,20 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06 (EINless Pipeline Integration Milestone)
+
+### EINless Step in Main Pipeline (Option C)
+- Added `einless_processor.py` — self-contained step that exports einless input TSVs from DuckDB, runs phonebook cream + DAF resolution, and writes `Grants.recipient_ein_backfilled` (raw `recipient_ein` untouched).
+- Wired into `irs990processor.py` as step `einless` (after `address`, before `match`). CLI `--step` / `--start-step` / `--stop-step` updated.
+- Exported TSVs (written to 990tools root for offline tooling): `distinct_grantee_names.tsv`, `distinct_grantee_names_clean.tsv`, `pure_no_ein_by_dollars.tsv`, high-value slices, `bmf_analysis.tsv`, `ein_name_variants.tsv`.
+- Production run on local DB (~15 min): 468,955 names resolved → 3,697,976 grant rows backfilled ($110B); 190,141 names / 1.7M grants still unresolved (hard tail).
+- Added `geolocate1_processor.py` and moved `geolocate1` to after full `geolocate` (archive cache + `loose_colocator` population).
+- `schema_duckdb.sql`: documented `loose_colocator` on Charities/Grants and processing columns on Grants (`recipient_ein_backfilled`, name normalization columns).
+
+### Hygiene & Process
+- Updated `docs/RECENTGOALS.md`, `docs/pipeline_overview.md`, `docs/how_to_run_tools.md`, `issue_bootstrap.md` for the new checkpoint.
+- Offline einless hygiene artifacts remain in `einless/` (option A tie-off); main pipeline now owns the production backfill path.
+
 ## [Unreleased] - 2026-05 (Category + TUI Success Arc)
 
 ### Major New Tools & Workflow

@@ -81,7 +81,9 @@ CREATE TABLE IF NOT EXISTS Charities (
     xml_name VARCHAR UNIQUE,
     -- XML filename reference
     colocator VARCHAR,
-    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
+    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code (tight, ~10-35ft / same building or PO)
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator (same town/metro) for Splink blocking and name matching when recipient_ein is missing
     grift DOUBLE,
     -- Grift amount
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -100,15 +102,25 @@ CREATE TABLE IF NOT EXISTS Grants (
     -- Precomputed soundex for fuzzy matching
     -- Filer name
     recipient_ein VARCHAR(9),
-    -- Grantee EIN (may be null for foreign)
+    -- Grantee EIN from 990 XML (source of truth; never overwritten by processing)
+    recipient_ein_backfilled VARCHAR(9),
+    -- Inferred EIN (einless phonebook, BMF pre-backfill, address/name match)
+    grantee_name_bmf VARCHAR,
+    -- Official BMF name when grant has or matches an EIN
+    grantee_name_geo VARCHAR,
+    -- Geo-aware normalized name (name rules)
+    grantee_name_conc VARCHAR,
+    -- Fully consolidated canonical name
     grant_amt DOUBLE NOT NULL,
     -- Grant amount
     tax_year INTEGER NOT NULL,
     -- Tax year
     colocator VARCHAR,
-    -- Grantee colocator data
+    -- Grantee colocator data (tight)
     filer_colocator VARCHAR,
-    -- filter colocator data, sus if they match
+    -- Filer colocator data
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator (same town) for Splink + grant matching when recipient_ein missing
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein, tax_year) REFERENCES Charities(ein, tax_year) -- DuckDB doesn't support CASCADE
 );
@@ -164,7 +176,9 @@ CREATE TABLE IF NOT EXISTS Addresses (
     longitude DOUBLE,
     -- Longitude coordinate
     colocator VARCHAR,
-    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
+    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code (tight)
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator for town-level blocking and matching
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- FOREIGN KEY (geocoding_id) REFERENCES Geocoding(geocoding_id) -- DuckDB doesn't support SET NULL
 );
 -- Geocoding table - Cached geocoding results
@@ -253,7 +267,9 @@ CREATE TABLE IF NOT EXISTS Backfill (
     name VARCHAR NOT NULL,
     -- Organization name
     colocator VARCHAR,
-    -- Colocator data
+    -- Colocator data (tight)
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator for town-level matching
     source VARCHAR DEFAULT 'xml',
     -- Source of backfill data
     zip_code VARCHAR,
@@ -308,7 +324,9 @@ CREATE TABLE IF NOT EXISTS Officers (
     photo_url VARCHAR,
     -- URL to officer photo from Google Knowledge Graph API
     colocator VARCHAR,
-    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code
+    -- Colocator data: LL:lat:lon, PO:box:zip, FA:country_code (tight)
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator for town-level blocking
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (charity_id) REFERENCES Charities(charity_id) -- DuckDB doesn't support CASCADE
 );
@@ -328,7 +346,9 @@ CREATE TABLE IF NOT EXISTS Contractors (
     tax_year INTEGER NOT NULL,
     -- Tax year
     colocator VARCHAR,
-    -- Colocator data
+    -- Colocator data (tight)
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator for town-level matching
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein) REFERENCES Charities(ein) -- DuckDB doesn't support CASCADE
 );
@@ -348,7 +368,9 @@ CREATE TABLE IF NOT EXISTS PoliticalContributions (
     tax_year INTEGER NOT NULL,
     -- Tax year
     colocator VARCHAR,
-    -- Colocator data
+    -- Colocator data (tight)
+    loose_colocator VARCHAR,
+    -- Coarse 0.5° grid colocator for town-level matching
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- FOREIGN KEY (filer_ein) REFERENCES Charities(ein) -- DuckDB doesn't support CASCADE
 );
@@ -357,6 +379,18 @@ CREATE TABLE IF NOT EXISTS _meta_clustering (
     clustered_column VARCHAR,
     clustered_at TIMESTAMP,
     PRIMARY KEY (table_name)
+);
+
+-- AuthoritativeEin table - Canonical name -> EIN mappings with colocator support
+-- Used for high-quality name-to-EIN resolution during grant matching and Splink seed generation.
+-- Populated by grant_match_processor.build_authoritative_ein_table()
+CREATE TABLE IF NOT EXISTS AuthoritativeEin (
+    name            VARCHAR NOT NULL,
+    colocator       VARCHAR,           -- tight colocator or 'NULL' for global rows
+    loose_colocator VARCHAR,           -- 0.5° coarse grid or 'NULL' for global rows
+    ein             VARCHAR(9) NOT NULL,
+    count           INTEGER,
+    PRIMARY KEY (name, colocator, loose_colocator)
 );
 -- Indexes for performance optimization
 -- Charities indexes
@@ -371,6 +405,7 @@ CREATE INDEX IF NOT EXISTS idx_grants_recipient_ein ON Grants(recipient_ein);
 CREATE INDEX IF NOT EXISTS idx_grants_tax_year ON Grants(tax_year);
 CREATE INDEX IF NOT EXISTS idx_grants_colocator ON Grants(colocator);
 CREATE INDEX IF NOT EXISTS idx_grants_filer_colocator ON Grants(filer_colocator);
+CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator);
 --CREATE INDEX IF NOT EXISTS idx_grants_filer_ein_year ON Grants(filer_ein, tax_year);
 -- Contributions indexes
 CREATE INDEX IF NOT EXISTS idx_contributions_filer_ein ON Contributions(filer_ein);
@@ -385,6 +420,7 @@ CREATE INDEX IF NOT EXISTS idx_addresses_master_id ON Addresses(master_id);
 CREATE INDEX IF NOT EXISTS idx_addresses_canonical ON Addresses(canonical_address);
 CREATE INDEX IF NOT EXISTS idx_dedup_canon_groups ON Addresses (canonical_address, address_id);
 create index IF NOT EXISTS idx_addresses_colocator on Addresses (colocator);
+CREATE INDEX IF NOT EXISTS idx_addresses_loose_colocator ON Addresses(loose_colocator);
 CREATE INDEX IF NOT EXISTS idx_addresses_canonical_covering ON Addresses(
     canonical_address,
     address_id,
@@ -405,6 +441,8 @@ CREATE INDEX IF NOT EXISTS idx_xmlfiles_processed ON XmlFiles(processed);
 -- Backfill indexes
 CREATE UNIQUE INDEX IF NOT EXISTS idx_backfill_recipient_ein ON Backfill (recipient_ein);
 CREATE INDEX IF NOT EXISTS idx_backfill_zip_code ON Backfill(zip_code);
+CREATE INDEX IF NOT EXISTS idx_backfill_colocator ON Backfill(colocator);
+CREATE INDEX IF NOT EXISTS idx_backfill_loose_colocator ON Backfill(loose_colocator);
 -- PipelineProgress indexes
 CREATE INDEX IF NOT EXISTS idx_pipeline_step_name ON PipelineProgress(step_name);
 CREATE INDEX IF NOT EXISTS idx_pipeline_status ON PipelineProgress(status);
@@ -416,15 +454,22 @@ CREATE INDEX IF NOT EXISTS idx_officers_master_id ON Officers(master_id);
 CREATE INDEX IF NOT EXISTS idx_officers_name ON Officers(last_name, first_name);
 CREATE INDEX IF NOT EXISTS idx_officers_full_name ON Officers(full_name);
 CREATE INDEX IF NOT EXISTS idx_officers_colocator ON Officers(colocator);
+CREATE INDEX IF NOT EXISTS idx_officers_loose_colocator ON Officers(loose_colocator);
 -- Contractors indexes
 CREATE INDEX IF NOT EXISTS idx_contractors_filer_ein ON Contractors(filer_ein);
 CREATE INDEX IF NOT EXISTS idx_contractors_tax_year ON Contractors(tax_year);
+CREATE INDEX IF NOT EXISTS idx_contractors_loose_colocator ON Contractors(loose_colocator);
 -- PoliticalContributions indexes
 CREATE INDEX IF NOT EXISTS idx_political_filer_ein ON PoliticalContributions(filer_ein);
 CREATE INDEX IF NOT EXISTS idx_political_tax_year ON PoliticalContributions(tax_year);
+CREATE INDEX IF NOT EXISTS idx_political_loose_colocator ON PoliticalContributions(loose_colocator);
 -- Additional indexes for grant matching
 CREATE INDEX IF NOT EXISTS idx_grants_grant_id ON Grants(grant_id);
 CREATE INDEX IF NOT EXISTS idx_charities_colocator ON Charities(colocator);
+-- AuthoritativeEin indexes (critical for name matching + Splink)
+CREATE INDEX IF NOT EXISTS idx_authoritative_ein_name_colocator ON AuthoritativeEin(name, colocator);
+CREATE INDEX IF NOT EXISTS idx_authoritative_ein_name_loose ON AuthoritativeEin(name, loose_colocator);
+CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator);
 -- FEC Committees table
 CREATE TABLE IF NOT EXISTS fec_committees (
     id UUID DEFAULT uuidv7() PRIMARY KEY,

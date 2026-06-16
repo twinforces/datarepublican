@@ -59,6 +59,8 @@ from photo_processor import PhotoProcessor
 from extract_processor import ExtractProcessor
 from grant_match_processor import GrantMatchProcessor
 from backfill_charities_processor import BackfillCharitiesProcessor
+from geolocate1_processor import Geolocate1Processor
+from einless_processor import EinlessProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from queue_status_display import QueueStatusDisplay
@@ -158,6 +160,12 @@ class IRS990Processor(BaseProcessor):
         self.grant_match_processor = GrantMatchProcessor(self.db_ops)
         # Initialize backfill charities processor
         self.backfill_charities_processor = BackfillCharitiesProcessor(self.db_ops)
+        # Phonebook exact-core resolution for no-EIN grantees (before match/geolocate).
+        # TSV exports land in 990tools root for offline einless/rebuild tooling.
+        einless_tsv_dir = Path(__file__).resolve().parent
+        self.einless_processor = EinlessProcessor(self.db_ops, output_dir=einless_tsv_dir)
+        # Lightweight geolocate step (cache + loose colocator); runs after full geolocate.
+        self.geolocate1_processor = Geolocate1Processor(self.db_ops)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -667,6 +675,30 @@ class IRS990Processor(BaseProcessor):
             log_error(f"Address geocoding failed: {e}", exc_info=True)
             return 0
 
+    def run_einless(self):
+        """Phonebook exact-core resolution; sets recipient_ein_backfilled (after address, before match)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before einless")
+            return 0
+        log_info("Running einless phonebook resolution for no-EIN grantees")
+        stats = self.einless_processor.run()
+        self.processed_steps += 1
+        return stats.get("grants_updated", 0)
+
+    def run_geolocate1(self):
+        """Lightweight geolocate1 step (runs after geolocate).
+
+        Loads geocode archive cache + computes loose_colocator (0.5° grid).
+        Future: FEC/Treasury blacklist same-building sus detection.
+        """
+        if self.exit_processing:
+            log_info("Shutdown requested before geolocate1")
+            return 0
+        log_info("Running geolocate1 (archive cache + loose colocator population)")
+        result = self.geolocate1_processor.run(max_files=self.max_files)
+        self.processed_steps += 1
+        return result
+
     def process_officer_photos(self):
         """Process officer photos using Google Knowledge Graph API (step 8)"""
         if self.exit_processing:
@@ -765,14 +797,17 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml","address", "geolocate",
-                                           "photos", "match", "grant_match", "backfill", "ratios","percentiles", "export"],
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml","address", "einless", "match",
+                                           "geolocate", "geolocate1", "photos", "grant_match", "backfill",
+                                           "ratios","percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml","address", "geolocate",
-                                                  "photos", "match", "grant_match", "backfill", "ratios","percentiles", "export"],
+    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml","address", "einless", "match",
+                                                  "geolocate", "geolocate1", "photos", "grant_match", "backfill",
+                                                  "ratios","percentiles", "export"],
                            help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "address", "geolocate",
-                                                 "photos", "match", "grant_match", "backfill", "ratios", "percentiles", "export"],
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "address", "einless", "match",
+                                                 "geolocate", "geolocate1", "photos", "grant_match",
+                                                 "backfill", "ratios", "percentiles", "export"],
                            help="Stopping step for processing")
     parser.add_argument("--progress", choices=["files", "bytes"], default="files",
                            help="Progress tracking type (default: files)")
@@ -786,8 +821,8 @@ def main():
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["irsfetch", "zip", "bmf","xml", "address", "match","geolocate",
-             "photos",  "grant_match", "backfill", "ratios","percentiles", "export"]
+    steps = ["irsfetch", "zip", "bmf", "xml", "address", "einless", "match", "geolocate",
+             "geolocate1", "photos", "grant_match", "backfill", "ratios", "percentiles", "export"]
 
     # Define step actions
     step_actions = {
@@ -795,9 +830,11 @@ def main():
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
         "xml": lambda: processor.process_xml_files(),
         "bmf": lambda: processor.process_bmf_files(),
-        "address": lambda: processor.deduplicate_addresses(),  # Deduplicate addresses and create master-child relationships
+        "address": lambda: processor.deduplicate_addresses(),
+        "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),
         "geolocate": lambda: processor.geolocate_addresses(),
+        "geolocate1": lambda: processor.run_geolocate1(),
         "grant_match": lambda: processor.grant_match_processor.match_grants_by_address(),
         "photos": lambda: processor.process_officer_photos(),
         "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),

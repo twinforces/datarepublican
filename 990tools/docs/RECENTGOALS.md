@@ -4,6 +4,33 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-06: EINless Pipeline Integration Milestone
+
+**What:** Integrated the offline einless phonebook hygiene into the main `irs990processor.py` pipeline as step `einless` (option C). Added `einless_processor.py` (self-contained: DuckDB TSV export + phonebook/DAF resolution) and `geolocate1_processor.py` (moved after full `geolocate`). Production-validated on local `irs990.duckdb`.
+
+**Why:** ~89% of no-EIN grantee names resolve via exact-core phonebook cream. Wiring this into the main pipeline means every rebuild gets phonebook backfills before `match`/`address_matcher`, without a separate manual hygiene pass. Raw filed data stays in `recipient_ein`; inferred matches go to `recipient_ein_backfilled` (same separation as BMF pre-backfill in `address_matcher`).
+
+**How:**
+- New step order: `… → address → einless → match → geolocate → geolocate1 → …`
+- `einless_processor.export_input_tsvs()` — DuckDB COPY for all einless toolchain inputs (SQL from `docs/pipeline_overview.md` + pure-no-EIN logic).
+- `einless_processor.run()` — phonebook + DAF → `recipient_ein_backfilled` + `Backfill` (`einless_phonebook` / `einless_daf` sources).
+- Ran `python -u irs990processor.py --step einless --nostats` (nohup, ~15 min, completed cleanly).
+- Verified: 0 mutations to raw `recipient_ein`; 468,955 names / 3.7M grants backfilled this run; hard tail ~190k names remains for match/rules integration.
+
+**Key artifacts:**
+- `einless_processor.py`, `geolocate1_processor.py`, updated `irs990processor.py`, `schema_duckdb.sql`
+- Offline hygiene still in `einless/` (option A); `issue_bootstrap.md` updated for next phase
+- Production log: `einless_step_20260615_1349.log`
+
+**Success signal:** User declared milestone reached; requested project hygiene + commit checkpoint.
+
+**Next immediate goals:**
+- Continue pipeline from `--start-step match` on production DB.
+- Deepen integration: einless statuses/splits into `address_matcher`, `grant_match_processor`, `generate_name_rules.py` (hooks already stubbed).
+- Optional: FEC/Treasury blacklist in reworked `geolocate1`.
+
+---
+
 ## 2026-05: University/College Family Siding — Automatic in Generator + Hygiene + Coverage Measurement
 
 **What:** Made university/college family detection + real-EIN siding automatic inside the repeatable `generate_name_rules.py` (using the BMF data it already loads from `bmf_analysis.tsv`). Created supporting tools for the "pre-matched siding" pattern and proper coverage math that excludes unmappables. Performed major project hygiene (archiving experimentals, cleaning root, updating docs).
