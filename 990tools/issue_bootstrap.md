@@ -2,7 +2,7 @@
 
 **Purpose**: Fast, low-token restart for a fresh session after CLI crashes (127/137 kills) or context resets.
 
-**Last major work**: June 2026 — **einless integrated into main pipeline** (`irs990processor.py --step einless`). Production run validated.
+**Last major work**: June 2026 — **FEC + Medicare steps** wired after `xml`; FEC 2024 production-validated (51.7M rows). Medicare test pending/in progress.
 
 ## Current State (Pipeline Integration Complete)
 
@@ -23,10 +23,10 @@
 ## Pipeline Step Order
 
 ```
-irsfetch → zip → bmf → xml → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
-**Resume from here:** `--start-step match`
+**Resume from here:** `--start-step medicare` (FEC 2024 complete) or `--start-step match` after medicare/address/einless
 
 ## Core Philosophy
 - Phonebook/cream (exact sig-core after guards + cleaning) is the hero (~89%).

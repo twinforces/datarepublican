@@ -5,6 +5,18 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06 (FEC + Medicare Pipeline Steps)
+
+### FEC Step (`--step fec`)
+- Added `fec_processor.py` — download FEC bulk zips, fix pipe-delimited rows, stream-promote to `fec_*` tables + `Addresses` via model `build_address()` factories.
+- Wired into `irs990processor.py` after `xml`; `FEC_CYCLES` env for cycle subset (e.g. `FEC_CYCLES=2024`).
+- Production-validated 2024 cycle on `/Volumes/Data/final/irs990.duckdb` (~51.7M FEC rows across 5 file types).
+- Fixes: Python CSV streaming (OOM on DuckDB `read_csv`+sort), MMDDYYYY/MM/DD/YYYY date parsing, row-count resume, periodic CHECKPOINT during bulk promote.
+
+### Medicare Step (`--step medicare`) — in progress
+- `medicare_processor.py`: NPPES discovery (CMS NPI_Files.html), Medicaid spending Parquet (opendata.hhs.gov), NPPES join for billing/servicing provider names.
+- Schema: `medicare_providers`, `medicare_provider_spending`, code lookup tables.
+
 ## [Unreleased] - 2026-06 (EINless Pipeline Integration Milestone)
 
 ### EINless Step in Main Pipeline (Option C)

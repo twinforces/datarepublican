@@ -4,6 +4,22 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-06: FEC Step Production Validation (2024 cycle)
+
+**What:** Production-validated `--step fec` on `/Volumes/Data/final/irs990.duckdb` for `FEC_CYCLES=2024`. Fixed OOM (Python CSV streaming vs DuckDB `read_csv`+`ORDER BY`), MMDDYYYY + MM/DD/YYYY date parsing, row-count resume across interrupted runs, and periodic CHECKPOINT during promote.
+
+**Why:** FEC bulk data is huge (29M individual contributions alone). DuckDB full-file sorts exhausted 5.5 GiB RAM; streaming + resume lets the step survive multi-hour runs and agent restarts without re-ingesting completed tables.
+
+**How:**
+- `fec_processor.py`: `csv.DictReader` streaming promote, `_parse_fec_date()`, `_existing_cycle_rows()` resume skip, `PROMOTE_BATCH_SIZE=15_000`, checkpoint every 10 batches.
+- Model address factories (`fec_*` models) + `bulk_insert` (no raw SQL address inserts).
+- Production counts (report_year=2024): committees 6,980; individual_contributions 29,104,378; committee_transactions 18,667,435; candidate_spendings 703,597; operating_expenditures 2,249,158.
+- Log: `fec_step_20260617_0635.log`
+
+**Next:** Run `--step medicare`; hygiene commit at FEC milestone; then medicare hygiene on success.
+
+---
+
 ## 2026-06: EINless Pipeline Integration Milestone
 
 **What:** Integrated the offline einless phonebook hygiene into the main `irs990processor.py` pipeline as step `einless` (option C). Added `einless_processor.py` (self-contained: DuckDB TSV export + phonebook/DAF resolution) and `geolocate1_processor.py` (moved after full `geolocate`). Production-validated on local `irs990.duckdb`.

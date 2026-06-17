@@ -19,6 +19,13 @@ from .geocoding import Geocoding
 from .backfill import Backfill
 from .pipeline_progress import PipelineProgress
 from .authoritative_ein import AuthoritativeEin
+from .irsbmf import IrsBmf
+from .fec_committee import FecCommittee
+from .fec_individual_contribution import FecIndividualContribution
+from .fec_committee_transaction import FecCommitteeTransaction
+from .fec_candidate_spending import FecCandidateSpending
+from .fec_operating_expenditure import FecOperatingExpenditure
+from .medicare_provider import MedicareProvider
 
 __all__ = [
     'Address',
@@ -33,5 +40,12 @@ __all__ = [
     'Geocoding',
     'Backfill',
     'PipelineProgress',
-    'AuthoritativeEin'
+    'IrsBmf',
+    'AuthoritativeEin',
+    'FecCommittee',
+    'FecIndividualContribution',
+    'FecCommitteeTransaction',
+    'FecCandidateSpending',
+    'FecOperatingExpenditure',
+    'MedicareProvider',
 ]

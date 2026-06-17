@@ -564,6 +564,55 @@ ALTER TABLE fec_committees
 ADD COLUMN charity_ein VARCHAR(9);
 -- CREATE INDEX IF NOT EXISTS idx_fec_committees_charity_ein ON fec_committees(charity_ein);
 -- Similar for other tables if needed
+
+-- Medicare / Medicaid CMS provider data (NPPES + T-MSIS spending + code lookups)
+CREATE TABLE IF NOT EXISTS hcpcs_codes (
+    code VARCHAR PRIMARY KEY,
+    description VARCHAR,
+    long_description VARCHAR
+);
+CREATE TABLE IF NOT EXISTS noc_codes (
+    code VARCHAR PRIMARY KEY,
+    description VARCHAR
+);
+CREATE TABLE IF NOT EXISTS nppes_code_values (
+    field_name VARCHAR NOT NULL,
+    code VARCHAR NOT NULL,
+    description VARCHAR,
+    PRIMARY KEY (field_name, code)
+);
+CREATE TABLE IF NOT EXISTS medicare_providers (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    npi VARCHAR NOT NULL UNIQUE,
+    entity_type_code VARCHAR,
+    ein VARCHAR,
+    organization_name VARCHAR,
+    provider_last_name VARCHAR,
+    provider_first_name VARCHAR,
+    provider_middle_name VARCHAR,
+    provider_credential VARCHAR,
+    enumeration_date DATE,
+    last_update_date DATE,
+    is_sole_proprietor VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS medicare_provider_spending (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    billing_provider_npi VARCHAR NOT NULL,
+    billing_provider_name VARCHAR,
+    servicing_provider_npi VARCHAR,
+    servicing_provider_name VARCHAR,
+    hcpcs_code VARCHAR,
+    claim_from_month VARCHAR,
+    total_unique_beneficiaries BIGINT,
+    total_claims BIGINT,
+    total_paid DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_medicare_spending_billing_npi ON medicare_provider_spending(billing_provider_npi);
+CREATE INDEX IF NOT EXISTS idx_medicare_spending_hcpcs ON medicare_provider_spending(hcpcs_code);
+CREATE INDEX IF NOT EXISTS idx_medicare_providers_npi ON medicare_providers(npi);
+
 -- Zips table for geo-matching (loaded from compressed TSV in repo)
 CREATE TABLE IF NOT EXISTS Zips_raw (
     country_code VARCHAR,

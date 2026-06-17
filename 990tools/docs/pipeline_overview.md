@@ -54,8 +54,16 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
+
+**`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
+
+Run standalone: `FEC_CYCLES=2024 python -u irs990processor.py --step fec --nostats -v`
+
+**`medicare` step** (`medicare_processor.py`): CMS NPPES + Medicaid provider spending (Parquet from opendata.hhs.gov). Promotes to `medicare_providers`, `medicare_provider_spending`, code lookups. Data under `{final_dir}/cms_data/medicare/`.
+
+Run standalone: `python -u irs990processor.py --step medicare --nostats -v`
 
 **Data separation on Grants:**
 - `recipient_ein` — parsed from 990 XML (never overwritten)

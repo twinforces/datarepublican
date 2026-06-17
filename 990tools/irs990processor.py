@@ -61,9 +61,25 @@ from grant_match_processor import GrantMatchProcessor
 from backfill_charities_processor import BackfillCharitiesProcessor
 from geolocate1_processor import Geolocate1Processor
 from einless_processor import EinlessProcessor
+from fec_processor import FECProcessor
+from medicare_processor import MedicareProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from queue_status_display import QueueStatusDisplay
+
+
+def _parse_cycle_list(raw: str) -> Optional[List[int]]:
+    """Parse FEC_CYCLES env (e.g. '2024' or '2020,2022,2024'); empty → all default cycles."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    cycles: List[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            cycles.append(int(part))
+    return cycles or None
+
 
 # Parsing functions are now handled by base_parser factory method
 
@@ -166,6 +182,14 @@ class IRS990Processor(BaseProcessor):
         self.einless_processor = EinlessProcessor(self.db_ops, output_dir=einless_tsv_dir)
         # Lightweight geolocate step (cache + loose colocator); runs after full geolocate.
         self.geolocate1_processor = Geolocate1Processor(self.db_ops)
+        cms_data_dir = Path(self.final_dir) / "cms_data"
+        fec_cycles = _parse_cycle_list(os.environ.get("FEC_CYCLES", ""))
+        self.fec_processor = FECProcessor(
+            self.db_ops,
+            data_dir=cms_data_dir / "fec",
+            cycles=fec_cycles,
+        )
+        self.medicare_processor = MedicareProcessor(self.db_ops, data_dir=cms_data_dir / "medicare")
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -439,6 +463,26 @@ class IRS990Processor(BaseProcessor):
         self.processed_steps += 1
         return result
     
+    def run_fec(self):
+        """Download FEC bulk files, preprocess, ingest (after xml)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before FEC")
+            return 0
+        log_info("Running FEC bulk download + ingest")
+        stats = self.fec_processor.run()
+        self.processed_steps += 1
+        return stats.get("rows_promoted", 0)
+
+    def run_medicare(self):
+        """Download CMS NPPES + Medicaid spending, ingest (after xml)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before Medicare")
+            return 0
+        log_info("Running Medicare/CMS provider data download + ingest")
+        stats = self.medicare_processor.run()
+        self.processed_steps += 1
+        return stats.get("nppes_providers", 0) + stats.get("spending_rows", 0)
+
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
         log_info("Processing XML files and extracting data")
@@ -797,17 +841,17 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml","address", "einless", "match",
-                                           "geolocate", "geolocate1", "photos", "grant_match", "backfill",
-                                           "ratios","percentiles", "export"],
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml", "fec", "medicare",
+                                           "address", "einless", "match", "geolocate", "geolocate1", "photos",
+                                           "grant_match", "backfill", "ratios","percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml","address", "einless", "match",
-                                                  "geolocate", "geolocate1", "photos", "grant_match", "backfill",
-                                                  "ratios","percentiles", "export"],
+    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml", "fec", "medicare",
+                                                  "address", "einless", "match", "geolocate", "geolocate1",
+                                                  "photos", "grant_match", "backfill", "ratios","percentiles", "export"],
                            help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "address", "einless", "match",
-                                                 "geolocate", "geolocate1", "photos", "grant_match",
-                                                 "backfill", "ratios", "percentiles", "export"],
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "fec", "medicare",
+                                                 "address", "einless", "match", "geolocate", "geolocate1",
+                                                 "photos", "grant_match", "backfill", "ratios", "percentiles", "export"],
                            help="Stopping step for processing")
     parser.add_argument("--progress", choices=["files", "bytes"], default="files",
                            help="Progress tracking type (default: files)")
@@ -821,8 +865,9 @@ def main():
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["irsfetch", "zip", "bmf", "xml", "address", "einless", "match", "geolocate",
-             "geolocate1", "photos", "grant_match", "backfill", "ratios", "percentiles", "export"]
+    steps = ["irsfetch", "zip", "bmf", "xml", "fec", "medicare", "address", "einless", "match",
+             "geolocate", "geolocate1", "photos", "grant_match", "backfill", "ratios",
+             "percentiles", "export"]
 
     # Define step actions
     step_actions = {
@@ -830,6 +875,8 @@ def main():
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
         "xml": lambda: processor.process_xml_files(),
         "bmf": lambda: processor.process_bmf_files(),
+        "fec": lambda: processor.run_fec(),
+        "medicare": lambda: processor.run_medicare(),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),

@@ -733,7 +733,13 @@ class DatabaseOperations:
             'ZipFile': 'ZipFiles',
             'IrsBmf': 'IrsBmf',
             'PoliticalContribution': 'PoliticalContributions',
-            'Geocoding': 'Geocoding'
+            'Geocoding': 'Geocoding',
+            'FecCommittee': 'fec_committees',
+            'FecIndividualContribution': 'fec_individual_contributions',
+            'FecCommitteeTransaction': 'fec_committee_transactions',
+            'FecCandidateSpending': 'fec_candidate_spendings',
+            'FecOperatingExpenditure': 'fec_operating_expenditures',
+            'MedicareProvider': 'medicare_providers',
         }
 
         if class_name in table_name_map:
