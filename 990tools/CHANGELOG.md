@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wired into `irs990processor.py` after `medicare`, before `address`. Data under `{final_dir}/cms_data/treasury/`.
 - Production-validated on `/Volumes/Data/final/irs990.duckdb`: 19,073 entities, 49,607 names, 22,203 identifiers, 41,776 programs, 28,961 addresses.
 - Idempotent ingest via `.sdn_ingest.json` marker; `_ensure_sanctions_schema()` for existing production DBs.
+- Address hygiene: country-only locations use `FA:<iso>` colocator; skip blank/`undetermined` rows (27,347 addresses, 0 blank canonicals).
 
 ## [Unreleased] - 2026-06 (FEC + Medicare Pipeline Steps)
 

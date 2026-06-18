@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+from constants import VALID_STATES
+from countryCodes import detect_foreign_country, iso3166_alpha2, lookupCC
 from database_operations import DatabaseOperations
 from download_utils import discover_ofac_sdn_url, ensure_download
 from logging_utils import log_info, log_warning
@@ -29,6 +31,22 @@ from models import (
 BATCH_SIZE = 5_000
 CHECKPOINT_EVERY_BATCHES = 5
 SDN_FILENAME = "sdn_advanced.xml"
+INGEST_VERSION = 3
+
+# OFAC country labels that don't match iso3166 names verbatim.
+OFAC_COUNTRY_ALIASES = {
+    "BURMA": "MM",
+    "KOREA, NORTH": "KP",
+    "KOREA, SOUTH": "KR",
+    "CONGO, DEMOCRATIC REPUBLIC OF THE": "CD",
+    "CONGO, REPUBLIC OF THE": "CG",
+    "COTE D IVOIRE": "CI",
+    "THE GAMBIA": "GM",
+    "BAHAMAS, THE": "BS",
+    "IRAN": "IR",
+    "RUSSIA": "RU",
+}
+SKIP_LOCATION_LABELS = frozenset({"", "UNDETERMINED"})
 
 LOC_PART_FIELDS = {
     "1451": "address_line1",
@@ -155,6 +173,8 @@ class SanctionsProcessor:
             return False
         if meta.get("mtime") != source.stat().st_mtime:
             return False
+        if meta.get("ingest_version") != INGEST_VERSION:
+            return False
         try:
             count = self.db_ops.execute_query(
                 "SELECT COUNT(*) FROM sanctioned_entities"
@@ -192,10 +212,114 @@ class SanctionsProcessor:
                     "source": str(source.resolve()),
                     "size": st.st_size,
                     "mtime": st.st_mtime,
+                    "ingest_version": INGEST_VERSION,
                 }
             ),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _resolve_country_code(*candidates: str) -> Optional[str]:
+        for raw in candidates:
+            if not raw or not str(raw).strip():
+                continue
+            text = str(raw).strip()
+            upper = text.upper()
+            if upper in OFAC_COUNTRY_ALIASES:
+                return OFAC_COUNTRY_ALIASES[upper]
+            if len(text) == 2 and text.isalpha() and lookupCC(text.upper()):
+                return text.upper()
+            for code, info in iso3166_alpha2.items():
+                if info.get("name", "").upper() == upper:
+                    return code
+            cc = detect_foreign_country(text)
+            if cc and cc != "ZZ":
+                return cc
+        return None
+
+    @staticmethod
+    def _has_structured_parts(loc: ParsedLocation) -> bool:
+        return bool(
+            loc.address_line1
+            or loc.address_line2
+            or loc.city
+            or loc.state
+            or loc.zip_code
+        )
+
+    @staticmethod
+    def _is_promotable_address(address: Address) -> bool:
+        if address.colocator and address.colocator.startswith("FA:"):
+            return True
+        return bool((address.canonical_address or "").strip())
+
+    def _build_foreign_address(
+        self, entity: SanctionedEntity, country_code: str
+    ) -> Address:
+        info = lookupCC(country_code) or {}
+        country_name = info.get("name", country_code)
+        address = Address(
+            ein="",
+            name=entity.primary_name or "",
+            address_line1=f"Foreign: {country_name}",
+            state=country_code,
+            colocator=f"FA:{country_code}",
+            address_type="ofac_sanction",
+            owner_id=entity.id,
+        )
+        address.prep_for_insert()
+        return address
+
+    @staticmethod
+    def _is_skipped_label(value: str) -> bool:
+        return value.strip().upper() in SKIP_LOCATION_LABELS
+
+    def _build_ofac_address(
+        self, entity: SanctionedEntity, loc: ParsedLocation
+    ) -> Optional[Address]:
+        if self._is_skipped_label(loc.unstructured) and self._is_skipped_label(
+            loc.country
+        ) and not self._has_structured_parts(loc):
+            return None
+
+        if not self._has_structured_parts(loc):
+            unstructured = (loc.unstructured or "").strip()
+            country_code = self._resolve_country_code(loc.country, unstructured)
+            if country_code and (
+                not unstructured
+                or "," not in unstructured
+                or unstructured.upper() in OFAC_COUNTRY_ALIASES
+            ):
+                return self._build_foreign_address(entity, country_code)
+            label = unstructured or (loc.country or "").strip()
+            if not label or self._is_skipped_label(label):
+                return None
+            address = entity.build_address(address_line1=label)
+            return address if self._is_promotable_address(address) else None
+
+        if loc.unstructured and not (
+            loc.address_line1 or loc.address_line2 or loc.city or loc.zip_code
+        ):
+            text = loc.unstructured.strip()
+            if self._is_skipped_label(text):
+                return None
+            country_code = self._resolve_country_code(text, loc.country)
+            if country_code and (
+                "," not in text or text.upper() in OFAC_COUNTRY_ALIASES
+            ):
+                return self._build_foreign_address(entity, country_code)
+            address = entity.build_address(address_line1=text)
+            return address if self._is_promotable_address(address) else None
+
+        state = loc.state if loc.state and loc.state.upper() in VALID_STATES else None
+        address = entity.build_address(
+            address_line1=loc.address_line1,
+            address_line2=loc.address_line2,
+            city=loc.city,
+            state=state,
+            zip_code=loc.zip_code,
+        )
+        return address if self._is_promotable_address(address) else None
 
     def _parse_support_data(
         self, xml_path: Path
@@ -722,40 +846,9 @@ class SanctionsProcessor:
                     loc = locations.get(location_id)
                     if loc is None:
                         continue
-                    if loc.unstructured and not any(
-                        (
-                            loc.address_line1,
-                            loc.city,
-                            loc.state,
-                            loc.zip_code,
-                        )
-                    ):
-                        entity_addresses.append(
-                            entity.build_address(
-                                address_line1=loc.unstructured,
-                                country=loc.country,
-                            )
-                        )
-                    elif any(
-                        (
-                            loc.address_line1,
-                            loc.address_line2,
-                            loc.city,
-                            loc.state,
-                            loc.zip_code,
-                            loc.country,
-                        )
-                    ):
-                        entity_addresses.append(
-                            entity.build_address(
-                                address_line1=loc.address_line1,
-                                address_line2=loc.address_line2,
-                                city=loc.city,
-                                state=loc.state,
-                                zip_code=loc.zip_code,
-                                country=loc.country,
-                            )
-                        )
+                    address = self._build_ofac_address(entity, loc)
+                    if address is not None:
+                        entity_addresses.append(address)
 
                 yield {
                     "entity": entity,

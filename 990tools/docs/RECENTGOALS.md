@@ -20,6 +20,8 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 **Success signal:** `.sdn_ingest.json` marker set; all five promoted tables populated. Grant-match flagging deferred to later pipeline work.
 
+**Address hygiene (v3):** Country-only OFAC locations → `FA:<iso>` colocator (10,004 rows); skip blank/`undetermined` noise. Production: 27,347 `ofac_sanction` addresses, 0 blank canonicals (was 5,485).
+
 ---
 
 ## 2026-06: FEC Step Production Validation (2024 cycle)

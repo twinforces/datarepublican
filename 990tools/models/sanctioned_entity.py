@@ -28,7 +28,6 @@ class SanctionedEntity(BaseModel):
         city: Optional[str] = None,
         state: Optional[str] = None,
         zip_code: Optional[str] = None,
-        country: Optional[str] = None,
         address_type: str = "ofac_sanction",
     ) -> Address:
         if self.id is None:
@@ -39,7 +38,7 @@ class SanctionedEntity(BaseModel):
             address_line1=address_line1 or "",
             address_line2=address_line2 or "",
             city=city or "",
-            state=state or country or "",
+            state=state or "",
             zip_code=zip_code or "",
             address_type=address_type,
             owner_id=self.id,
