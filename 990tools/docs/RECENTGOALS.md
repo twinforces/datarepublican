@@ -14,13 +14,13 @@ This is the active scratchpad for current and recently completed work. Entries i
 - `sanctions_processor.py`: curl download (`sdn_advanced.xml`, ~125 MB), two-pass iterparse (reference data + DistinctParty promote), idempotent `.sdn_ingest.json` marker, schema bootstrap on existing DBs.
 - `download_utils.discover_ofac_sdn_url()` — Treasury advanced XML endpoint with legacy fallback.
 - Models: `SanctionedEntity`, `SanctionedName`, `SanctionedIdentifier`, `SanctionedProgram` + `build_address()` for street locations.
-- Production counts: `sanctioned_entities` 19,073; `sanctioned_names` 49,607; `sanctioned_identifiers` 22,203; `sanctioned_programs` 41,776; `ofac_sanction` addresses 28,961.
+- Production counts: `sanctioned_entities` 19,073; `sanctioned_names` 49,607; `sanctioned_identifiers` 22,203; `sanctioned_programs` 41,776.
 - Data: `{final_dir}/cms_data/treasury/sdn_advanced.xml`
-- Log: `sanctions_step_20260618.log` (run via `nohup` — survives CLI crashes)
+- Logs: `sanctions_step_20260618_v3.log` (nohup)
 
-**Success signal:** `.sdn_ingest.json` marker set; all five promoted tables populated. Grant-match flagging deferred to later pipeline work.
+**Success signal:** Committed `68eff39e` (ingest) + `f198fbcd` (address hygiene). Grant-match flagging deferred.
 
-**Address hygiene (v3):** Country-only OFAC locations → `FA:<iso>` colocator (10,004 rows); skip blank/`undetermined` noise. Production: 27,347 `ofac_sanction` addresses, 0 blank canonicals (was 5,485).
+**Address hygiene (v3):** Country-only → `FA:<iso>` (10,004 rows); skip blank/`undetermined`. Final: 27,347 `ofac_sanction` addresses, 0 blank canonicals.
 
 ---
 

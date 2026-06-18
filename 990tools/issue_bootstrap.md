@@ -2,54 +2,49 @@
 
 **Purpose**: Fast, low-token restart for a fresh session after CLI crashes (127/137 kills) or context resets.
 
-**Last major work**: June 2026 — **Sanctions step** production-validated after `medicare`. OFAC SDN: 19,073 entities, 49,607 names, 28,961 addresses. Prior: FEC 2024 (51.7M rows), Medicare (9.6M NPPES + 230M spending).
+**Last major work**: June 2026 — **Sanctions step** complete (`68eff39e`, `f198fbcd`). OFAC SDN: 19,073 entities, 27,347 addresses (10k FA colocators, 0 blank canonicals). **Next:** DOT/FMCSA motor carrier census ingest.
 
-## Current State (Pipeline Integration Complete)
+## Current State
 
-### Offline hygiene (June 2026, option A in `einless/`)
-- Rebuild cream: **88.87%** on `pure_no_ein_by_dollars.tsv` (1,186,989 cream / 148,726 non-cream).
-- Rebucket hard tail: 125,404 hard rows classified (foreign, plausible, flow, etc.).
-- Artifacts: `einless/{data,docs,code}/`, `einless_traditional_progress_report.md`.
+### Sanctions (production-validated 2026-06-18)
+- `sanctioned_entities` 19,073; `sanctioned_names` 49,607; `ofac_sanction` addresses 27,347
+- Country-only → `FA:<iso>`; blank/`undetermined` skipped
+- Data: `/Volumes/Data/final/cms_data/treasury/sdn_advanced.xml`
+- Log: `sanctions_step_20260618_v3.log`
 
-### Production pipeline run (2026-06-15)
-- Command: `python -u irs990processor.py --step einless --nostats`
-- **468,955** distinct names resolved → **3,697,976** grant rows backfilled ($110B).
-- **190,141** names / **1.7M** grants still unresolved (hard tail for match/rules).
-- Raw `recipient_ein` untouched; backfills in `recipient_ein_backfilled`.
-- Log: `einless_step_20260615_1349.log`
-
-**User verdict**: Milestone reached — 89% phonebook cream integrated into production pipeline. Hygiene checkpoint committed.
+### Prior milestones
+- **FEC 2024**: 51.7M rows (`ba28b194`)
+- **Medicare**: 9.6M NPPES + 230M spending (`187b1bc0`)
+- **Einless**: 468,955 names → 3.7M grant backfills (`einless_step_20260615_1349.log`)
 
 ## Pipeline Step Order
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
-**Resume from here:** `--start-step address` (FEC + Medicare + Sanctions complete) or `--start-step match` after address/einless
+**Resume from here:** `--start-step dot` (sanctions complete) or `--start-step address` after dot
+
+## DOT Step (in progress)
+
+**Source:** FMCSA Company Census File — `https://data.transportation.gov/api/views/az4n-8mr2/rows.csv?accessType=DOWNLOAD` (~1M carriers, ~265 MB CSV).
+
+**Target tables:** `dot_carriers`, `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
+
+**Why:** Same-building / colocation signals — FEC + Treasury sanctions + trucking carriers at one address (shell offices, nominee agents).
+
+**Consumer (later):** `grant_match_processor`, `geolocate1_processor` — not in ingest step.
 
 ## Core Philosophy
-- Phonebook/cream (exact sig-core after guards + cleaning) is the hero (~89%).
-- Post-phonebook tail is structural (foreign, for-profit, pass-through flows) — not missed BMF variants.
 - Raw `recipient_ein` = filed data; `recipient_ein_backfilled` = inferred. Never mix them.
-- Offline `einless/` hygiene remains for hard-tail classification, Grok diagnostics, pattern mining.
-
-## Critical Artifacts
-1. `einless_processor.py` — production einless step (export TSVs + phonebook + DAF).
-2. `docs/einless_grantee_resolution_architecture.md` — architecture, data model, integration plan.
-3. `docs/pipeline_overview.md` — step order, SQL exports, data separation.
-4. `einless/` — offline hygiene artifacts (option A tie-off).
-5. `bmf_fuzzy_candidate_matcher.py` — shared phonebook/DAF/plausible logic.
-
-Integration hooks (stubbed, next phase) in:
-- `address_matcher.py`, `grant_match_processor.py`, `generate_name_rules.py`
+- External reference ingests (FEC, Medicare, sanctions, DOT) are ingest-only; matching deferred.
+- Use `nohup` for long steps (`dot`, `einless`, `match`, `geolocate`).
 
 ## Known Ops Problems
-- CLI kills with 127/137 (OOM). Use `nohup` for long steps (`sanctions`, `einless`, `match`, `geolocate`).
+- CLI kills with 127/137 (OOM). Use `nohup` + log redirection.
 - Default logging is WARNING — add `-v` for progress lines.
-- Heavy steps: einless name scan (~15 min), match (~hours), geolocate.
 
 ## Immediate Next Work
-1. Run `--start-step address` on production DB (sanctions ingest complete).
-2. Wire sanctioned-name matching into `grant_match_processor` / export (consumer of `sanctioned_names`).
-3. Wire einless hard-tail statuses/splits into `address_matcher`, `grant_match_processor`, `generate_name_rules.py`.
+1. Implement and production-validate `--step dot`.
+2. Run `--start-step address` on production DB.
+3. Wire colocation consumers: sanctions names, DOT carriers, FEC at shared `canonical_address`.

@@ -54,7 +54,7 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
 **`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
@@ -70,6 +70,15 @@ Run standalone: `python -u irs990processor.py --step medicare --nostats -v`
 Run standalone (use `nohup` for CLI crash resilience):
 ```bash
 nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_step.log 2>&1 &
+```
+
+Country-only OFAC locations use `FA:<iso>` colocators; blank/`undetermined` rows are skipped (not promoted to `Addresses`).
+
+**`dot` step** (`dot_processor.py`): FMCSA Motor Carrier Census (~1M carriers) from [data.transportation.gov](https://data.transportation.gov/Trucking-and-Motorcoaches/Company-Census-File/az4n-8mr2). Promotes to `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`). Data under `{final_dir}/cms_data/dot/`. Ingest only — same-building colocation with grants/FEC is a later consumer (`grant_match` / `geolocate1`).
+
+Run standalone:
+```bash
+nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 ```
 
 **Data separation on Grants:**
