@@ -32,6 +32,7 @@ from .sanctioned_entity import (
     SanctionedName,
     SanctionedProgram,
 )
+from .dot_carrier import DotCarrier
 
 __all__ = [
     'Address',
@@ -58,4 +59,5 @@ __all__ = [
     'SanctionedName',
     'SanctionedIdentifier',
     'SanctionedProgram',
+    'DotCarrier',
 ]

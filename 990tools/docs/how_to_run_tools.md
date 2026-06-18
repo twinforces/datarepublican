@@ -27,7 +27,7 @@ Checks for bad variants. Should say "No significant bad variants detected".
 
 Full step order:
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
 Common invocations:
@@ -37,6 +37,7 @@ python -u irs990processor.py --db-path irs990.duckdb
 
 # Single step (resilient to CLI crashes — use nohup)
 nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_step.log 2>&1 &
+nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 nohup python -u irs990processor.py --step einless --nostats -v > einless_step.log 2>&1 &
 
 # Resume after einless milestone

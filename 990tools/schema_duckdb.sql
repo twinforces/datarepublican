@@ -653,6 +653,29 @@ CREATE INDEX IF NOT EXISTS idx_sanctioned_identifiers_entity ON sanctioned_ident
 CREATE INDEX IF NOT EXISTS idx_sanctioned_programs_entity ON sanctioned_programs(entity_id);
 CREATE INDEX IF NOT EXISTS idx_sanctioned_programs_code ON sanctioned_programs(program_code);
 
+-- FMCSA DOT motor carrier census (Company Census File)
+CREATE TABLE IF NOT EXISTS dot_carriers (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    dot_number VARCHAR NOT NULL UNIQUE,
+    legal_name VARCHAR,
+    dba_name VARCHAR,
+    status_code VARCHAR,
+    carrier_operation VARCHAR,
+    business_org_desc VARCHAR,
+    phone VARCHAR,
+    email_address VARCHAR,
+    power_units INTEGER,
+    truck_units INTEGER,
+    fleetsize VARCHAR,
+    docket1 VARCHAR,
+    docket1prefix VARCHAR,
+    mcs150_date DATE,
+    add_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dot_carriers_legal_name ON dot_carriers(legal_name);
+CREATE INDEX IF NOT EXISTS idx_dot_carriers_dba_name ON dot_carriers(dba_name);
+
 -- Zips table for geo-matching (loaded from compressed TSV in repo)
 CREATE TABLE IF NOT EXISTS Zips_raw (
     country_code VARCHAR,

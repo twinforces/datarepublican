@@ -64,6 +64,7 @@ from einless_processor import EinlessProcessor
 from fec_processor import FECProcessor
 from medicare_processor import MedicareProcessor
 from sanctions_processor import SanctionsProcessor
+from dot_processor import DotProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from queue_status_display import QueueStatusDisplay
@@ -194,6 +195,7 @@ class IRS990Processor(BaseProcessor):
         self.sanctions_processor = SanctionsProcessor(
             self.db_ops, data_dir=cms_data_dir / "treasury"
         )
+        self.dot_processor = DotProcessor(self.db_ops, data_dir=cms_data_dir / "dot")
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -496,6 +498,16 @@ class IRS990Processor(BaseProcessor):
         stats = self.sanctions_processor.run()
         self.processed_steps += 1
         return stats.get("entities", 0)
+
+    def run_dot(self):
+        """Download FMCSA motor carrier census and ingest (after sanctions)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before DOT")
+            return 0
+        log_info("Running FMCSA DOT carrier census download + ingest")
+        stats = self.dot_processor.run()
+        self.processed_steps += 1
+        return stats.get("carriers", 0)
 
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
@@ -855,15 +867,15 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions",
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions", "dot",
                                            "address", "einless", "match", "geolocate", "geolocate1", "photos",
                                            "grant_match", "backfill", "ratios","percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml", "fec", "medicare", "sanctions",
+    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml", "fec", "medicare", "sanctions", "dot",
                                                   "address", "einless", "match", "geolocate", "geolocate1",
                                                   "photos", "grant_match", "backfill", "ratios","percentiles", "export"],
                            help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions",
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions", "dot",
                                                  "address", "einless", "match", "geolocate", "geolocate1",
                                                  "photos", "grant_match", "backfill", "ratios", "percentiles", "export"],
                            help="Stopping step for processing")
@@ -879,7 +891,7 @@ def main():
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "address", "einless", "match",
+    steps = ["irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "address", "einless", "match",
              "geolocate", "geolocate1", "photos", "grant_match", "backfill", "ratios",
              "percentiles", "export"]
 
@@ -892,6 +904,7 @@ def main():
         "fec": lambda: processor.run_fec(),
         "medicare": lambda: processor.run_medicare(),
         "sanctions": lambda: processor.run_sanctions(),
+        "dot": lambda: processor.run_dot(),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),

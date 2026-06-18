@@ -331,6 +331,15 @@ OFAC_SDN_ADVANCED_URL = (
 )
 OFAC_SDN_LEGACY_URL = "https://www.treasury.gov/ofac/downloads/sdn.xml"
 
+FMCSA_COMPANY_CENSUS_URL = (
+    "https://data.transportation.gov/api/views/az4n-8mr2/rows.csv?accessType=DOWNLOAD"
+)
+
+
+def discover_fmcsa_census_url() -> str:
+    """Return FMCSA Company Census CSV export URL (data.transportation.gov Socrata)."""
+    return FMCSA_COMPANY_CENSUS_URL
+
 
 def discover_ofac_sdn_url() -> str:
     """Return the OFAC SDN advanced XML export URL (stable Treasury endpoint)."""

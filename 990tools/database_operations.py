@@ -744,6 +744,7 @@ class DatabaseOperations:
             'SanctionedName': 'sanctioned_names',
             'SanctionedIdentifier': 'sanctioned_identifiers',
             'SanctionedProgram': 'sanctioned_programs',
+            'DotCarrier': 'dot_carriers',
         }
 
         if class_name in table_name_map:

@@ -5,6 +5,14 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06 (DOT / FMCSA Pipeline Step)
+
+### DOT Step (`--step dot`)
+- Added `dot_processor.py` — FMCSA Company Census CSV download + streaming promote to `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
+- Added `models/dot_carrier.py`, `download_utils.discover_fmcsa_census_url()`.
+- Wired into `irs990processor.py` after `sanctions`, before `address`. Data under `{final_dir}/cms_data/dot/`.
+- Ingest only — same-building colocation with grants/FEC/sanctions is a later consumer.
+
 ## [Unreleased] - 2026-06 (Sanctions Pipeline Step)
 
 ### Sanctions Step (`--step sanctions`)
