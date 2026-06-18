@@ -2,7 +2,7 @@
 
 **Purpose**: Fast, low-token restart for a fresh session after CLI crashes (127/137 kills) or context resets.
 
-**Last major work**: June 2026 — **Sanctions step** complete (`68eff39e`, `f198fbcd`). OFAC SDN: 19,073 entities, 27,347 addresses (10k FA colocators, 0 blank canonicals). **Next:** DOT/FMCSA motor carrier census ingest.
+**Last major work**: June 2026 — **DOT step** implemented (`d43a902b`), production run in progress. **Sanctions** complete (`68eff39e`, `f198fbcd`): 19,073 entities, 27,347 addresses.
 
 ## Current State
 
@@ -25,13 +25,15 @@ irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → 
 
 **Resume from here:** `--start-step dot` (sanctions complete) or `--start-step address` after dot
 
-## DOT Step (in progress)
+## DOT Step (production run in progress)
 
-**Source:** FMCSA Company Census File — `https://data.transportation.gov/api/views/az4n-8mr2/rows.csv?accessType=DOWNLOAD` (~1M carriers, ~265 MB CSV).
+**Source:** FMCSA Company Census File — `https://data.transportation.gov/api/views/az4n-8mr2/rows.csv?accessType=DOWNLOAD` (~1M carriers; CSV ~900 MB on disk).
 
 **Target tables:** `dot_carriers`, `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
 
-**Why:** Same-building / colocation signals — FEC + Treasury sanctions + trucking carriers at one address (shell offices, nominee agents).
+**Implementation:** `dot_processor.py`, `models/dot_carrier.py` — committed `d43a902b`.
+
+**Log:** `dot_step_20260618.log` (nohup). Idempotent marker: `{final_dir}/cms_data/dot/.dot_census_ingest.json`.
 
 **Consumer (later):** `grant_match_processor`, `geolocate1_processor` — not in ingest step.
 
@@ -45,6 +47,6 @@ irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → 
 - Default logging is WARNING — add `-v` for progress lines.
 
 ## Immediate Next Work
-1. Implement and production-validate `--step dot`.
+1. Wait for DOT production run to finish; verify `dot_carriers` + `dot_carrier_%` address counts.
 2. Run `--start-step address` on production DB.
 3. Wire colocation consumers: sanctions names, DOT carriers, FEC at shared `canonical_address`.

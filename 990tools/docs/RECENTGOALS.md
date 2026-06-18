@@ -4,6 +4,25 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-06: DOT Step — FMCSA Motor Carrier Census (in progress)
+
+**What:** `--step dot` on `/Volumes/Data/final/irs990.duckdb`. FMCSA Company Census CSV → `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
+
+**Why:** Same-building colocation signals — FEC committees, OFAC sanctions, and trucking carriers at one canonical address (shell offices, nominee agents). Ingest only; matching deferred to `grant_match` / `geolocate1`.
+
+**How:**
+- `dot_processor.py`: curl download (`company_census.csv`, ~900 MB actual), streaming `csv.DictReader`, batch 15k, idempotent `.dot_census_ingest.json` marker (`INGEST_VERSION = 1`).
+- `download_utils.discover_fmcsa_census_url()` — data.transportation.gov Company Census File.
+- Model: `DotCarrier` + `build_address()` for phy/mail; skip non-promotable addresses; dedupe mail when same canonical as phy.
+- Data: `{final_dir}/cms_data/dot/company_census.csv`
+- Log: `dot_step_20260618.log` (nohup, production run started 2026-06-18)
+
+**Success signal:** Committed `d43a902b` (implementation). Production counts TBD when run completes.
+
+**Resume:** `--start-step address` after dot validates.
+
+---
+
 ## 2026-06: Sanctions Step Production Validation (OFAC SDN)
 
 **What:** Production-validated `--step sanctions` on `/Volumes/Data/final/irs990.duckdb`. Treasury OFAC SDN advanced XML ingest → `sanctioned_*` tables + `Addresses` (`address_type=ofac_sanction`).
