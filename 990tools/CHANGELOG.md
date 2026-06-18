@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-validated 2024 cycle on `/Volumes/Data/final/irs990.duckdb` (~51.7M FEC rows across 5 file types).
 - Fixes: Python CSV streaming (OOM on DuckDB `read_csv`+sort), MMDDYYYY/MM/DD/YYYY date parsing, row-count resume, periodic CHECKPOINT during bulk promote.
 
-### Medicare Step (`--step medicare`) — in progress
-- `medicare_processor.py`: NPPES discovery (CMS NPI_Files.html), Medicaid spending Parquet (opendata.hhs.gov), NPPES join for billing/servicing provider names.
-- Schema: `medicare_providers`, `medicare_provider_spending`, code lookup tables.
+### Medicare Step (`--step medicare`)
+- Added `medicare_processor.py` — NPPES zip discovery (CMS NPI_Files.html), streaming NPPES promote, Medicaid spending Parquet ingest (opendata.hhs.gov) with NPPES name joins.
+- Added `download_utils.py` — `discover_nppes_zip_url()`, `discover_medicaid_spending_download_url()` (prefers Parquet).
+- Production-validated: 9.6M `medicare_providers`, 230M `medicare_provider_spending` rows (99.5% with billing provider name from NPPES).
+- Fixes: NPPES streaming (CSV type auto-detect failures), MM/DD/YYYY dates, spending column detection (`TOTAL_PATIENTS`/`TOTAL_CLAIM_LINES`), batched Parquet JOIN by NPI prefix (OOM on 238M single-pass).
 
 ## [Unreleased] - 2026-06 (EINless Pipeline Integration Milestone)
 

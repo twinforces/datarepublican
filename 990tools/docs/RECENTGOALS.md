@@ -16,7 +16,23 @@ This is the active scratchpad for current and recently completed work. Entries i
 - Production counts (report_year=2024): committees 6,980; individual_contributions 29,104,378; committee_transactions 18,667,435; candidate_spendings 703,597; operating_expenditures 2,249,158.
 - Log: `fec_step_20260617_0635.log`
 
-**Next:** Run `--step medicare`; hygiene commit at FEC milestone; then medicare hygiene on success.
+**Next:** FEC milestone committed (`ba28b194`).
+
+---
+
+## 2026-06: Medicare Step Production Validation
+
+**What:** Production-validated `--step medicare` on `/Volumes/Data/final/irs990.duckdb`. NPPES streaming ingest (9.6M providers) + Medicaid spending Parquet (230M rows, 229M with NPPES billing names).
+
+**Why:** NPPES CSV has mixed types and 10GB size — DuckDB `read_csv` auto-detect fails; streaming + row-count resume matches FEC pattern. Spending Parquet (238M rows) OOMs on single INSERT…JOIN — batched by NPI prefix.
+
+**How:**
+- `medicare_processor.py`: streaming NPPES via `csv.DictReader`, `_parse_nppes_date()`, spending batched `read_parquet` + NPI prefix (100 batches).
+- `download_utils.py`: NPPES zip discovery from CMS NPI_Files.html; Medicaid spending Parquet from opendata.hhs.gov.
+- Production counts: `medicare_providers` 9,606,683; `medicare_provider_spending` 230,154,264 (229,001,898 with `billing_provider_name`).
+- Log: `medicare_step_20260617_0942.log`
+
+**Success signal:** `optimize_database completed after medicare` in log.
 
 ---
 
