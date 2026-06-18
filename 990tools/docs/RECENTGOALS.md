@@ -16,7 +16,7 @@ This is the active scratchpad for current and recently completed work. Entries i
 - Production counts (report_year=2024): committees 6,980; individual_contributions 29,104,378; committee_transactions 18,667,435; candidate_spendings 703,597; operating_expenditures 2,249,158.
 - Log: `fec_step_20260617_0635.log`
 
-**Next:** FEC milestone committed (`ba28b194`).
+**Next:** FEC milestone committed (`ba28b194`). Medicare committed (`187b1bc0`).
 
 ---
 
@@ -32,7 +32,7 @@ This is the active scratchpad for current and recently completed work. Entries i
 - Production counts: `medicare_providers` 9,606,683; `medicare_provider_spending` 230,154,264 (229,001,898 with `billing_provider_name`).
 - Log: `medicare_step_20260617_0942.log`
 
-**Success signal:** `optimize_database completed after medicare` in log.
+**Success signal:** `optimize_database completed after medicare` in log. Committed `187b1bc0`.
 
 ---
 
