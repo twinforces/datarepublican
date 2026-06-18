@@ -16,7 +16,7 @@ This is the active scratchpad for current and recently completed work. Entries i
 - Production counts (report_year=2024): committees 6,980; individual_contributions 29,104,378; committee_transactions 18,667,435; candidate_spendings 703,597; operating_expenditures 2,249,158.
 - Log: `fec_step_20260617_0635.log`
 
-**Next:** FEC milestone committed (`ba28b194`). Medicare committed (`187b1bc0`).
+**Success signal:** All 5 FEC 2024 file types promoted; committed `ba28b194`.
 
 ---
 
