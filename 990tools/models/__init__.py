@@ -26,6 +26,12 @@ from .fec_committee_transaction import FecCommitteeTransaction
 from .fec_candidate_spending import FecCandidateSpending
 from .fec_operating_expenditure import FecOperatingExpenditure
 from .medicare_provider import MedicareProvider
+from .sanctioned_entity import (
+    SanctionedEntity,
+    SanctionedIdentifier,
+    SanctionedName,
+    SanctionedProgram,
+)
 
 __all__ = [
     'Address',
@@ -48,4 +54,8 @@ __all__ = [
     'FecCandidateSpending',
     'FecOperatingExpenditure',
     'MedicareProvider',
+    'SanctionedEntity',
+    'SanctionedName',
+    'SanctionedIdentifier',
+    'SanctionedProgram',
 ]

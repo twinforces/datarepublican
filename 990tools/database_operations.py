@@ -740,6 +740,10 @@ class DatabaseOperations:
             'FecCandidateSpending': 'fec_candidate_spendings',
             'FecOperatingExpenditure': 'fec_operating_expenditures',
             'MedicareProvider': 'medicare_providers',
+            'SanctionedEntity': 'sanctioned_entities',
+            'SanctionedName': 'sanctioned_names',
+            'SanctionedIdentifier': 'sanctioned_identifiers',
+            'SanctionedProgram': 'sanctioned_programs',
         }
 
         if class_name in table_name_map:

@@ -2,7 +2,7 @@
 
 **Purpose**: Fast, low-token restart for a fresh session after CLI crashes (127/137 kills) or context resets.
 
-**Last major work**: June 2026 — **FEC + Medicare steps** production-validated after `xml`. FEC 2024: 51.7M rows. Medicare: 9.6M NPPES providers + 230M spending rows.
+**Last major work**: June 2026 — **Sanctions step** production-validated after `medicare`. OFAC SDN: 19,073 entities, 49,607 names, 28,961 addresses. Prior: FEC 2024 (51.7M rows), Medicare (9.6M NPPES + 230M spending).
 
 ## Current State (Pipeline Integration Complete)
 
@@ -23,10 +23,10 @@
 ## Pipeline Step Order
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
-**Resume from here:** `--start-step address` (FEC + Medicare complete) or `--start-step match` after address/einless
+**Resume from here:** `--start-step address` (FEC + Medicare + Sanctions complete) or `--start-step match` after address/einless
 
 ## Core Philosophy
 - Phonebook/cream (exact sig-core after guards + cleaning) is the hero (~89%).
@@ -45,11 +45,11 @@ Integration hooks (stubbed, next phase) in:
 - `address_matcher.py`, `grant_match_processor.py`, `generate_name_rules.py`
 
 ## Known Ops Problems
-- CLI kills with 127/137 (OOM). Use `nohup` for long steps (`einless`, `match`, `geolocate`).
+- CLI kills with 127/137 (OOM). Use `nohup` for long steps (`sanctions`, `einless`, `match`, `geolocate`).
 - Default logging is WARNING — add `-v` for progress lines.
 - Heavy steps: einless name scan (~15 min), match (~hours), geolocate.
 
 ## Immediate Next Work
-1. Run `--start-step match` on production DB.
-2. Wire einless hard-tail statuses/splits into `address_matcher`, `grant_match_processor`, `generate_name_rules.py`.
-3. Optional: FEC/Treasury blacklist in `geolocate1_processor.py`.
+1. Run `--start-step address` on production DB (sanctions ingest complete).
+2. Wire sanctioned-name matching into `grant_match_processor` / export (consumer of `sanctioned_names`).
+3. Wire einless hard-tail statuses/splits into `address_matcher`, `grant_match_processor`, `generate_name_rules.py`.

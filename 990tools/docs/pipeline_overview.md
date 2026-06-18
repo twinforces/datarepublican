@@ -54,7 +54,7 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
 **`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
@@ -64,6 +64,13 @@ Run standalone: `FEC_CYCLES=2024 python -u irs990processor.py --step fec --nosta
 **`medicare` step** (`medicare_processor.py`): CMS NPPES + Medicaid provider spending (Parquet from opendata.hhs.gov). Promotes to `medicare_providers`, `medicare_provider_spending`, code lookups. Data under `{final_dir}/cms_data/medicare/`.
 
 Run standalone: `python -u irs990processor.py --step medicare --nostats -v`
+
+**`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.
+
+Run standalone (use `nohup` for CLI crash resilience):
+```bash
+nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_step.log 2>&1 &
+```
 
 **Data separation on Grants:**
 - `recipient_ein` — parsed from 990 XML (never overwritten)

@@ -613,6 +613,46 @@ CREATE INDEX IF NOT EXISTS idx_medicare_spending_billing_npi ON medicare_provide
 CREATE INDEX IF NOT EXISTS idx_medicare_spending_hcpcs ON medicare_provider_spending(hcpcs_code);
 CREATE INDEX IF NOT EXISTS idx_medicare_providers_npi ON medicare_providers(npi);
 
+-- Treasury OFAC SDN sanctions (Treasury sanctions list ingest)
+CREATE TABLE IF NOT EXISTS sanctioned_entities (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    ofac_uid VARCHAR NOT NULL UNIQUE,
+    primary_name VARCHAR,
+    entity_type VARCHAR,
+    entity_subtype VARCHAR,
+    list_type VARCHAR,
+    list_date DATE,
+    remarks VARCHAR,
+    source_issue_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sanctioned_names (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    name VARCHAR NOT NULL,
+    alias_type VARCHAR,
+    is_primary BOOLEAN DEFAULT FALSE,
+    low_quality BOOLEAN DEFAULT FALSE
+);
+CREATE TABLE IF NOT EXISTS sanctioned_identifiers (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    id_type VARCHAR,
+    id_number VARCHAR,
+    country VARCHAR
+);
+CREATE TABLE IF NOT EXISTS sanctioned_programs (
+    id UUID DEFAULT uuidv7() PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    program_code VARCHAR NOT NULL,
+    sanctions_type VARCHAR
+);
+CREATE INDEX IF NOT EXISTS idx_sanctioned_names_entity ON sanctioned_names(entity_id);
+CREATE INDEX IF NOT EXISTS idx_sanctioned_names_name ON sanctioned_names(name);
+CREATE INDEX IF NOT EXISTS idx_sanctioned_identifiers_entity ON sanctioned_identifiers(entity_id);
+CREATE INDEX IF NOT EXISTS idx_sanctioned_programs_entity ON sanctioned_programs(entity_id);
+CREATE INDEX IF NOT EXISTS idx_sanctioned_programs_code ON sanctioned_programs(program_code);
+
 -- Zips table for geo-matching (loaded from compressed TSV in repo)
 CREATE TABLE IF NOT EXISTS Zips_raw (
     country_code VARCHAR,

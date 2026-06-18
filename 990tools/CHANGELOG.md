@@ -5,6 +5,16 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06 (Sanctions Pipeline Step)
+
+### Sanctions Step (`--step sanctions`)
+- Added `sanctions_processor.py` — Treasury OFAC SDN advanced XML download + iterparse promote to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, and `Addresses` (`ofac_sanction`).
+- Added `models/sanctioned_entity.py` — entity/name/identifier/program models with `build_address()` factory.
+- Added `download_utils.discover_ofac_sdn_url()` — OFAC advanced XML endpoint (`sdn_advanced.xml`).
+- Wired into `irs990processor.py` after `medicare`, before `address`. Data under `{final_dir}/cms_data/treasury/`.
+- Production-validated on `/Volumes/Data/final/irs990.duckdb`: 19,073 entities, 49,607 names, 22,203 identifiers, 41,776 programs, 28,961 addresses.
+- Idempotent ingest via `.sdn_ingest.json` marker; `_ensure_sanctions_schema()` for existing production DBs.
+
 ## [Unreleased] - 2026-06 (FEC + Medicare Pipeline Steps)
 
 ### FEC Step (`--step fec`)

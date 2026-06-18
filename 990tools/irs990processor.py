@@ -63,6 +63,7 @@ from geolocate1_processor import Geolocate1Processor
 from einless_processor import EinlessProcessor
 from fec_processor import FECProcessor
 from medicare_processor import MedicareProcessor
+from sanctions_processor import SanctionsProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning
 from config import global_config
 from queue_status_display import QueueStatusDisplay
@@ -190,6 +191,9 @@ class IRS990Processor(BaseProcessor):
             cycles=fec_cycles,
         )
         self.medicare_processor = MedicareProcessor(self.db_ops, data_dir=cms_data_dir / "medicare")
+        self.sanctions_processor = SanctionsProcessor(
+            self.db_ops, data_dir=cms_data_dir / "treasury"
+        )
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -482,6 +486,16 @@ class IRS990Processor(BaseProcessor):
         stats = self.medicare_processor.run()
         self.processed_steps += 1
         return stats.get("nppes_providers", 0) + stats.get("spending_rows", 0)
+
+    def run_sanctions(self):
+        """Download Treasury OFAC SDN list and ingest (after medicare)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before sanctions")
+            return 0
+        log_info("Running Treasury OFAC sanctions download + ingest")
+        stats = self.sanctions_processor.run()
+        self.processed_steps += 1
+        return stats.get("entities", 0)
 
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
@@ -841,15 +855,15 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml", "fec", "medicare",
+    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions",
                                            "address", "einless", "match", "geolocate", "geolocate1", "photos",
                                            "grant_match", "backfill", "ratios","percentiles", "export"],
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml", "fec", "medicare",
+    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml", "fec", "medicare", "sanctions",
                                                   "address", "einless", "match", "geolocate", "geolocate1",
                                                   "photos", "grant_match", "backfill", "ratios","percentiles", "export"],
                            help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "fec", "medicare",
+    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions",
                                                  "address", "einless", "match", "geolocate", "geolocate1",
                                                  "photos", "grant_match", "backfill", "ratios", "percentiles", "export"],
                            help="Stopping step for processing")
@@ -865,7 +879,7 @@ def main():
     args = parser.parse_args()
 
     # Define processing steps in order
-    steps = ["irsfetch", "zip", "bmf", "xml", "fec", "medicare", "address", "einless", "match",
+    steps = ["irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "address", "einless", "match",
              "geolocate", "geolocate1", "photos", "grant_match", "backfill", "ratios",
              "percentiles", "export"]
 
@@ -877,6 +891,7 @@ def main():
         "bmf": lambda: processor.process_bmf_files(),
         "fec": lambda: processor.run_fec(),
         "medicare": lambda: processor.run_medicare(),
+        "sanctions": lambda: processor.run_sanctions(),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),

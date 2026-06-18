@@ -326,6 +326,24 @@ def discover_nppes_zip_urls_from_page(
     return monthly_urls
 
 
+OFAC_SDN_ADVANCED_URL = (
+    "https://sanctionslistservice.ofac.treas.gov/api/publicationpreview/exports/sdn_advanced.xml"
+)
+OFAC_SDN_LEGACY_URL = "https://www.treasury.gov/ofac/downloads/sdn.xml"
+
+
+def discover_ofac_sdn_url() -> str:
+    """Return the OFAC SDN advanced XML export URL (stable Treasury endpoint)."""
+    meta = curl_remote_meta(OFAC_SDN_ADVANCED_URL)
+    if meta and meta.status_code == 200:
+        return OFAC_SDN_ADVANCED_URL
+    log_warning(
+        f"OFAC advanced XML unreachable at {OFAC_SDN_ADVANCED_URL}; "
+        f"falling back to legacy {OFAC_SDN_LEGACY_URL}"
+    )
+    return OFAC_SDN_LEGACY_URL
+
+
 def discover_nppes_zip_url(
     page_url: str = NPPES_FILES_PAGE,
     *,

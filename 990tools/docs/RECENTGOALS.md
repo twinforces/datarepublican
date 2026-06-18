@@ -4,6 +4,24 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-06: Sanctions Step Production Validation (OFAC SDN)
+
+**What:** Production-validated `--step sanctions` on `/Volumes/Data/final/irs990.duckdb`. Treasury OFAC SDN advanced XML ingest → `sanctioned_*` tables + `Addresses` (`address_type=ofac_sanction`).
+
+**Why:** Grant/export consumers need a sanctioned-entity reference list for later name-match flagging. Ingest-only in this step — no grant matching yet.
+
+**How:**
+- `sanctions_processor.py`: curl download (`sdn_advanced.xml`, ~125 MB), two-pass iterparse (reference data + DistinctParty promote), idempotent `.sdn_ingest.json` marker, schema bootstrap on existing DBs.
+- `download_utils.discover_ofac_sdn_url()` — Treasury advanced XML endpoint with legacy fallback.
+- Models: `SanctionedEntity`, `SanctionedName`, `SanctionedIdentifier`, `SanctionedProgram` + `build_address()` for street locations.
+- Production counts: `sanctioned_entities` 19,073; `sanctioned_names` 49,607; `sanctioned_identifiers` 22,203; `sanctioned_programs` 41,776; `ofac_sanction` addresses 28,961.
+- Data: `{final_dir}/cms_data/treasury/sdn_advanced.xml`
+- Log: `sanctions_step_20260618.log` (run via `nohup` — survives CLI crashes)
+
+**Success signal:** `.sdn_ingest.json` marker set; all five promoted tables populated. Grant-match flagging deferred to later pipeline work.
+
+---
+
 ## 2026-06: FEC Step Production Validation (2024 cycle)
 
 **What:** Production-validated `--step fec` on `/Volumes/Data/final/irs990.duckdb` for `FEC_CYCLES=2024`. Fixed OOM (Python CSV streaming vs DuckDB `read_csv`+`ORDER BY`), MMDDYYYY + MM/DD/YYYY date parsing, row-count resume across interrupted runs, and periodic CHECKPOINT during promote.
