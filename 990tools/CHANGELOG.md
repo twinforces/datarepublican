@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - 2026-06 (DOT / FMCSA Pipeline Step)
 
 ### DOT Step (`--step dot`)
+- OOM fix: `memory_limit='8GB'`, 5k promote/insert batches, checkpoint every flush (matches FEC pattern on large `Addresses` table).
 - Added `dot_processor.py` — FMCSA Company Census CSV download + streaming promote to `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
 - Added `models/dot_carrier.py`, `download_utils.discover_fmcsa_census_url()`.
 - Wired into `irs990processor.py` after `sanctions`, before `address`. Data under `{final_dir}/cms_data/dot/`.

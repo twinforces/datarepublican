@@ -19,8 +19,9 @@ from download_utils import discover_fmcsa_census_url, ensure_download
 from logging_utils import log_info, log_warning
 from models import Address, DotCarrier
 
-BATCH_SIZE = 15_000
-CHECKPOINT_EVERY_BATCHES = 10
+BATCH_SIZE = 5_000
+CHECKPOINT_EVERY_BATCHES = 1
+INSERT_BATCH_SIZE = 5_000
 CENSUS_FILENAME = "company_census.csv"
 INGEST_VERSION = 1
 
@@ -124,8 +125,7 @@ class DotProcessor:
         with self.db_ops.acquire_write_conn() as conn:
             self._ensure_dot_schema(conn)
             self._clear_dot_tables(conn)
-            conn.execute("SET preserve_insertion_order=false")
-            conn.execute("SET threads=2")
+            self._prepare_dot_conn(conn)
 
             with csv_path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
                 reader = csv.DictReader(handle)
@@ -162,6 +162,12 @@ class DotProcessor:
         print(f"  dot addresses: {totals['addresses']:,}", flush=True)
         return totals
 
+    @staticmethod
+    def _prepare_dot_conn(conn) -> None:
+        conn.execute("SET preserve_insertion_order=false")
+        conn.execute("SET threads=2")
+        conn.execute("SET memory_limit='8GB'")
+
     def _flush_batches(
         self,
         conn,
@@ -170,10 +176,20 @@ class DotProcessor:
         totals: Dict[str, int],
     ) -> Dict[str, int]:
         if carriers:
-            self.db_ops.bulk_insert(carriers, conn=conn)
+            self.db_ops.bulk_insert(
+                carriers,
+                conn=conn,
+                batch_size=INSERT_BATCH_SIZE,
+                commit_batches=True,
+            )
             totals["carriers"] += len(carriers)
         if addresses:
-            self.db_ops.bulk_insert(addresses, conn=conn)
+            self.db_ops.bulk_insert(
+                addresses,
+                conn=conn,
+                batch_size=INSERT_BATCH_SIZE,
+                commit_batches=True,
+            )
             totals["addresses"] += len(addresses)
         return totals
 
