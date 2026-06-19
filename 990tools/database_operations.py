@@ -95,7 +95,7 @@ class DuckDBPool:
         
         # Build shared config dictionary that EVERY connection will use
         self.shared_config = {
-            "memory_limit": "6GB",
+            "memory_limit": "8GB",
             "threads": str(global_config.db_threads),
             #"access_mode": "READ_ONLY",
             #"enable_progress_bar": "false",
