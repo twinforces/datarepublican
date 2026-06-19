@@ -19,10 +19,11 @@ from download_utils import discover_fmcsa_census_url, ensure_download
 from logging_utils import log_info, log_warning
 from models import Address, DotCarrier
 
-BATCH_SIZE = 5_000
-CHECKPOINT_EVERY_BATCHES = 20
+BATCH_SIZE = 2_500
+CHECKPOINT_EVERY_BATCHES = 10
 PROGRESS_EVERY_BATCHES = 20
-INSERT_BATCH_SIZE = 5_000
+INSERT_BATCH_SIZE = 2_500
+ADDRESS_INSERT_BATCH_SIZE = 1_000
 CENSUS_FILENAME = "company_census.csv"
 INGEST_VERSION = 1
 
@@ -208,7 +209,7 @@ class DotProcessor:
     def _prepare_dot_conn(conn) -> None:
         conn.execute("SET preserve_insertion_order=false")
         conn.execute("SET threads=2")
-        conn.execute("SET memory_limit='8GB'")
+        conn.execute("SET memory_limit='12GB'")
 
     def _flush_batches(
         self,
@@ -225,11 +226,12 @@ class DotProcessor:
                 commit_batches=True,
             )
             totals["carriers"] += len(carriers)
+            conn.execute("CHECKPOINT")
         if addresses:
             self.db_ops.bulk_insert(
                 addresses,
                 conn=conn,
-                batch_size=INSERT_BATCH_SIZE,
+                batch_size=ADDRESS_INSERT_BATCH_SIZE,
                 commit_batches=True,
             )
             totals["addresses"] += len(addresses)
