@@ -20,7 +20,8 @@ from logging_utils import log_info, log_warning
 from models import Address, DotCarrier
 
 BATCH_SIZE = 5_000
-CHECKPOINT_EVERY_BATCHES = 1
+CHECKPOINT_EVERY_BATCHES = 20
+PROGRESS_EVERY_BATCHES = 20
 INSERT_BATCH_SIZE = 5_000
 CENSUS_FILENAME = "company_census.csv"
 INGEST_VERSION = 1
@@ -113,54 +114,95 @@ class DotProcessor:
             encoding="utf-8",
         )
 
+    def _existing_carrier_rows(self, conn) -> int:
+        row = conn.execute("SELECT COUNT(*) FROM dot_carriers").fetchone()
+        return int(row[0]) if row else 0
+
     def _promote_census(self, csv_path: Path) -> Dict[str, int]:
         log_info(f"Ingesting FMCSA census from {csv_path} (streaming)")
         print(f"Ingesting FMCSA census from {csv_path} (streaming)", flush=True)
 
-        totals = {"carriers": 0, "addresses": 0}
+        run_totals = {"carriers": 0, "addresses": 0}
         carrier_batch: List[DotCarrier] = []
         address_batch: List[Address] = []
         batch_num = 0
 
         with self.db_ops.acquire_write_conn() as conn:
             self._ensure_dot_schema(conn)
-            self._clear_dot_tables(conn)
             self._prepare_dot_conn(conn)
+            existing = self._existing_carrier_rows(conn)
+            skip_rows = 0
+            if existing:
+                skip_rows = existing
+                msg = (
+                    f"  DOT: resuming — skip {skip_rows:,} file rows, "
+                    f"keep existing {existing:,} DB rows"
+                )
+                log_info(msg)
+                print(msg, flush=True)
+            else:
+                self._clear_dot_tables(conn)
 
+            skipped = 0
             with csv_path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
                 reader = csv.DictReader(handle)
                 for raw_row in reader:
-                    row = {str(k or "").strip().lower(): (v or "").strip() for k, v in raw_row.items()}
+                    row = {
+                        str(k or "").strip().lower(): (v or "").strip()
+                        for k, v in raw_row.items()
+                    }
                     carrier, addresses = self._row_to_models(row)
                     if carrier is None:
                         continue
+                    if skipped < skip_rows:
+                        skipped += 1
+                        continue
+
                     carrier_batch.append(carrier)
                     address_batch.extend(addresses)
 
                     if len(carrier_batch) >= BATCH_SIZE:
                         batch_num += 1
-                        totals = self._flush_batches(
-                            conn, carrier_batch, address_batch, totals
+                        run_totals = self._flush_batches(
+                            conn, carrier_batch, address_batch, run_totals
                         )
                         carrier_batch.clear()
                         address_batch.clear()
                         if batch_num % CHECKPOINT_EVERY_BATCHES == 0:
                             conn.execute("CHECKPOINT")
                             log_info(
-                                f"  DOT checkpoint after {totals['carriers']:,} carriers"
+                                f"  DOT checkpoint after "
+                                f"{existing + run_totals['carriers']:,} carriers"
                             )
+                        if batch_num % PROGRESS_EVERY_BATCHES == 0:
+                            msg = (
+                                f"  DOT: +{run_totals['carriers']:,} this run "
+                                f"({existing + run_totals['carriers']:,} total)"
+                            )
+                            log_info(msg)
+                            print(msg, flush=True)
 
             if carrier_batch:
-                totals = self._flush_batches(
-                    conn, carrier_batch, address_batch, totals
+                run_totals = self._flush_batches(
+                    conn, carrier_batch, address_batch, run_totals
                 )
             conn.execute("CHECKPOINT")
 
+        totals = {
+            "carriers": existing + run_totals["carriers"],
+            "addresses": self._existing_address_rows(),
+        }
         log_info(f"  dot_carriers: {totals['carriers']:,}")
         log_info(f"  dot addresses: {totals['addresses']:,}")
         print(f"  dot_carriers: {totals['carriers']:,}", flush=True)
         print(f"  dot addresses: {totals['addresses']:,}", flush=True)
         return totals
+
+    def _existing_address_rows(self) -> int:
+        row = self.db_ops.execute_query(
+            "SELECT COUNT(*) FROM Addresses WHERE address_type LIKE 'dot_carrier_%'"
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     @staticmethod
     def _prepare_dot_conn(conn) -> None:
