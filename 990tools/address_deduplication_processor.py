@@ -452,7 +452,77 @@ class AddressDeduplicationProcessor(BaseProcessor):
     def __init__(self, db_ops: DatabaseOperations):
         super().__init__(db_ops)
         self.batch_size = 1000
-        
+
+    @staticmethod
+    def _emit_progress(message: str) -> None:
+        """Log + stdout for nohup tail monitoring."""
+        log_info(message)
+        print(message, flush=True)
+
+    def _log_preflight_stats(self) -> None:
+        """Snapshot Addresses state before incremental SQL dedup."""
+        self._emit_progress("=== Address dedup preflight ===")
+        row = self.db_ops.execute_query("""
+            SELECT
+                COUNT(*) AS total_addrs,
+                SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) AS null_master,
+                SUM(CASE WHEN master_id IS NOT NULL THEN 1 ELSE 0 END) AS set_master
+            FROM Addresses
+        """).fetchone()
+        if row:
+            self._emit_progress(
+                f"  Addresses: {int(row[0]):,} total; "
+                f"{int(row[1] or 0):,} master_id NULL (to process); "
+                f"{int(row[2] or 0):,} already set"
+            )
+
+        row = self.db_ops.execute_query("""
+            WITH g AS (
+                SELECT
+                    canonical_address,
+                    COUNT(*) AS n,
+                    SUM(CASE WHEN master_id IS NULL THEN 1 ELSE 0 END) AS null_cnt
+                FROM Addresses
+                WHERE canonical_address IS NOT NULL AND canonical_address != ''
+                GROUP BY canonical_address
+            )
+            SELECT
+                SUM(CASE WHEN null_cnt = 0 THEN 1 ELSE 0 END) AS fully_deduped,
+                SUM(CASE WHEN null_cnt > 0 AND null_cnt < n THEN 1 ELSE 0 END) AS partial_groups,
+                SUM(CASE WHEN null_cnt = n THEN 1 ELSE 0 END) AS all_null_groups
+            FROM g
+        """).fetchone()
+        if row:
+            self._emit_progress(
+                f"  Canonical groups: {int(row[0] or 0):,} fully deduped; "
+                f"{int(row[1] or 0):,} partial (incremental merge); "
+                f"{int(row[2] or 0):,} all-null"
+            )
+
+        for label, sql in (
+            ("DOT new rows", """
+                SELECT COUNT(*) FROM Addresses
+                WHERE address_type LIKE 'dot_carrier%' AND master_id IS NULL
+            """),
+            ("DOT shared canonical w/ existing root", """
+                SELECT COUNT(DISTINCT a.canonical_address)
+                FROM Addresses a
+                JOIN Addresses b ON a.canonical_address = b.canonical_address
+                WHERE a.address_type LIKE 'dot_carrier%' AND a.master_id IS NULL
+                  AND b.address_type NOT LIKE 'dot_carrier%' AND b.master_id IS NOT NULL
+                  AND a.canonical_address IS NOT NULL AND a.canonical_address != ''
+            """),
+            ("Geocoding rows (existing)", """
+                SELECT COUNT(*) FROM Geocoding
+            """),
+        ):
+            r = self.db_ops.execute_query(sql).fetchone()
+            if r:
+                self._emit_progress(f"  {label}: {int(r[0]):,}")
+
+        self._emit_progress("  Strategy: SQL incremental — MIN(address_id) root, no master_id reset")
+        self._emit_progress("=== End preflight ===")
+
     def setup_pending_canonicals(self):
         log_info("Phase 1: Setup - Creating pending_canonicals table (clean slate)")
 
@@ -504,19 +574,22 @@ class AddressDeduplicationProcessor(BaseProcessor):
     def _sql_deduplicate_and_geocode(self) -> int:
         """Final robust version: catches all remaining groups, includes po_box, full indexes."""
 
-        log_info("Running complete master/child assignment and geocoding record creation...")
+        self._emit_progress("Running SQL master/child assignment + geocoding (incremental)...")
+        phase_start = time.time()
 
         with self.db_ops.acquire_write_conn() as conn:
             conn.execute("PRAGMA memory_limit = '16GB';")
 
             unprocessed = conn.execute("SELECT COUNT(*) FROM Addresses WHERE master_id IS NULL").fetchone()[0] or 0
             if unprocessed == 0:
-                log_info("Nothing to do — all addresses already have master_id set.")
+                self._emit_progress("Nothing to do — all addresses already have master_id set.")
                 return 0
 
-            log_info(f"Found {unprocessed:,} addresses still needing master_id assignment")
+            self._emit_progress(f"Processing {unprocessed:,} addresses with master_id NULL")
 
             # Step 1: Rebuild pending_canonicals from current state
+            step_start = time.time()
+            self._emit_progress("Step 1/6: building pending_canonicals from all addresses...")
             conn.execute("DROP TABLE IF EXISTS pending_canonicals;")
 
             conn.execute("""
@@ -531,9 +604,14 @@ class AddressDeduplicationProcessor(BaseProcessor):
             """)
 
             pending_count = conn.execute("SELECT COUNT(*) FROM pending_canonicals").fetchone()[0] or 0
-            log_info(f"Built fresh pending_canonicals with {pending_count:,} groups")
+            self._emit_progress(
+                f"Step 1/6 done in {time.time() - step_start:.1f}s — "
+                f"{pending_count:,} canonical groups"
+            )
 
             # Step 2: Idempotent Geocoding insert (with po_box)
+            step_start = time.time()
+            self._emit_progress("Step 2/6: inserting new Geocoding rows (idempotent)...")
             result = conn.execute("""
                 INSERT INTO Geocoding (
                     geocoding_id,
@@ -578,11 +656,16 @@ class AddressDeduplicationProcessor(BaseProcessor):
 
             row = result.fetchone()
             inserted = int(row[0]) if row and row[0] is not None else 0
-            log_info(f"DEBUG: Inserted {inserted:,} new Geocoding records")
+            self._emit_progress(
+                f"Step 2/6 done in {time.time() - step_start:.1f}s — "
+                f"{inserted:,} new Geocoding records"
+            )
 
             self.db_ops._intermediate_commit_and_checkpoint(conn, inserted)
 
             # Step 3: Build typed address_map
+            step_start = time.time()
+            self._emit_progress("Step 3/6: building address_map...")
             conn.execute("DROP TABLE IF EXISTS address_map;")
 
             conn.execute("""
@@ -606,9 +689,14 @@ class AddressDeduplicationProcessor(BaseProcessor):
             """)
 
             map_count = conn.execute("SELECT COUNT(*) FROM address_map").fetchone()[0] or 0
-            log_info(f"DEBUG: Built address_map with {map_count:,} addresses")
+            self._emit_progress(
+                f"Step 3/6 done in {time.time() - step_start:.1f}s — "
+                f"address_map {map_count:,} rows"
+            )
 
             # Step 4: Rebuild Addresses (casts inside COALESCE)
+            step_start = time.time()
+            self._emit_progress("Step 4/6: rebuilding Addresses table (long step)...")
             conn.execute("""
                 CREATE OR REPLACE TABLE Addresses_new AS
                 SELECT
@@ -638,8 +726,13 @@ class AddressDeduplicationProcessor(BaseProcessor):
             # Swap tables
             conn.execute("DROP TABLE Addresses;")
             conn.execute("ALTER TABLE Addresses_new RENAME TO Addresses;")
+            self._emit_progress(
+                f"Step 4/6 done in {time.time() - step_start:.1f}s — table swap complete"
+            )
 
-            # Rebuild ALL your indexes
+            # Step 5: Rebuild indexes
+            step_start = time.time()
+            self._emit_progress("Step 5/6: rebuilding Addresses indexes...")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_addresses_ein ON Addresses(ein);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_addresses_zip_code ON Addresses(zip_code);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_addresses_type ON Addresses(address_type);")
@@ -651,13 +744,26 @@ class AddressDeduplicationProcessor(BaseProcessor):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_addresses_canonical_covering ON Addresses(canonical_address, address_id, master_id, geocoding_id);")
 
             self.db_ops._intermediate_commit_and_checkpoint(conn, 0)
+            self._emit_progress(
+                f"Step 5/6 done in {time.time() - step_start:.1f}s — indexes rebuilt"
+            )
 
             updated_count = conn.execute("SELECT COUNT(*) FROM Addresses WHERE master_id IS NOT NULL").fetchone()[0] or 0
+            remaining_null = conn.execute(
+                "SELECT COUNT(*) FROM Addresses WHERE master_id IS NULL"
+            ).fetchone()[0] or 0
 
+            step_start = time.time()
+            self._emit_progress("Step 6/6: VACUUM ANALYZE Addresses + Geocoding...")
             conn.execute("VACUUM ANALYZE Addresses;")
             conn.execute("VACUUM ANALYZE Geocoding;")
+            self._emit_progress(f"Step 6/6 done in {time.time() - step_start:.1f}s")
 
-            log_info(f"SQL deduplication complete - {updated_count:,} addresses now have master_id ({inserted:,} geocoding records created)")
+            self._emit_progress(
+                f"SQL dedup complete in {time.time() - phase_start:.1f}s — "
+                f"{updated_count:,} with master_id; {remaining_null:,} still NULL; "
+                f"{inserted:,} new Geocoding"
+            )
             return updated_count
     
     def _get_work_batch(self, where_clause: str, params: Tuple, last_pk: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -891,29 +997,16 @@ class AddressDeduplicationProcessor(BaseProcessor):
         consumer, GeocodingRecordCreator, _process_work_item, etc.) can now be
         deleted from the file once you confirm this works.
         """
-        log_info("Starting address deduplication (pure DuckDB SQL version)")
+        self._emit_progress("Starting address deduplication (pure DuckDB SQL, incremental)")
+        self._log_preflight_stats()
 
-        # Phase 1: Setup - Create pending_canonicals table (unchanged)
-        log_info("Phase 1: Building pending_canonicals table...")
-        self.setup_pending_canonicals()
-
-        # Phase 2: Main work - one fast SQL statement
-        log_info("Phase 2: Master/child assignment + geocoding records...")
         start = time.time()
         total_processed = self._sql_deduplicate_and_geocode()
         duration = time.time() - start
-        log_info(f"Phase 2 finished in {duration:.1f} seconds ({total_processed:,} groups)")
-
-        # Phase 3: Cleanup
-        log_info("Phase 3: Cleanup - dropping temporary table")
-        try:
-            with self.db_ops.acquire_write_conn() as conn:
-                #conn.execute("DROP TABLE IF EXISTS pending_canonicals")
-                pass
-        except Exception as e:
-            log_warning(f"Could not drop pending_canonicals: {e}")
-
-        log_info(f"Address deduplication completed successfully: {total_processed:,} canonical groups")
+        self._emit_progress(
+            f"Address deduplication finished in {duration:.1f}s "
+            f"({total_processed:,} addresses with master_id)"
+        )
         return total_processed
 
     def old_deduplicate_addresses(self, progress_bar=None) -> int:
