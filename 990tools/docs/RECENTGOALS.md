@@ -4,22 +4,23 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
-## 2026-06: DOT Step — FMCSA Motor Carrier Census (in progress)
+## 2026-06: DOT Step Production Validation (FMCSA Motor Carrier Census)
 
-**What:** `--step dot` on `/Volumes/Data/final/irs990.duckdb`. FMCSA Company Census CSV → `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
+**What:** Production-validated `--step dot` on `/Volumes/Data/final/irs990.duckdb`. FMCSA Company Census CSV (4.45M carriers) → `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).
 
 **Why:** Same-building colocation signals — FEC committees, OFAC sanctions, and trucking carriers at one canonical address (shell offices, nominee agents). Ingest only; matching deferred to `grant_match` / `geolocate1`.
 
 **How:**
-- `dot_processor.py`: curl download (`company_census.csv`, ~900 MB actual), streaming `csv.DictReader`, batch 15k, idempotent `.dot_census_ingest.json` marker (`INGEST_VERSION = 1`).
-- `download_utils.discover_fmcsa_census_url()` — data.transportation.gov Company Census File.
-- Model: `DotCarrier` + `build_address()` for phy/mail; skip non-promotable addresses; dedupe mail when same canonical as phy.
+- `dot_processor.py`: curl download (`company_census.csv`, ~1.6 GB), streaming `csv.DictReader`, FEC-style resume, idempotent `.dot_census_ingest.json` marker (`INGEST_VERSION = 1`).
+- Production counts: `dot_carriers` 4,454,157; `dot_carrier_phy` 4,450,675; `dot_carrier_mail` 977,160.
 - Data: `{final_dir}/cms_data/dot/company_census.csv`
-- Log: `dot_step_20260618.log` (nohup, production run started 2026-06-18)
+- Log: `dot_step_20260620_v5.log` (final resume after laptop crash; v1–v4 partial runs)
 
-**Success signal:** Committed `d43a902b` (implementation). Production counts TBD when run completes.
+**Ops notes:** OOM at 30k (v1) → 8GB + 5k batches; harness timeout at 545k (v2); OOM at 3.9M (v3); laptop crash at 4.36M (v4). Resume + 12GB/2.5k batches finished last 92k (v5).
 
-**Resume:** `--start-step address` after dot validates.
+**Success signal:** Committed `d43a902b` (impl) + `2fced65e`/`2b2399f3`/`a80c9d92` (OOM/resume fixes). Ingest marker written.
+
+**Resume:** `--start-step address` on production DB.
 
 ---
 
