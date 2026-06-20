@@ -40,7 +40,10 @@ nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_ste
 nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 nohup python -u irs990processor.py --step einless --nostats -v > einless_step.log 2>&1 &
 
-# Resume after einless milestone
+# Production resume (June 2026): sanctions + dot complete on /Volumes/Data/final/irs990.duckdb
+nohup python -u irs990processor.py --start-step address --nostats -v > address_step.log 2>&1 &
+
+# Resume after einless milestone (earlier checkpoint)
 python -u irs990processor.py --start-step match --db-path irs990.duckdb
 ```
 

@@ -74,12 +74,14 @@ nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_ste
 
 Country-only OFAC locations use `FA:<iso>` colocators; blank/`undetermined` rows are skipped (not promoted to `Addresses`).
 
-**`dot` step** (`dot_processor.py`): FMCSA Motor Carrier Census (~1M carriers) from [data.transportation.gov](https://data.transportation.gov/Trucking-and-Motorcoaches/Company-Census-File/az4n-8mr2). Promotes to `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`). Data under `{final_dir}/cms_data/dot/`. Ingest only — same-building colocation with grants/FEC is a later consumer (`grant_match` / `geolocate1`).
+**`dot` step** (`dot_processor.py`): FMCSA Motor Carrier Census (4.45M carriers; CSV ~1.6 GB) from [data.transportation.gov](https://data.transportation.gov/Trucking-and-Motorcoaches/Company-Census-File/az4n-8mr2). Promotes to `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`). Data under `{final_dir}/cms_data/dot/`. FEC-style resume on interrupt; idempotent `.dot_census_ingest.json` marker. Production-validated 2026-06-20: 4,454,157 carriers; 4,450,675 phy + 977,160 mail addresses. Ingest only — same-building colocation is a later consumer (`grant_match` / `geolocate1`).
 
-Run standalone:
+Run standalone (use `nohup` — long-running on large DBs):
 ```bash
 nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 ```
+
+**Production resume point (June 2026):** `--start-step address` (sanctions + dot complete).
 
 **Data separation on Grants:**
 - `recipient_ein` — parsed from 990 XML (never overwritten)

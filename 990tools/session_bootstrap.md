@@ -1,11 +1,11 @@
 # 990tools Session Bootstrap
 
-**Last updated:** 2026-06 (EINless pipeline integration milestone)
+**Last updated:** 2026-06-20 (DOT production validation)
 
-> **Note:** For the current phase, prefer `issue_bootstrap.md` — it is authoritative for einless + pipeline work. This file retains the 2026-05 category/Splink context.
+> **Note:** For the current phase, prefer `issue_bootstrap.md` — authoritative for pipeline work. This file retains the 2026-05 category/Splink context.
 
 ## Current Focus (June 2026)
-EINless phonebook integration is complete in the main pipeline (`--step einless`). Production run backfilled 3.7M grants. Next: continue from `--start-step match` and wire hard-tail einless learnings into address_matcher / grant_match / generate_name_rules.
+External reference ingests complete through **DOT** on production DB (`/Volumes/Data/final/irs990.duckdb`): sanctions (19k entities) + DOT (4.45M carriers). **Next:** `--start-step address`, then einless → match → geolocate. See `issue_bootstrap.md` and `docs/RECENTGOALS.md`.
 
 ## Previous Focus (May 2026)
 We were doing targeted Splink discovery on coherent name categories instead of one giant run on the full master list. This is the "hybrid of a hybrid" approach.
