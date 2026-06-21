@@ -59,7 +59,8 @@ from photo_processor import PhotoProcessor
 from extract_processor import ExtractProcessor
 from grant_match_processor import GrantMatchProcessor
 from backfill_charities_processor import BackfillCharitiesProcessor
-from geolocate1_processor import Geolocate1Processor
+from geolocate_prev_processor import GeolocatePrevProcessor
+from geolocate_archive_processor import GeolocateArchiveProcessor
 from einless_processor import EinlessProcessor
 from fec_processor import FECProcessor
 from medicare_processor import MedicareProcessor
@@ -103,6 +104,21 @@ CURRENT_PROCESSING_VERSION = 2  # Increment when processing logic changes (refac
 MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
+
+# Geolocate trilogy (after match). Legacy aliases: geolocate → geolocate_new, geolocate1 → geolocate_prev
+PIPELINE_STEPS = [
+    "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "address", "einless", "match",
+    "geolocate_prev", "geolocate_new", "geolocate_archive", "photos", "grant_match", "backfill", "ratios",
+    "percentiles", "export",
+]
+STEP_ALIASES = {
+    "geolocate": "geolocate_new",
+    "geolocate1": "geolocate_prev",
+}
+
+
+def normalize_step(step: str) -> str:
+    return STEP_ALIASES.get(step, step)
 
 
 
@@ -182,8 +198,8 @@ class IRS990Processor(BaseProcessor):
         # TSV exports land in 990tools root for offline einless/rebuild tooling.
         einless_tsv_dir = Path(__file__).resolve().parent
         self.einless_processor = EinlessProcessor(self.db_ops, output_dir=einless_tsv_dir)
-        # Lightweight geolocate step (cache + loose colocator); runs after full geolocate.
-        self.geolocate1_processor = Geolocate1Processor(self.db_ops)
+        self.geolocate_prev_processor = GeolocatePrevProcessor(self.db_ops)
+        self.geolocate_archive_processor = GeolocateArchiveProcessor(self.db_ops)
         cms_data_dir = Path(self.final_dir) / "cms_data"
         fec_cycles = _parse_cycle_list(os.environ.get("FEC_CYCLES", ""))
         self.fec_processor = FECProcessor(
@@ -716,34 +732,34 @@ class IRS990Processor(BaseProcessor):
 
 
 
-    def geolocate_addresses(self):
-        """Geolocate addresses using census API (step 7) - Phase 2 only"""
+    def run_geolocate_new(self):
+        """Census API geocoding for pending Geocoding rows (geolocate trilogy step 2)."""
         if self.exit_processing:
-            log_info("Shutdown requested before starting geocoding")
+            log_info("Shutdown requested before geolocate_new")
             return 0
         self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS)
-        #from geocoding_api_processor import GeocodingAPIProcessor
-   
-        # Check if censusgeocode is available
+
         if cg is None:
             if not global_config.is_quiet():
-                log_warning("censusgeocode library not available. Skipping geocoding. "
-                              "To enable geocoding, install with: pip install censusgeocode")
+                log_warning(
+                    "censusgeocode library not available. Skipping geolocate_new. "
+                    "Install with: pip install censusgeocode"
+                )
             return 0
-   
+
         try:
-            if not global_config.is_quiet():
-                log_info("Starting geocoding API processing (Phase 2) - geocoding records should be created during address deduplication (Phase 1)")
-   
-            # Create and run the API processor for Phase 2
+            log_info("Starting geolocate_new (Census API for pending geocoding records)")
             api_processor = GeocodingAPIProcessor(self.db_ops)
             result = api_processor.process_pending_geocoding_records(max_files=self.max_files)
             self.processed_steps += 1
             return result
-   
         except Exception as e:
-            log_error(f"Address geocoding failed: {e}", exc_info=True)
+            log_error(f"geolocate_new failed: {e}", exc_info=True)
             return 0
+
+    def geolocate_addresses(self):
+        """Backward-compat alias for run_geolocate_new."""
+        return self.run_geolocate_new()
 
     def run_einless(self):
         """Phonebook exact-core resolution; sets recipient_ein_backfilled (after address, before match)."""
@@ -755,17 +771,27 @@ class IRS990Processor(BaseProcessor):
         self.processed_steps += 1
         return stats.get("grants_updated", 0)
 
-    def run_geolocate1(self):
-        """Lightweight geolocate1 step (runs after geolocate).
-
-        Loads geocode archive cache + computes loose_colocator (0.5° grid).
-        Future: FEC/Treasury blacklist same-building sus detection.
-        """
+    def run_geolocate_prev(self):
+        """Archive cache + loose_colocator (geolocate trilogy step 1, before Census API)."""
         if self.exit_processing:
-            log_info("Shutdown requested before geolocate1")
+            log_info("Shutdown requested before geolocate_prev")
             return 0
-        log_info("Running geolocate1 (archive cache + loose colocator population)")
-        result = self.geolocate1_processor.run(max_files=self.max_files)
+        log_info("Running geolocate_prev (archive cache + loose colocator)")
+        result = self.geolocate_prev_processor.run(max_files=self.max_files)
+        self.processed_steps += 1
+        return result
+
+    def run_geolocate1(self):
+        """Backward-compat alias for run_geolocate_prev."""
+        return self.run_geolocate_prev()
+
+    def run_geolocate_archive(self):
+        """Export successful geocodes → geocode_archive_distinct.tsv.gz (trilogy step 3)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before geolocate_archive")
+            return 0
+        log_info("Running geolocate_archive (export geocode archive TSV)")
+        result = self.geolocate_archive_processor.run()
         self.processed_steps += 1
         return result
 
@@ -867,18 +893,11 @@ def main():
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Database path (default: irs990.duckdb)")
     parser.add_argument("--dbUI", action="store_true", help="Start database UI alongside processing")
     parser.add_argument("--profile", type=int, help="Profile currently executing step (collect_operations or execute_operations_batch) for N seconds and exit")
-    parser.add_argument("--step", choices=["all", "irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions", "dot",
-                                           "address", "einless", "match", "geolocate", "geolocate1", "photos",
-                                           "grant_match", "backfill", "ratios","percentiles", "export"],
+    _step_choices = PIPELINE_STEPS + list(STEP_ALIASES.keys())
+    parser.add_argument("--step", choices=["all"] + _step_choices,
                           default="all", help="Processing step to run (deprecated: use --start-step and --stop-step)")
-    parser.add_argument("--start-step", choices=["irsfetch", "zip",  "bmf","xml", "fec", "medicare", "sanctions", "dot",
-                                                  "address", "einless", "match", "geolocate", "geolocate1",
-                                                  "photos", "grant_match", "backfill", "ratios","percentiles", "export"],
-                           help="Starting step for processing")
-    parser.add_argument("--stop-step", choices=["irsfetch", "zip", "bmf","xml", "fec", "medicare", "sanctions", "dot",
-                                                 "address", "einless", "match", "geolocate", "geolocate1",
-                                                 "photos", "grant_match", "backfill", "ratios", "percentiles", "export"],
-                           help="Stopping step for processing")
+    parser.add_argument("--start-step", choices=_step_choices, help="Starting step for processing")
+    parser.add_argument("--stop-step", choices=_step_choices, help="Stopping step for processing")
     parser.add_argument("--progress", choices=["files", "bytes"], default="files",
                            help="Progress tracking type (default: files)")
     parser.add_argument("--extract", nargs='+', help="List of EINs to extract XML files for")
@@ -890,12 +909,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Define processing steps in order
-    steps = ["irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "address", "einless", "match",
-             "geolocate", "geolocate1", "photos", "grant_match", "backfill", "ratios",
-             "percentiles", "export"]
+    steps = PIPELINE_STEPS
 
-    # Define step actions
     step_actions = {
         "irsfetch": lambda: processor.fetch_irs_zips(args.start_year, args.end_year),
         "zip": lambda: processor.process_zip_files(args.start_year, args.end_year),
@@ -908,8 +923,11 @@ def main():
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),
-        "geolocate": lambda: processor.geolocate_addresses(),
-        "geolocate1": lambda: processor.run_geolocate1(),
+        "geolocate_prev": lambda: processor.run_geolocate_prev(),
+        "geolocate_new": lambda: processor.run_geolocate_new(),
+        "geolocate_archive": lambda: processor.run_geolocate_archive(),
+        "geolocate": lambda: processor.run_geolocate_new(),
+        "geolocate1": lambda: processor.run_geolocate_prev(),
         "grant_match": lambda: processor.grant_match_processor.match_grants_by_address(),
         "photos": lambda: processor.process_officer_photos(),
         "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),
@@ -923,13 +941,17 @@ def main():
         args.start_step = args.step
         args.stop_step = args.step
 
-    # Set defaults if not specified
     if not args.start_step:
         args.start_step = "irsfetch"
     if not args.stop_step:
         args.stop_step = "export"
 
-    # Validate start and stop steps
+    for raw_step in (args.start_step, args.stop_step, args.step):
+        if raw_step in STEP_ALIASES:
+            log_warning(f"Step '{raw_step}' is deprecated — use '{STEP_ALIASES[raw_step]}'")
+    args.start_step = normalize_step(args.start_step)
+    args.stop_step = normalize_step(args.stop_step)
+
     if steps.index(args.start_step) > steps.index(args.stop_step):
         parser.error("--start-step must come before --stop-step in the processing order")
 

@@ -27,7 +27,7 @@ Checks for bad variants. Should say "No significant bad variants detected".
 
 Full step order:
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate_prev → geolocate_new → geolocate_archive → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
 Common invocations:
