@@ -26,6 +26,20 @@ Rename/refactor current `geolocate1`/`geolocate` into trilogy; `grant_match` sta
 
 **Fraud research direction:** Cross-pollination signals (charity↔contractor, grants↔sanctions, FEC↔NGO, Medicare providers receiving grants, DOT address stacking). Early signal: shared `canonical_address` across `address_type`s — now in stats report. Deeper signals after geolocate trilogy + `loose_colocator`. Standalone `dot_fraud_signals.py` (or similar) for carrier stacking — not a pipeline step.
 
+**Report UX (planned):** Fraud/colocation reports should render canonical addresses as clickable Google Maps links (`https://www.google.com/maps/search/?api=1&query=…`).
+
+---
+
+## 2026-06: Match Step Kickoff
+
+**What:** Production `--start-step match` on `/Volumes/Data/final/irs990.duckdb` (skip `einless`).
+
+**Why:** Name rules + address_matcher after incremental address dedup and external ingests; validates einless backfills.
+
+**How:** `nohup python3 -u irs990processor.py --start-step match --stop-step match -v > match_step_20260620.log 2>&1`
+
+**After:** geolocate_prev → geolocate_new → geolocate_archive → grant_match.
+
 ---
 
 ## 2026-06: DOT Step Production Validation (FMCSA Motor Carrier Census)
