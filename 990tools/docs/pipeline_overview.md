@@ -54,8 +54,17 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate_prev → geolocate_new → geolocate_archive → photos → grant_match → backfill → ratios → percentiles → export
 ```
+
+**Geolocate trilogy (planned rename):**
+| Step | Current name | Role |
+|------|--------------|------|
+| `geolocate_prev` | `geolocate1` | Load `geocode_archive_distinct.tsv.gz`; fast colocator wins from prior runs |
+| `geolocate_new` | `geolocate` | Census API pass for remaining pending Geocoding rows |
+| `geolocate_archive` | *(new)* | Export successful geocodes → refresh archive TSV for next rebuild |
+
+Runs in succession after `match`, before `photos` / `grant_match`. `grant_match` remains the colocator + `loose_colocator` hail-mary (pre-phonebook).
 
 **`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
 
@@ -81,7 +90,7 @@ Run standalone (use `nohup` — long-running on large DBs):
 nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 ```
 
-**Production resume point (June 2026):** `--start-step address` (sanctions + dot complete).
+**Production resume point (June 2026):** `--start-step match` (address dedup complete; `einless` already run — skip unless re-hygiene needed).
 
 **Data separation on Grants:**
 - `recipient_ein` — parsed from 990 XML (never overwritten)
@@ -114,6 +123,21 @@ Offline hygiene (rebuild/rebucket/Grok on hard tail) lives in `einless/` — see
 3. v2 analyzer + reverse_coverage for diagnostics (raw/cleaned/best_canonical/similarity/reason).
 4. Pipeline `einless` step phonebook-backfills no-EIN grantees; then `match` (address_matcher.py) and grant_match_processor.py apply name rules + address matching.
 5. Visualization and fraud detection in DuckDB use the synthetic EIN for BIG PHARMA SUBSIDY rows.
+
+## Fraud / Cross-Pollination Research (June 2026)
+
+Ultimate goal: surface reportable fraud signals for USG review. Early ingest-only sources now in DB:
+
+| Signal | Tables / join key | When useful |
+|--------|-----------------|-------------|
+| Same-building colocation | `Addresses.canonical_address` across `address_type` | Now (stats report `shared_canonical`) |
+| Charity as contractor | `Charities`/`IrsBmf` ↔ `Contractors` (name/EIN) | After `match` |
+| Grants to sanctioned entity | `Grants` ↔ `sanctioned_names` | After `match` + name rules |
+| FEC ↔ NGO | `fec_*` ↔ `Charities` at shared address or EIN | After geolocate trilogy |
+| Medicare provider grants | `medicare_providers` ↔ `Grants` (NPI/name) | After `match`; Planned Parenthood-class providers |
+| DOT shell offices | Many `dot_carrier_*` rows per `canonical_address` | Standalone script + post-`loose_colocator` |
+
+Stats report (`stats_processor.py`) now includes FEC/Medicare/sanctions/DOT table counts (0 if missing), address-type breakdown, and top multi-type canonicals + DOT-stacked addresses.
 
 Pharma subsidy rows ($1B first-pill cost, tax deduction "charity") use synthetic EIN 99-7777777 to preserve $ volume without pretending they are normal charities.
 

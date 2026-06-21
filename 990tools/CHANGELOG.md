@@ -5,6 +5,19 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06 (Address Dedup + Stats)
+
+### Address Step (`--step address`) — production-validated 2026-06-20
+- Incremental SQL dedup: 69.3M NULL `master_id` → 0 without resetting existing charity roots.
+- Phased-commit fix (`7ea4a2a1`): geocoding + table swap commit before index rebuild; survives Step 5 OOM.
+- Preflight + step progress logging (`09d5c50d`).
+- Production: 95,196,749 addresses; 14,342,486 Geocoding groups; DB ~91 GB.
+
+### Stats Report Hardening
+- `stats_processor.py`: `KNOWN_TABLES` includes FEC, Medicare, sanctions, DOT; missing tables → count 0.
+- New sections: external reference counts, address-type breakdown, shared-canonical / DOT-stacking signals.
+- Guardrails on all major analysis blocks when core tables absent.
+
 ## [Unreleased] - 2026-06 (DOT / FMCSA Pipeline Step)
 
 ### DOT Step (`--step dot`) — production-validated 2026-06-20

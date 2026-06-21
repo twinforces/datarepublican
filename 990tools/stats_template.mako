@@ -297,7 +297,7 @@ ${'####'} Colocator Type Breakdown
 ${'####'} Colocator by Address Type
 | Address Type | Count |
 |--------------|-------|
-% for address_type, count in addresses_colocator_analysis['colocator_by_address_type']:
+% for address_type, count in addresses_colocator_analysis.get('colocator_by_address_type', []):
 | ${address_type} | ${count} |
 % endfor
 
@@ -321,6 +321,55 @@ ${'###'} Geocoding Status Analysis
 | Total geocoding records | ${geocoding_status_analysis['total_geocoding_records']} |
 | Records with coordinates | ${geocoding_status_analysis['geocoded_with_coords']} |
 | Records with API attempts | ${geocoding_status_analysis['attempted_records']} |
+
+${'###'} External Reference Tables (FEC / Medicare / Sanctions / DOT)
+
+| Source | Ingested | Tables |
+|--------|----------|--------|
+% for group_name, counts in external_reference_analysis['groups'].items():
+| ${group_name} | ${'yes' if external_reference_analysis['ingested'][group_name] else 'no'} | ${', '.join(f"{t}={counts[t]:,}" for t in counts)} |
+% endfor
+
+${'###'} Address Type Breakdown
+
+| Address Type | Count |
+|--------------|-------|
+% for address_type, count in address_type_analysis.get('by_type', []):
+| ${address_type if address_type else 'NULL'} | ${count} |
+% endfor
+
+% if address_type_analysis.get('new_source_types'):
+${'####'} New-Source Address Types (FEC / OFAC / DOT)
+| Address Type | Count |
+|--------------|-------|
+% for address_type, count in address_type_analysis['new_source_types']:
+| ${address_type} | ${count} |
+% endfor
+% endif
+
+${'###'} Shared Canonical / Colocation Signals
+
+| Metric | Count |
+|--------|-------|
+| Canonical addresses shared across multiple address_types | ${shared_canonical_analysis.get('multi_type_canonicals', 0)} |
+
+% if shared_canonical_analysis.get('top_multi_type'):
+${'####'} Top Multi-Type Canonical Addresses
+| Canonical Address | Address Types | Rows | Type Count |
+|-------------------|---------------|------|------------|
+% for canon, types, rows, type_count in shared_canonical_analysis['top_multi_type']:
+| ${canon} | ${types} | ${rows} | ${type_count} |
+% endfor
+% endif
+
+% if shared_canonical_analysis.get('top_dot_stacked'):
+${'####'} Top DOT-Stacked Addresses (5+ carrier rows)
+| Canonical Address | Carrier Rows |
+|-------------------|--------------|
+% for canon, carrier_rows in shared_canonical_analysis['top_dot_stacked']:
+| ${canon} | ${carrier_rows} |
+% endfor
+% endif
 
 ${'##'} Processing Details
 

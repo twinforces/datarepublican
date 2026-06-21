@@ -4,6 +4,30 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-06: Address Step Production Validation (Incremental Dedup)
+
+**What:** Production-validated `--step address` on `/Volumes/Data/final/irs990.duckdb`. Incremental SQL dedup assigned `master_id` to 69.3M new rows (DOT/sanctions/FEC) without resetting existing roots.
+
+**Why:** DOT + sanctions added ~5.4M address rows with NULL `master_id`. Needed incremental merge (MIN `address_id` root) so charity dedup state was preserved. v1 failed silently — geocoding committed but table swap rolled back on index OOM.
+
+**How:**
+- `address_deduplication_processor.py`: phased transactions; `_commit_or_raise()` after step 2 geocoding and step 4 table swap; `_verify_dedup_applied()`; indexes one-at-a-time.
+- Production: 95,196,749 addresses; **0** NULL `master_id`; 14,342,486 Geocoding rows; DB ~91 GB.
+- Logs: `address_step_20260620_v2.log` (dedup); `address_step_20260620_v2_indexes.log` (indexes 7–9 + VACUUM after OOM on index 7).
+- Commits: `09d5c50d` (logging), `7ea4a2a1` (phased commit fix).
+
+**Resume:** `--start-step match` (skip `einless` — phonebook backfills already applied June 15).
+
+**Next pipeline architecture (planned):**
+```
+… → match → geolocate_prev → geolocate_new → geolocate_archive → photos → grant_match → …
+```
+Rename/refactor current `geolocate1`/`geolocate` into trilogy; `grant_match` stays as colocator/loose_colocator hail-mary.
+
+**Fraud research direction:** Cross-pollination signals (charity↔contractor, grants↔sanctions, FEC↔NGO, Medicare providers receiving grants, DOT address stacking). Early signal: shared `canonical_address` across `address_type`s — now in stats report. Deeper signals after geolocate trilogy + `loose_colocator`. Standalone `dot_fraud_signals.py` (or similar) for carrier stacking — not a pipeline step.
+
+---
+
 ## 2026-06: DOT Step Production Validation (FMCSA Motor Carrier Census)
 
 **What:** Production-validated `--step dot` on `/Volumes/Data/final/irs990.duckdb`. FMCSA Company Census CSV (4.45M carriers) → `dot_carriers` + `Addresses` (`dot_carrier_phy`, `dot_carrier_mail`).

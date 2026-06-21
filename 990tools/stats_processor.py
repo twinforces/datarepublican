@@ -14,6 +14,18 @@ from base_processor import BaseProducer
 from pending_database_context import PendingDatabaseContext
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 
+# Tables the stats report knows about. Missing tables show count 0 (not an error).
+KNOWN_TABLES = (
+    'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
+    'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding',
+    'BMF', 'IrsBmf', 'Backfill', 'Zips',
+    'fec_committees', 'fec_individual_contributions', 'fec_committee_transactions',
+    'fec_candidate_spendings', 'fec_operating_expenditures',
+    'medicare_providers', 'medicare_provider_spending',
+    'sanctioned_entities', 'sanctioned_names', 'sanctioned_identifiers', 'sanctioned_programs',
+    'dot_carriers',
+)
+
 
 def escape_newlines(data):
     """Recursively escape newlines in all strings within data structures"""
@@ -38,6 +50,29 @@ class StatsProcessor:
             db_ops: DatabaseOperations instance for database access
         """
         self.db_ops = db_ops
+
+    def _table_exists(self, table: str) -> bool:
+        try:
+            row = self.db_ops.execute_query(
+                "SELECT 1 FROM duckdb_tables() WHERE table_name = ? LIMIT 1",
+                (table,),
+            ).fetchone()
+            return row is not None
+        except Exception:
+            return False
+
+    def _safe_scalar(self, sql: str, params: tuple = (), default: Any = 0) -> Any:
+        try:
+            row = self.db_ops.execute_query(sql, params).fetchone()
+            return row[0] if row and row[0] is not None else default
+        except Exception:
+            return default
+
+    def _safe_fetchall(self, sql: str, params: tuple = ()) -> list:
+        try:
+            return self.db_ops.execute_query(sql, params).fetchall()
+        except Exception:
+            return []
 
     def generate_stats_report(self, step_name: str, notes: str = "") -> str:
         """Generate a statistics report for the current database state"""
@@ -98,6 +133,12 @@ class StatsProcessor:
             addresses_colocator_analysis = self.get_addresses_colocator_analysis()
             log_info("Getting geocoding status analysis...")
             geocoding_status_analysis = self.get_geocoding_status_analysis()
+            log_info("Getting external reference analysis...")
+            external_reference_analysis = self.get_external_reference_analysis()
+            log_info("Getting address type breakdown...")
+            address_type_analysis = self.get_address_type_analysis()
+            log_info("Getting shared-canonical (colocation) analysis...")
+            shared_canonical_analysis = self.get_shared_canonical_analysis()
 
             # Prepare template data
             template_data = {
@@ -118,6 +159,9 @@ class StatsProcessor:
                 'addresses_deduplication_analysis': addresses_deduplication_analysis,
                 'addresses_colocator_analysis': addresses_colocator_analysis,
                 'geocoding_status_analysis': geocoding_status_analysis,
+                'external_reference_analysis': external_reference_analysis,
+                'address_type_analysis': address_type_analysis,
+                'shared_canonical_analysis': shared_canonical_analysis,
                 'notes': notes or "No additional notes."
             }
 
@@ -147,41 +191,38 @@ class StatsProcessor:
             raise
 
     def get_table_counts(self) -> dict:
-        """Get row counts for all tables"""
-        tables = [
-            'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
-            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding', 'BMF', 'IrsBmf'
-        ]
-
+        """Get row counts for known tables; missing tables report 0."""
         counts = {}
-        for table in tables:
-            try:
-                result = self.db_ops.execute_query(f"SELECT COUNT(*) FROM {table}").fetchone()
-                counts[table] = result[0] if result else 0
-            except Exception:
-                counts[table] = 0  # Table might not exist yet
-
+        for table in KNOWN_TABLES:
+            if self._table_exists(table):
+                counts[table] = int(self._safe_scalar(f"SELECT COUNT(*) FROM {table}", default=0))
+            else:
+                counts[table] = 0
         return counts
 
     def get_table_summaries(self) -> dict:
-        """Get SUMMARIZE data for all tables"""
-        tables = [
-            'ZipFiles', 'XmlFiles', 'Charities', 'Officers', 'Grants',
-            'Contractors', 'PoliticalContributions', 'Addresses', 'Geocoding','BMF', 'IrsBmf'
-        ]
-
+        """Get SUMMARIZE data for tables that exist."""
         summaries = {}
-        for table in tables:
+        for table in KNOWN_TABLES:
+            if not self._table_exists(table):
+                summaries[table] = []
+                continue
             try:
                 result = self.db_ops.execute_query(f"SUMMARIZE {table}")
                 summaries[table] = result.fetchall()
             except Exception:
-                summaries[table] = []  # Table might not exist yet or SUMMARIZE might fail
-
+                summaries[table] = []
         return summaries
 
     def get_xml_files_group_counts(self) -> Dict[str, List[Tuple]]:
         """Get group by counts for XmlFiles columns"""
+        empty = {
+            'tax_year': [], 'form_type': [], 'processed': [],
+            'processing_version': [], 'error_message_prefix': [],
+        }
+        if not self._table_exists('XmlFiles'):
+            return empty
+
         group_counts = {}
 
         # Group by tax_year
@@ -308,6 +349,12 @@ class StatsProcessor:
 
     def get_charities_analysis(self) -> Dict[str, Any]:
         """Get comprehensive analysis for Charities table"""
+        if not self._table_exists('Charities'):
+            return {
+                'tax_year_counts': [], 'org_type_counts': [], 'form_type_counts': [],
+                'histograms': {},
+            }
+
         analysis = {}
 
         # Tax year group by
@@ -380,6 +427,9 @@ class StatsProcessor:
 
     def get_officers_analysis(self) -> Dict[str, Any]:
         """Get analysis for Officers table"""
+        if not self._table_exists('Officers'):
+            return {'top_last_names': []}
+
         analysis = {}
 
         # Top 10 last names
@@ -396,6 +446,9 @@ class StatsProcessor:
 
     def get_grants_analysis(self) -> Dict[str, Any]:
         """Get analysis for Grants table"""
+        if not self._table_exists('Grants'):
+            return {}
+
         analysis = {}
 
         # Grant amount histogram using quartile bins
@@ -430,6 +483,9 @@ class StatsProcessor:
 
     def get_contractors_analysis(self) -> Dict[str, Any]:
         """Get analysis for Contractors table"""
+        if not self._table_exists('Contractors'):
+            return {}
+
         analysis = {}
 
         # Amount histogram using quartile bins
@@ -464,6 +520,9 @@ class StatsProcessor:
 
     def get_political_contributions_analysis(self) -> Dict[str, Any]:
         """Get analysis for PoliticalContributions table"""
+        if not self._table_exists('PoliticalContributions'):
+            return {}
+
         analysis = {}
 
         # Amount histogram using quartile bins
@@ -498,6 +557,9 @@ class StatsProcessor:
 
     def get_addresses_analysis(self) -> Dict[str, Any]:
         """Get analysis for Addresses table"""
+        if not self._table_exists('Addresses'):
+            return {'top_states': [], 'top_zip_codes': []}
+
         analysis = {}
 
         # Top 10 states
@@ -526,6 +588,14 @@ class StatsProcessor:
 
     def get_addresses_deduplication_analysis(self) -> Dict[str, Any]:
         """Get analysis for address deduplication progress"""
+        empty = {
+            'total_canonical_addresses': 0, 'distinct_canonical_addresses': 0,
+            'child_addresses': 0, 'master_addresses': 0, 'still_need_deduplication': 0,
+            'total_addresses_processed': 0, 'unique_addresses_no_duplicates': 0,
+        }
+        if not self._table_exists('Addresses'):
+            return empty
+
         analysis = {}
 
         # Total addresses with canonical_address
@@ -594,6 +664,15 @@ class StatsProcessor:
     def get_addresses_colocator_analysis(self) -> Dict[str, Any]:
         """Get analysis for Address colocator field"""
         analysis = {}
+
+        if not self._table_exists('Addresses'):
+            analysis.update({
+                'distinct_colocators': 0, 'po_count': 0, 'fa_count': 0, 'll_count': 0,
+                'institution_count': 0, 'total_with_colocator': 0, 'neither_count': 0,
+                'colocator_by_address_type': [], 'colocator_type_breakdown': [],
+                'top_institution_prefixes': [],
+            })
+            return analysis
 
         try:
             # Distinct colocator values
@@ -713,6 +792,13 @@ class StatsProcessor:
 
     def get_geocoding_status_analysis(self) -> Dict[str, Any]:
         """Get analysis for Geocoding table status distribution"""
+        empty = {
+            'geocoding_status_counts': [], 'total_geocoding_records': 0,
+            'geocoded_with_coords': 0, 'attempted_records': 0,
+        }
+        if not self._table_exists('Geocoding'):
+            return empty
+
         analysis = {}
 
         # Group by geocoding_status
@@ -748,6 +834,100 @@ class StatsProcessor:
         analysis['attempted_records'] = result[0] if result else 0
 
         return analysis
+
+    def get_external_reference_analysis(self) -> Dict[str, Any]:
+        """Counts for FEC, Medicare, sanctions, and DOT tables (0 if not ingested yet)."""
+        groups = {
+            'fec': (
+                'fec_committees', 'fec_individual_contributions', 'fec_committee_transactions',
+                'fec_candidate_spendings', 'fec_operating_expenditures',
+            ),
+            'medicare': ('medicare_providers', 'medicare_provider_spending'),
+            'sanctions': (
+                'sanctioned_entities', 'sanctioned_names',
+                'sanctioned_identifiers', 'sanctioned_programs',
+            ),
+            'dot': ('dot_carriers',),
+        }
+        analysis: Dict[str, Any] = {'groups': {}, 'ingested': {}}
+        for group, tables in groups.items():
+            counts = {}
+            for table in tables:
+                counts[table] = (
+                    int(self._safe_scalar(f"SELECT COUNT(*) FROM {table}", default=0))
+                    if self._table_exists(table) else 0
+                )
+            analysis['groups'][group] = counts
+            analysis['ingested'][group] = any(v > 0 for v in counts.values())
+        return analysis
+
+    def get_address_type_analysis(self) -> Dict[str, Any]:
+        """Breakdown of Addresses by address_type (includes new FEC/sanctions/DOT rows)."""
+        if not self._table_exists('Addresses'):
+            return {'by_type': [], 'new_source_types': []}
+
+        by_type = self._safe_fetchall("""
+            SELECT address_type, COUNT(*) AS count
+            FROM Addresses
+            GROUP BY address_type
+            ORDER BY count DESC
+        """)
+        new_types = {
+            'fec_committee', 'fec_individual_contribution', 'fec_committee_transaction',
+            'fec_candidate_spending', 'fec_operating_expenditure',
+            'ofac_sanction', 'dot_carrier_phy', 'dot_carrier_mail',
+        }
+        new_source_types = [(t, c) for t, c in by_type if t in new_types]
+        return {'by_type': by_type, 'new_source_types': new_source_types}
+
+    def get_shared_canonical_analysis(self) -> Dict[str, Any]:
+        """Early fraud/colocation signals: shared canonicals across address types."""
+        if not self._table_exists('Addresses'):
+            return {
+                'multi_type_canonicals': 0,
+                'top_multi_type': [],
+                'top_dot_stacked': [],
+            }
+
+        multi_type_count = int(self._safe_scalar("""
+            SELECT COUNT(*) FROM (
+                SELECT canonical_address
+                FROM Addresses
+                WHERE canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
+                GROUP BY canonical_address
+                HAVING COUNT(DISTINCT address_type) > 1
+            )
+        """, default=0))
+
+        top_multi_type = self._safe_fetchall("""
+            SELECT
+                canonical_address,
+                LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
+                COUNT(*) AS address_rows,
+                COUNT(DISTINCT address_type) AS type_count
+            FROM Addresses
+            WHERE canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
+            GROUP BY canonical_address
+            HAVING COUNT(DISTINCT address_type) > 1
+            ORDER BY type_count DESC, address_rows DESC
+            LIMIT 25
+        """)
+
+        top_dot_stacked = self._safe_fetchall("""
+            SELECT canonical_address, COUNT(*) AS carrier_rows
+            FROM Addresses
+            WHERE address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+            GROUP BY canonical_address
+            HAVING COUNT(*) >= 5
+            ORDER BY carrier_rows DESC
+            LIMIT 25
+        """)
+
+        return {
+            'multi_type_canonicals': multi_type_count,
+            'top_multi_type': top_multi_type,
+            'top_dot_stacked': top_dot_stacked,
+        }
 
     # Analytics methods for DuckDB
     def get_charity_summary_stats(self, tax_year: int = None) -> Dict[str, Any]:

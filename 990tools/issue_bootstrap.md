@@ -2,9 +2,15 @@
 
 **Purpose**: Fast, low-token restart for a fresh session after CLI crashes (127/137 kills) or context resets.
 
-**Last major work**: June 2026 — **DOT step** complete (`d43a902b` + resume/OOM fixes). 4,454,157 carriers, 5.4M address rows. **Sanctions** complete: 19,073 entities, 27,347 addresses.
+**Last major work**: June 2026 — **Address step** complete (`7ea4a2a1`). 95.2M addresses, 0 NULL `master_id`. Prior: DOT + sanctions ingests.
 
 ## Current State
+
+### Address (production-validated 2026-06-20)
+- 95,196,749 addresses; **0** NULL `master_id` (69.3M incremental merge)
+- 14,342,486 Geocoding canonical groups; all 9 indexes rebuilt
+- DB: `/Volumes/Data/final/irs990.duckdb` (~91 GB)
+- Logs: `address_step_20260620_v2.log`, `address_step_20260620_v2_indexes.log`
 
 ### Sanctions (production-validated 2026-06-18)
 - `sanctioned_entities` 19,073; `sanctioned_names` 49,607; `ofac_sanction` addresses 27,347
@@ -25,10 +31,12 @@
 ## Pipeline Step Order
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate → geolocate1 → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate_prev → geolocate_new → geolocate_archive → photos → grant_match → backfill → ratios → percentiles → export
 ```
 
-**Resume from here:** `--start-step address` (dot + sanctions complete)
+**Planned rename** (not wired yet): current `geolocate1` → `geolocate_prev` (archive cache), current `geolocate` → `geolocate_new` (Census API), new `geolocate_archive` (export successful geocodes).
+
+**Resume from here:** `--start-step match` (address complete; skip `einless` — already run 2026-06-15)
 
 ## DOT Step (complete)
 
@@ -46,5 +54,8 @@ irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → 
 - Default logging is WARNING — add `-v` for progress lines.
 
 ## Immediate Next Work
-1. Run `--start-step address` on production DB.
-2. Wire colocation consumers: sanctions names, DOT carriers, FEC at shared `canonical_address`.
+1. Run `--start-step match` on production DB (watch how einless backfills interact with name rules).
+2. Refactor geolocate into trilogy (`geolocate_prev` / `geolocate_new` / `geolocate_archive`).
+3. Update stats after match (`python stats_command.py` or drop `--nostats`).
+4. Fraud research: shared-canonical queries in stats report; deeper colocation after geolocate trilogy.
+5. Standalone DOT stacking script (many carriers / one address) — build alongside, not a pipeline step.

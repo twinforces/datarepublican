@@ -1,11 +1,11 @@
 # 990tools Session Bootstrap
 
-**Last updated:** 2026-06-20 (DOT production validation)
+**Last updated:** 2026-06-20 (address production validation)
 
 > **Note:** For the current phase, prefer `issue_bootstrap.md` — authoritative for pipeline work. This file retains the 2026-05 category/Splink context.
 
 ## Current Focus (June 2026)
-External reference ingests complete through **DOT** on production DB (`/Volumes/Data/final/irs990.duckdb`): sanctions (19k entities) + DOT (4.45M carriers). **Next:** `--start-step address`, then einless → match → geolocate. See `issue_bootstrap.md` and `docs/RECENTGOALS.md`.
+Address dedup complete on production DB: 95.2M rows, 0 NULL `master_id`. **Next:** `--start-step match` (skip `einless`). Then geolocate trilogy refactor (`geolocate_prev` / `geolocate_new` / `geolocate_archive`). See `issue_bootstrap.md` and `docs/RECENTGOALS.md`.
 
 ## Previous Focus (May 2026)
 We were doing targeted Splink discovery on coherent name categories instead of one giant run on the full master list. This is the "hybrid of a hybrid" approach.
