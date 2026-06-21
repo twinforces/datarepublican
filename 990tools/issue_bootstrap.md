@@ -6,6 +6,12 @@
 
 ## Current State
 
+### Address cluster reports (ready to generate)
+- Script: `generate_address_reports.py` (spec: `address_cluster_report.md`)
+- Physical notes: `physical_notes.json` (OKC + top shells seeded)
+- Run when DB unlocked: `python generate_address_reports.py --min-dot-carriers 50 --max-clusters 50`
+- Addresses render as **Google Maps** links in HTML output
+
 ### Match (in progress)
 - **Resume command used:** `--start-step match --stop-step match` (skip `einless`)
 - **Log:** `match_step_20260620.log`
