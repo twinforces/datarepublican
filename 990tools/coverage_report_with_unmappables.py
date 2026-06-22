@@ -31,7 +31,18 @@ def load_rules(path: str) -> List[Dict]:
         data = json.load(f)
 
     if isinstance(data, list):
-        return data
+        # Current generator output format: list of [canonical_str, meta_dict] pairs
+        # or already list-of-dicts. Normalize to consistent list of dicts.
+        result = []
+        for item in data:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                canon = item[0]
+                meta = item[1] if isinstance(item[1], dict) else {}
+                variants = meta.get("variants", []) if isinstance(meta, dict) else []
+                result.append({"canonical": canon, "variants": variants})
+            elif isinstance(item, dict):
+                result.append(item)
+        return result
     if isinstance(data, dict):
         result = []
         for k, v in data.items():

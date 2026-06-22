@@ -3,16 +3,24 @@
 extract_pharma_no_eins.py
 
 Takes the full (unfiltered) distinct_grantee_names.tsv and produces
-a pharma_no_eins.tsv containing only rows that:
-  - Have no recipient_ein (NaN / missing / empty)
-  - Match the big pharma subsidy/privacy patterns (the same ones used
-    for the original no-EIN inference)
+a pharma_no_eins.tsv containing only rows where the grantee_name:
+  - NEVER has a recipient_ein anywhere in the entire file (pure no-EIN singletons)
+  - Matches the big pharma subsidy/privacy patterns from big_pharma_subsidy.json
 
-This gives you a clean, repeatable input for:
-    python splink_pattern_miner.py --use-clean-tsv pharma_no_eins.tsv ...
+The "never has an EIN anywhere" rule means:
+  - If a name appears once with a real EIN and once without → it is excluded.
+  - Only names that are always missing recipient_ein (true "will never have an EIN"
+    cases like "SEE ATTACHED", "VARIOUS NEEDY PATIENTS", "HIPPA REGULATIONS...", etc.)
+    are kept, then further filtered to the pharma subsidy patterns.
 
-Exactly what you asked for to "run Splink on those [no-EIN pharma] to see
-what common patterns it spits out".
+This is the correct input for reviewing/curating the subsidy noise that should roll
+up under the synthetic "BIG PHARMA SUBSIDY" EIN, and for Splink runs that want to
+stay inside the no-EIN subsidy bucket without contamination from names that sometimes
+resolve to real organizations.
+
+Usage:
+    python extract_pharma_no_eins.py --input distinct_grantee_names.tsv \
+        --output pharma_no_eins.tsv
 """
 import argparse
 import json
@@ -26,8 +34,11 @@ DEFAULT_OUTPUT = "pharma_no_eins.tsv"
 BIG_PHARMA_JSON = "big_pharma_subsidy.json"
 
 
-def load_pharma_patterns(path: str = BIG_PHARMA_JSON) -> list[str]:
-    """Load the patterns exactly as used in the original pharma siding."""
+def load_pharma_patterns(path: str = BIG_PHARMA_JSON):
+    """Load the patterns from big_pharma_subsidy.json and compile them as regex.
+    These patterns are used as real regex in the generator, so we treat them
+    consistently as regex everywhere for correctness.
+    """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"{path} not found")
@@ -35,29 +46,44 @@ def load_pharma_patterns(path: str = BIG_PHARMA_JSON) -> list[str]:
     with open(p, encoding="utf-8") as f:
         data = json.load(f)
 
-    patterns: list[str] = []
+    raw_patterns: list[str] = []
     if isinstance(data, dict):
         for _canon, info in data.items():
             if isinstance(info, dict):
-                patterns.extend(info.get("patterns", []))
+                raw_patterns.extend(info.get("patterns", []))
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
-                patterns.extend(item.get("patterns", []))
+                raw_patterns.extend(item.get("patterns", []))
             elif isinstance(item, str):
-                patterns.append(item)
+                raw_patterns.append(item)
 
-    # Normalize: uppercase for matching
-    patterns = sorted({p.upper() for p in patterns if p})
-    print(f"Loaded {len(patterns)} pharma patterns from {path}")
-    return patterns
+    # Compile as regex (case-insensitive), matching how the generator uses them
+    compiled = []
+    for pat in raw_patterns:
+        if pat:
+            try:
+                compiled.append(re.compile(pat, re.IGNORECASE))
+            except re.error:
+                # Fall back to simple substring if someone put an invalid regex
+                compiled.append(pat)  # will be handled specially below
+
+    print(f"Loaded {len(compiled)} pharma patterns from {path} (compiled as regex)")
+    return compiled
 
 
-def name_matches_pharma(name: str, patterns: list[str]) -> bool:
+def name_matches_pharma(name: str, patterns: list) -> bool:
     if not isinstance(name, str):
         return False
-    n = name.upper()
-    return any(p in n for p in patterns)
+    for p in patterns:
+        if isinstance(p, re.Pattern):
+            if p.search(name):
+                return True
+        else:
+            # fallback for any non-compiled patterns
+            if p in name.upper():
+                return True
+    return False
 
 
 def main():
@@ -89,21 +115,28 @@ def main():
 
     print(f"Using EIN column: {ein_col}")
 
-    # No EIN filter
-    no_ein_mask = df[ein_col].isna() | (df[ein_col].astype(str).str.strip() == "")
-    print(f"Rows with no recipient_ein: {no_ein_mask.sum():,}")
+    # === CORRECT LOGIC: pure no-EIN singletons (name never has recipient_ein anywhere) ===
+    # A name only qualifies if it has NO recipient_ein in ANY row in the entire file.
+    # Names that appear once with a real EIN and once without are excluded — they are not
+    # true "will never have an EIN" cases (e.g. "SEE ATTACHED" or "VARIOUS NEEDY PATIENTS").
+    print("Identifying grantee_names that NEVER have a recipient_ein anywhere in the file...")
+    has_ein_mask = df[ein_col].notna() & (df[ein_col].astype(str).str.strip() != "")
+    names_with_any_ein = set(df.loc[has_ein_mask, "grantee_name"].astype(str).unique())
+    all_names = set(df["grantee_name"].astype(str).unique())
+    pure_no_ein_names = all_names - names_with_any_ein
+
+    print(f"  Total unique grantee_names: {len(all_names):,}")
+    print(f"  Names that have EIN at least once: {len(names_with_any_ein):,}")
+    print(f"  Pure no-EIN names (never appear with any EIN): {len(pure_no_ein_names):,}")
 
     # Load patterns
     patterns = load_pharma_patterns(args.pharma_json)
 
-    # Pharma name match
-    pharma_mask = df["grantee_name"].apply(lambda n: name_matches_pharma(n, patterns))
-    print(f"Rows matching pharma patterns: {pharma_mask.sum():,}")
-
-    # Combined filter
-    final_mask = no_ein_mask & pharma_mask
-    result = df[final_mask].copy()
-    print(f"Final no-EIN + pharma matches: {len(result):,}")
+    # Filter to pure no-EIN rows first, then apply pharma pattern match
+    pure_df = df[df["grantee_name"].isin(pure_no_ein_names)].copy()
+    pharma_mask = pure_df["grantee_name"].apply(lambda n: name_matches_pharma(n, patterns))
+    result = pure_df[pharma_mask].copy()
+    print(f"Final pure no-EIN + pharma matches: {len(result):,} rows ({result['grantee_name'].nunique():,} unique names)")
 
     # Prepare output columns
     # The Splink clean loader mainly needs grantee_name, grant_count, dollars

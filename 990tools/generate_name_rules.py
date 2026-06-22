@@ -25,6 +25,13 @@ import subprocess
 from typing import Set, Optional, Dict, List, Tuple
 from enum import Enum, auto
 
+# Attachment suffix stripping for polluted names (e.g. "University of X Foundation - SEE ADDENDUM...")
+try:
+    from name_cleaner import clean_name_for_matching as _strip_attachment_suffixes
+except ImportError:
+    def _strip_attachment_suffixes(name: str) -> str:
+        return name
+
 # ==================== CONFIG ====================
 DISTINCT_NAMES_TSV = "distinct_grantee_names.tsv"
 BMF_TSV = "bmf_analysis.tsv"
@@ -511,6 +518,37 @@ SIMPLES = [
     "POP WARNER"
 ]
 
+# High-value "simple" names that should get dedicated early siding, right after Pharma.
+# These are well-known orgs with reliable EINs. Siding them early:
+# - Secures good EINs before later processing
+# - Prevents them from leaking into protective buckets (municipality, hospitals, churches, etc.)
+# - Keeps the phased siding stack clean and incremental.
+#
+# The canonical list now lives in approved_simples.json (populated via TUI "S" option).
+# Falls back to the list below if the file is missing.
+def _load_early_simples():
+    try:
+        with open("approved_simples.json", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("canonicals", data.get("simples", []))
+    except Exception:
+        pass
+    # Fallback (kept for bootstrapping)
+    return [
+        "UNITED WAY",
+        "ROTARY",
+        "BOY SCOUTS OF AMERICA",
+        "GIRL SCOUTS OF AMERICA",
+        "KIWANIS",
+        "CHAMBER OF COMMERCE",
+        "AMERICAN LEGION",
+        "KNIGHTS OF COLUMBUS",
+        "LOYAL ORDER OF MOOSE",
+        "POP WARNER",
+    ]
+
+EARLY_SIMPLES = _load_early_simples()
+
 MANUAL_NOISE = {
     "FRIENDS OF",
     "PARENT TEACHER",
@@ -797,6 +835,11 @@ def clean_name(name: str, geo_blacklist: Set[str], noise_words: Set[str]) -> str
     cleaned = re.sub(r"\s+", " ", cleaned).strip()  # collapse multiple spaces
     if not cleaned:
         return name  # fallback to original if everything was stripped
+
+    # Strip attachment suffixes (SEE ADDENDUM, SEE NOTE, etc.) when a strong org signal is present.
+    # This lets real entities like "University of X Foundation - SEE ADDENDUM..." survive as clean names.
+    cleaned = _strip_attachment_suffixes(cleaned)
+
     return cleaned
 
 
@@ -1070,6 +1113,17 @@ if __name__ == "__main__":
     print(
         "\n=== BIG PHARMA SUBSIDY rollup + pharma_siding pass (early like priority rules, before STAGE 3 rubicon) ==="
     )
+
+    # EINless hygiene integration (post-89% cream "we're done with this mapping project" review)
+    # The einless/ sub-layer (rebuild_einless_cleaned + rebucket with explicit pass_through_flow bucket,
+    # foreign_synthetic_ein, grantor_context for A-passes-to-B / subgrant / foreign direct grantee cases)
+    # produces classified hard splits that did not phonebook match.
+    # These feed here for canonical rollups (using the existing heuristics in this file for "roll up certain types of orgs canonically")
+    # and early filters, plus secondary geo passes on remaining einless hards.
+    # See einless/ (structure for tie-off option A), einless/code/einless_pipeline.py (orchestrator),
+    # and einless/docs/einless_grantee_resolution_architecture.md for the integration plan and fresh hygiene numbers (hard 125404 after latest flow patterns).
+    # Example future: load einless/data/*_hard_flow.tsv or einless hard_plausible and add as PRIORITY or sided canonicals
+    # (e.g. under "EINLESS_SUBGRANT_FLOW" or per-grantor labeled groups). This unifies the pre-phonebook complicated rule system with the phonebook + einless classification.
     # Dedicated pharma_siding: side-track all the noisy VARIOUS/SEE ATTACHED/HIPPA/PATIENT/Drugs & Medicines rows
     # so the main pipeline doesn't waste time scanning them. Add back as single canonical before output.
     # This matches your preferred clean architecture. Geo rules also moved early.
@@ -1124,6 +1178,49 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: Could not load {BIG_PHARMA_JSON}: {e}")
         pharma_sided = {}
+
+    # ========== EARLY SIMPLES siding (right after Pharma, per phased stack) ==========
+    # These well-known orgs get pulled out early with their best available EIN.
+    # Prevents leakage into later protective buckets (municipality, hospitals, churches, etc.)
+    # and ensures clean high-quality canonicals + real EINs.
+    # This is the flexible incremental siding layer the user requested after Pharma.
+    simples_sided = {}
+    try:
+        simple_patterns = {}
+        for simple in EARLY_SIMPLES:
+            # Word-boundary regex, same spirit as collect_simple_variants
+            pat = re.compile(rf'\b{re.escape(simple)}\b', re.IGNORECASE)
+            simple_patterns[simple] = pat
+
+        if grantee_names:
+            original_count = len(grantee_names)
+            non_simples = []
+            sided_count = 0
+            for name in grantee_names:
+                matched = False
+                for simple, pat in simple_patterns.items():
+                    if pat.search(name):
+                        if name not in simples_sided:
+                            # EIN will be resolved later during priority/simple absorption or charity/BMF passes.
+                            # This early siding is primarily to remove the names from the main stream
+                            # and guarantee they get a clean canonical.
+                            simples_sided[name] = {
+                                "canonical": simple,
+                                "ein": "",
+                                "variants": [name],
+                                "source": "early_simples_siding",
+                            }
+                            sided_count += 1
+                        matched = True
+                        break
+                if not matched:
+                    non_simples.append(name)
+            grantee_names[:] = non_simples
+            if sided_count:
+                print(f"Sided {sided_count:,} early simples names (UNITED WAY, ROTARY, etc.) right after Pharma")
+    except Exception as e:
+        print(f"Warning: Early Simples siding failed: {e}")
+        simples_sided = {}
 
     # Seed priority canonicals FIRST (before data)
     # WHY: Priority canonicals should exist from the start so they attract variants
@@ -1551,6 +1648,27 @@ if __name__ == "__main__":
             )
         )
         print(f"Added BIG PHARMA SUBSIDY rollup with {len(pharma_variants):,} variants back to final output (siding bug fixed)")
+
+    # Add back early simples as their own high-priority canonicals (or variants under the simple name)
+    if "simples_sided" in locals() and simples_sided:
+        from collections import defaultdict
+        simple_groups = defaultdict(list)
+        for name, info in simples_sided.items():
+            simple_groups[info["canonical"]].append(name)
+
+        for simple_name, variants in simple_groups.items():
+            final_rules_list.append(
+                (
+                    simple_name,
+                    {
+                        "ein": "",  # Will be filled by later absorption if a better one exists
+                        "variants": sorted(variants),
+                        "source_count": len(variants),
+                        "source": "early_simples_siding",
+                    },
+                )
+            )
+        print(f"Added {len(simple_groups)} early simples (incl. UNITED WAY) back from siding")
     # ========== Final single emit pass (guarantees all canonicals including SIMPLES are included) ==========
     final_rules_list = [
         (

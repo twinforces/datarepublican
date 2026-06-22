@@ -17,6 +17,15 @@ from database_operations import DatabaseOperations
 from logging_utils import log_info, log_error
 import gzip
 import os
+
+# EINless integration note (post-hygiene "tie this off in a bow" per user review + architect plan):
+# Use einless/ outputs (the cleaned_hard.tsv with new pass_through_flow flag, foreign_synthetic_ein,
+# and _hard_flow.tsv / _hard_foreign.tsv splits from rebucket after the 2026-06 hygiene with 125404 hard)
+# for early classification of subgrant/intermediary/foreign flows before full geo/name matching.
+# This lets address_matcher respect "A passes to B" and grantor attribution instead of over-matching.
+# See einless/ structure (option A), einless/code/einless_pipeline.py, and the architecture doc for details.
+# Complements the ~89% phonebook cream; secondary geo pass on remaining einless hards is a natural next step.
+# The einless learnings (flow patterns, statuses) also feed generate_name_rules canonical rollups.
 class AddressMatcher:
     """Handles geo normalization + full name-based EIN backfill."""
 

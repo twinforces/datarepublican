@@ -11,6 +11,8 @@ import sys
 import time
 import threading
 import gc
+import gzip
+import csv
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
@@ -44,13 +46,13 @@ archive_path = os.path.join(os.path.dirname(DEFAULT_FINAL_DIR), 'geocode_archive
 # === API Configuration ===
 API_CONFIG = {
     'ENABLE_CENSUS_RAW': True,
-    'ENABLE_GROK': False,
-    'ENABLE_PHOTON': False,
-    'ENABLE_NOMINATIM': False,
+    'ENABLE_GROK': True,
+    'ENABLE_PHOTON': True,
+    'ENABLE_NOMINATIM': True,
     'ENABLE_GEOCODE_MAPS_CO': True,
 
-    'ENABLE_LIBRESTREET': False,
-    'ENABLE_OPENCAGE': False,
+    'ENABLE_LIBRESTREET': True,
+    'ENABLE_OPENCAGE': True,
     'ENABLE_GOOGLE_MAPS': False,
     'ENABLE_NAME_SEARCH': False,
 }
@@ -801,16 +803,15 @@ Return lat/long only if ≥75% confident in a real street location."""
         self.db_ops.execute_query(update_query)
             
     def apply_geocode_archive_full_propagation(self, cache_file: str = "geocode_archive_distinct.tsv.gz") -> int:
-        """Load the pre-geocoded TSV.gz archive and perform FULL owner propagation in pure DuckDB SQL.
+        """Load the pre-geocoded TSV.gz archive and perform FULL owner propagation using chunked processing to avoid memory exhaustion.
 
-        Final clean version — joins on unique geocoding_id, no batching needed,
-        ignores DuckDB's inflated row-count reporting.
+        Streams the archive via gzip + csv in 100000-row chunks, delegates to _apply_chunk_updates for each,
+        and guarantees atomicity via a single outer transaction.
         """
-        log_info(f"Applying full geocode archive cache + owner propagation from {cache_file}...")
+        log_info(f"Applying full geocode archive cache + owner propagation from {cache_file} (chunked)...")
         actual_cache_file = os.path.join(global_config.final_dir, cache_file)
 
         with self.db_ops.acquire_write_conn() as conn:
-            
             # === QUICK IDEMPOTENCY CHECK ===
             already_done = conn.execute("""
                 SELECT COUNT(*) 
@@ -820,195 +821,194 @@ Return lat/long only if ≥75% confident in a real street location."""
             """).fetchone()[0]
 
             if already_done > 0:
-                log_info("✅ Archive cache already applied (found 'Match:Archive' status). Skipping all work.")
+                log_info("Archive cache already applied (found 'Match:Archive' status). Skipping all work.")
                 return 0
             conn.execute("BEGIN TRANSACTION")
 
             try:
-                # 1. Load the gzipped TSV
-                log_info(f"Loading geocode cache from {actual_cache_file}...")
-                conn.execute(f"""
-                    CREATE OR REPLACE TABLE geocode_cache AS
-                    SELECT 
-                        canonical_address,
-                        colocator
-                    FROM read_csv('{actual_cache_file}',
-                        delim = '\t',
-                        header = true,
-                        compression = 'gzip',
-                        null_padding = true,
-                        types = {{
-                            'canonical_address': 'VARCHAR',
-                            'colocator': 'VARCHAR'
-                        }}
-                    );
-                """)
-
-                # 2. Index for fast joins
-                conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_geocode_cache_canonical 
-                    ON geocode_cache(canonical_address);
-                """)
-                conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_addresses_geocoding 
-                    ON Addresses(geocoding_id);
-                """)
-
-                # 3. Build update_map (only rows that need updating)
-                log_info("Building update map...")
-                conn.execute("""
-                    CREATE OR REPLACE TEMP TABLE update_map AS
-                    SELECT 
-                        g.geocoding_id,
-                        c.colocator,
-                        CASE 
-                            WHEN c.colocator LIKE 'LL:%' 
-                            THEN CAST(split_part(c.colocator, ':', 2) AS DOUBLE) 
-                            ELSE NULL 
-                        END AS parsed_lat,
-                        CASE 
-                            WHEN c.colocator LIKE 'LL:%' 
-                            THEN CAST(split_part(c.colocator, ':', 3) AS DOUBLE) 
-                            ELSE NULL 
-                        END AS parsed_lon
-                    FROM Geocoding g
-                    INNER JOIN geocode_cache c 
-                            ON g.canonical_address = c.canonical_address
-                    WHERE g.geocoding_status IN (NULL, 'pending', 'owners', 'No_Match');
-                """)
-
-                map_count = conn.execute("SELECT COUNT(*) FROM update_map").fetchone()[0]
-                log_info(f"DEBUG: update_map contains {map_count:,} rows that should be updated")
-
-                # 4. Update Geocoding
-                log_info("Updating Geocoding records...")
-                result = conn.execute("""
-                    UPDATE Geocoding g
-                    SET 
-                        geocoding_status = 'Match:PatternOwners',
-                        last_attempt      = CURRENT_TIMESTAMP,
-                        attempt_count     = COALESCE(g.attempt_count, 0) + 1,
-                        matched_address   = 'Loaded from geocode_archive_distinct.tsv.gz',
-                        latitude          = m.parsed_lat,
-                        longitude         = m.parsed_lon
-                    FROM update_map m
-                    WHERE g.geocoding_id = m.geocoding_id
-                    RETURNING COUNT(*) AS updated_geocoding
-                """).fetchone()
-
-                updated_geocoding = int(result[0]) if result and result[0] is not None else 0
-                log_info(f"DEBUG: Updated {updated_geocoding:,} Geocoding records")
-
-                # 5. Update Addresses — single fast join on unique geocoding_id
-                log_info("Updating Addresses records...")
-
-                conn.execute("""
-                    UPDATE Addresses a
-                    SET colocator = m.colocator
-                    FROM update_map m
-                    WHERE a.geocoding_id = m.geocoding_id;
-                """)
-
-                # Reliable post-check (this is the number you can trust)
-                actual_updated_addresses = conn.execute("""
-                    SELECT COUNT(*) 
-                    FROM Addresses 
-                    WHERE colocator IN (SELECT colocator FROM update_map)
-                """).fetchone()[0]
-                log_info(f"DEBUG: After update, {actual_updated_addresses:,} Addresses rows now have a colocator from the archive")
-
-                # 6. Propagate to owner tables
-                log_info("Propagating colocators to owner tables...")
-                conn.execute("""
-                    UPDATE Charities ch
-                SET colocator = m.colocator
-                FROM (
-                    SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
-                    FROM update_map m
-                    JOIN Addresses a ON a.geocoding_id = m.geocoding_id
-                    WHERE a.owner_id IS NOT NULL
-                      AND a.address_type IN ('charity', 'filer')
-                    GROUP BY owner_id
-                ) m
-                WHERE ch.charity_id = m.owner_id;
-                """)
-
-                conn.execute("""
-                    UPDATE Grants gr
-                SET colocator = m.colocator
-                FROM (
-                    SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
-                    FROM update_map m
-                    JOIN Addresses a ON a.geocoding_id = m.geocoding_id
-                    WHERE a.owner_id IS NOT NULL
-                      AND a.address_type = 'grant'
-                    GROUP BY owner_id
-                ) m
-                WHERE gr.grant_id = m.owner_id;
-                """)
-
-                conn.execute("""
-                    UPDATE Contractors con
-                SET colocator = m.colocator
-                FROM (
-                    SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
-                    FROM update_map m
-                    JOIN Addresses a ON a.geocoding_id = m.geocoding_id
-                    WHERE a.owner_id IS NOT NULL
-                      AND a.address_type = 'contractor'
-                    GROUP BY owner_id
-                ) m
-                WHERE con.contractor_id = m.owner_id;
-            """)
-                
-                conn.execute("""
-                    UPDATE Officers off
-                SET colocator = m.colocator
-                FROM (
-                    SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
-                    FROM update_map m
-                    JOIN Addresses a ON a.geocoding_id = m.geocoding_id
-                    WHERE a.owner_id IS NOT NULL
-                      AND a.address_type = 'officer'
-                    GROUP BY owner_id
-                ) m
-                WHERE off.officer_id = m.owner_id;
-                """)
-
-                conn.execute("""
-                    UPDATE PoliticalContributions pc
-                SET colocator = m.colocator
-                FROM (
-                    SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
-                    FROM update_map m
-                    JOIN Addresses a ON a.geocoding_id = m.geocoding_id
-                    WHERE a.owner_id IS NOT NULL
-                      AND a.address_type IN ('politicalcontribution', 'political')
-                    GROUP BY owner_id
-                ) m
-                WHERE pc.political_id = m.owner_id;
-                """)
-
-                # Cleanup
-                conn.execute("DROP TABLE IF EXISTS geocode_cache;")
-                conn.execute("DROP TABLE IF EXISTS update_map;")
-                conn.execute("VACUUM ANALYZE Geocoding;")
-                conn.execute("VACUUM ANALYZE Addresses;")
-                conn.execute("VACUUM ANALYZE Charities, Grants, Officers, Contractors, PoliticalContributions;")
-
-                conn.commit()
-
-                log_info(f"✅ Full archive cache + owner propagation complete")
-                log_info(f"   → Updated {updated_geocoding:,} Geocoding records")
-                log_info(f"   → Updated {actual_updated_addresses:,} Addresses with colocator")
-                log_info(f"   → Propagated to owner tables")
-
-                return updated_geocoding
-
+                log_info(f"Streaming geocode cache from {actual_cache_file}...")
+                chunk_size = 100000
+                total_updated_geocoding = 0
+                total_updated_addresses = 0
+                chunk_num = 0
+                with gzip.open(actual_cache_file, 'rt', encoding='utf-8', errors='replace') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    chunk = []
+                    for row in reader:
+                        if 'canonical_address' not in row or 'colocator' not in row:
+                            continue
+                        chunk.append((row['canonical_address'], row['colocator']))
+                        if len(chunk) >= chunk_size:
+                            chunk_num += 1
+                            g_count, a_count = self._apply_chunk_updates(chunk, conn, chunk_num)
+                            total_updated_geocoding += g_count
+                            total_updated_addresses += a_count
+                            chunk = []
+                    if chunk:
+                        chunk_num += 1
+                        g_count, a_count = self._apply_chunk_updates(chunk, conn, chunk_num)
+                        total_updated_geocoding += g_count
+                        total_updated_addresses += a_count
+                # Final cleanup and analyze
+                for table in ['Geocoding', 'Addresses', 'Charities', 'Grants', 'Officers', 'Contractors', 'PoliticalContributions']:
+                    log_info(f"Running VACUUM ANALYZE on {table}...")
+                    conn.execute(f"VACUUM ANALYZE {table};")
+                    conn.commit()
+                log_info(f"Full archive cache + owner propagation complete (chunked)")
+                log_info(f"   Updated {total_updated_geocoding:,} Geocoding records")
+                log_info(f"   Updated {total_updated_addresses:,} Addresses with colocator")
+                log_info(f"   Processed across {chunk_num} chunks")
+                return total_updated_geocoding
             except Exception as e:
                 conn.rollback()
                 log_error(f"Full cache propagation failed: {e}", exc_info=True)
                 raise
+
+    def _apply_chunk_updates(self, chunk: list, conn, chunk_num: int) -> tuple[int, int]:
+        """Process one chunk of (canonical_address, colocator) tuples from the archive.
+
+        Stages data in a temporary DuckDB table, runs scoped update_map and owner propagations,
+        then cleans up. Returns (updated_geocoding_count, updated_addresses_count).
+        """
+        if not chunk:
+            return 0, 0
+        log_info(f"Processing chunk {chunk_num} with {len(chunk):,} addresses...")
+        # Robust staging using batched VALUES (avoids executemany issues on some DuckDB connections)
+        conn.execute("""
+            CREATE OR REPLACE TEMP TABLE chunk_cache (
+                canonical_address VARCHAR,
+                colocator VARCHAR
+            )
+        """)
+        # Sanitize for SQL and batch to keep each INSERT query small
+        safe_chunk = []
+        for ca, co in chunk:
+            ca = str(ca or "").replace("'", "''")
+            co = str(co or "").replace("'", "''")
+            safe_chunk.append((ca, co))
+        batch_size = 2000  # keeps each VALUES clause well under parser limits
+        for i in range(0, len(safe_chunk), batch_size):
+            sub = safe_chunk[i : i + batch_size]
+            values_clause = ", ".join(f"('{ca}', '{co}')" for ca, co in sub)
+            conn.execute(f"INSERT INTO chunk_cache VALUES {values_clause}")
+        conn.execute("""
+            CREATE OR REPLACE TEMP TABLE update_map AS
+            SELECT 
+                g.geocoding_id,
+                c.colocator,
+                CASE 
+                    WHEN c.colocator LIKE 'LL:%' 
+                    THEN CAST(split_part(c.colocator, ':', 2) AS DOUBLE) 
+                    ELSE NULL 
+                END AS parsed_lat,
+                CASE 
+                    WHEN c.colocator LIKE 'LL:%' 
+                    THEN CAST(split_part(c.colocator, ':', 3) AS DOUBLE) 
+                    ELSE NULL 
+                END AS parsed_lon
+            FROM Geocoding g
+            INNER JOIN chunk_cache c 
+                    ON g.canonical_address = c.canonical_address
+            WHERE g.geocoding_status IN (NULL, 'pending', 'owners', 'No_Match');
+        """)
+        map_count = conn.execute("SELECT COUNT(*) FROM update_map").fetchone()[0]
+        if map_count == 0:
+            conn.execute("DROP TABLE IF EXISTS chunk_cache;")
+            conn.execute("DROP TABLE IF EXISTS update_map;")
+            return 0, 0
+        result = conn.execute("""
+            UPDATE Geocoding g
+            SET 
+                geocoding_status = 'Match:Archive',
+                last_attempt      = CURRENT_TIMESTAMP,
+                attempt_count     = COALESCE(g.attempt_count, 0) + 1,
+                matched_address   = 'Loaded from geocode_archive_distinct.tsv.gz',
+                latitude          = m.parsed_lat,
+                longitude         = m.parsed_lon
+            FROM update_map m
+            WHERE g.geocoding_id = m.geocoding_id
+        """).fetchone()
+        updated_geocoding = int(result[0]) if result and result[0] is not None else 0
+        conn.execute("""
+            UPDATE Addresses a
+            SET colocator = m.colocator
+            FROM update_map m
+            WHERE a.geocoding_id = m.geocoding_id;
+        """)
+        actual_updated_addresses = conn.execute("""
+            SELECT COUNT(*) 
+            FROM Addresses 
+            WHERE colocator IN (SELECT colocator FROM update_map)
+        """).fetchone()[0]
+        conn.execute("""
+            UPDATE Charities ch
+            SET colocator = m.colocator
+            FROM (
+                SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
+                FROM update_map m
+                JOIN Addresses a ON a.geocoding_id = m.geocoding_id
+                WHERE a.owner_id IS NOT NULL
+                  AND a.address_type IN ('charity', 'filer')
+                GROUP BY owner_id
+            ) m
+            WHERE ch.charity_id = m.owner_id;
+        """)
+        conn.execute("""
+            UPDATE Grants gr
+            SET colocator = m.colocator
+            FROM (
+                SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
+                FROM update_map m
+                JOIN Addresses a ON a.geocoding_id = m.geocoding_id
+                WHERE a.owner_id IS NOT NULL
+                  AND a.address_type = 'grant'
+                GROUP BY owner_id
+            ) m
+            WHERE gr.grant_id = m.owner_id;
+        """)
+        conn.execute("""
+            UPDATE Contractors con
+            SET colocator = m.colocator
+            FROM (
+                SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
+                FROM update_map m
+                JOIN Addresses a ON a.geocoding_id = m.geocoding_id
+                WHERE a.owner_id IS NOT NULL
+                  AND a.address_type = 'contractor'
+                GROUP BY owner_id
+            ) m
+            WHERE con.contractor_id = m.owner_id;
+        """)
+        conn.execute("""
+            UPDATE Officers off
+            SET colocator = m.colocator
+            FROM (
+                SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
+                FROM update_map m
+                JOIN Addresses a ON a.geocoding_id = m.geocoding_id
+                WHERE a.owner_id IS NOT NULL
+                  AND a.address_type = 'officer'
+                GROUP BY owner_id
+            ) m
+            WHERE off.officer_id = m.owner_id;
+        """)
+        conn.execute("""
+            UPDATE PoliticalContributions pc
+            SET colocator = m.colocator
+            FROM (
+                SELECT DISTINCT owner_id, ANY_VALUE(m.colocator) AS colocator
+                FROM update_map m
+                JOIN Addresses a ON a.geocoding_id = m.geocoding_id
+                WHERE a.owner_id IS NOT NULL
+                  AND a.address_type IN ('politicalcontribution', 'political')
+                GROUP BY owner_id
+            ) m
+            WHERE pc.political_id = m.owner_id;
+        """)
+        conn.execute("DROP TABLE IF EXISTS chunk_cache;")
+        conn.execute("DROP TABLE IF EXISTS update_map;")
+        log_info(f"Chunk {chunk_num} complete: {updated_geocoding:,} Geocoding, {actual_updated_addresses:,} Addresses updated")
+        return updated_geocoding, actual_updated_addresses
 
     def _get_custom_metrics(self) -> Dict[str, Any]:
         if not hasattr(self, 'pipeline'):

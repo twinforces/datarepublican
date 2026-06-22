@@ -10,12 +10,20 @@ Usage:
       --grants-table Grants \
       --output suggested_patterns.json \
       --sample 200000
+
+For iterative bucket work (second pass excluding already-reviewed items):
+  python splink_pattern_miner.py --use-clean-tsv category_buckets/high_schools.tsv \
+      --output suggestions_high_schools_pass2.json \
+      --exclude-approved approved_high_schools.json \
+      --blocking-strategy none --max-suggestions 200
 """
 
 import argparse
 import json
+import os
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Optional, Tuple
 
 import duckdb
@@ -192,6 +200,13 @@ def prepare_data(con: duckdb.DuckDBPyConnection, grants_table: str, sample: Opti
         sql += f" USING SAMPLE {sample} ROWS"
     df = con.execute(sql).df()
 
+    # Strip attachment suffixes when a strong org signal is present (helps Splink see real entities behind polluted names)
+    try:
+        from name_cleaner import clean_name_for_matching
+        df["name"] = df["name"].apply(clean_name_for_matching)
+    except ImportError:
+        pass
+
     # Compute geo_collapse in Python
     df["geo_collapse"] = df["name"].apply(lambda x: 1 if detect_geo_suffix(x) else 0)
 
@@ -228,9 +243,26 @@ def prepare_data(con: duckdb.DuckDBPyConnection, grants_table: str, sample: Opti
 
 def prepare_clean_tsv_data(path: str, sample: Optional[int] = None) -> Tuple[pd.DataFrame, bool]:
     """
-    Load the clean distinct grantee names TSV directly for large-scale blocking tests.
-    This bypasses the full DuckDB schema and is useful for testing how far
-    first_two_sig_words blocking can scale.
+    Load the 'clean' distinct grantee names TSV directly (bypasses DuckDB).
+
+    This is the fast-path input used for most modern Splink experiments and TUI
+    review sessions. It is a reduced 3-column version of the full
+    distinct_grantee_names.tsv (grantee_name + grant_count + total_dollars).
+
+    Key differences from the full file:
+    - No recipient_ein column (dropped for size/speed).
+    - Usually filtered or lightly curated for iteration.
+    - Primary input for --use-clean-tsv, category_splitter.py, the TUI, and
+      the church/pharma/education bucketing workflow.
+
+    The full distinct_grantee_names.tsv (which does contain recipient_ein)
+    is what powers the original university_ein_resolver.py path, because
+    universities and some other institutions have reliable EIN coverage from
+    the BMF join.
+
+    For entities with poor EIN coverage (most churches, many school districts,
+    high schools, etc.) we use the clean TSV + name-only normalization +
+    targeted Splink.
     """
     print(f"Loading clean TSV for blocking test: {path}")
     df = pd.read_csv(path, sep="\t")
@@ -240,6 +272,14 @@ def prepare_clean_tsv_data(path: str, sample: Optional[int] = None) -> Tuple[pd.
         df["name"] = df["grantee_name"].astype(str).str.upper()
     else:
         df["name"] = df.iloc[:, 0].astype(str).str.upper()
+
+    # Strip attachment suffixes (SEE ADDENDUM, etc.) when a strong org signal is present.
+    # This helps the miner see the real entity behind polluted names.
+    try:
+        from name_cleaner import clean_name_for_matching
+        df["name"] = df["name"].apply(clean_name_for_matching)
+    except ImportError:
+        pass
 
     # Synthetic unique ID for Splink
     df["grant_id"] = range(len(df))
@@ -400,6 +440,39 @@ def extract_high_value_patterns(cluster_df: pd.DataFrame, global_name_freq: Coun
             unique.append(s)
     return unique[:max_suggestions]
 
+
+def load_exclusion_patterns(path: str):
+    """Load canonicals/patterns to exclude from approved_*.json (canonicals list) or subsidy-style files.
+    Returns a list of uppercased strings for fast substring matching.
+    """
+    if not path:
+        return []
+    p = Path(path)
+    if not p.exists():
+        print(f"Warning: exclude file not found: {path}")
+        return []
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Warning: could not load {path}: {e}")
+        return []
+
+    patterns = []
+    if isinstance(data, dict):
+        if "canonicals" in data:
+            patterns = [str(x) for x in data.get("canonicals", []) if x]
+        else:
+            for v in data.values():
+                if isinstance(v, dict):
+                    patterns.extend([str(x) for x in v.get("patterns", []) if x])
+                elif isinstance(v, (str, int)):
+                    patterns.append(str(v))
+    elif isinstance(data, list):
+        patterns = [str(x) for x in data if x]
+    return [pat.upper() for pat in patterns if pat]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--duckdb", default=None, help="Path to DuckDB (required unless --use-clean-tsv is used)")
@@ -410,12 +483,20 @@ def main():
     parser.add_argument("--max-suggestions", type=int, default=300, help="Maximum number of suggestions to output")
     parser.add_argument("--dashboard", action="store_true", help="Launch Splink Cluster Studio dashboard after clustering")
     parser.add_argument("--use-clean-tsv", type=str, default=None,
-                        help="Path to distinct_grantee_names_clean.tsv for large-scale blocking tests (bypasses full DB)")
+                        help="Path to distinct_grantee_names_clean.tsv (the fast 3-col version without EIN). "
+                             "This is the recommended input for category-bucketed Splink runs (churches, pharma, "
+                             "future education buckets, etc.). The full distinct_grantee_names.tsv (with recipient_ein) "
+                             "is only needed for EIN-based resolvers like the original university path.")
     parser.add_argument("--blocking-strategy", choices=["sig_name", "redaction", "loose", "none"],
                         default="sig_name",
                         help="Blocking strategy to use. 'redaction' is useful for no-EIN redaction/subsidy files "
                              "(e.g. pharma_no_eins.tsv) where normal sig_name blocking fragments common redaction phrases. "
                              "'loose' or 'none' further relax blocking (suitable for small buckets ~5k rows).")
+    parser.add_argument("--exclude-approved", "--exclude-patterns", default=None,
+                        help="Path to approved_*.json / seeds.json from a previous pass or bucket. "
+                             "Rows in the input containing any of these patterns (as substring) are dropped *before* clustering. "
+                             "Suggestions are also filtered afterward. This is the main mechanism to avoid re-surfacing "
+                             "already-approved cores like 'BOYS & GIRLS CLUB', 'UNITED WAY', etc. in later bucket grinds.")
     args = parser.parse_args()
 
     print("=== Splink Pattern Miner (schema-aware) ===")
@@ -430,9 +511,74 @@ def main():
         con = duckdb.connect(args.duckdb)
         df, with_colocator = prepare_data(con, args.grants_table, args.sample)
 
+    # === Early input filtering using --exclude-approved + auto simples (strongest protection) ===
+    # Drop any rows from the input data that contain an already-approved core or a known simple.
+    # This prevents "BOYS & GIRLS CLUB OF FOO", "UNITED WAY OF BAR", etc. from even
+    # entering clustering.
+    all_exclusions = []
+    if args.exclude_approved:
+        all_exclusions.extend(load_exclusion_patterns(args.exclude_approved))
+    # Auto-consult approved_simples.json (populated via TUI "S" during grinds)
+    try:
+        with open("approved_simples.json", encoding="utf-8") as f:
+            simples_data = json.load(f)
+        simple_patterns = simples_data.get("canonicals", simples_data.get("simples", []))
+        all_exclusions.extend([p.upper() for p in simple_patterns])
+        if simple_patterns:
+            print(f"Auto-consulting {len(simple_patterns)} simples from approved_simples.json for exclusion")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"Warning: could not load approved_simples.json: {e}")
+
+    if all_exclusions:
+        # Dedup while preserving order
+        seen = set()
+        unique_ex = []
+        for ex in all_exclusions:
+            if ex not in seen:
+                seen.add(ex)
+                unique_ex.append(ex)
+        all_exclusions = unique_ex
+
+        before_rows = len(df)
+        mask = ~df["name"].str.upper().apply(lambda n: any(ex in n for ex in all_exclusions))
+        df = df[mask].copy()
+        dropped_rows = before_rows - len(df)
+        if dropped_rows > 0:
+            print(f"Input filter: dropped {dropped_rows:,} rows containing approved or simple patterns before clustering.")
+
     global_name_freq = Counter(df["name"].tolist())
     cluster_df = run_splink_discovery(df, with_colocator, args.blocking_strategy)
     suggestions = extract_high_value_patterns(cluster_df, global_name_freq, args.max_suggestions)
+
+    # === Exclusion filter for iterative bucket passes (also auto-consults simples) ===
+    if args.exclude_approved or os.path.exists("approved_simples.json"):
+        exclusions = []
+        if args.exclude_approved:
+            exclusions.extend(load_exclusion_patterns(args.exclude_approved))
+        try:
+            with open("approved_simples.json", encoding="utf-8") as f:
+                simples_data = json.load(f)
+            exclusions.extend([p.upper() for p in simples_data.get("canonicals", simples_data.get("simples", []))])
+        except Exception:
+            pass
+
+        if exclusions:
+            # Dedup
+            seen = set()
+            unique_ex = [e for e in exclusions if not (e in seen or seen.add(e))]
+            before = len(suggestions)
+            kept = []
+            for s in suggestions:
+                pat = s.get("pattern", "").upper()
+                variants_text = " ".join(str(v).upper() for v in s.get("example_variants", []))
+                combined = pat + " " + variants_text
+                if not any(ex in combined for ex in unique_ex):
+                    kept.append(s)
+            suggestions = kept
+            dropped = before - len(suggestions)
+            print(f"Exclusion filter: dropped {dropped:,} items matching approved or simples. {len(suggestions):,} left.")
 
     report = {
         "metadata": {

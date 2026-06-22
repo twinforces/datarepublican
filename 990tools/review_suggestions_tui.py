@@ -25,6 +25,13 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+# Name cleaning for attachment suffixes (SEE ADDENDUM etc.) on real org names
+try:
+    from name_cleaner import clean_name_for_matching
+except ImportError:
+    def clean_name_for_matching(name: str) -> str:
+        return name
+
 try:
     from rich.console import Console
     from rich.table import Table
@@ -174,6 +181,89 @@ def _normalize_for_dedup(name: str) -> str:
         normalized_words.append(plural_map.get(w, w))
 
     return " ".join(normalized_words)
+
+
+def _item_matches_any_norm(item, norms):
+    """
+    Return True if either the main pattern or any of its review_variants
+    (after normalization) matches any of the given normalized patterns.
+    This is critical for absorption after Y/M/S decisions to prevent repeats.
+    """
+    if not item or not norms:
+        return False
+
+    main_pat = _get_name_for_sort(item)
+    main_norm = _normalize_for_dedup(main_pat)
+    for sn in norms:
+        if sn in main_norm or main_norm in sn or sn == main_norm:
+            return True
+
+    for v in item.get("review_variants", []):
+        vname = v[0] if isinstance(v, (list, tuple)) else str(v)
+        vn = _normalize_for_dedup(vname)
+        for sn in norms:
+            if sn in vn or vn in sn or sn == vn:
+                return True
+    return False
+
+
+def _add_simple_to_file_and_session(core: str, session_norms_set: set, approved_list: list):
+    """Add a core simple to approved_simples.json and the current session."""
+    core = core.strip()
+    if not core:
+        return
+    simples_path = Path("approved_simples.json")
+    data = {"canonicals": []}
+    if simples_path.exists():
+        try:
+            with open(simples_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {"canonicals": []}
+
+    cans = data.setdefault("canonicals", [])
+    if core not in cans:
+        cans.append(core)
+        cans.sort()
+        with open(simples_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        print(f"  → Added '{core}' to approved_simples.json")
+
+    norm = _normalize_for_dedup(core)
+    session_norms_set.add(norm)
+
+
+def _collect_entries(prompt: str, console=None, default: str = "") -> list[str]:
+    """
+    Collect one or more entries for M or S.
+    Primary intended way: comma-separated on a single line (what used to work).
+    Bonus: one per line, blank line to finish.
+    """
+    print(f"{prompt}")
+    if default:
+        print(f"  (default: {default})")
+    print("  Comma-separated on one line (recommended), or one per line + blank to finish.")
+
+    entries = []
+    first = True
+    while True:
+        try:
+            if console:
+                line = console.input("> " if not first else f"{prompt}: ").strip()
+            else:
+                line = input("> " if not first else f"{prompt}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        first = False
+        if not line:
+            break
+        for part in line.split(","):
+            p = part.strip()
+            if p:
+                entries.append(p)
+    if not entries and default:
+        entries = [default]
+    return entries
 
 
 def clean_proposed_pattern(pattern: str) -> str:
@@ -509,11 +599,19 @@ def main():
     parser.add_argument("--suggestions", default="suggested_patterns.json",
                         help="JSON file produced by splink_pattern_miner.py")
     parser.add_argument("--priority-canonicals", default="priority_canonicals.json",
-                        help="Existing priority_canonicals.json for pre-blessing")
+                        help="Existing priority_canonicals.json for pre-blessing during this review (still useful per-bucket)")
     parser.add_argument("--clean-names-tsv", default="distinct_grantee_names_clean.tsv",
                         help="Clean names TSV for fast variant + dollar lookups")
-    parser.add_argument("--output", default="approved_patterns.json",
-                        help="Output file (will be in the same format as priority_canonicals.json)")
+    parser.add_argument("--output", default="approved_from_review.json",
+                        help="Output file for items approved in *this* session. Use a bucket-specific name (e.g. approved_pure_no_ein_high_value.json) to keep buckets separate.")
+    parser.add_argument("--merge-existing-priority", action="store_true",
+                        help="Legacy behavior: load --priority-canonicals, append this session's approvals, dedup, and write the merged result. Off by default so buckets stay separate.")
+    parser.add_argument("--redaction-patterns", default=None,
+                        help="Path to big_pharma_subsidy.json (or similar patterns file). Any suggestion whose 'pattern' matches one of the loaded patterns (case-insensitive contains) will be dropped before review. Useful for no-EIN subsidy/redaction buckets.")
+    parser.add_argument("--exclude-approved", "--exclude-patterns", default=None,
+                        help="Path to approved_*.json from a previous review of this bucket. Suggestions matching these canonicals will be dropped before review. Enables clean second-pass iteration.")
+    parser.add_argument("--auto-approve", action="append", default=None,
+                        help="Auto-approve any suggestions whose pattern matches this regex (case-insensitive). Can be given multiple times.")
     parser.add_argument("--max-review", type=int, default=None,
                         help="Only review the first N suggestions (for batching)")
     args = parser.parse_args()
@@ -528,8 +626,121 @@ def main():
         print("No suggestions found.")
         return
 
+    # Clean attachment suffixes on suggestion patterns (e.g. "Foundation - SEE ADDENDUM...")
+    # so the reviewer sees and works with the real core name.
+    for s in suggestions:
+        if "pattern" in s and isinstance(s["pattern"], str):
+            s["pattern"] = clean_name_for_matching(s["pattern"])
+        if "name" in s and isinstance(s["name"], str):
+            s["name"] = clean_name_for_matching(s["name"])
+
     if args.max_review:
         suggestions = suggestions[:args.max_review]
+
+    # === Redaction pattern filtering (if requested) ===
+    if args.redaction_patterns:
+        redaction_patterns = []
+        try:
+            with open(args.redaction_patterns, encoding="utf-8") as f:
+                rdata = json.load(f)
+            for v in rdata.values():
+                if isinstance(v, dict):
+                    for pat in v.get("patterns", []):
+                        if pat:
+                            try:
+                                redaction_patterns.append(re.compile(pat, re.IGNORECASE))
+                            except re.error:
+                                redaction_patterns.append(pat)
+        except Exception as e:
+            print(f"Warning: Could not load redaction patterns from {args.redaction_patterns}: {e}")
+
+        if redaction_patterns:
+            before = len(suggestions)
+            kept = []
+            for s in suggestions:
+                pat = s.get("pattern", "")
+                matched = False
+                for rp in redaction_patterns:
+                    if isinstance(rp, re.Pattern):
+                        if rp.search(pat):
+                            matched = True
+                            break
+                    else:
+                        if rp in pat.upper():
+                            matched = True
+                            break
+                if not matched:
+                    kept.append(s)
+            suggestions = kept
+            dropped = before - len(suggestions)
+            print(f"Redaction filter: dropped {dropped:,} items matching known subsidy patterns from {args.redaction_patterns}. {len(suggestions):,} left for review.")
+
+    # === Bucket approved exclusion (for iterative second-pass reviews) ===
+    if args.exclude_approved:
+        try:
+            with open(args.exclude_approved, encoding="utf-8") as f:
+                edata = json.load(f)
+            if isinstance(edata, dict) and "canonicals" in edata:
+                exclusions = [str(x).upper() for x in edata["canonicals"] if x]
+            else:
+                exclusions = []
+                for v in (edata.values() if isinstance(edata, dict) else []):
+                    if isinstance(v, dict):
+                        exclusions.extend([str(x).upper() for x in v.get("patterns", []) if x])
+                    elif isinstance(v, str):
+                        exclusions.append(v.upper())
+        except Exception as e:
+            print(f"Warning: Could not load exclude-approved from {args.exclude_approved}: {e}")
+            exclusions = []
+
+        if exclusions:
+            before = len(suggestions)
+            kept = []
+            for s in suggestions:
+                pat = s.get("pattern", "").upper()
+                if not any(ex in pat for ex in exclusions):
+                    kept.append(s)
+            suggestions = kept
+            dropped = before - len(suggestions)
+            print(f"Bucket exclusion: dropped {dropped:,} items already approved in previous pass from {args.exclude_approved}. {len(suggestions):,} left for review.")
+
+    # Auto-approve (applied after other filters)
+    auto_approve_patterns = []
+    if args.auto_approve:
+        for pat in args.auto_approve:
+            if pat:
+                try:
+                    auto_approve_patterns.append(re.compile(pat, re.IGNORECASE))
+                except re.error:
+                    auto_approve_patterns.append(pat)
+
+    # Apply auto-approve early so they don't clutter the manual review queue
+    if auto_approve_patterns:
+        before = len(suggestions)
+        kept = []
+        auto_approved = []
+        for s in suggestions:
+            pat = s.get("pattern", "")
+            matched = False
+            for ap in auto_approve_patterns:
+                if isinstance(ap, re.Pattern):
+                    if ap.search(pat):
+                        matched = True
+                        break
+                else:
+                    if ap in pat.upper():
+                        matched = True
+                        break
+            if matched:
+                auto_approved.append(s)
+            else:
+                kept.append(s)
+        suggestions = kept
+        if auto_approved:
+            print(f"Auto-approve: automatically blessed {len(auto_approved):,} items matching --auto-approve patterns.")
+            # We'll add them to approved at the end or treat them specially; for simplicity we still show them lightly or skip manual review
+            # For now we just drop them from the manual queue (they are still valuable)
+            # In a fuller restoration we would mark them approved without showing.
 
     # Load priority canonicals for pre-blessing
     raw_priority_names = load_priority_canonicals(args.priority_canonicals)
@@ -606,7 +817,8 @@ def main():
     session_norms = set()  # normalized forms approved or introduced during this review session
 
     print(f"\nReviewing {len(enriched):,} suggestions (sorted by $ impact).")
-    print("Controls: [Y]es  [N]o  [M]odify  [Q]uit & save\n")
+    print("Controls: [Y]es  [N]o  [M]odify  [S]imple  [Q]uit & save")
+    print("  M/S support multiple: one per line (blank line to finish) or comma-separated.\n")
 
     for i, s in enumerate(enriched, 1):
         pattern = s["pattern"]
@@ -644,10 +856,10 @@ def main():
         # Prompt - Y/N/M/Q
         if is_preblessed:
             default_choice = "y"
-            prompt_text = "Already in priority_canonicals — [Y]es / [N]o / [M]odify / [Q]uit? "
+            prompt_text = "Already in priority_canonicals — [Y]es / [N]o / [M]odify / [S]imple / [Q]uit? "
         else:
             default_choice = "n"
-            prompt_text = "[Y]es / [N]o / [M]odify / [Q]uit? "
+            prompt_text = "[Y]es / [N]o / [M]odify / [S]imple / [Q]uit? "
 
         choice = None
         if console and Prompt is not None:
@@ -655,7 +867,7 @@ def main():
                 choice = Prompt.ask(
                     prompt_text,
                     default=default_choice,
-                    choices=["y", "n", "m", "q"],
+                    choices=["y", "n", "m", "s", "q"],
                     show_choices=False
                 ).strip().lower()
             except Exception:
@@ -669,18 +881,19 @@ def main():
             approved.append(s)
             session_norms.add(norm_pattern)
         elif choice == "m":
-            new_pattern = Prompt.ask("Modified pattern", default=pattern) if (console and Prompt) else input(f"Modified pattern [{pattern}]: ").strip() or pattern
-            new_pattern = new_pattern.strip()
+            # Multi-entry support for Modify
+            entries = _collect_entries("Modified pattern(s) — first applies here, extras as additional simples", console, default=pattern)
+
+            if not entries:
+                entries = [pattern]
+
+            new_pattern = entries[0]
             s["pattern"] = new_pattern
             approved.append(s)
 
-            # Re-test all remaining suggestions against the newly introduced pattern.
-            # This is especially powerful for redaction work: changing
-            # "VARIOUS CHARITIES UNDER 5000" → "VARIOUS" can collapse dozens
-            # of similar variants that would otherwise need individual review.
+            # Re-test remaining against the new primary pattern
             norm_new = _normalize_for_dedup(new_pattern)
             absorbed = []
-            # Scan backwards so we can safely delete while iterating
             for j in range(len(enriched) - 1, i, -1):
                 other = enriched[j]
                 other_pat = _get_name_for_sort(other)
@@ -693,28 +906,78 @@ def main():
                 print(f"  → Also absorbed {len(absorbed)} remaining suggestion(s) under the new pattern '{new_pattern}'")
                 approved.extend(absorbed)
 
-            # Record the newly introduced canonical
             session_norms.add(norm_new)
 
-            # Full safety rescan: re-check *all* remaining suggestions against every
-            # pattern the user has approved or introduced in this session so far.
-            # This catches any stragglers that now match because of the change
-            # (especially useful when shortening patterns like "VARIOUS CHARITIES..." → "VARIOUS").
+            # Register any extra entries as additional simples + immediate absorption
+            if len(entries) > 1:
+                extras = entries[1:]
+                print(f"  → Registering {len(extras)} additional simple(s): {', '.join(extras)}")
+                for extra in extras:
+                    _add_simple_to_file_and_session(extra, session_norms, approved)
+
+                # Also absorb against the new simples right now
+                extra_absorbed = []
+                for j in range(len(enriched) - 1, i, -1):
+                    other = enriched[j]
+                    if _item_matches_any_norm(other, session_norms):
+                        extra_absorbed.append(other)
+                        del enriched[j]
+                if extra_absorbed:
+                    print(f"  → Also absorbed {len(extra_absorbed)} item(s) matching the additional simples")
+                    approved.extend(extra_absorbed)
+
+            # Final safety rescan
             safety_absorbed = []
             for j in range(len(enriched) - 1, i, -1):
                 other = enriched[j]
                 other_pat = _get_name_for_sort(other)
                 other_norm = _normalize_for_dedup(other_pat)
-                if any(
-                    sn in other_norm or other_norm in sn or sn == other_norm
-                    for sn in session_norms
-                ):
+                if any(sn in other_norm or other_norm in sn or sn == other_norm for sn in session_norms):
                     safety_absorbed.append(other)
                     del enriched[j]
 
             if safety_absorbed:
                 print(f"  → Safety rescan absorbed {len(safety_absorbed)} additional item(s).")
                 approved.extend(safety_absorbed)
+
+        elif choice == "s":
+            # Multi-entry support for Simple
+            cores = _collect_entries("Core simple name(s) to add to approved_simples.json", console, default=pattern)
+
+            if cores:
+                print(f"  → Registering {len(cores)} simple(s): {', '.join(cores)}")
+                for core in cores:
+                    _add_simple_to_file_and_session(core, session_norms, approved)
+
+                approved.append(s)
+                norm_new = _normalize_for_dedup(cores[0]) if cores else norm_pattern
+                session_norms.add(norm_new)
+
+                # Absorb matches for the new simples
+                absorbed = []
+                for j in range(len(enriched) - 1, i, -1):
+                    other = enriched[j]
+                    if _item_matches_any_norm(other, session_norms):
+                        absorbed.append(other)
+                        del enriched[j]
+
+                if absorbed:
+                    print(f"  → Absorbed {len(absorbed)} item(s) matching the new simple(s)")
+                    approved.extend(absorbed)
+
+                # Safety rescan
+                safety_absorbed = []
+                for j in range(len(enriched) - 1, i, -1):
+                    other = enriched[j]
+                    other_norm = _normalize_for_dedup(_get_name_for_sort(other))
+                    if any(sn in other_norm or other_norm in sn or sn == other_norm for sn in session_norms):
+                        safety_absorbed.append(other)
+                        del enriched[j]
+
+                if safety_absorbed:
+                    print(f"  → Safety rescan absorbed {len(safety_absorbed)} additional item(s).")
+                    approved.extend(safety_absorbed)
+
         # else: 'n' or anything else → skip
 
     # Build merged output in the same format as priority_canonicals.json

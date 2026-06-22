@@ -17,6 +17,15 @@ from countryCodes import iso3166_alpha2  # ← from your generate_foreign_update
 from models import AuthoritativeEin
 import hashlib
 
+# EINless integration (per 2026-06 hygiene "we're done... tie this off in a bow" review + architect plan):
+# einless/ (with pass_through_flow, foreign_synthetic, grantor-context assigned_ein from the by_dollars hygiene
+# hard 125404 after flow patterns) provides pre-classified buckets for early handling in grant matching.
+# Use _hard_flow.tsv / _hard_foreign.tsv / the pass_through_flow flag on hard to apply "A passes to B" logic,
+# grantor attribution for foreign grantees of US foundations, and avoid forcing recipient EINs on structural tail.
+# See einless/ structure (A), pipeline.py, and einless/docs/..._architecture.md for the full integration sketch
+# (unifies with the pre-phonebook complicated rules in generate_name_rules.py for canonical rollups + secondary geo).
+# This complements the core phonebook cream (~89% honest) and the big_pharma/foreign early exits already here.
+
 COMPANY_SUFFIX_REGEX = re.compile(r'\\s+(INC|CORP|LLC|FOUNDATION|MINISTRY|ASSOCIATION|CHURCH)$', re.IGNORECASE)
     
 def word_jaccard(name1: str, name2: str) -> float:
