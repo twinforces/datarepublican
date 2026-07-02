@@ -66,7 +66,7 @@ from fec_processor import FECProcessor
 from medicare_processor import MedicareProcessor
 from sanctions_processor import SanctionsProcessor
 from dot_processor import DotProcessor
-from logging_utils import log_info, log_error, log_debug, log_warning
+from logging_utils import log_info, log_error, log_debug, log_warning, update_logging_config
 from config import global_config
 from queue_status_display import QueueStatusDisplay
 
@@ -108,7 +108,7 @@ BATCH_SIZE = 100
 # Geolocate trilogy (after match). Legacy aliases: geolocate → geolocate_new, geolocate1 → geolocate_prev
 PIPELINE_STEPS = [
     "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "address", "einless", "match",
-    "geolocate_prev", "geolocate_new", "geolocate_archive", "photos", "grant_match", "backfill", "ratios",
+    "geolocate_prev", "geolocate_new", "geolocate_grok", "geolocate_archive", "photos", "grant_match", "backfill", "ratios",
     "percentiles", "export",
 ]
 STEP_ALIASES = {
@@ -733,7 +733,7 @@ class IRS990Processor(BaseProcessor):
 
 
     def run_geolocate_new(self):
-        """Census API geocoding for pending Geocoding rows (geolocate trilogy step 2)."""
+        """Free-API geocoding for pending rows; misses → grok_pending (geolocate step 2)."""
         if self.exit_processing:
             log_info("Shutdown requested before geolocate_new")
             return 0
@@ -748,13 +748,29 @@ class IRS990Processor(BaseProcessor):
             return 0
 
         try:
-            log_info("Starting geolocate_new (Census API for pending geocoding records)")
+            log_info("Starting geolocate_new (free APIs; Grok deferred to geolocate_grok)")
             api_processor = GeocodingAPIProcessor(self.db_ops)
             result = api_processor.process_pending_geocoding_records(max_files=self.max_files)
             self.processed_steps += 1
             return result
         except Exception as e:
             log_error(f"geolocate_new failed: {e}", exc_info=True)
+            return 0
+
+    def run_geolocate_grok(self):
+        """xAI Batch API geocoding for grok_pending rows (geolocate step 3)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before geolocate_grok")
+            return 0
+        try:
+            from geolocate_grok_processor import GeolocateGrokProcessor
+            log_info("Starting geolocate_grok (xAI Batch API for grok_pending rows)")
+            processor = GeolocateGrokProcessor(self.db_ops)
+            result = processor.run()
+            self.processed_steps += 1
+            return result
+        except Exception as e:
+            log_error(f"geolocate_grok failed: {e}", exc_info=True)
             return 0
 
     def geolocate_addresses(self):
@@ -925,6 +941,7 @@ def main():
         "match": lambda: processor.match_grants(),
         "geolocate_prev": lambda: processor.run_geolocate_prev(),
         "geolocate_new": lambda: processor.run_geolocate_new(),
+        "geolocate_grok": lambda: processor.run_geolocate_grok(),
         "geolocate_archive": lambda: processor.run_geolocate_archive(),
         "geolocate": lambda: processor.run_geolocate_new(),
         "geolocate1": lambda: processor.run_geolocate_prev(),
@@ -957,6 +974,7 @@ def main():
 
     # Set global config from parsed args
     global_config.set_from_args(args)
+    update_logging_config()
 
     # If --log-sql is specified, force verbose mode for SQL logging
     if args.log_sql:

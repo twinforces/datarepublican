@@ -6,7 +6,8 @@ Runs last in the geolocate trilogy (after geolocate_new). Writes
 {final_dir}/geocode_archive_distinct.tsv.gz with columns:
   canonical_address, colocator
 
-Merges with any existing archive so prior successes are preserved.
+colocator is LL:lat:lon for successes, or grok:<CODE> for Grok-classified failures
+(e.g. grok:NOTA). Merges with any existing archive so prior results are preserved.
 """
 
 import os
@@ -27,6 +28,7 @@ class GeolocateArchiveProcessor:
         'Match', 'Non_Exact', 'Match:Archive',
         'Tie', 'Exact',  # legacy status strings if present
     )
+    SUCCESS_STATUS_PREFIXES = ('Match:',)
 
     def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
@@ -35,8 +37,8 @@ class GeolocateArchiveProcessor:
         output_path = os.path.join(global_config.final_dir, output_file)
         log_info(f"=== Starting geolocate_archive → {output_path} ===")
 
-        rows = self._fetch_successful_pairs()
-        log_info(f"Fetched {len(rows):,} distinct successful geocode pairs from DB")
+        rows = self._fetch_archive_pairs()
+        log_info(f"Fetched {len(rows):,} distinct geocode archive pairs from DB")
 
         merged = self._merge_existing_archive(output_path, rows)
         log_info(f"Merged archive: {len(merged):,} distinct pairs (existing + new)")
@@ -45,19 +47,28 @@ class GeolocateArchiveProcessor:
         log_info(f"=== geolocate_archive complete: {len(merged):,} rows written ===")
         return len(merged)
 
-    def _fetch_successful_pairs(self) -> Dict[str, str]:
+    def _fetch_archive_pairs(self) -> Dict[str, str]:
         status_list = ", ".join(f"'{s}'" for s in self.SUCCESS_STATUSES)
+        prefix_checks = " OR ".join(
+            f"g.geocoding_status LIKE '{pfx}%'" for pfx in self.SUCCESS_STATUS_PREFIXES
+        )
         result = self.db_ops.execute_query(f"""
             SELECT
                 g.canonical_address,
-                ANY_VALUE(a.colocator) AS colocator
+                COALESCE(
+                    NULLIF(TRIM(g.colocator), ''),
+                    ANY_VALUE(a.colocator)
+                ) AS colocator
             FROM Geocoding g
-            INNER JOIN Addresses a ON a.geocoding_id = g.geocoding_id
-            WHERE g.geocoding_status IN ({status_list})
+            LEFT JOIN Addresses a ON a.geocoding_id = g.geocoding_id
+            WHERE (
+                g.geocoding_status IN ({status_list})
+                OR {prefix_checks}
+                OR g.geocoding_status LIKE 'grok:%'
+            )
               AND g.canonical_address IS NOT NULL
               AND TRIM(g.canonical_address) != ''
-              AND a.colocator IS NOT NULL
-              AND TRIM(a.colocator) != ''
+              AND COALESCE(NULLIF(TRIM(g.colocator), ''), NULLIF(TRIM(a.colocator), '')) IS NOT NULL
             GROUP BY g.canonical_address
         """).fetchall()
 

@@ -4,6 +4,34 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-07: Geolocate Trilogy — Production `geolocate_new` on Data2 (v9)
+
+**What:** Geolocate trilogy refactor landed and is running in production. `geolocate_new` (free APIs + deferred Grok) on `/Volumes/Data2/final/irs990.duckdb` after DB migration from `/Volumes/Data` (old drive → Tesla exFAT). Run **v9** (`geolocate_step_20260630_v9.log`, PID in `geolocate.pid`). Adaptive monitor: `geolocate_monitor.sh`.
+
+**Why:** Split monolithic geolocate into prev (archive/loose colocator) → new (Census/Photon/maps/OpenCage) → grok (xAI batch) → archive (round-trip cache). Classify Grok failures as terminal `grok:<CODE>` statuses for pattern mining instead of opaque `No_Match`. Self-hosted Photon on Kamatera VPS — no throttle needed.
+
+**How:**
+- **Pipeline:** `geolocate_prev` → `geolocate_new` → `geolocate_grok` → `geolocate_archive` (wired in `irs990processor.py`; legacy `geolocate`/`geolocate1` aliases preserved).
+- **Grok failure taxonomy** (`constants.py`): `NOTA`, `VAGUE`, `AMBIG`, `REDACT`, `UNKN` → `grok:<CODE>` colocator; archive + prev load them as terminal; export `grok_failures_for_patterns.tsv.gz` when grok_pending drained.
+- **Photon:** self-hosted `45.61.62.160:2322`, 32 workers, 0s delay (`GEOCODING_PHOTON_SELF_HOSTED_*`).
+- **v9 status (2026-07-02 ~07:17):** ~38h uptime; session fed **50,000**/10,109,423; ~805k resolved; ~39k matches; hard-tail serial grind (census bulk still 0%); rate ~250–400/hr. **Exit signal:** `census batch=10000 matched=5xxx` on a fresh 10k feed.
+- **Resume command:**
+  ```bash
+  cd 990tools
+  nohup python3 -u irs990processor.py --start-step geolocate_new --stop-step geolocate_new \
+    -v --final-dir /Volumes/Data2/final --db-threads 1 --nostats \
+    >> geolocate_step_20260630_v9.log 2>&1 &
+  echo $! > geolocate.pid
+  nohup ./geolocate_monitor.sh >> geolocate_monitor.log 2>&1 &
+  ```
+- **After `geolocate_new` drains:** `geolocate_grok` (needs xAI credits) → `geolocate_archive`.
+
+**Key artifacts:** `geocoding_api_processor.py`, `geolocate_grok_processor.py`, `geolocate_archive_processor.py`, `geolocate_prev_processor.py`, `geolocate_monitor.sh`, `pipeline.py` (feed milestones + admission cap).
+
+**Hygiene (2026-07-02):** Docs sync; old geolocate logs archived to `archive/geolocate_runs_2026-06/`; runtime logs/pid/monitor state gitignored.
+
+---
+
 ## 2026-06: Address Step Production Validation (Incremental Dedup)
 
 **What:** Production-validated `--step address` on `/Volumes/Data/final/irs990.duckdb`. Incremental SQL dedup assigned `master_id` to 69.3M new rows (DOT/sanctions/FEC) without resetting existing roots.

@@ -1,0 +1,34 @@
+# Runtime / ops (geolocate and long pipeline steps)
+*.log
+geolocate.pid
+geolocate_monitor.log
+geolocate_monitor.lastpid
+geolocate_monitor.metrics
+geolocate_monitor.progress
+geolocate_monitor.state
+geolocate_monitor.state.pending
+geolocate_step_*.log
+geolocate_grok_state.json
+
+# Local DB copies (production lives on /Volumes/Data2/final)
+irs990.duckdb
+irs990.duckdb.*
+*.duckdb
+*.duckdb.wal*
+
+# Python / tooling
+__pycache__/
+.pytest_cache/
+.venv/
+.tmp/
+
+# Large generated TSV/JSONL (keep in archive/ or final_dir)
+*.tsv
+*.tsv.gz
+*.jsonl
+!approved_*.json
+!category_buckets/*.json
+
+# Cache / output scratch
+_cache/
+_output/

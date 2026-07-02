@@ -5,6 +5,24 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-07 (Geolocate Trilogy + Grok Failure Taxonomy)
+
+### Geolocate pipeline refactor
+- Split into `geolocate_prev` → `geolocate_new` → `geolocate_grok` → `geolocate_archive` (legacy aliases `geolocate`/`geolocate1` preserved).
+- `geolocate_new`: free APIs only (Census, Photon self-hosted, geocode.maps.co, OpenCage); inline Grok disabled — failures queue as `grok_pending` for batch step.
+- `geolocate_grok_processor.py`: xAI Batch API for `grok_pending` rows; resumable `geolocate_grok_state.json`; exports `grok_failures_for_patterns.tsv.gz` on drain.
+- `geolocate_prev` / `geolocate_archive`: round-trip archive cache; `grok:<CODE>` failures persist as terminal colocators (not re-queued).
+
+### Grok failure classification
+- Taxonomy in `constants.py`: `NOTA`, `VAGUE`, `AMBIG`, `REDACT`, `UNKN` → `grok:<CODE>` status/colocator.
+- `geocoding_api_processor.py`: shared `grok_result_update_fields()`; batch + realtime paths use structured codes.
+
+### Ops / performance
+- Self-hosted Photon: 32 workers, 0s politeness delay (own VPS).
+- `geolocate_monitor.sh`: adaptive cadence monitor with incremental log metrics (fed/resolved/rate/ETA).
+- `pipeline.py`: feed milestones, in-flight cap, periodic FORCE CHECKPOINT.
+- Production DB moved to `/Volumes/Data2/final` (Jul 2026); v9 run in progress.
+
 ## [Unreleased] - 2026-06 (Address Dedup + Stats)
 
 ### Address Step (`--step address`) — production-validated 2026-06-20

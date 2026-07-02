@@ -221,8 +221,8 @@ class PendingDatabaseContext:
         ids: List[str] = []
         with db_ops.acquire_write_conn() as conn:
 
-            # <<< WINNING CODE — PERIODIC FLUSHING FOR ADDRESS DEDUP >>>
-            FLUSH_EVERY_N_ROWS = 10_000   # More aggressive flushing to prevent out-of-memory
+            # Periodic mid-transaction flush — keeps WAL/memory bounded during long drains
+            FLUSH_EVERY_N_ROWS = 25_000
 
             try:
                 # Start explicit transaction
@@ -296,18 +296,7 @@ class PendingDatabaseContext:
                 raise
 
             if checkpoint:
-            # Final checkpoint with macOS workaround
-                try:
-                    # Recycle connection first to enable reliable checkpointing on macOS
-                    #db_ops.recycle_connection()
-                    # Then attempt CHECKPOINT for WAL flushing
-                    conn.execute("CHECKPOINT")
-                    if PDC_DEBUG: print("###DEBUG### PDC_SAVE: Final checkpoint completed successfully")
-                    log_info("Final checkpoint completed successfully")
-                except Exception as e:
-                    print(f"###DEBUG### PDC_SAVE: Final checkpoint failed: {e}")
-                    log_warning(f"Final checkpoint failed: {e}")
-                    # Continue anyway - data is still committed
+                self._force_checkpoint(conn, label="final")
 
             if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
         return ids
@@ -475,30 +464,36 @@ class PendingDatabaseContext:
                     # Log the error but don't fail the entire transaction
                     log_error(f"Failed to update addresses for canonical_address {geocoding.canonical_address}: {e}")
                     # Continue with the transaction - geocoding record update will still succeed
-    def _intermediate_commit_and_checkpoint(self, conn, updated_so_far: int, db_ops: DatabaseOperations) -> int:
-        """
-        Commit the current transaction, recycle connection to enable checkpointing, then checkpoint for WAL flushing.
-
-        On macOS, DuckDB has known issues where CHECKPOINT doesn't work reliably.
-        The solution is to recycle the connection first (to work around macOS issues),
-        then attempt CHECKPOINT (for performance benefits from WAL flushing).
-        """
+    def _log_geocoding_status_counts(self, conn, label: str = "checkpoint") -> None:
+        """Emit status histogram for monitor after checkpoint — single grep-friendly line."""
         try:
-            log_debug("Performing intermediate commit and checkpoint...")
-            conn.commit()                               # Ends the huge transaction
+            rows = conn.execute(
+                "SELECT geocoding_status, COUNT(*) AS n "
+                "FROM Geocoding GROUP BY geocoding_status ORDER BY n DESC"
+            ).fetchall()
+            parts = [f"{status}={count:,}" for status, count in rows]
+            msg = f"GEOCODING_STATUS_COUNTS ({label}) " + " ".join(parts)
+            log_info(msg)
+            print(msg, flush=True)
+        except Exception as e:
+            log_warning(f"GEOCODING_STATUS_COUNTS failed ({label}): {e}")
 
-            # Now attempt CHECKPOINT for WAL flushing and performance benefits
-            try:
-                # Get the fresh connection after recycling
-                with db_ops.acquire_write_conn() as fresh_conn:
-                    fresh_conn.execute("CHECKPOINT")
-                    log_debug("Intermediate checkpoint succeeded after connection recycling")
-            except Exception as checkpoint_e:
-                log_warning(f"Checkpoint failed even after recycling: {checkpoint_e}")
-                # Continue anyway - the recycling itself provides WAL cleanup
+    def _force_checkpoint(self, conn, label: str = "checkpoint") -> None:
+        try:
+            conn.execute("PRAGMA force_checkpoint")
+            log_info(f"FORCE CHECKPOINT completed ({label})")
+            self._log_geocoding_status_counts(conn, label=label)
+        except Exception as e:
+            log_warning(f"FORCE CHECKPOINT failed ({label}): {e}")
 
-            log_info(f"INTERMEDIATE COMMIT + CHECKPOINT after ~{updated_so_far:,} address updates — memory/WAL reclaimed")
-            return 0                                        # reset the counter
+    def _intermediate_commit_and_checkpoint(self, conn, updated_so_far: int, db_ops: DatabaseOperations) -> int:
+        """Commit + FORCE CHECKPOINT — frees WAL/memory during long write drains."""
+        try:
+            log_debug("Performing intermediate commit and force checkpoint...")
+            conn.commit()
+            self._force_checkpoint(conn, label=f"intermediate ~{updated_so_far:,} rows")
+            log_info(f"INTERMEDIATE COMMIT + FORCE CHECKPOINT after ~{updated_so_far:,} updates")
+            return 0
 
         except Exception as e:
             # Log connection state for debugging

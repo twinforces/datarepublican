@@ -101,8 +101,8 @@ class DuckDBPool:
             #"enable_progress_bar": "false",
             "enable_object_cache": "true",
             "preserve_insertion_order": "false",
-            "checkpoint_threshold": "500MB",  # or PRAGMA later if needed
-            "wal_autocheckpoint": "500MB",
+            "checkpoint_threshold": "1TB",
+            "wal_autocheckpoint": "1TB",
             # Add any other safe global-ish settings here
         }
         self.write_conn = LoggingDuckDBConnection(db_path, config=self.shared_config) if self.log_wrapper_write else duckdb.connect(db_path, config=self.shared_config)
@@ -112,7 +112,7 @@ class DuckDBPool:
         self.auto_checkpoint = auto_checkpoint
         with self.acquire_write() as conn:
             self._init_schema()
-            conn.execute("CHECKPOINT")
+            # Skip CHECKPOINT on init — production DB hits DuckDB UUID/VARCHAR index bug on checkpoint.
         self.wal_timer.cancel()
         self.wal_timer= None
         self.max_read = max_read
@@ -188,6 +188,9 @@ class DuckDBPool:
         conn.execute("SET enable_progress_bar = false")  # Disable progress bars for better performance
         conn.execute(f"SET threads = {global_config.db_threads}")
         conn.execute("SET enable_object_cache = true")
+        if not read_only:
+            conn.execute("SET wal_autocheckpoint='1TB'")
+            conn.execute("SET checkpoint_threshold='1TB'")
         #conn.execute("SET max_temp_directory_size = '100GB'")  # Increase temp directory size - DEFAULT is ALL
 
         #try:

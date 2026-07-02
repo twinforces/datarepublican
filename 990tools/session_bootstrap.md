@@ -1,11 +1,11 @@
 # 990tools Session Bootstrap
 
-**Last updated:** 2026-06-20 (address production validation)
+**Last updated:** 2026-07-02 (geolocate v9 on Data2)
 
 > **Note:** For the current phase, prefer `issue_bootstrap.md` — authoritative for pipeline work. This file retains the 2026-05 category/Splink context.
 
-## Current Focus (June 2026)
-Address dedup complete on production DB: 95.2M rows, 0 NULL `master_id`. **Next:** `--start-step match` (skip `einless`). Then geolocate trilogy refactor (`geolocate_prev` / `geolocate_new` / `geolocate_archive`). See `issue_bootstrap.md` and `docs/RECENTGOALS.md`.
+## Current Focus (July 2026)
+**`geolocate_new` v9 running** on `/Volumes/Data2/final/irs990.duckdb` — hard-tail serial grind. Monitor via `geolocate_monitor.sh`. After drain: `geolocate_grok` → `geolocate_archive` → `grant_match`. See `issue_bootstrap.md` and `docs/RECENTGOALS.md` (top entry).
 
 ## Previous Focus (May 2026)
 We were doing targeted Splink discovery on coherent name categories instead of one giant run on the full master list. This is the "hybrid of a hybrid" approach.

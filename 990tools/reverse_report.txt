@@ -1,9 +1,0 @@
-Loading rules and data...
-Loaded 214718 canonicals and 3078683 distinct names
-
-=== REVERSE COVERAGE REPORT (Potential Bad Variants) ===
-
-No significant bad variants detected. Rule set looks clean.
-
-Reverse coverage script complete. Saved as reverse_coverage.py
-Run with: .venv/bin/python reverse_coverage.py

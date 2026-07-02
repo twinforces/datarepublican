@@ -14,6 +14,7 @@ from database_operations import DatabaseOperations
 from queue_status_display import QueueStatusDisplay
 from constants import BATCH_SIZE, CONSUMER_BATCH_SIZE
 import logging_utils
+from logging_utils import log_error, log_info
 
 # Generics first
 W = TypeVar("W", bound="WorkUnit")
@@ -99,7 +100,7 @@ class ResultWorkUnit(WorkUnit):
     def is_result(self) -> bool:
         return self.type == 'result'
     
-DEBUG_PIPELINE = True
+DEBUG_PIPELINE = False
 
 class AtomicCounter:
     def __init__(self, initial=0):
@@ -374,7 +375,14 @@ class PipelineStage(Generic[W]):
 # ConsumerStage: Custom class because only the consumer can write to the DB
 # ==============================
 class ConsumerStage(PipelineStage):
-    def __init__(self, name: str, db_ops: DatabaseOperations, threshold: int, pipeline: Optional["Pipeline"] = None):
+    def __init__(
+        self,
+        name: str,
+        db_ops: DatabaseOperations,
+        threshold: int,
+        pipeline: Optional["Pipeline"] = None,
+        checkpoint_interval: int = 10_000,
+    ):
         super().__init__(
             name=name,
             workers=1,
@@ -385,7 +393,7 @@ class ConsumerStage(PipelineStage):
         )
         self.db_ops = db_ops
         self.last_checkpoint = 0
-        self.checkpoint_interval = 10_000  # Checkpoint every 10,000 updates
+        self.checkpoint_interval = checkpoint_interval
 
     def _consume_handler(self, batch: List[ResultWorkUnit]) -> List[Tuple[bool, Any]]:
         print(f"###ERROR### CONSUMER HANDLER: Processing batch of {len(batch)} units, should never be called")
@@ -501,11 +509,24 @@ class ConsumerStage(PipelineStage):
         print(f"Consumer flushing {len(contexts)} PDCs (~{count:,} updates)")
         merged = PendingDatabaseContext.merge(contexts)
         try:
-            checkpoint=  totalups == -1 or self.last_checkpoint < totalups - self.checkpoint_interval
-                
-            merged.save_to_database(self.db_ops, checkpoint=checkpoint)
+            should_checkpoint = (
+                totalups == -1
+                or (totalups - self.last_checkpoint) >= self.checkpoint_interval
+            )
+            merged.save_to_database(self.db_ops, checkpoint=should_checkpoint)
+            if should_checkpoint:
+                if totalups != -1:
+                    self.last_checkpoint = totalups
+                log_info(
+                    f"[{self.name}] FORCE CHECKPOINT at ~{totalups:,} cumulative updates "
+                    f"(interval={self.checkpoint_interval:,})"
+                )
         except Exception as e:
-            print(f"[{self.name}] ERROR saving to database: {e}")
+            log_error(f"[{self.name}] ERROR saving to database: {e}")
+            print(f"[{self.name}] ERROR saving to database: {e}", flush=True)
+            proc = getattr(self.pipeline, '_geocode_processor', None)
+            if proc and hasattr(proc, 'run_stats'):
+                proc.run_stats.save_errors += 1
         
         self.workload.dec(len(contexts))
 
@@ -520,8 +541,11 @@ class Pipeline(Generic[W]):
         stages: List[PipelineStage[W]],
         db_ops: DatabaseOperations,
         backpressure_enabled: bool = BACKPRESSURE_ENABLED_DEFAULT,
+        in_flight_cap: int = BACKPRESSURE_THRESHOLD,
         chain_on: str = 'success',
         workunit_class: type[W] = WorkUnit,
+        consumer_threshold: int = CONSUMER_BATCH_SIZE,
+        checkpoint_interval: int = 10_000,
     ):
         if chain_on not in ('success', 'failure'):
             raise ValueError(f"Invalid chain_on: {chain_on}")
@@ -534,6 +558,12 @@ class Pipeline(Generic[W]):
         for stage in self.stages.values():
             stage.pipeline = self
         self.backpressure_enabled = backpressure_enabled
+        self.in_flight_cap = in_flight_cap
+        self._admission_queue: Optional[queue.Queue] = None
+        if backpressure_enabled:
+            self._admission_queue = queue.Queue(maxsize=in_flight_cap)
+            for _ in range(in_flight_cap):
+                self._admission_queue.put_nowait(None)
 
         # Feed handler: pass full W, not .data
         continue_flag = False if chain_on == 'failure' else True
@@ -549,8 +579,9 @@ class Pipeline(Generic[W]):
         self.result_consumer = ConsumerStage(
             name="result",
             db_ops=db_ops,
-            threshold=CONSUMER_THRESHOLD,
+            threshold=consumer_threshold,
             pipeline=self,
+            checkpoint_interval=checkpoint_interval,
         )
         self.stages["result"] = self.result_consumer
 
@@ -589,13 +620,18 @@ class Pipeline(Generic[W]):
 
     def _record_global_success(self, count: int = 1):
         self.metrics['overall']['success'] += count
+        if self._admission_queue is not None:
+            for _ in range(count):
+                self._admission_queue.put(None, block=True)
 
     def feed(self, items: List[Any]):
         if DEBUG_PIPELINE:
             print(f"FEEDING BATCH of {len(items)} items")
-        wu_items = [self.workunit_class.work_item("feed", item.data) for item in items]
-        batch = self.workunit_class.batch("feed", wu_items)
-        self.feed_stage.put(batch)
+        for item in items:
+            if self._admission_queue is not None:
+                self._admission_queue.get(block=True)
+            wu = self.workunit_class.work_item("feed", item.data)
+            self.feed_stage.put(wu)
 
     def run_with_provider(self, provider, max_items: Optional[int] = None):
         total = provider.get_total_work()
@@ -628,21 +664,70 @@ class Pipeline(Generic[W]):
                     batch = batch[:remaining]
 
             self.feed(batch)
+            self._record_global_total(len(batch))
             processed += len(batch)
             last_id = new_last_id
 
-            if processed % 10000 == 0:
-                print(f"→ {processed:,}/{total:,} fed")
+            if processed % 1000 == 0 or processed == total:
+                committed = self.metrics['overall']['success']
+                in_flight = max(0, processed - committed)
+                print(f"→ {processed:,}/{total:,} fed", flush=True)
+                proc = getattr(self, '_geocode_processor', None)
+                if proc and hasattr(proc, 'run_stats'):
+                    s = proc.run_stats
+                    step = getattr(proc, 'pipeline_step', 'geolocate_new')
+                    if step == "geolocate_grok":
+                        print(
+                            f"[{step}] running grok_match={s.grok_match:,} "
+                            f"grok_fail={s.grok_fail:,} committed={committed:,} "
+                            f"in_flight≈{in_flight:,} save_err={s.save_errors:,}",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[{step}] running census={s.census_match:,} "
+                            f"census_strip={s.census_strip_match:,} "
+                            f"preprocess={s.preprocess_match:,} other={s.other_match:,} "
+                            f"grok_queued={s.grok_queued:,} committed={committed:,} "
+                            f"in_flight≈{in_flight:,} save_err={s.save_errors:,}",
+                            flush=True,
+                        )
+                else:
+                    print(
+                        f"[pipeline] committed={committed:,} in_flight≈{in_flight:,}",
+                        flush=True,
+                    )
 
         print("Last batch sent — starting graceful shutdown...")
         self.shutdown()
         print(f"Pipeline complete — {processed:,} processed")
+        self._log_stage_summary()
+        return processed
         
     @classmethod
     def result(cls, stage: str, context: PendingDatabaseContext) -> ResultWorkUnit:
         """Create a result unit (non-generic, always ResultWorkUnit)."""
         return ResultWorkUnit(stage=stage, data=context)
     
+    def _log_stage_summary(self):
+        print("[pipeline] Stage metrics:", flush=True)
+        for name in self.order:
+            stage = self.stages.get(name)
+            if not stage:
+                continue
+            m = stage.metrics
+            print(
+                f"  {name}: total={m.get('total', 0):,} success={m.get('success', 0):,} "
+                f"failure={m.get('failure', 0):,} peak_q={m.get('peak_queue', 0):,}",
+                flush=True,
+            )
+        o = self.metrics['overall']
+        print(
+            f"  overall: fed={o.get('total', 0):,} committed={o.get('success', 0):,} "
+            f"expected={o.get('expected', 0):,}",
+            flush=True,
+        )
+
     def _join_with_timeout(self, q, name: str, timeout_s: int = 24*3600):
         """Poll join w/ timeout."""
         start = time.time()
