@@ -14,6 +14,7 @@ import threading
 import gc
 import gzip
 import csv
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
@@ -39,8 +40,13 @@ from base_processor import BaseProcessor
 from config import global_config
 from constants import (
     GEOCODING_BATCH_SIZE, GEOCODING_FEED_BATCH_SIZE, GEOCODING_API_WORKERS,
-    CENSUS_API_BATCH_SIZE, GEOCODE_CONSUMER_BATCH_SIZE, GEOCODE_CHECKPOINT_INTERVAL,
-    GEOCODING_IN_FLIGHT_CAP, GEOCODING_GROK_WORKERS, GEOCODING_GROK_BATCH_SIZE,
+    CENSUS_API_BATCH_SIZE, CENSUS_API_MIN_DELAY, CENSUS_API_RETRY_ATTEMPTS,
+    CENSUS_API_RETRY_BACKOFF_BASE, GEOCODE_CONSUMER_BATCH_SIZE, GEOCODE_CHECKPOINT_INTERVAL,
+    GEOCODING_IN_FLIGHT_CAP, GEOCODING_API_IN_FLIGHT_CAP, GEOCODING_GROK_WORKERS,
+    GEOCODING_GROK_BATCH_SIZE, GEOCODING_PREPROCESS_BATCH_SIZE,
+    GEOCODING_WORKER_QUEUE_DEPTH, GEOCODING_FEED_BUFFER_BATCHES,
+    GEOCODING_PENDING_API_BATCH_SIZE, GEOCODING_BATCHER_TIMEOUT,
+    GEOCODING_STATUS_PENDING_API, CENSUS_FAILURES_EXPORT_FILE,
     GROK_GEOCODE_MODEL_DEFAULT, GROK_FAILURE_CODES, grok_failure_status,
     GEOCODE_MAPS_CO_WORKERS, GEOCODE_MAPS_CO_MIN_DELAY,
     GEOCODING_PHOTON_WORKERS, GEOCODING_PHOTON_MIN_DELAY,
@@ -147,29 +153,94 @@ class GeocodingWorkUnit(WorkUnit):
 
 @dataclass
 class GeocodeRunStats:
-    """Per-run counters for geolocate_new diagnostics."""
+    """Per-run counters for geolocate step diagnostics."""
     fed: int = 0
     preprocess_match: int = 0
     census_match: int = 0
     census_strip_match: int = 0
+    pending_api_queued: int = 0
     other_match: int = 0
     grok_queued: int = 0
     grok_match: int = 0
     grok_fail: int = 0
     save_errors: int = 0
+    census_pending_total: int = 0
+    census_calls: int = 0
+    census_strip_calls: int = 0
+    census_call_failures: int = 0
+    census_strip_call_failures: int = 0
+    census_addrs_sent: int = 0
+    census_call_secs_total: float = 0.0
+    census_call_secs_last: float = 0.0
+    census_call_secs_max: float = 0.0
+    census_run_start: float = field(default_factory=time.time)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def record_census_call(
+        self,
+        *,
+        stage: str,
+        batch_size: int,
+        elapsed_s: float,
+        matched: int,
+        failed: bool,
+    ) -> None:
+        with self._lock:
+            self.census_addrs_sent += batch_size
+            self.census_call_secs_total += elapsed_s
+            self.census_call_secs_last = elapsed_s
+            if elapsed_s > self.census_call_secs_max:
+                self.census_call_secs_max = elapsed_s
+            if stage == "census_strip":
+                self.census_strip_calls += 1
+                if failed:
+                    self.census_strip_call_failures += 1
+            else:
+                self.census_calls += 1
+                if failed:
+                    self.census_call_failures += 1
+
+    def census_call_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            calls = self.census_calls + self.census_strip_calls
+            failures = self.census_call_failures + self.census_strip_call_failures
+            elapsed_s = max(time.time() - self.census_run_start, 1.0)
+            elapsed_hr = elapsed_s / 3600.0
+            avg_s = (self.census_call_secs_total / calls) if calls else 0.0
+            rate_hr = calls / elapsed_hr if elapsed_hr > 0 else 0.0
+            return {
+                "calls": calls,
+                "census_calls": self.census_calls,
+                "census_strip_calls": self.census_strip_calls,
+                "failures": failures,
+                "addrs_sent": self.census_addrs_sent,
+                "elapsed_s": elapsed_s,
+                "elapsed_hr": elapsed_hr,
+                "last_s": self.census_call_secs_last,
+                "avg_s": avg_s,
+                "max_s": self.census_call_secs_max,
+                "rate_hr": rate_hr,
+            }
 
     def log_summary(self, step: str = "geolocate_new"):
+        snap = self.census_call_snapshot()
         log_info(
             f"Geocode run summary ({step}): fed={self.fed:,} preprocess={self.preprocess_match:,} "
             f"census={self.census_match:,} census_strip={self.census_strip_match:,} "
-            f"other={self.other_match:,} grok_queued={self.grok_queued:,} "
-            f"grok_match={self.grok_match:,} grok_fail={self.grok_fail:,} save_errors={self.save_errors:,}"
+            f"pending_api={self.pending_api_queued:,} other={self.other_match:,} "
+            f"grok_queued={self.grok_queued:,} grok_match={self.grok_match:,} "
+            f"grok_fail={self.grok_fail:,} save_errors={self.save_errors:,} "
+            f"census_calls={snap['census_calls']:,} census_strip_calls={snap['census_strip_calls']:,} "
+            f"census_failures={snap['failures']:,} census_avg_s={snap['avg_s']:.1f}"
         )
         print(
             f"[{step}] SUMMARY fed={self.fed:,} preprocess={self.preprocess_match:,} "
             f"census={self.census_match:,} census_strip={self.census_strip_match:,} "
-            f"other={self.other_match:,} grok_queued={self.grok_queued:,} "
-            f"grok_match={self.grok_match:,} grok_fail={self.grok_fail:,} save_errors={self.save_errors:,}",
+            f"pending_api={self.pending_api_queued:,} other={self.other_match:,} "
+            f"grok_queued={self.grok_queued:,} grok_match={self.grok_match:,} "
+            f"grok_fail={self.grok_fail:,} save_errors={self.save_errors:,} "
+            f"census_calls={snap['census_calls']:,}+{snap['census_strip_calls']:,}strip "
+            f"census_failures={snap['failures']:,} census_avg_s={snap['avg_s']:.1f}",
             flush=True,
         )
 
@@ -177,31 +248,66 @@ class GeocodeRunStats:
 class GeocodingAPIProcessor(BaseProcessor):
     _maps_co_disabled = False
     _librestreet_disabled = False
+    _census_api_lock = threading.Lock()
+    _census_api_last_request: float = 0.0
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_FEED_BATCH_SIZE):
         super().__init__(db_ops)
         self.batch_size = batch_size
         self._thread_local = threading.local()
         self.geocoding_patterns = self._load_geocoding_patterns()
+        self._census_strip_suite_regexes = self._load_census_strip_suite_regexes()
         self.run_stats = GeocodeRunStats()
         self.pipeline_step = "geolocate_new"
+        self._db_ops = db_ops
+        self._census_pipeline: Optional[Pipeline[GeocodingWorkUnit]] = None
+        self._api_pipeline: Optional[Pipeline[GeocodingWorkUnit]] = None
+        self._free_pipeline: Optional[Pipeline[GeocodingWorkUnit]] = None
+        self._grok_pipeline: Optional[Pipeline[GeocodingWorkUnit]] = None
+        self.pipeline: Optional[Pipeline[GeocodingWorkUnit]] = None
         self._validate_geocoder_api_keys()
 
-        self.free_pipeline = self._build_free_pipeline(db_ops)
-        self.grok_pipeline = self._build_grok_pipeline(db_ops)
-        self.pipeline = self.free_pipeline
-        self.free_pipeline._geocode_processor = self
-        self.grok_pipeline._geocode_processor = self
+    def _bind_pipeline(self, pl: Pipeline[GeocodingWorkUnit]) -> Pipeline[GeocodingWorkUnit]:
+        pl._geocode_processor = self
+        return pl
 
-    def _build_free_pipeline(self, db_ops: DatabaseOperations) -> Pipeline[GeocodingWorkUnit]:
-        preprocess_stage = PipelineStage("preprocess", 4, 5000, self._preprocess_handler)
-        census_stage_raw = PipelineStage(
-            "census", GEOCODING_API_WORKERS, CENSUS_API_BATCH_SIZE, self._census_handler_raw,
+    @property
+    def census_pipeline(self) -> Pipeline[GeocodingWorkUnit]:
+        if self._census_pipeline is None:
+            self._census_pipeline = self._bind_pipeline(self._build_census_pipeline(self._db_ops))
+        return self._census_pipeline
+
+    @property
+    def api_pipeline(self) -> Pipeline[GeocodingWorkUnit]:
+        if self._api_pipeline is None:
+            self._api_pipeline = self._bind_pipeline(self._build_api_pipeline(self._db_ops))
+        return self._api_pipeline
+
+    @property
+    def free_pipeline(self) -> Pipeline[GeocodingWorkUnit]:
+        if self._free_pipeline is None:
+            self._free_pipeline = self._bind_pipeline(self._build_free_pipeline(self._db_ops))
+        return self._free_pipeline
+
+    @property
+    def grok_pipeline(self) -> Pipeline[GeocodingWorkUnit]:
+        if self._grok_pipeline is None:
+            self._grok_pipeline = self._bind_pipeline(self._build_grok_pipeline(self._db_ops))
+        return self._grok_pipeline
+
+    @staticmethod
+    def _worker_queue_slots(workers: int) -> int:
+        return workers * GEOCODING_WORKER_QUEUE_DEPTH
+
+    def _build_preprocess_stage(self, *, worker_queue_maxsize: Optional[int] = None) -> PipelineStage:
+        wq = worker_queue_maxsize if worker_queue_maxsize is not None else self._worker_queue_slots(4)
+        return PipelineStage(
+            "preprocess", 4, GEOCODING_PREPROCESS_BATCH_SIZE, self._preprocess_handler,
+            worker_queue_maxsize=wq,
+            batcher_timeout=GEOCODING_BATCHER_TIMEOUT,
         )
-        census_stage_strip = PipelineStage(
-            "census_strip", GEOCODING_API_WORKERS, CENSUS_API_BATCH_SIZE, self._census_handler_strip,
-        )
-        stages = [preprocess_stage, census_stage_raw, census_stage_strip]
+
+    def _append_api_tail_stages(self, stages: List[PipelineStage]) -> None:
         if API_CONFIG['ENABLE_PHOTON']:
             photon_workers, _ = self._photon_runtime_settings()
             stages.append(PipelineStage("photon", photon_workers, 1, self._photon_handler))
@@ -218,6 +324,64 @@ class GeocodingAPIProcessor(BaseProcessor):
         stages.append(PipelineStage(
             "fail", 1, 5000, self._grok_pending_fail_handler, is_final_failure=True,
         ))
+
+    def _build_census_pipeline(self, db_ops: DatabaseOperations) -> Pipeline[GeocodingWorkUnit]:
+        census_wq = self._worker_queue_slots(GEOCODING_API_WORKERS)
+        stages = [
+            self._build_preprocess_stage(worker_queue_maxsize=census_wq),
+            PipelineStage(
+                "census", GEOCODING_API_WORKERS, CENSUS_API_BATCH_SIZE, self._census_handler_raw,
+                worker_queue_maxsize=census_wq,
+                batcher_timeout=GEOCODING_BATCHER_TIMEOUT,
+            ),
+            PipelineStage(
+                "census_strip", GEOCODING_API_WORKERS, CENSUS_API_BATCH_SIZE, self._census_handler_strip,
+                worker_queue_maxsize=census_wq,
+                batcher_timeout=GEOCODING_BATCHER_TIMEOUT,
+            ),
+            PipelineStage(
+                "fail", 1, GEOCODING_PENDING_API_BATCH_SIZE, self._pending_api_fail_handler,
+                is_final_failure=True,
+                worker_queue_maxsize=self._worker_queue_slots(1),
+                batcher_timeout=GEOCODING_BATCHER_TIMEOUT,
+            ),
+        ]
+        return Pipeline(
+            stages=stages,
+            db_ops=db_ops,
+            chain_on='failure',
+            workunit_class=GeocodingWorkUnit,
+            consumer_threshold=GEOCODE_CONSUMER_BATCH_SIZE,
+            checkpoint_interval=GEOCODE_CHECKPOINT_INTERVAL,
+            buffered_feed=True,
+            feed_buffer_batches=GEOCODING_FEED_BUFFER_BATCHES,
+            batcher_timeout=GEOCODING_BATCHER_TIMEOUT,
+        )
+
+    def _build_api_pipeline(self, db_ops: DatabaseOperations) -> Pipeline[GeocodingWorkUnit]:
+        stages = [self._build_preprocess_stage()]
+        self._append_api_tail_stages(stages)
+        return Pipeline(
+            stages=stages,
+            db_ops=db_ops,
+            chain_on='failure',
+            workunit_class=GeocodingWorkUnit,
+            consumer_threshold=GEOCODE_CONSUMER_BATCH_SIZE,
+            checkpoint_interval=GEOCODE_CHECKPOINT_INTERVAL,
+            backpressure_enabled=True,
+            in_flight_cap=GEOCODING_API_IN_FLIGHT_CAP,
+        )
+
+    def _build_free_pipeline(self, db_ops: DatabaseOperations) -> Pipeline[GeocodingWorkUnit]:
+        preprocess_stage = self._build_preprocess_stage()
+        census_stage_raw = PipelineStage(
+            "census", GEOCODING_API_WORKERS, CENSUS_API_BATCH_SIZE, self._census_handler_raw,
+        )
+        census_stage_strip = PipelineStage(
+            "census_strip", GEOCODING_API_WORKERS, CENSUS_API_BATCH_SIZE, self._census_handler_strip,
+        )
+        stages = [preprocess_stage, census_stage_raw, census_stage_strip]
+        self._append_api_tail_stages(stages)
         return Pipeline(
             stages=stages,
             db_ops=db_ops,
@@ -463,6 +627,46 @@ class GeocodingAPIProcessor(BaseProcessor):
             log_warning(f"Failed to load geocoding_patterns.json: {e}")
             return []
 
+    def _load_census_strip_suite_regexes(self) -> List[re.Pattern]:
+        """Suite/unit strip patterns for census_strip (colocator is round(lat,4) — suite irrelevant)."""
+        regexes: List[str] = []
+        for pattern in self.geocoding_patterns:
+            if pattern.get("name") != "census_strip_suites":
+                continue
+            for sub in pattern.get("patterns", []):
+                if sub.get("action") == "strip" and sub.get("regex"):
+                    regexes.append(sub["regex"])
+            if pattern.get("action") == "strip" and pattern.get("regex"):
+                regexes.append(pattern["regex"])
+        if not regexes:
+            regexes = [
+                r"(?i)[,\s]+(?:suite|ste\.?|apt\.?|apartment|unit|rm\.?|room|fl\.?|floor|bldg\.?|building)\s*#?\s*(?:\d+[a-z0-9-]*|[a-z](?:\d+|(?=\s*,|\s*$)))",
+                r"(?i)[,\s]+#\s*\d+[a-z0-9-]*",
+                r"(?i)[,\s]+\d{1,4}(?=,\s*[A-Za-z])",
+            ]
+        return [re.compile(rx) for rx in regexes]
+
+    def _strip_suite_from_address(self, address: str) -> str:
+        """Remove suite/unit/# clauses so census_strip can match the building."""
+        if not address:
+            return address
+        result = address
+        changed = True
+        while changed:
+            changed = False
+            for rx in self._census_strip_suite_regexes:
+                new = rx.sub("", result).strip()
+                new = re.sub(r"\s{2,}", " ", new)
+                new = re.sub(r",\s*,", ", ", new)
+                if new != result:
+                    result = new
+                    changed = True
+        return result
+
+    def _strip_for_census_strip(self, address: str) -> str:
+        """C/O then suite/unit strip for census_strip retry."""
+        return self._strip_suite_from_address(self._strip_co_from_address(address))
+
     def _strip_co_from_address(self, address: str) -> str:
         """Strip leading C/O patterns from address strings."""
         if not address:
@@ -548,7 +752,7 @@ class GeocodingAPIProcessor(BaseProcessor):
     def _check_geocoding_patterns(self, canonical_address: str, zip_code: str = "", pattern_type: str = 'all') -> Optional[Dict[str, Any]]:
         safe_names = [
             'privacy_addresses', 'various_addresses', 'incomplete_addresses', 'no_street_number',
-            'mail_drop_addresses', 'rural_route', 'exempt_addresses',
+            'mail_drop_addresses', 'rural_route', 'exempt_addresses', 'fraud_source_addresses',
         ]
         dangerous_names = ['po_box_addresses', 'co_addresses', 'mall_complexes', 'major_institutions', 'registered_agents_2025']
         patterns = [p for p in self.geocoding_patterns if pattern_type == 'all' or p.get('name') in (safe_names if pattern_type == 'safe' else dangerous_names)]
@@ -785,6 +989,158 @@ class GeocodingAPIProcessor(BaseProcessor):
 
         return results
     
+    def _format_census_progress(
+        self,
+        *,
+        stage: str,
+        batch_size: int,
+        matched: int,
+        elapsed_s: float,
+        context: str = "call",
+    ) -> str:
+        snap = self.run_stats.census_call_snapshot()
+        pl = self.pipeline
+        fed = committed = in_flight = 0
+        queues = ""
+        if pl is not None:
+            fed = pl.metrics['overall'].get('total', 0)
+            committed = pl.metrics['overall'].get('success', 0)
+            in_flight = max(0, fed - committed)
+            queues = pl._format_queue_sizes()
+
+        pct = (100.0 * matched / batch_size) if batch_size else 0.0
+        eta_hr = 0.0
+        if snap['rate_hr'] > 0 and fed > 0:
+            batches_remaining = max(0, (fed + CENSUS_API_BATCH_SIZE - 1) // CENSUS_API_BATCH_SIZE - snap['census_calls'])
+            eta_hr = batches_remaining / snap['rate_hr']
+
+        return (
+            f"[{self.pipeline_step}] census {context} stage={stage} "
+            f"batch={batch_size} matched={matched}/{batch_size} ({pct:.0f}%) "
+            f"elapsed={elapsed_s:.1f}s last={snap['last_s']:.1f}s avg={snap['avg_s']:.1f}s max={snap['max_s']:.1f}s "
+            f"calls={snap['census_calls']}+{snap['census_strip_calls']}strip "
+            f"failures={snap['failures']} addrs_sent={snap['addrs_sent']:,} "
+            f"rate={snap['rate_hr']:.1f}/hr "
+            f"eta_census≈{eta_hr:.0f}h "
+            f"fed={fed:,} committed={committed:,} in_flight≈{in_flight:,} "
+            f"queues: {queues}"
+        )
+
+    def _log_census_progress(
+        self,
+        *,
+        stage: str = "",
+        batch_size: int = 0,
+        matched: int = 0,
+        elapsed_s: float = 0.0,
+        context: str = "heartbeat",
+    ) -> None:
+        msg = self._format_census_progress(
+            stage=stage or "—",
+            batch_size=batch_size,
+            matched=matched,
+            elapsed_s=elapsed_s,
+            context=context,
+        )
+        log_info(msg)
+        print(msg, flush=True)
+
+    @classmethod
+    def _census_rate_limit_wait(cls) -> None:
+        """Serialize Census HTTP calls with a minimum gap (TUI-safe global throttle)."""
+        with cls._census_api_lock:
+            now = time.monotonic()
+            wait_s = CENSUS_API_MIN_DELAY - (now - cls._census_api_last_request)
+            if wait_s > 0:
+                time.sleep(wait_s)
+            cls._census_api_last_request = time.monotonic()
+
+    @staticmethod
+    def _is_transient_census_error(exc: BaseException) -> bool:
+        if isinstance(exc, (ConnectionResetError, ConnectionError, OSError)):
+            return True
+        if isinstance(exc, requests.exceptions.RequestException):
+            return True
+        msg = str(exc).lower()
+        return 'connection reset' in msg or 'connection broken' in msg
+
+    def _geocode_census_data_chunk(
+        self,
+        census_data: List[Dict[str, Any]],
+        stage: str,
+        depth: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Call Census batch API with rate limit, retry+backoff, and binary split on partial responses."""
+        n = len(census_data)
+        if n == 0:
+            return []
+
+        last_exc: Optional[BaseException] = None
+        for attempt in range(CENSUS_API_RETRY_ATTEMPTS):
+            try:
+                self._census_rate_limit_wait()
+                return geocode(
+                    census_data,
+                    return_type='locations',
+                    batch_size=CENSUS_API_BATCH_SIZE,
+                )
+            except KeyError as e:
+                # censusbatchgeocoder: response CSV missing a geocoding_id (partial/truncated batch)
+                last_exc = e
+                break
+            except Exception as e:
+                if not self._is_transient_census_error(e):
+                    raise
+                last_exc = e
+                if attempt + 1 < CENSUS_API_RETRY_ATTEMPTS:
+                    delay = CENSUS_API_RETRY_BACKOFF_BASE * (2 ** attempt)
+                    log_warning(
+                        f"Census {stage} transient error ({n} addrs), "
+                        f"retry {attempt + 2}/{CENSUS_API_RETRY_ATTEMPTS} in {delay:.0f}s: {e}"
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+
+        if n <= 1:
+            row = census_data[0]
+            log_warning(
+                f"Census {stage} exhausted retries on 1 address ({last_exc}) — No_Match"
+            )
+            return [self._census_no_match_row(row)]
+
+        mid = n // 2
+        log_warning(
+            f"Census {stage} partial/transient failure on {n} addrs ({last_exc}); "
+            f"splitting → {mid}+{n - mid} (depth={depth})"
+        )
+        left = self._geocode_census_data_chunk(census_data[:mid], stage, depth + 1)
+        right = self._geocode_census_data_chunk(census_data[mid:], stage, depth + 1)
+        return left + right
+
+    @staticmethod
+    def _census_no_match_row(row: Dict[str, Any]) -> Dict[str, Any]:
+        """Synthetic Census API row when the service omits an id or the chunk is unrecoverable."""
+        return {
+            **row,
+            'geocoded_address': '',
+            'is_match': 'No_Match',
+            'is_exact': '',
+            'returned_address': '',
+            'coordinates': '',
+            'tiger_line': '',
+            'side': '',
+            'state_fips': '',
+            'county_fips': '',
+            'tract': '',
+            'block': '',
+            'longitude': None,
+            'latitude': None,
+        }
+
+    def _geocode_census_data(self, census_data: List[Dict[str, Any]], stage: str) -> List[Dict[str, Any]]:
+        return self._geocode_census_data_chunk(census_data, stage)
+
     def _census_handler_raw(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         return self._census_handler(batch, do_strip=False)
         
@@ -794,15 +1150,14 @@ class GeocodingAPIProcessor(BaseProcessor):
     def _census_handler(self, batch: List[GeocodingWorkUnit], do_strip=False) -> List[tuple[bool, GeocodingWorkUnit]]:
         results = []
         census_data = []
-        now = datetime.now().isoformat()
 
         for unit in batch:
             parsed = unit.parsed_normalized.copy()
             source_addr = unit.canonical_address
             if do_strip:
-                source_addr = self._strip_co_from_address(unit.canonical_address)
+                source_addr = self._strip_for_census_strip(unit.canonical_address)
                 if parsed.get('street'):
-                    parsed['street'] = self._strip_co_from_address(parsed['street'])
+                    parsed['street'] = self._strip_for_census_strip(parsed['street'])
             if not parsed:
                 log_warning(f"Census fallback to canonical {unit.geocoding_id}")
                 parts = source_addr.split(', ')
@@ -831,10 +1186,15 @@ class GeocodingAPIProcessor(BaseProcessor):
             }
             census_data.append(census_entry)
 
+        stage = "census_strip" if do_strip else "census"
+        t0 = time.perf_counter()
         try:
-            geocoded_results = geocode(
-                census_data, return_type='locations', batch_size=CENSUS_API_BATCH_SIZE,
-            )
+            geocoded_results = self._geocode_census_data(census_data, stage)
+            elapsed_s = time.perf_counter() - t0
+            if len(geocoded_results) != len(batch):
+                raise RuntimeError(
+                    f"Census {stage} result count mismatch: {len(geocoded_results)} != {len(batch)}"
+                )
             n_match = 0
             for res, unit in zip(geocoded_results, batch):
                 is_match = (res.get('is_match') or '').strip()
@@ -853,11 +1213,37 @@ class GeocodingAPIProcessor(BaseProcessor):
                 else:
                     unit.data['attempt_count'] = unit.attempt_count + 1
                     results.append((False, unit))
-            stage = "census_strip" if do_strip else "census"
-            log_info(f"Census {stage}: batch={len(batch)} matched={n_match} ({100*n_match/len(batch):.0f}%)")
-            print(f"[geolocate_new] {stage} batch={len(batch)} matched={n_match}/{len(batch)}", flush=True)
+            self.run_stats.record_census_call(
+                stage=stage,
+                batch_size=len(batch),
+                elapsed_s=elapsed_s,
+                matched=n_match,
+                failed=False,
+            )
+            self._log_census_progress(
+                stage=stage,
+                batch_size=len(batch),
+                matched=n_match,
+                elapsed_s=elapsed_s,
+                context="call",
+            )
         except Exception as e:
-            log_error(f"Census failed: {e}")
+            elapsed_s = time.perf_counter() - t0
+            self.run_stats.record_census_call(
+                stage=stage,
+                batch_size=len(batch),
+                elapsed_s=elapsed_s,
+                matched=0,
+                failed=True,
+            )
+            log_error(f"Census {stage} failed after {elapsed_s:.1f}s: {e}")
+            self._log_census_progress(
+                stage=stage,
+                batch_size=len(batch),
+                matched=0,
+                elapsed_s=elapsed_s,
+                context="call_failed",
+            )
             for unit in batch:
                 unit.data['attempt_count'] = unit.attempt_count + 1
                 results.append((False, unit))
@@ -1025,7 +1411,10 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
             for u in batch
         ]
         n_match = sum(1 for ok, _ in results if ok)
-        print(f"[geolocate_new] {stage} batch={len(batch)} matched={n_match}/{len(batch)}", flush=True)
+        print(
+            f"[{self.pipeline_step}] {stage} batch={len(batch)} matched={n_match}/{len(batch)}",
+            flush=True,
+        )
         return results
 
     def _photon_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
@@ -1074,10 +1463,39 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
             results.append((False, unit))
         return results
 
+    def _pending_api_fail_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
+        self.run_stats.pending_api_queued += len(batch)
+        log_info(f"Pending API handler: {len(batch)} addresses queued for geolocate_api")
+        print(f"[{self.pipeline_step}] pending_api batch={len(batch)}", flush=True)
+        ctx = PendingDatabaseContext()
+        now = datetime.now().isoformat()
+        for unit in batch:
+            gid = unit.geocoding_id
+            ctx.addOperationToDatabase(DatabaseOperation(
+                operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                data={
+                    'table': 'Geocoding',
+                    'updates': [{
+                        'geocoding_id': gid,
+                        'geocoding_status': GEOCODING_STATUS_PENDING_API,
+                        'last_attempt': now,
+                        'attempt_count': unit.attempt_count + 1,
+                        'matched_address': None,
+                    }],
+                    'id_column': 'geocoding_id'
+                }
+            ))
+            ctx.addOperationToDatabase(DatabaseOperation(
+                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                data={'count': unit.address_count}
+            ))
+        result = ResultWorkUnit(ctx, stage='fail')
+        return [(True, result)]
+
     def _grok_pending_fail_handler(self, batch: List[GeocodingWorkUnit]) -> List[tuple[bool, GeocodingWorkUnit]]:
         self.run_stats.grok_queued += len(batch)
         log_info(f"Grok pending handler: {len(batch)} addresses queued for geolocate_grok")
-        print(f"[geolocate_new] grok_pending batch={len(batch)}", flush=True)
+        print(f"[{self.pipeline_step}] grok_pending batch={len(batch)}", flush=True)
         ctx = PendingDatabaseContext()
         now = datetime.now().isoformat()
         for unit in batch:
@@ -1132,10 +1550,17 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
         result = ResultWorkUnit(ctx, stage='fail')
         return [(True, result)]
 
-    _WORK_ORDER = """
-        CASE WHEN canonical_address ILIKE '%po box%' OR canonical_address ILIKE '%p.o.%' THEN 1 ELSE 0 END,
-        geocoding_id
-    """
+    _WORK_ORDER = "geocoding_id"
+
+    @staticmethod
+    def _normalized_po_box(normalized_address: Any) -> str:
+        if not normalized_address:
+            return ""
+        try:
+            data = json.loads(normalized_address) if isinstance(normalized_address, str) else normalized_address
+            return str((data or {}).get("po_box") or "").strip()
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return ""
 
     def _rows_to_work_units(self, rows) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
         work_units = []
@@ -1153,33 +1578,55 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
             new_pk = row[0]
         return work_units, new_pk
 
-    def get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
-        log_debug(f"get_work_batch last_pk={last_pk} batch_size={self.batch_size}")
-        where_parts = ["geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')"]
-        params = []
-
-        if last_pk is not None:
-            where_parts.append("geocoding_id > ?")
-            params.append(last_pk)
-
+    def _fetch_work_batch(
+        self,
+        where_parts: List[str],
+        params: List[Any],
+        *,
+        order_by: Optional[str] = None,
+        label: str = "work",
+    ) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
+        order_clause = order_by or self._WORK_ORDER
         where_clause = " AND ".join(where_parts)
-
         query = f"""
             SELECT geocoding_id, normalized_address, attempt_count, canonical_address, address_count, geocoding_status
             FROM Geocoding
             WHERE {where_clause}
-            ORDER BY {self._WORK_ORDER}
+            ORDER BY {order_clause}
             LIMIT {self.batch_size}
         """
-
         result = self.db_ops.execute_query(query, tuple(params))
         rows = result.fetchall()
         if rows:
-            po_ct = sum(1 for r in rows if 'po box' in (r[3] or '').lower() or 'p.o.' in (r[3] or '').lower())
-            log_debug(f"get_work_batch fetched {len(rows)} rows ({po_ct} PO boxes)")
+            po_ct = sum(
+                1 for r in rows
+                if self._normalized_po_box(r[1]) not in ('', '0')
+            )
+            log_debug(f"get_{label}_batch fetched {len(rows)} rows ({po_ct} with po_box flag)")
+        return self._rows_to_work_units(rows)
 
-        work_units, new_pk = self._rows_to_work_units(rows)
-        return work_units, new_pk
+    def get_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
+        log_debug(f"get_work_batch last_pk={last_pk} batch_size={self.batch_size}")
+        where_parts = ["geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')"]
+        params: List[Any] = []
+        if last_pk is not None:
+            where_parts.append("geocoding_id > ?")
+            params.append(last_pk)
+        return self._fetch_work_batch(where_parts, params, label="work")
+
+    def get_api_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
+        log_debug(f"get_api_work_batch last_pk={last_pk} batch_size={self.batch_size}")
+        where_parts = ["geocoding_status = ?"]
+        params: List[Any] = [GEOCODING_STATUS_PENDING_API]
+        if last_pk is not None:
+            where_parts.append("geocoding_id > ?")
+            params.append(last_pk)
+        return self._fetch_work_batch(
+            where_parts,
+            params,
+            order_by="address_count DESC NULLS LAST, geocoding_id",
+            label="api",
+        )
 
     def get_grok_work_batch(self, last_pk: Optional[str] = None) -> Tuple[List[GeocodingWorkUnit], Optional[str]]:
         log_debug(f"get_grok_work_batch last_pk={last_pk} batch_size={self.batch_size}")
@@ -1208,12 +1655,18 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
         return int(result.fetchone()[0])
     
     def get_total_work(self) -> int:
-        query = """
-            SELECT COUNT(*)
-            FROM Geocoding
-            WHERE geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')
-        """
-        result = self.db_ops.execute_query(query)
+        return self._count_geocoding_where(
+            "geocoding_status IS NULL OR geocoding_status IN ('pending', 'owners')"
+        )
+
+    def get_api_total_work(self) -> int:
+        return self._count_geocoding_where("geocoding_status = ?", (GEOCODING_STATUS_PENDING_API,))
+
+    def _count_geocoding_where(self, where_clause: str, params: tuple = ()) -> int:
+        result = self.db_ops.execute_query(
+            f"SELECT COUNT(*) FROM Geocoding WHERE {where_clause}",
+            params,
+        )
         return int(result.fetchone()[0])
 
     def get_work_count(self, max_files=None) -> int:
@@ -1242,26 +1695,174 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
         total = self.get_work_count(max_files=(max_files or global_config.max_files))
         return total, "addresses", "Geocoding addresses"
 
-    def process_pending_geocoding_records(self, max_files=None, progress_bar=None) -> int:
-        self.run_stats = GeocodeRunStats()
-        self.pipeline_step = "geolocate_new"
+    def _bulk_resolve_pending_po_boxes(self) -> int:
+        """Resolve PO rows that should never hit census — normalized po_box flag only."""
+        pending_po = self.db_ops.execute_query("""
+            SELECT COUNT(*) FROM Geocoding
+            WHERE geocoding_status IN ('pending', 'owners')
+              AND LEFT(COALESCE(json_extract_string(normalized_address, '$.zip'), ''), 5) != ''
+              AND COALESCE(json_extract_string(normalized_address, '$.po_box'), '') NOT IN ('', '0')
+        """).fetchone()[0]
+        if not pending_po:
+            return 0
+        log_info(f"Bulk-resolving {pending_po:,} pending PO box Geocoding rows → Match:PO")
+        print(f"[geolocate_census] bulk PO resolve: {pending_po:,} rows → Match:PO", flush=True)
+        self.db_ops.execute_query("""
+            UPDATE Geocoding
+            SET
+                geocoding_status = 'Match:PO',
+                colocator = CASE
+                    WHEN json_extract_string(normalized_address, '$.po_box') = 'POBOX'
+                        THEN 'PO:BOX:' || LEFT(json_extract_string(normalized_address, '$.zip'), 5)
+                    ELSE 'PO:' || json_extract_string(normalized_address, '$.po_box')
+                         || ':' || LEFT(json_extract_string(normalized_address, '$.zip'), 5)
+                END,
+                matched_address = canonical_address,
+                last_attempt = CURRENT_TIMESTAMP
+            WHERE geocoding_status IN ('pending', 'owners')
+              AND LEFT(COALESCE(json_extract_string(normalized_address, '$.zip'), ''), 5) != ''
+              AND COALESCE(json_extract_string(normalized_address, '$.po_box'), '') NOT IN ('', '0')
+        """)
+        return int(pending_po)
+
+    def _prepare_geocode_run(self, *, census_resume: bool = False) -> None:
+        if census_resume:
+            log_info("Census resume: skipping address_count, archive, and PO prep")
+            print("[geolocate_census] resume: skipping prep (address_count, archive, PO)", flush=True)
+            return
         self.setup_address_counts()
         archive_done = self.db_ops.execute_query(
-            "SELECT COUNT(*) FROM Geocoding WHERE geocoding_status = 'Match:Archive'"
+            "SELECT EXISTS(SELECT 1 FROM Geocoding WHERE geocoding_status = 'Match:Archive' LIMIT 1)"
         ).fetchone()[0]
-        if archive_done > 0:
-            log_info(f"Skipping archive re-apply ({archive_done:,} Match:Archive already present)")
+        if archive_done:
+            log_info("Skipping archive re-apply (Match:Archive already present)")
         else:
             log_info("Applying geocode archive cache...")
             self.apply_geocode_archive_full_propagation()
+        resolved = self._bulk_resolve_pending_po_boxes()
+        if resolved:
+            log_info(f"Bulk PO resolve complete: {resolved:,} rows")
+
+    def process_census_pending_records(self, max_files=None) -> int:
+        self.run_stats = GeocodeRunStats()
+        self.pipeline_step = "geolocate_census"
+        self.pipeline = None
+        self._prepare_geocode_run(census_resume=True)
         pending = self.get_work_count(max_files=max_files)
-        log_info(f"Starting geolocate_new (free APIs) for {pending:,} pending addresses (max_files={max_files})")
-        print(f"[geolocate_new] Starting free pipeline: {pending:,} pending (max_files={max_files})", flush=True)
-        processed = self.free_pipeline.run_with_provider(self, max_items=max_files) or 0
+        self.run_stats.census_pending_total = pending
+        log_info(f"Starting geolocate_census for {pending:,} pending addresses (max_files={max_files})")
+        print(
+            f"[geolocate_census] Starting census bulk pass: {pending:,} pending (max_files={max_files})",
+            flush=True,
+        )
+        stop_heartbeat = threading.Event()
+
+        def _census_heartbeat():
+            while not stop_heartbeat.wait(120):
+                self._log_census_progress(context="heartbeat")
+
+        heartbeat = threading.Thread(
+            target=_census_heartbeat, daemon=True, name="census_progress_heartbeat",
+        )
+        heartbeat.start()
+        try:
+            self.pipeline = self.census_pipeline
+            processed = self.census_pipeline.run_with_provider(self, max_items=max_files) or 0
+        finally:
+            stop_heartbeat.set()
+            heartbeat.join(timeout=1.0)
         self.run_stats.fed = processed
-        self.run_stats.log_summary(step="geolocate_new")
-        print(f"Geolocate_new complete: {processed} records processed")
+        self._log_census_progress(context="complete")
+        self.run_stats.log_summary(step="geolocate_census")
+        print(f"Geolocate_census complete: {processed} records processed")
         return processed
+
+    def process_api_pending_records(self, max_files=None) -> int:
+        self.run_stats = GeocodeRunStats()
+        self.pipeline_step = "geolocate_api"
+        self.pipeline = self.api_pipeline
+
+        class _ApiProvider:
+            def __init__(self, proc: "GeocodingAPIProcessor"):
+                self._proc = proc
+
+            def get_work_batch(self, last_pk):
+                return self._proc.get_api_work_batch(last_pk)
+
+            def get_total_work(self):
+                return self._proc.get_api_total_work()
+
+        pending = self.get_api_total_work()
+        if max_files is not None:
+            pending = min(pending, max_files)
+        log_info(f"Starting geolocate_api for {pending:,} pending_api rows (max_files={max_files})")
+        print(
+            f"[geolocate_api] Starting API tail pass: {pending:,} pending_api (max_files={max_files})",
+            flush=True,
+        )
+        provider = _ApiProvider(self)
+        processed = self.api_pipeline.run_with_provider(provider, max_items=max_files) or 0
+        self.run_stats.fed = processed
+        self.run_stats.log_summary(step="geolocate_api")
+        print(f"Geolocate_api complete: {processed} records processed")
+        return processed
+
+    def export_census_failures_for_patterns(
+        self, output_file: str = CENSUS_FAILURES_EXPORT_FILE,
+    ) -> int:
+        """Export pending_api rows after census pass for pattern-rule mining."""
+        output_path = os.path.join(global_config.final_dir, output_file)
+        rows = self.db_ops.execute_query("""
+            SELECT
+                canonical_address,
+                matched_address,
+                normalized_address,
+                address_count,
+                geocoding_id
+            FROM Geocoding
+            WHERE geocoding_status = ?
+            ORDER BY address_count DESC NULLS LAST, canonical_address
+        """, (GEOCODING_STATUS_PENDING_API,)).fetchall()
+
+        os.makedirs(global_config.final_dir or ".", exist_ok=True)
+        tmp_path = output_path + ".tmp"
+        try:
+            with gzip.open(tmp_path, "wt", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+                writer.writerow([
+                    "canonical_address",
+                    "last_matched_address",
+                    "address_count",
+                    "normalized_address",
+                    "geocoding_id",
+                ])
+                for canon, matched, norm, count, gid in rows:
+                    writer.writerow([
+                        canon or "",
+                        matched or "",
+                        count or 0,
+                        norm or "",
+                        gid or "",
+                    ])
+            shutil.move(tmp_path, output_path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        log_info(f"Exported {len(rows):,} pending_api rows → {output_path}")
+        print(
+            f"[geolocate_census] exported {len(rows):,} pending_api failures → {output_path}",
+            flush=True,
+        )
+        return len(rows)
+
+    def process_pending_geocoding_records(self, max_files=None, progress_bar=None) -> int:
+        """Legacy monolithic path — runs census bulk pass then API tail pass."""
+        log_warning("process_pending_geocoding_records is deprecated; use census + api passes")
+        census = self.process_census_pending_records(max_files=max_files)
+        self.export_census_failures_for_patterns()
+        api = self.process_api_pending_records(max_files=max_files)
+        return census + api
 
     def process_grok_pending_realtime(self, max_files=None) -> int:
         """Realtime Grok pipeline — prefer geolocate_grok batch step for bulk."""
@@ -1291,6 +1892,13 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
         return processed
 
     def setup_address_counts(self):
+        null_count = self.db_ops.execute_query(
+            "SELECT COUNT(*) FROM Geocoding WHERE address_count IS NULL"
+        ).fetchone()[0]
+        if not null_count:
+            log_info("Skipping address_count backfill (none NULL)")
+            return
+        log_info(f"Backfilling address_count for {null_count:,} Geocoding rows")
         update_query = """
             UPDATE Geocoding
             SET address_count = (

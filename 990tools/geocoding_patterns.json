@@ -372,6 +372,62 @@
   "patterns": [
     { "regex": "(?i)(beer\\s*sheva|budapest|jerusalem|san\\s*juan).*?(ny|nj|fl|ca|tx)", "colocator": "FA:XX", "status": "owners", "action": "match" }
   ]
+},
+{
+  "name": "census_strip_suites",
+  "description": "Suite/unit/# stripped in census_strip stage before Census retry (colocator round 4dp)",
+  "priority": 5,
+  "patterns": [
+    {
+      "regex": "(?i)[,\\s]+(?:suite|ste\\.?|apt\\.?|apartment|unit|rm\\.?|room|fl\\.?|floor|bldg\\.?|building)\\s*#?\\s*(?:\\d+[a-z0-9-]*|[a-z](?:\\d+|(?=\\s*,|\\s*$)))",
+      "action": "strip"
+    },
+    {
+      "regex": "(?i)[,\\s]+#\\s*\\d+[a-z0-9-]*",
+      "action": "strip"
+    },
+    {
+      "regex": "(?i)[,\\s]+\\d{1,4}(?=,\\s*[A-Za-z])",
+      "action": "strip"
+    }
+  ]
+},
+{
+  "name": "fraud_source_addresses",
+  "description": "NPPES/DOT/FEC bogus-address families mined from pending_api concordance (Jul 2026)",
+  "priority": 15,
+  "patterns": [
+    {
+      "regex": "(?i)^(unknown|none|n/a|na|tbd|not available|general delivery)\\s*,",
+      "colocator": "INCOMPLETE:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)^[^,\\d]+,\\s*[A-Za-z]{2},\\s*\\d{5}(?:-\\d{4})?$",
+      "colocator": "VENDOR:{city}:{state}:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i),\\s*(?:Ab|Bc|Mb|Nb|Nl|Ns|Nt|Nu|On|Pe|Qc|Sk|Yt)\\s*,\\s*\\d{3}\\s*$",
+      "colocator": "FA:CA",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i),\\s*(?:Tijuana|Mexicali|Nogales|Ciudad Juarez|Baja California)\\b",
+      "colocator": "FA:MX",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)^(?!.*\\b\\d{3,}\\b).*(?:\\b&\\b|\\band\\b).*(?:hwy|highway|interstate|i-\\d+)",
+      "colocator": "PARTIAL:{zip}",
+      "status": "owners",
+      "action": "match"
+    }
+  ]
 }
   ]
 }
