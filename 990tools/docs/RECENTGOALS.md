@@ -4,9 +4,53 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
-## 2026-07: Geolocate Trilogy — Production `geolocate_new` on Data2 (v9)
+## 2026-07-09: Geocoding victory + phase snapshot (next phase ready)
 
-**What:** Geolocate trilogy refactor landed and is running in production. `geolocate_new` (free APIs + deferred Grok) on `/Volumes/Data2/final/irs990.duckdb` after DB migration from `/Volumes/Data` (old drive → Tesla exFAT). Run **v9** (`geolocate_step_20260630_v9.log`, PID in `geolocate.pid`). Adaptive monitor: `geolocate_monitor.sh`.
+**What:** Declared geocoding victory (bulk Grok/API autopilot off; low-weight `pending_api` → `geocode_tail`; preprocess pass). Project hygiene committed on `grokrefactor3` (`85774d93`). Production DB snapshot frozen as phase marker before next work.
+
+**Why:** Clean restore point after geolocate success so the next pipeline phase can mutate `irs990.duckdb` without losing the post-geocode state.
+
+**How:**
+- Live DB: `/Volumes/Data/final/irs990.duckdb` (~91 GB; **Data2 not mounted** as of this note).
+- Snapshot: `cp -c` (APFS clone) → `/Volumes/Data/final/irs990.duckdb.geolocate`
+- Verified: same size, readonly open OK, `Addresses` count **95,196,749**
+- No writers / no active WAL at snapshot time
+- Prior phase snapshots on same volume: `.dot`, `.address`, `.xml`, `.bmf`, `.siding`
+- Victory tooling: `declare_geocoding_victory.py`, `preprocess_geocode_tail.py`, overnight loop victory guard (see CHANGELOG)
+
+**Next / in progress:** `geolocate_archive` bookend polish (see entry below).
+
+---
+
+## 2026-07-09: geolocate_archive + geolocate_prev bookend (status in TSV)
+
+**What:** Extend archive TSV so the next rebuild can restore **geocoding_status** with **colocator**, not only the colocator string. Correct model: `loose_colocator` lives on **Addresses** (and owners), is **calculated later** in `geolocate_prev`, and is **not** stored on Geocoding or required in the archive.
+
+**Why:** Paid/free geocode results must round-trip without re-spend; status (Match:Census, Match:Grok-4, grok:UNKN, …) matters for analytics and for not collapsing everything to Match:Archive.
+
+**How:**
+- Archive columns: `canonical_address`, `colocator`, `geocoding_status`
+- `geolocate_prev` restores status + colocator onto **Geocoding**; legacy 2-col TSV still works (infers Match:Archive / grok:*)
+- After load: lat/lon backfill, then **loose_colocator** on Addresses + owners from 0.5° grid
+- Files: `geolocate_archive_processor.py`, `geolocate_prev_processor.py`
+
+**Production run (2026-07-09):** succeeded.
+- Fetched 13,904,584 from DB; kept 14,346 archive-only keys; **13,918,930** written
+- Output: `/Volumes/Data/final/geocode_archive_distinct.tsv.gz` (~233 MB)
+- Top statuses: Match:Census 9.47M, Match:Archive 2.54M, Match:PO 1.10M, Match:Grok-4 232k, …
+- Log: `geolocate_archive_20260709.log`
+
+**Run command:**
+```bash
+python3 -u irs990processor.py --start-step geolocate_archive --stop-step geolocate_archive \
+  -v --final-dir /Volumes/Data/final --nostats
+```
+
+---
+
+## 2026-07: Geolocate Trilogy — Production `geolocate_new` (v9; historical)
+
+**What:** Geolocate trilogy refactor landed and ran in production. Early notes used `/Volumes/Data2/final`; **current live path is `/Volumes/Data/final/irs990.duckdb`**. Run **v9** was `geolocate_step_20260630_v9.log`. Adaptive monitor: `geolocate_monitor.sh`.
 
 **Why:** Split monolithic geolocate into prev (archive/loose colocator) → new (Census/Photon/maps/OpenCage) → grok (xAI batch) → archive (round-trip cache). Classify Grok failures as terminal `grok:<CODE>` statuses for pattern mining instead of opaque `No_Match`. Self-hosted Photon on Kamatera VPS — no throttle needed.
 
@@ -14,21 +58,12 @@ This is the active scratchpad for current and recently completed work. Entries i
 - **Pipeline:** `geolocate_prev` → `geolocate_new` → `geolocate_grok` → `geolocate_archive` (wired in `irs990processor.py`; legacy `geolocate`/`geolocate1` aliases preserved).
 - **Grok failure taxonomy** (`constants.py`): `NOTA`, `VAGUE`, `AMBIG`, `REDACT`, `UNKN` → `grok:<CODE>` colocator; archive + prev load them as terminal; export `grok_failures_for_patterns.tsv.gz` when grok_pending drained.
 - **Photon:** self-hosted `45.61.62.160:2322`, 32 workers, 0s delay (`GEOCODING_PHOTON_SELF_HOSTED_*`).
-- **v9 status (2026-07-02 ~07:17):** ~38h uptime; session fed **50,000**/10,109,423; ~805k resolved; ~39k matches; hard-tail serial grind (census bulk still 0%); rate ~250–400/hr. **Exit signal:** `census batch=10000 matched=5xxx` on a fresh 10k feed.
-- **Resume command:**
-  ```bash
-  cd 990tools
-  nohup python3 -u irs990processor.py --start-step geolocate_new --stop-step geolocate_new \
-    -v --final-dir /Volumes/Data2/final --db-threads 1 --nostats \
-    >> geolocate_step_20260630_v9.log 2>&1 &
-  echo $! > geolocate.pid
-  nohup ./geolocate_monitor.sh >> geolocate_monitor.log 2>&1 &
-  ```
-- **After `geolocate_new` drains:** `geolocate_grok` (needs xAI credits) → `geolocate_archive`.
+- **v9 status (2026-07-02 ~07:17):** ~38h uptime; session fed **50,000**/10,109,423; ~805k resolved; ~39k matches; hard-tail serial grind. Later: victory declared 2026-07-09 (see entry above).
+- **After drain path (done in spirit):** Grok batch + pattern mining + victory/tail tiering; archive step may still polish round-trip cache.
 
 **Key artifacts:** `geocoding_api_processor.py`, `geolocate_grok_processor.py`, `geolocate_archive_processor.py`, `geolocate_prev_processor.py`, `geolocate_monitor.sh`, `pipeline.py` (feed milestones + admission cap).
 
-**Hygiene (2026-07-02):** Docs sync; old geolocate logs archived to `archive/geolocate_runs_2026-06/`; runtime logs/pid/monitor state gitignored.
+**Hygiene (2026-07-02):** Docs sync; old geolocate logs archived to `archive/geolocate_runs_2026-06/`; runtime logs/pid/monitor state gitignored. **2026-07-09:** victory commit + `.geolocate` DB snapshot.
 
 ---
 

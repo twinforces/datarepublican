@@ -2,24 +2,35 @@
 """
 geolocate_prev_processor.py - Fast geolocation from prior-run archive cache.
 
-Runs first in the geolocate trilogy (before geolocate_new / geolocate_archive):
-1. Load geocode_archive_distinct.tsv.gz → colocators on Geocoding + Addresses + owners
-2. Backfill lat/lon from colocator (PO: / LL:)
-3. Compute loose_colocator (0.5° grid) for Splink + grant_match hail-mary
+Bookend for geolocate_archive. Runs first in the geolocate trilogy
+(before geolocate_new / geolocate_grok / geolocate_archive):
+
+1. Load geocode_archive_distinct.tsv.gz → Geocoding (colocator + geocoding_status)
+   Columns: canonical_address, colocator, [geocoding_status]
+   Older 2-column archives (canonical + colocator only) still work.
+2. Propagate colocators to owner tables via Addresses join
+3. Backfill lat/lon from colocator (PO: / LL:)
+4. Compute loose_colocator (0.5° grid) later on Addresses + owners —
+   loose_colocator is NOT stored on Geocoding and is not part of the archive.
 """
 
-import os
-import gzip
+from __future__ import annotations
+
 import csv
-from typing import List, Tuple
+import gzip
+import os
+from typing import List, Optional, Tuple
 
 from database_operations import DatabaseOperations
 from logging_utils import log_info, log_error, log_warning
 from config import global_config
 
+# (canonical_address, colocator, geocoding_status)
+ArchiveChunkRow = Tuple[str, str, str]
+
 
 class GeolocatePrevProcessor:
-    """Archive-cache geolocation + loose_colocator population."""
+    """Archive-cache geolocation + later loose_colocator population on Addresses/owners."""
 
     def __init__(self, db_ops: DatabaseOperations):
         self.db_ops = db_ops
@@ -94,6 +105,18 @@ class GeolocatePrevProcessor:
         conn.execute("SET threads=1")
         conn.execute("SET memory_limit='12GB'")
 
+    def _archive_already_applied_count(self, conn) -> int:
+        """Rows that look like archive/API wins (idempotency skip signal)."""
+        return conn.execute("""
+            SELECT COUNT(*) FROM Geocoding
+            WHERE colocator IS NOT NULL AND TRIM(colocator) != ''
+              AND (
+                    geocoding_status = 'Match:Archive'
+                 OR geocoding_status LIKE 'Match:%'
+                 OR geocoding_status LIKE 'grok:%'
+              )
+        """).fetchone()[0]
+
     def apply_geocode_archive_cache(self, cache_file: str = "geocode_archive_distinct.tsv.gz") -> int:
         """Load pre-geocoded archive and propagate colocators to owners."""
         actual_cache_file = os.path.join(global_config.final_dir, cache_file)
@@ -103,45 +126,53 @@ class GeolocatePrevProcessor:
             return 0
 
         with self.db_ops.acquire_write_conn() as conn:
-            already_done = conn.execute("""
-                SELECT COUNT(*) FROM Geocoding
-                WHERE geocoding_status = 'Match:Archive'
-            """).fetchone()[0]
+            already_done = self._archive_already_applied_count(conn)
 
+        # Production post-geolocate has ~13M+ matched rows; skip re-stream when saturated.
         archive_skip_threshold = 2_400_000
         try:
             if already_done >= archive_skip_threshold:
-                log_info(f"Archive cache complete ({already_done:,} Match:Archive) — skipping TSV stream")
-                print(f"[geolocate_prev] Archive already loaded ({already_done:,} rows), skipping stream", flush=True)
+                log_info(
+                    f"Archive cache already applied ({already_done:,} matched/colocated) — skipping TSV stream"
+                )
+                print(
+                    f"[geolocate_prev] Archive already loaded ({already_done:,} rows), skipping stream",
+                    flush=True,
+                )
                 total_geocoding = already_done
             else:
                 if already_done > 0:
-                    log_info(f"Resuming archive cache ({already_done:,} rows already Match:Archive)")
+                    log_info(f"Resuming archive cache ({already_done:,} rows already matched/colocated)")
                 log_info(f"Streaming geocode cache from {actual_cache_file}...")
                 print(f"[geolocate_prev] Streaming archive from {actual_cache_file}", flush=True)
                 chunk_size = 20000
                 total_geocoding = 0
                 chunk_num = 0
 
-                with gzip.open(actual_cache_file, 'rt', encoding='utf-8', errors='replace') as f:
-                    reader = csv.DictReader(f, delimiter='\t')
-                    chunk: List[Tuple[str, str]] = []
+                with gzip.open(actual_cache_file, "rt", encoding="utf-8", errors="replace") as f:
+                    reader = csv.DictReader(f, delimiter="\t")
+                    chunk: List[ArchiveChunkRow] = []
                     for row in reader:
-                        if 'canonical_address' not in row or 'colocator' not in row:
+                        parsed = self._parse_archive_row(row)
+                        if not parsed:
                             continue
-                        chunk.append((row['canonical_address'], row['colocator']))
+                        chunk.append(parsed)
                         if len(chunk) >= chunk_size:
                             chunk_num += 1
-                            total_geocoding += self._commit_archive_chunk(chunk, chunk_num, total_geocoding)
+                            total_geocoding += self._commit_archive_chunk(
+                                chunk, chunk_num, total_geocoding
+                            )
                             chunk = []
                     if chunk:
                         chunk_num += 1
-                        total_geocoding += self._commit_archive_chunk(chunk, chunk_num, total_geocoding)
+                        total_geocoding += self._commit_archive_chunk(
+                            chunk, chunk_num, total_geocoding
+                        )
 
             with self.db_ops.acquire_write_conn() as conn:
                 self._tune_conn(conn)
                 self._propagate_colocators_to_owners(conn)
-                for table in ['Geocoding', 'Addresses', 'Charities', 'Grants']:
+                for table in ["Geocoding", "Addresses", "Charities", "Grants"]:
                     print(f"[geolocate_prev] VACUUM ANALYZE {table}...", flush=True)
                     conn.execute(f"VACUUM ANALYZE {table};")
 
@@ -153,7 +184,24 @@ class GeolocatePrevProcessor:
             log_error(f"Archive cache load failed: {e}", exc_info=True)
             raise
 
-    def _commit_archive_chunk(self, chunk: List[Tuple[str, str]], chunk_num: int, total_so_far: int) -> int:
+    @staticmethod
+    def _parse_archive_row(row: dict) -> Optional[ArchiveChunkRow]:
+        """Normalize a TSV dict into (canon, colocator, status)."""
+        if not row:
+            return None
+        canon = (row.get("canonical_address") or "").strip()
+        coloc = (row.get("colocator") or "").strip()
+        if not canon or not coloc:
+            return None
+        status = (row.get("geocoding_status") or "").strip()
+        if not status:
+            # Legacy 2-col archive, or status omitted
+            status = coloc if coloc.startswith("grok:") else "Match:Archive"
+        return (canon, coloc, status)
+
+    def _commit_archive_chunk(
+        self, chunk: List[ArchiveChunkRow], chunk_num: int, total_so_far: int
+    ) -> int:
         """Apply one archive chunk on a fresh write connection to avoid memory accumulation."""
         with self.db_ops.acquire_write_conn() as conn:
             self._tune_conn(conn)
@@ -174,7 +222,7 @@ class GeolocatePrevProcessor:
                     pass
                 raise
 
-    def _apply_archive_chunk(self, conn, chunk: List[Tuple[str, str]], chunk_num: int) -> int:
+    def _apply_archive_chunk(self, conn, chunk: List[ArchiveChunkRow], chunk_num: int) -> int:
         if not chunk:
             return 0
 
@@ -184,15 +232,19 @@ class GeolocatePrevProcessor:
         conn.execute("""
             CREATE OR REPLACE TEMP TABLE chunk_cache (
                 canonical_address VARCHAR,
-                colocator VARCHAR
+                colocator VARCHAR,
+                geocoding_status VARCHAR
             )
         """)
 
-        safe_chunk = [(str(ca or "").replace("'", "''"), str(co or "").replace("'", "''")) for ca, co in chunk]
+        def _esc(s: str) -> str:
+            return str(s or "").replace("'", "''")
+
+        safe_chunk = [(_esc(ca), _esc(co), _esc(st)) for ca, co, st in chunk]
         batch_size = 2000
         for i in range(0, len(safe_chunk), batch_size):
-            sub = safe_chunk[i:i + batch_size]
-            values = ", ".join(f"('{ca}', '{co}')" for ca, co in sub)
+            sub = safe_chunk[i : i + batch_size]
+            values = ", ".join(f"('{ca}', '{co}', '{st}')" for ca, co, st in sub)
             conn.execute(f"INSERT INTO chunk_cache VALUES {values}")
 
         conn.execute("""
@@ -201,15 +253,24 @@ class GeolocatePrevProcessor:
                 g.geocoding_id,
                 c.colocator,
                 CASE
+                    WHEN NULLIF(TRIM(c.geocoding_status), '') IS NOT NULL
+                        THEN TRIM(c.geocoding_status)
                     WHEN c.colocator LIKE 'grok:%' THEN c.colocator
                     ELSE 'Match:Archive'
                 END AS target_status,
-                CASE WHEN c.colocator LIKE 'LL:%' THEN TRY_CAST(split_part(c.colocator, ':', 2) AS DOUBLE) ELSE NULL END AS parsed_lat,
-                CASE WHEN c.colocator LIKE 'LL:%' THEN TRY_CAST(split_part(c.colocator, ':', 3) AS DOUBLE) ELSE NULL END AS parsed_lon
+                CASE WHEN c.colocator LIKE 'LL:%'
+                     THEN TRY_CAST(split_part(c.colocator, ':', 2) AS DOUBLE)
+                     ELSE NULL END AS parsed_lat,
+                CASE WHEN c.colocator LIKE 'LL:%'
+                     THEN TRY_CAST(split_part(c.colocator, ':', 3) AS DOUBLE)
+                     ELSE NULL END AS parsed_lon
             FROM Geocoding g
             INNER JOIN chunk_cache c ON g.canonical_address = c.canonical_address
             WHERE g.geocoding_status IS NULL
-               OR g.geocoding_status IN ('pending', 'owners', 'No_Match')
+               OR g.geocoding_status IN (
+                    'pending', 'owners', 'No_Match',
+                    'pending_api', 'geocode_tail', 'grok_pending'
+               )
         """)
 
         map_count = conn.execute("SELECT COUNT(*) FROM update_map").fetchone()[0]
@@ -258,7 +319,11 @@ class GeolocatePrevProcessor:
                         INNER JOIN Geocoding g ON a.geocoding_id = g.geocoding_id
                         WHERE a.address_type = '{addr_type}'
                           AND g.colocator IS NOT NULL
-                          AND g.geocoding_status = 'Match:Archive'
+                          AND (
+                                g.geocoding_status = 'Match:Archive'
+                             OR g.geocoding_status LIKE 'Match:%'
+                             OR g.geocoding_status LIKE 'grok:%'
+                          )
                           AND a.owner_id IS NOT NULL
                         GROUP BY a.owner_id
                     ) sub
@@ -269,7 +334,19 @@ class GeolocatePrevProcessor:
                 log_warning(f"Could not propagate to {table}: {ex}")
 
     def populate_lat_lon_and_loose_colocators(self):
-        log_info("Populating lat/lon (from colocator) and loose_colocator (0.5° grid)...")
+        """
+        After archive colocators are on Geocoding/owners:
+        backfill lat/lon, then compute loose_colocator on Addresses + owner tables.
+        Geocoding does not store loose_colocator.
+        """
+        log_info("Populating lat/lon (from colocator) and loose_colocator on Addresses/owners...")
+
+        # Ensure Addresses has loose_colocator (schema has it; older DBs may not)
+        self.db_ops.execute_query(
+            "ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS loose_colocator VARCHAR;"
+        )
+        self.db_ops.execute_query("ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS latitude DOUBLE;")
+        self.db_ops.execute_query("ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS longitude DOUBLE;")
 
         for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
             self.db_ops.execute_query(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS lat DOUBLE;")
@@ -279,20 +356,53 @@ class GeolocatePrevProcessor:
         for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
             self._backfill_lat_lon_for_table(table)
 
+        # Addresses: copy lat/lon from Geocoding, then loose grid from lat/lon
+        self.db_ops.execute_query("""
+            UPDATE Addresses a
+            SET latitude = g.latitude,
+                longitude = g.longitude,
+                colocator = COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)
+            FROM Geocoding g
+            WHERE a.geocoding_id = g.geocoding_id
+              AND g.latitude IS NOT NULL
+              AND a.latitude IS NULL
+        """)
+        self.db_ops.execute_query("""
+            UPDATE Addresses a
+            SET latitude = TRY_CAST(split_part(g.colocator, ':', 2) AS DOUBLE),
+                longitude = TRY_CAST(split_part(g.colocator, ':', 3) AS DOUBLE),
+                colocator = COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)
+            FROM Geocoding g
+            WHERE a.geocoding_id = g.geocoding_id
+              AND a.latitude IS NULL
+              AND g.colocator LIKE 'LL:%'
+        """)
+        self.db_ops.execute_query("""
+            UPDATE Addresses
+            SET loose_colocator = 'LL:' || ROUND(latitude / 0.5) * 0.5
+                                      || ':' || ROUND(longitude / 0.5) * 0.5
+            WHERE (loose_colocator IS NULL OR TRIM(loose_colocator) = '')
+              AND latitude IS NOT NULL AND longitude IS NOT NULL
+        """)
+
+        # Owners: derive loose from their lat/lon (filled above)
         loose_sql = """
             UPDATE {table}
             SET loose_colocator = 'LL:' || ROUND(lat / 0.5) * 0.5 || ':' || ROUND(lon / 0.5) * 0.5
-            WHERE loose_colocator IS NULL AND lat IS NOT NULL
+            WHERE (loose_colocator IS NULL OR loose_colocator = '') AND lat IS NOT NULL
         """
         for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
             self.db_ops.execute_query(loose_sql.format(table=table))
 
+        self.db_ops.execute_query(
+            "CREATE INDEX IF NOT EXISTS idx_addresses_loose_colocator ON Addresses(loose_colocator);"
+        )
         self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator);")
         self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator);")
         self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_grants_lat_lon ON Grants(lat, lon);")
         self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_lat_lon ON Charities(lat, lon);")
 
-        log_info("lat/lon + loose_colocator population complete for geolocate_prev")
+        log_info("lat/lon + loose_colocator population complete (Addresses + owners)")
 
     def _backfill_lat_lon_for_table(self, table: str):
         owner_meta = {

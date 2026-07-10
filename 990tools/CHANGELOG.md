@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 2026-07 (Geolocate Trilogy + Grok Failure Taxonomy)
 
+### geolocate_archive bookend (Jul 9, 2026)
+- Archive TSV columns: `canonical_address`, `colocator`, **`geocoding_status`** (legacy 2-col still loads).
+- `loose_colocator` is not archived; it lives on Addresses/owners and is computed later in `geolocate_prev`.
+- `geolocate_prev` restores archived status onto Geocoding; then lat/lon + loose on Addresses/owners.
+- Production export: **13,918,930** rows → `/Volumes/Data/final/geocode_archive_distinct.tsv.gz` (~233 MB).
+- Phase snapshot: `/Volumes/Data/final/irs990.duckdb.geolocate` (APFS clone of post-victory DB).
+
 ### Geocoding victory (Jul 9, 2026)
 - `declare_geocoding_victory.py`: tier low-weight `pending_api` → `geocode_tail`; export top `grok:UNKN`; set `victory_declared` on overnight state.
 - `preprocess_geocode_tail.py`: one-shot pattern pass over `geocode_tail` (155k rows → `Match:PatternOwners` in first run).
