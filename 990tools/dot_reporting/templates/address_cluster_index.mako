@@ -9,9 +9,9 @@
 </head>
 <body>
   <header>
-    <h1>Address Cluster Report</h1>
+    <h1>Cluster Report${' — ' + slice_label if slice_label else ''}</h1>
     <p class="meta">Generated ${generated_at} · DB: ${db_path} · ${cluster_count} clusters</p>
-    <p class="meta">Criteria: multi_type ≥ ${min_multi_type} OR dot_carriers ≥ ${min_dot_carriers}</p>
+    <p class="meta">Slice: ${slice_by if slice_by else 'address'} · Criteria: multi_type ≥ ${min_multi_type} OR dot_carriers ≥ ${min_dot_carriers}</p>
   </header>
 
   <!-- Review Shell Controls -->

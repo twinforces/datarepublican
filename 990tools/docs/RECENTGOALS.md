@@ -4,6 +4,23 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-07-10: grant_match kickoff + DOT multi-slice reports
+
+**What:** Pipeline order: `geolocate_archive` → **`grant_match`** → `backfill` → **`photos`**. DOT cluster HTML generator accepts `--slice-by` address / colocator / zipcode / loose_colocator. Project hygiene commit; production `grant_match` started.
+
+**Why:** Photos should not block grant_match / backfill. grant_match fills and uses loose_colocator for hail-mary EIN match. DOT fraud review needs slices beyond exact street address (shared LL grid, zip stacks).
+
+**How:**
+- `irs990processor.PIPELINE_STEPS` photos after backfill
+- `dot_reporting/generate_address_reports.py --slice-by … --db-path /Volumes/Data/final/irs990.duckdb.geolocate`
+- grant_match:
+  ```bash
+  nohup python3 -u irs990processor.py --start-step grant_match --stop-step grant_match \
+    -v --final-dir /Volumes/Data/final --nostats >> grant_match_20260710.log 2>&1 &
+  ```
+
+---
+
 ## 2026-07-09: Geocoding victory + phase snapshot (next phase ready)
 
 **What:** Declared geocoding victory (bulk Grok/API autopilot off; low-weight `pending_api` → `geocode_tail`; preprocess pass). Project hygiene committed on `grokrefactor3` (`85774d93`). Production DB snapshot frozen as phase marker before next work.
@@ -39,6 +56,15 @@ This is the active scratchpad for current and recently completed work. Entries i
 - Output: `/Volumes/Data/final/geocode_archive_distinct.tsv.gz` (~233 MB)
 - Top statuses: Match:Census 9.47M, Match:Archive 2.54M, Match:PO 1.10M, Match:Grok-4 232k, …
 - Log: `geolocate_archive_20260709.log`
+
+**Empty officer address shells (not a geocode miss):**
+- Officers 4.12M; ~97% have an Addresses row; only **38%** have real fields+`geocoding_id`
+- **2.43M** officer rows are blank shells (also ~22k contractor); address-dedup requires
+  `canonical_address != ''`, so blanks never share one Geocoding master (0 blank Geocoding rows)
+- `geolocate_prev` now **deletes** empty shells (no line1/city/zip/po_box, null gid, no colocator)
+  before archive load
+- **Production delete-only (2026-07-09):** removed **2,452,704** shells (officer 2,431,021 + contractor 21,683);
+  Addresses 95,196,749 → **92,744,045**; officer addrs left 1,581,654 (all with gid); 0 shells remain
 
 **Run command:**
 ```bash

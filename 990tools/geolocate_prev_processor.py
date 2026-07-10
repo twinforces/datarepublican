@@ -5,6 +5,10 @@ geolocate_prev_processor.py - Fast geolocation from prior-run archive cache.
 Bookend for geolocate_archive. Runs first in the geolocate trilogy
 (before geolocate_new / geolocate_grok / geolocate_archive):
 
+0. Delete empty address shells (no street/city/zip, no geocoding_id, no colocator).
+   XML often emits officer/contractor Address rows with no USAddress content;
+   address-dedup never creates a Geocoding row for blank canonical_address, so
+   they never collapse to one master geocode and only waste space / pollute stats.
 1. Load geocode_archive_distinct.tsv.gz → Geocoding (colocator + geocoding_status)
    Columns: canonical_address, colocator, [geocoding_status]
    Older 2-column archives (canonical + colocator only) still work.
@@ -28,6 +32,18 @@ from config import global_config
 # (canonical_address, colocator, geocoding_status)
 ArchiveChunkRow = Tuple[str, str, str]
 
+# Address rows that carry no location signal and never entered Geocoding.
+# Keep FA:/PO:/LL: colocators even if street fields are blank (foreign / PO).
+EMPTY_ADDRESS_WHERE = """
+    geocoding_id IS NULL
+    AND COALESCE(TRIM(address_line1), '') = ''
+    AND COALESCE(TRIM(address_line2), '') = ''
+    AND COALESCE(TRIM(city), '') = ''
+    AND COALESCE(TRIM(zip_code), '') = ''
+    AND COALESCE(TRIM(po_box), '') = ''
+    AND (colocator IS NULL OR TRIM(colocator) = '')
+"""
+
 
 class GeolocatePrevProcessor:
     """Archive-cache geolocation + later loose_colocator population on Addresses/owners."""
@@ -37,6 +53,9 @@ class GeolocatePrevProcessor:
 
     def run(self, max_files: int | None = None) -> int:
         log_info("=== Starting geolocate_prev (archive cache + loose colocator) ===")
+
+        deleted = self.delete_empty_address_shells()
+        log_info(f"Empty address shells removed: {deleted:,}")
 
         self._ensure_zips_table()
         self.db_ops.execute_query("ALTER TABLE Geocoding ADD COLUMN IF NOT EXISTS colocator VARCHAR;")
@@ -48,6 +67,82 @@ class GeolocatePrevProcessor:
 
         log_info("=== geolocate_prev complete ===")
         return updated
+
+    def delete_empty_address_shells(self) -> int:
+        """
+        Remove Addresses with no geocodable content.
+
+        Why they exist: officer/contractor build_address() always creates a row;
+        XML often omits USAddress. Address dedup only groups non-empty
+        canonical_address, so blanks never share one Geocoding record — each
+        stays a self-master orphan with null geocoding_id.
+
+        Safe: requires null geocoding_id and no colocator (preserves FA:/PO: shells).
+        """
+        log_info("Deleting empty address shells (no fields, no geocoding_id, no colocator)...")
+        print("[geolocate_prev] Counting empty address shells...", flush=True)
+
+        with self.db_ops.acquire_write_conn() as conn:
+            # Breakdown for the log before delete
+            try:
+                by_type = conn.execute(f"""
+                    SELECT COALESCE(address_type, '(null)'), COUNT(*)::BIGINT
+                    FROM Addresses
+                    WHERE {EMPTY_ADDRESS_WHERE}
+                    GROUP BY 1
+                    ORDER BY 2 DESC
+                """).fetchall()
+                for at, c in by_type:
+                    log_info(f"  empty shell {at}: {c:,}")
+                    print(f"[geolocate_prev]   empty shell {at}: {c:,}", flush=True)
+            except Exception as e:
+                log_warning(f"Could not pre-count empty shells by type: {e}")
+
+            before = conn.execute(f"""
+                SELECT COUNT(*) FROM Addresses WHERE {EMPTY_ADDRESS_WHERE}
+            """).fetchone()[0]
+            if before == 0:
+                log_info("No empty address shells to delete")
+                print("[geolocate_prev] No empty address shells", flush=True)
+                return 0
+
+            print(f"[geolocate_prev] Deleting {before:,} empty address shells...", flush=True)
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                # DuckDB DELETE returns affected row count via fetchone on some versions
+                result = conn.execute(f"""
+                    DELETE FROM Addresses
+                    WHERE {EMPTY_ADDRESS_WHERE}
+                """)
+                deleted = before
+                try:
+                    row = result.fetchone() if result is not None else None
+                    if row and row[0] is not None:
+                        deleted = int(row[0])
+                except Exception:
+                    pass
+                # Verify
+                remaining = conn.execute(f"""
+                    SELECT COUNT(*) FROM Addresses WHERE {EMPTY_ADDRESS_WHERE}
+                """).fetchone()[0]
+                if remaining:
+                    # If DELETE count unreliable, use before - remaining
+                    deleted = before - remaining
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+            log_info(f"Deleted {deleted:,} empty address shells ({remaining:,} remain)")
+            print(
+                f"[geolocate_prev] Deleted {deleted:,} empty address shells "
+                f"({remaining:,} remain)",
+                flush=True,
+            )
+            return int(deleted)
 
     def _ensure_zips_table(self):
         """Build the Zips lookup table if it doesn't exist (idempotent)."""

@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 2026-07 (Geolocate Trilogy + Grok Failure Taxonomy)
 
+### Pipeline order + DOT report slices (Jul 10, 2026)
+- Pipeline: `grant_match` → `backfill` → **`photos`** (photos moved after backfill).
+- `dot_reporting/generate_address_reports.py`: `--slice-by address|colocator|zipcode|loose_colocator`
+  (default DB `/Volumes/Data/final/irs990.duckdb.geolocate`).
+
 ### geolocate_archive bookend (Jul 9, 2026)
 - Archive TSV columns: `canonical_address`, `colocator`, **`geocoding_status`** (legacy 2-col still loads).
 - `loose_colocator` is not archived; it lives on Addresses/owners and is computed later in `geolocate_prev`.
 - `geolocate_prev` restores archived status onto Geocoding; then lat/lon + loose on Addresses/owners.
+- `geolocate_prev` deletes empty address shells (blank street/city/zip, null `geocoding_id`, no colocator)
+  so officer/contractor XML stubs do not pollute stats; address-dedup never geocodes blank canonicals.
 - Production export: **13,918,930** rows → `/Volumes/Data/final/geocode_archive_distinct.tsv.gz` (~233 MB).
 - Phase snapshot: `/Volumes/Data/final/irs990.duckdb.geolocate` (APFS clone of post-victory DB).
 

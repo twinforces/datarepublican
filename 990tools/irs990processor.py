@@ -105,10 +105,13 @@ MAX_WORKERS = 16
 QUEUE_SIZE = 1000
 BATCH_SIZE = 100
 
-# Geolocate trilogy (after match). Legacy aliases: geolocate → geolocate_new, geolocate1 → geolocate_prev
+# Geolocate (after match): prev → census bulk → API tail → grok batch → archive.
+# geolocate_new = legacy combined census+api (one step); prefer census then api separately.
 PIPELINE_STEPS = [
     "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "address", "einless", "match",
-    "geolocate_prev", "geolocate_new", "geolocate_grok", "geolocate_archive", "photos", "grant_match", "backfill", "ratios",
+    "geolocate_prev", "geolocate_census", "geolocate_api", "geolocate_new", "geolocate_grok",
+    "geolocate_archive",
+    "grant_match", "backfill", "photos", "ratios",
     "percentiles", "export",
 ]
 STEP_ALIASES = {
@@ -732,41 +735,76 @@ class IRS990Processor(BaseProcessor):
 
 
 
-    def run_geolocate_new(self):
-        """Free-API geocoding for pending rows; misses → grok_pending (geolocate step 2)."""
+    def run_geolocate_census(self):
+        """Bulk Census pass for pending rows; misses → pending_api (geolocate step 2a)."""
         if self.exit_processing:
-            log_info("Shutdown requested before geolocate_new")
+            log_info("Shutdown requested before geolocate_census")
             return 0
         self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS)
 
         if cg is None:
             if not global_config.is_quiet():
                 log_warning(
-                    "censusgeocode library not available. Skipping geolocate_new. "
+                    "censusgeocode library not available. Skipping geolocate_census. "
                     "Install with: pip install censusgeocode"
                 )
             return 0
 
         try:
-            log_info("Starting geolocate_new (free APIs; Grok deferred to geolocate_grok)")
-            api_processor = GeocodingAPIProcessor(self.db_ops)
-            result = api_processor.process_pending_geocoding_records(max_files=self.max_files)
+            from geolocate_census_processor import GeolocateCensusProcessor
+            log_info("Starting geolocate_census (bulk Census; API deferred to geolocate_api)")
+            processor = GeolocateCensusProcessor(self.db_ops)
+            result = processor.run(max_files=self.max_files)
             self.processed_steps += 1
             return result
         except Exception as e:
-            log_error(f"geolocate_new failed: {e}", exc_info=True)
+            log_error(f"geolocate_census failed: {e}", exc_info=True)
             return 0
 
+    def run_geolocate_api(self):
+        """Serial API tail for pending_api rows; misses → grok_pending (geolocate step 2b)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before geolocate_api")
+            return 0
+        self.setup_status_gauges(interval=MONITOR_INTERVAL_SECONDS)
+
+        try:
+            from geolocate_api_processor import GeolocateApiProcessor
+            log_info("Starting geolocate_api (photon/opencage/…; Grok deferred to geolocate_grok)")
+            processor = GeolocateApiProcessor(self.db_ops)
+            result = processor.run(max_files=self.max_files)
+            self.processed_steps += 1
+            return result
+        except Exception as e:
+            log_error(f"geolocate_api failed: {e}", exc_info=True)
+            return 0
+
+    def run_geolocate_new(self):
+        """Legacy alias — runs geolocate_census then geolocate_api."""
+        if self.exit_processing:
+            log_info("Shutdown requested before geolocate_new")
+            return 0
+        log_info("geolocate_new is deprecated; running geolocate_census + geolocate_api")
+        census = self.run_geolocate_census()
+        if self.exit_processing:
+            return census
+        api = self.run_geolocate_api()
+        return census + api
+
     def run_geolocate_grok(self):
-        """xAI Batch API geocoding for grok_pending rows (geolocate step 3)."""
+        """xAI Batch API geocoding for grok_pending + pending_api rows (geolocate step 3)."""
         if self.exit_processing:
             log_info("Shutdown requested before geolocate_grok")
             return 0
         try:
             from geolocate_grok_processor import GeolocateGrokProcessor
-            log_info("Starting geolocate_grok (xAI Batch API for grok_pending rows)")
+            max_rows = global_config.max_files
+            log_info(
+                f"Starting geolocate_grok (preprocess + xAI batch; "
+                f"intake=grok_pending+pending_api; max_rows={max_rows})"
+            )
             processor = GeolocateGrokProcessor(self.db_ops)
-            result = processor.run()
+            result = processor.run(max_rows=max_rows)
             self.processed_steps += 1
             return result
         except Exception as e:
@@ -940,12 +978,14 @@ def main():
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),
         "geolocate_prev": lambda: processor.run_geolocate_prev(),
+        "geolocate_census": lambda: processor.run_geolocate_census(),
+        "geolocate_api": lambda: processor.run_geolocate_api(),
         "geolocate_new": lambda: processor.run_geolocate_new(),
         "geolocate_grok": lambda: processor.run_geolocate_grok(),
         "geolocate_archive": lambda: processor.run_geolocate_archive(),
         "geolocate": lambda: processor.run_geolocate_new(),
         "geolocate1": lambda: processor.run_geolocate_prev(),
-        "grant_match": lambda: processor.grant_match_processor.match_grants_by_address(),
+        "grant_match": lambda: processor.grant_match_processor.match_grants(),
         "photos": lambda: processor.process_officer_photos(),
         "backfill": lambda: processor.backfill_charities_processor.backfill_charities(),
         "ratios": lambda: processor.calculate_ratios(),

@@ -54,17 +54,20 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate_prev → geolocate_new → geolocate_archive → photos → grant_match → backfill → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match
+  → geolocate_prev → geolocate_census → geolocate_api → geolocate_grok → geolocate_archive
+  → grant_match → backfill → photos → ratios → percentiles → export
 ```
 
-**Geolocate trilogy (planned rename):**
-| Step | Current name | Role |
-|------|--------------|------|
-| `geolocate_prev` | `geolocate1` | Load `geocode_archive_distinct.tsv.gz`; fast colocator wins from prior runs |
-| `geolocate_new` | `geolocate` | Census API pass for remaining pending Geocoding rows |
-| `geolocate_archive` | *(new)* | Export successful geocodes → refresh archive TSV for next rebuild |
+**Geolocate trilogy:**
+| Step | Role |
+|------|------|
+| `geolocate_prev` | Load archive TSV; lat/lon + loose_colocator on Addresses/owners; drop empty shells |
+| `geolocate_new` / census+api | Free-API geocoding (Grok deferred) |
+| `geolocate_grok` | xAI batch for hard tail |
+| `geolocate_archive` | Export `canonical_address` + colocator + geocoding_status TSV |
 
-Runs in succession after `match`, before `photos` / `grant_match`. `grant_match` remains the colocator + `loose_colocator` hail-mary (pre-phonebook).
+After archive: **`grant_match`** (colocator + loose_colocator hail-mary) → **`backfill`** → **`photos`** (officer KG; after backfill so EIN graph is stable).
 
 **`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
 
