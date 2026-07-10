@@ -48,6 +48,7 @@ from constants import (
     GEOCODING_PENDING_API_BATCH_SIZE, GEOCODING_BATCHER_TIMEOUT,
     GEOCODING_STATUS_PENDING_API, CENSUS_FAILURES_EXPORT_FILE,
     GROK_GEOCODE_MODEL_DEFAULT, GROK_FAILURE_CODES, grok_failure_status,
+    GEOCODING_GROK_MIN_CONFIDENCE_PCT, VALID_STATES,
     GEOCODE_MAPS_CO_WORKERS, GEOCODE_MAPS_CO_MIN_DELAY,
     GEOCODING_PHOTON_WORKERS, GEOCODING_PHOTON_MIN_DELAY,
     GEOCODING_PHOTON_SELF_HOSTED_WORKERS, GEOCODING_PHOTON_SELF_HOSTED_MIN_DELAY,
@@ -250,11 +251,15 @@ class GeocodingAPIProcessor(BaseProcessor):
     _librestreet_disabled = False
     _census_api_lock = threading.Lock()
     _census_api_last_request: float = 0.0
+    _us_zip_codes: Optional[frozenset[str]] = None
+    _us_zip_states: Optional[Dict[str, str]] = None
+    _us_zip_coords: Optional[Dict[str, Tuple[float, float]]] = None
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_FEED_BATCH_SIZE):
         super().__init__(db_ops)
         self.batch_size = batch_size
         self._thread_local = threading.local()
+        self._ensure_us_zip_lookup(db_ops)
         self.geocoding_patterns = self._load_geocoding_patterns()
         self._census_strip_suite_regexes = self._load_census_strip_suite_regexes()
         self.run_stats = GeocodeRunStats()
@@ -298,6 +303,99 @@ class GeocodingAPIProcessor(BaseProcessor):
     @staticmethod
     def _worker_queue_slots(workers: int) -> int:
         return workers * GEOCODING_WORKER_QUEUE_DEPTH
+
+    @classmethod
+    def _us_zips_file_path(cls) -> str:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for candidate in (
+            os.path.join(os.getcwd(), 'US_zips.txt.gz'),
+            os.path.join(here, 'US_zips.txt.gz'),
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+        return os.path.join(here, 'US_zips.txt.gz')
+
+    @classmethod
+    def _load_us_zips_from_file(cls, path: str) -> None:
+        codes: set[str] = set()
+        states: Dict[str, str] = {}
+        coords: Dict[str, Tuple[float, float]] = {}
+        with gzip.open(path, 'rt', encoding='utf-8') as handle:
+            for line in handle:
+                parts = line.rstrip('\n').split('\t')
+                if len(parts) < 11:
+                    continue
+                zip_code = parts[1].strip()
+                if not zip_code or zip_code in codes:
+                    continue
+                codes.add(zip_code)
+                states[zip_code] = parts[4].strip()
+                try:
+                    coords[zip_code] = (float(parts[9]), float(parts[10]))
+                except ValueError:
+                    pass
+        cls._us_zip_codes = frozenset(codes)
+        cls._us_zip_states = states
+        cls._us_zip_coords = coords
+
+    @classmethod
+    def _ensure_us_zip_lookup(cls, db_ops: Optional[DatabaseOperations] = None) -> None:
+        if cls._us_zip_codes is not None:
+            return
+        if db_ops is not None:
+            try:
+                describe = db_ops.execute_query("DESCRIBE Zips").fetchall()
+                col_names = {row[0] for row in describe} if describe else set()
+                state_col = (
+                    "state_code" if "state_code" in col_names
+                    else "state" if "state" in col_names
+                    else None
+                )
+                if state_col:
+                    query = f"SELECT zip, {state_col}, lat, lon FROM Zips"
+                else:
+                    query = "SELECT zip, NULL, lat, lon FROM Zips"
+                rows = db_ops.execute_query(query).fetchall()
+                if (
+                    isinstance(rows, (list, tuple))
+                    and len(rows) > 1000
+                    and isinstance(rows[0], (list, tuple))
+                    and isinstance(rows[0][0], str)
+                ):
+                    codes = frozenset(row[0] for row in rows if row[0])
+                    states = {row[0]: row[1] for row in rows if row[0] and row[1]}
+                    coords: Dict[str, Tuple[float, float]] = {}
+                    for row in rows:
+                        if row[0] and row[2] is not None and row[3] is not None:
+                            coords[row[0]] = (row[2], row[3])
+                    cls._us_zip_codes = codes
+                    cls._us_zip_states = states
+                    cls._us_zip_coords = coords
+                    log_info(f"Loaded {len(codes):,} US zip codes from Zips table")
+                    return
+            except Exception as exc:
+                log_debug(f"Zips table unavailable for in-memory lookup: {exc}")
+        zip_path = cls._us_zips_file_path()
+        if os.path.isfile(zip_path):
+            cls._load_us_zips_from_file(zip_path)
+            log_info(
+                f"Loaded {len(cls._us_zip_codes or ()):,} US zip codes from {zip_path}",
+            )
+            return
+        log_warning("US zip lookup unavailable — preprocess zip rules degraded")
+        cls._us_zip_codes = frozenset()
+        cls._us_zip_states = {}
+        cls._us_zip_coords = {}
+
+    def _is_valid_us_zip(self, zip5: str) -> bool:
+        return bool(zip5 and self._us_zip_codes and zip5 in self._us_zip_codes)
+
+    def _us_zip_state_code(self, zip5: str) -> str:
+        return (self._us_zip_states or {}).get(zip5, '')
+
+    def _vendor_colocator(self, city: str, state: str, zip5: str) -> str:
+        state = (state or self._us_zip_state_code(zip5) or '').strip()
+        return f'VENDOR:{city}:{state}:{zip5}'
 
     def _build_preprocess_stage(self, *, worker_queue_maxsize: Optional[int] = None) -> PipelineStage:
         wq = worker_queue_maxsize if worker_queue_maxsize is not None else self._worker_queue_slots(4)
@@ -749,51 +847,558 @@ class GeocodingAPIProcessor(BaseProcessor):
         else:
             return address
 
-    def _check_geocoding_patterns(self, canonical_address: str, zip_code: str = "", pattern_type: str = 'all') -> Optional[Dict[str, Any]]:
+    _PLACEHOLDER_STREET = re.compile(
+        r'(?i)^(unknown|none|n/a|na|tbd|not available|general delivery|address unknown|no street address|'
+        r'not present|no actual location|local|fellowship)\b'
+    )
+    _US_TERRITORIES = frozenset({'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW'})
+    _MILITARY_STATES = frozenset({'AP', 'AE', 'AA'})
+    _MILITARY_CITIES = frozenset({'APO', 'FPO', 'DPO'})
+    _CA_PROVINCE = re.compile(r'(?i)^(Ab|Bc|Mb|Nb|Nl|Ns|Nt|Nu|On|Pe|Qc|Sk|Yt)$')
+    _MX_BORDER_CITY = re.compile(r'(?i)^(Tijuana|Mexicali|Nogales|Ciudad Juarez|Baja California)$')
+    _FOREIGN_COUNTRY_MARKERS = re.compile(
+        r'(?i)\b(?:'
+        r'germany|canada|france|england|scotland|wales|ireland|israel|china|india|mexico|'
+        r'brazil|australia|netherlands|norway|sweden|denmark|finland|poland|spain|italy|'
+        r'russia|ukraine|pakistan|japan|korea|taiwan|philippines|indonesia|thailand|'
+        r'vietnam|colombia|argentina|chile|peru|ecuador|venezuela|belgium|switzerland|'
+        r'austria|portugal|greece|turkey|egypt|morocco|nigeria|kenya|south africa|'
+        r'saudi arabia|uae|qatar|kuwait|lebanon|syria|iraq|iran|afghanistan|bangladesh|'
+        r'sri lanka|nepal|cambodia|malaysia|singapore|hong kong|new zealand|british columbia|'
+        r'ontario|quebec|saskatchewan|catalonia|cataloni|ingushetia|chechnya|kashmir'
+        r')\b'
+    )
+    _FOREIGN_CITY_HINTS = re.compile(
+        r'(?i)\b(?:'
+        r'calgary|toronto|vancouver|montreal|ottawa|london|paris|berlin|munich|muenchen|'
+        r'milan|milano|rome|roma|barcelona|madrid|amsterdam|brussels|vienna|prague|'
+        r'warsaw|budapest|bucharest|athens|lisbon|stockholm|oslo|copenhagen|helsinki|'
+        r'dublin|edinburgh|glasgow|goteborg|gothenburg|vilnius|riga|tallinn|kyiv|kiev|'
+        r'moscow|istanbul|dubai|riyadh|tel aviv|jerusalem|beirut|cairo|nairobi|lagos|'
+        r'sydney|melbourne|auckland|singapore|bangkok|manila|jakarta|hanoi|seoul|tokyo|'
+        r'beijing|shanghai|taipei|mumbai|delhi|islamabad|karachi|dhaka|colombo|'
+        r'buenos aires|sao paulo|mexico city|guadalajara|monterrey|havana|bogota|lima|'
+        r'santiago|hauzenberg|malappuram|aulnay|guelph|courtenay|'
+        r'wiesbaden|yokosuka|okinawa|ramstein|stuttgart|kaiserslautern|chinhae'
+        r')\b'
+    )
+    _HWY_INTERSECTION = re.compile(
+        r'(?i)(?:\b(hwy|highway|interstate|i-\d+)\b.*(?:\s&\s|\band\b)|(?:\s&\s|\band\b).*\b(hwy|highway|interstate|i-\d+)\b)'
+    )
+    _STREET_NUMBER_WORDS = re.compile(
+        r'(?i)\b(?:'
+        r'zero|one|two|three|four|five|six|seven|eight|nine|ten|'
+        r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|'
+        r'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand'
+        r')\b'
+    )
+
+    def _street_has_number(self, street: str) -> bool:
+        """True when street appears to include a civic number (digit or spelled-out)."""
+        if not street:
+            return False
+        if re.search(r'\d', street):
+            return True
+        return bool(self._STREET_NUMBER_WORDS.search(street))
+
+    def _parsed_address_fields(self, parsed: Dict[str, Any]) -> tuple[str, str, str, str]:
+        street = (parsed.get('street') or parsed.get('address_line1') or '').strip()
+        city = (parsed.get('city') or '').strip()
+        state = (parsed.get('state') or '').strip()
+        zip5 = (parsed.get('zip') or '')[:5]
+        return street, city, state, zip5
+
+    def _expand_colocator(
+        self,
+        colocator: str,
+        canonical_address: str,
+        zip_code: str = "",
+        parsed: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        if not colocator:
+            return colocator
+        parsed = parsed or {}
+        zip5 = zip_code or (parsed.get('zip') or '')[:5] or '00000'
+        colocator = colocator.replace('{zip}', zip5)
+        city = (parsed.get('city') or '').strip()
+        state = (parsed.get('state') or '').strip()
+        if '{city}' in colocator:
+            if not city:
+                m = re.search(r', ([^,]+), ([A-Za-z]{2}),', canonical_address)
+                if m:
+                    city = m.group(1).strip()
+            colocator = colocator.replace('{city}', city or '?')
+        if '{state}' in colocator:
+            if not state:
+                state = self._us_zip_state_code(zip5)
+            if not state:
+                m = re.search(r', ([A-Za-z]{2}),', canonical_address)
+                if m:
+                    state = m.group(1).strip()
+            colocator = colocator.replace('{state}', state or '?')
+        if '{entity}' in colocator:
+            m = re.match(r'c/o\s+(.+?)[,]', canonical_address, re.IGNORECASE)
+            if m:
+                colocator = colocator.replace('{entity}', m.group(1).strip())
+        if '{box}' in colocator:
+            box_m = re.search(r'(?i)p\.?\s*o\.?\s*(?:box|drawer)\s*#?\s*(\d+)', canonical_address)
+            if box_m:
+                colocator = colocator.replace('{box}', box_m.group(1))
+        return colocator
+
+    def _apply_preprocess_shortcircuit(
+        self, unit: GeocodingWorkUnit, colocator: str, matched: Optional[str] = None,
+    ) -> tuple[bool, ResultWorkUnit]:
+        self.run_stats.preprocess_match += 1
+        return True, self._apply_geocoding_only_update(
+            unit, 'Match:PatternOwners',
+            colocator=colocator,
+            matched=matched or unit.canonical_address,
+        )
+
+    def _is_city_only_parsed(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip5: str,
+        canonical: str,
+    ) -> bool:
+        """Vendor/city-only address: city+state+zip present but no geocodable street."""
+        if not (city and state and zip5):
+            return False
+        if not street:
+            return True
+        if self._street_has_number(street):
+            return False
+        if self._HWY_INTERSECTION.search(street):
+            return False
+        if street.lower().strip(' ,') == city.lower().strip(' ,'):
+            return True
+        parts = [p.strip() for p in canonical.split(',')]
+        if len(parts) == 3:
+            head, mid, tail = parts
+            if re.match(r'^[A-Za-z]{2}$', mid) and re.match(r'^\d{5}', tail) and not self._street_has_number(head):
+                return True
+        return False
+
+    def _is_city_state_only_parsed(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip5: str,
+    ) -> bool:
+        """Vendor/city-only: city+US state, no street, no zip (iter-3 grok tail)."""
+        if street or not city or not state or zip5:
+            return False
+        return state.upper() in VALID_STATES
+
+    def _is_city_zip_no_state_parsed(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip5: str,
+    ) -> bool:
+        """Vendor city+zip without state when zip is in the US Zips lookup."""
+        if street or not city or state or not zip5:
+            return False
+        if zip5 in ('00000', '99999') or not self._is_valid_us_zip(zip5):
+            return False
+        if self._FOREIGN_COUNTRY_MARKERS.search(city) or self._FOREIGN_CITY_HINTS.search(city):
+            return False
+        return True
+
+    def _is_foreign_city_zip_no_state(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip_raw: str,
+        zip5: str,
+    ) -> bool:
+        if street or not city or state:
+            return False
+        if not zip_raw:
+            return False
+        if zip5 in ('00000', '99999'):
+            return True
+        if zip5.isdigit() and len(zip5) == 5 and not self._is_valid_us_zip(zip5):
+            return True
+        if not re.match(r'^\d{5}', zip_raw):
+            return True
+        return bool(
+            self._FOREIGN_COUNTRY_MARKERS.search(city)
+            or self._FOREIGN_CITY_HINTS.search(city)
+        )
+
+    def _is_zip_only_parsed(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip5: str,
+        canonical: str = "",
+    ) -> bool:
+        """Malformed row: only a zip (or bare number) with no street/city/state."""
+        if street or city or state:
+            return False
+        if zip5:
+            return True
+        return bool(canonical and re.fullmatch(r'\d{3,5}', canonical.strip()))
+
+    def _is_us_territory_parsed(self, state: str) -> bool:
+        return state.upper() in self._US_TERRITORIES
+
+    def _zip_only_colocator(self, zip5: str, canonical: str = "") -> str:
+        zip5 = zip5 or (canonical.strip() if canonical else '')
+        if self._is_valid_us_zip(zip5):
+            return f'VENDOR::{self._us_zip_state_code(zip5)}:{zip5}'
+        if zip5.isdigit() and len(zip5) == 5:
+            return f'PARTIAL:{zip5}'
+        return f'PARTIAL:{zip5 or "00000"}'
+
+    def _is_city_only_intl_parsed(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip5: str,
+    ) -> bool:
+        """Foreign city name with no US street/state/zip anchor (iter-3 grok UNKN tail)."""
+        if street or state or zip5 or not city:
+            return False
+        if city.upper() in VALID_STATES:
+            return False
+        if self._FOREIGN_COUNTRY_MARKERS.search(city):
+            return True
+        if self._CA_PROVINCE.match(city):
+            return True
+        if self._MX_BORDER_CITY.search(city):
+            return True
+        return True
+
+    def _preprocess_bogus_shortcircuit(
+        self,
+        unit: GeocodingWorkUnit,
+        parsed: Dict[str, Any],
+        zip_code: str,
+    ) -> Optional[tuple[bool, ResultWorkUnit]]:
+        """Structured-data bogus detection before Census (DOT/FEC/NPPES fraud-source families)."""
+        addr = unit.canonical_address
+        street = (parsed.get('street') or parsed.get('address_line1') or '').strip()
+        city = (parsed.get('city') or '').strip()
+        state = (parsed.get('state') or '').strip()
+        zip5 = zip_code or (parsed.get('zip') or '')[:5]
+        country = (parsed.get('country') or '').strip().upper()
+
+        if country and country not in ('US', 'USA', 'UNITED STATES'):
+            tag = country[:2] if len(country) >= 2 else 'XX'
+            return self._apply_preprocess_shortcircuit(unit, f'FA:{tag}')
+
+        if state and self._CA_PROVINCE.match(state):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:CA')
+
+        if city and self._MX_BORDER_CITY.search(city):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:MX')
+
+        if self._is_us_territory_parsed(state):
+            return self._apply_preprocess_shortcircuit(
+                unit, self._vendor_colocator(city or '?', state.upper(), zip5),
+            )
+
+        psc_src = ' '.join(filter(None, (street, city, addr)))
+        if re.search(r'(?i)\bpsc\s+\d+', psc_src):
+            psc_m = re.search(r'(?i)\bpsc\s+(\d+)', psc_src)
+            psc_code = psc_m.group(1) if psc_m else '?'
+            return self._apply_preprocess_shortcircuit(
+                unit, f'MILITARY:PSC{psc_code}:{zip5 or "00000"}',
+            )
+
+        if (
+            self._FOREIGN_COUNTRY_MARKERS.search(street)
+            or self._FOREIGN_COUNTRY_MARKERS.search(addr)
+            or (
+                re.search(r'(?i)\b(usnh|us\s+army)\b', street or addr)
+                and self._FOREIGN_CITY_HINTS.search(f'{city} {addr}')
+            )
+        ):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:INTL')
+
+        city_upper = city.upper()
+        mil_city_token = city_upper.split()[0] if city_upper else ''
+        if (
+            state.upper() in self._MILITARY_STATES
+            or city_upper in self._MILITARY_CITIES
+            or mil_city_token in self._MILITARY_CITIES
+        ):
+            mil_city = mil_city_token if mil_city_token in self._MILITARY_CITIES else 'APO'
+            return self._apply_preprocess_shortcircuit(
+                unit, f'MILITARY:{mil_city}:{zip5 or "00000"}',
+            )
+
+        if street and re.match(r'(?i)^(?:dept\.?|department)\s+(?:la\s+)?', street):
+            dept_m = re.match(r'(?i)^(?:dept\.?|department)\s+(?:la\s+)?(\S+)', street)
+            dept_code = dept_m.group(1) if dept_m else '?'
+            return self._apply_preprocess_shortcircuit(
+                unit, f'DEPT:{dept_code}:{zip5 or "00000"}',
+            )
+
+        if street and re.match(r'(?i)^bin\s+\d+', street):
+            bin_m = re.match(r'(?i)^bin\s+(\d+)', street)
+            bin_code = bin_m.group(1) if bin_m else '?'
+            return self._apply_preprocess_shortcircuit(
+                unit, f'DEPT:BIN{bin_code}:{zip5 or "00000"}',
+            )
+
+        if zip5 in ('00000', '99999') or (parsed.get('zip') or '').strip() in ('00000', '99999'):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:INTL')
+
+        raw_zip = (parsed.get('zip') or '').strip()
+        zip_digits = re.sub(r'\D', '', raw_zip) if raw_zip else ''
+        if zip_digits and len(zip_digits) != 5 and not self._is_valid_us_zip(zip_digits[:5]):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:INTL')
+        if raw_zip and not state and self._is_foreign_city_zip_no_state(
+            street, city, state, raw_zip, zip5,
+        ):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:INTL')
+
+        if self._is_city_only_intl_parsed(street, city, state, zip5):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:INTL')
+
+        if not street and not city and state.upper() in VALID_STATES and not zip5:
+            return self._apply_preprocess_shortcircuit(
+                unit, f'VENDOR::{state.upper()}:',
+            )
+
+        if self._is_city_state_only_parsed(street, city, state, zip5):
+            return self._apply_preprocess_shortcircuit(
+                unit, f'VENDOR:{city}:{state}:{zip5 or ""}',
+            )
+
+        if self._is_city_zip_no_state_parsed(street, city, state, zip5):
+            return self._apply_preprocess_shortcircuit(
+                unit, self._vendor_colocator(city, state, zip5),
+            )
+
+        if self._is_zip_only_parsed(street, city, state, zip5, addr):
+            return self._apply_preprocess_shortcircuit(
+                unit, self._zip_only_colocator(zip5, addr),
+            )
+
+        if street and self._PLACEHOLDER_STREET.match(street):
+            return self._apply_preprocess_shortcircuit(unit, f'BOGUS:{zip5 or "00000"}')
+
+        if re.match(r'(?i)^(unknown|none|n/a|na|tbd|not available|general delivery)\s*,', addr):
+            return self._apply_preprocess_shortcircuit(unit, f'BOGUS:{zip5 or "00000"}')
+
+        if street and not re.search(r'\d{3,}', street) and self._HWY_INTERSECTION.search(street):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        if street and re.search(r'\bAND\b', street, re.IGNORECASE) and not self._street_has_number(street):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        _STREET_TYPE = r'(?:st|street|streets|ave|avenue|rd|road|blvd|boulevard|rt|route|pkwy|parkway|ter|terrace|way|ln|lane|dr|drive)'
+
+        if street and street.lstrip().startswith('&'):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        if street and '&' in street and re.search(rf'(?i)\b{_STREET_TYPE}\b', street):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        if street and re.search(
+            rf'(?i)\b{_STREET_TYPE}\b.*\band\b.*\b{_STREET_TYPE}\b',
+            street,
+        ):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        if street and re.fullmatch(r'\d+', street.strip()):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^(attn|dba)\s+', street):
+            return self._apply_preprocess_shortcircuit(unit, f'PERSON:{zip5 or "00000"}')
+
+        if street and re.search(r'(?i)\battn\b', street) and not re.search(r'\d{3,}', street):
+            return self._apply_preprocess_shortcircuit(unit, f'PERSON:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^e[de]?amc\b', street) and not self._street_has_number(street):
+            return self._apply_preprocess_shortcircuit(unit, f'DEPT:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^university at\s+', street):
+            return self._apply_preprocess_shortcircuit(unit, f'UNIV:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^dumc\s+\d+', street):
+            return self._apply_preprocess_shortcircuit(unit, f'UNIV:{zip5 or "00000"}')
+
+        if street and re.search(r'(?i)\bmchj-', street):
+            return self._apply_preprocess_shortcircuit(unit, f'DEPT:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^mail\s+location\s+\d+', street):
+            m = re.match(r'(?i)^mail\s+location\s+(\d+)', street)
+            loc = m.group(1) if m else '?'
+            return self._apply_preprocess_shortcircuit(unit, f'DEPT:LOC{loc}:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^athletic\s+department\b', street):
+            return self._apply_preprocess_shortcircuit(unit, f'DEPT:{zip5 or "00000"}')
+
+        if re.search(r'(?i)housecalls\s+only', addr):
+            return self._apply_preprocess_shortcircuit(unit, f'BOGUS:{zip5 or "00000"}')
+
+        if re.search(r'(?i)\bsp-fr-', addr):
+            return self._apply_preprocess_shortcircuit(unit, f'DEPT:{zip5 or "00000"}')
+
+        if re.search(r'(?i)\bcrdamc\b', addr):
+            return self._apply_preprocess_shortcircuit(unit, f'DEPT:{zip5 or "00000"}')
+
+        if street and re.search(r'(?i)\b(highway|hwy|county rd|county road|state hwy|state road|us highway)\b', street):
+            return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
+
+        if street and re.match(r'(?i)^(rr|rt|route)\s*\d', street):
+            return self._apply_preprocess_shortcircuit(unit, f'RR:{zip5 or "00000"}')
+
+        return None
+
+    def _pattern_match_result(
+        self,
+        spec: Dict[str, Any],
+        canonical_address: str,
+        zip_code: str,
+        parsed: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        colocator = self._expand_colocator(
+            spec.get('colocator', ''), canonical_address, zip_code, parsed,
+        )
+        if '{location}' in colocator:
+            m = re.search(r'(.+?)\s+(mall|center|plaza)', canonical_address, re.IGNORECASE)
+            if m:
+                colocator = colocator.replace('{location}', m.group(1).strip())
+        status = 'owners' if spec.get('colocator') else spec.get('status', 'pending')
+        return {
+            **spec,
+            'colocator': colocator,
+            'action': spec.get('action', 'match'),
+            'status': status,
+        }
+
+    def _eval_normalized_subpattern(
+        self,
+        sub: Dict[str, Any],
+        parsed: Dict[str, Any],
+        canonical_address: str,
+        zip_code: str,
+    ) -> bool:
+        predicate = sub.get('predicate')
+        if predicate == 'city_zip_only':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            zip5 = zip5 or zip_code
+            return self._is_city_only_parsed(street, city, state, zip5, canonical_address)
+
+        if predicate == 'city_state_only':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            return self._is_city_state_only_parsed(street, city, state, zip5)
+
+        if predicate == 'city_zip_no_state':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            zip5 = zip5 or zip_code
+            return self._is_city_zip_no_state_parsed(street, city, state, zip5)
+
+        if predicate == 'city_only_intl':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            return self._is_city_only_intl_parsed(street, city, state, zip5)
+
+        if predicate == 'zip_only':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            zip5 = zip5 or zip_code
+            return self._is_zip_only_parsed(street, city, state, zip5, canonical_address)
+
+        if predicate == 'us_territory':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            return self._is_us_territory_parsed(state)
+
+        for field in sub.get('require') or []:
+            if not (parsed.get(field) or '').strip():
+                return False
+        for field in sub.get('absent') or []:
+            if (parsed.get(field) or '').strip():
+                return False
+
+        fields = sub.get('fields') or {}
+        if not predicate and not fields:
+            return False
+        for field, regex in fields.items():
+            if field == 'street':
+                val = (parsed.get('street') or parsed.get('address_line1') or '').strip()
+            else:
+                val = (parsed.get(field) or '').strip()
+            if not regex:
+                continue
+            if not re.search(regex, val, re.IGNORECASE):
+                return False
+        return True
+
+    def _check_geocoding_patterns(
+        self,
+        canonical_address: str,
+        zip_code: str = "",
+        pattern_type: str = 'all',
+        parsed: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         safe_names = [
             'privacy_addresses', 'various_addresses', 'incomplete_addresses', 'no_street_number',
             'mail_drop_addresses', 'rural_route', 'exempt_addresses', 'fraud_source_addresses',
+            'address_unknown_placeholders', 'mail_collections_centers', 'suite_pmb_box_junk',
+            'normalized_preprocess',
         ]
         dangerous_names = ['po_box_addresses', 'co_addresses', 'mall_complexes', 'major_institutions', 'registered_agents_2025']
         patterns = [p for p in self.geocoding_patterns if pattern_type == 'all' or p.get('name') in (safe_names if pattern_type == 'safe' else dangerous_names)]
         for pattern in patterns:
+            group_match_on = pattern.get('match_on', 'canonical')
             if 'patterns' in pattern:
                 for sub in pattern['patterns']:
-                    if re.search(sub.get('regex', ''), canonical_address, re.IGNORECASE):
-                        status = 'owners' if sub.get('colocator') else sub.get('status', 'pending')
-                        return {**sub, 'action': sub.get('action', 'match'), 'status': status}
+                    match_on = sub.get('match_on', group_match_on)
+                    if match_on == 'normalized':
+                        if not parsed or not self._eval_normalized_subpattern(
+                            sub, parsed, canonical_address, zip_code,
+                        ):
+                            continue
+                    elif not re.search(sub.get('regex', ''), canonical_address, re.IGNORECASE):
+                        continue
+                    return self._pattern_match_result(sub, canonical_address, zip_code, parsed)
             else:
+                match_on = pattern.get('match_on', 'canonical')
+                if match_on == 'normalized':
+                    if not parsed or not self._eval_normalized_subpattern(
+                        pattern, parsed, canonical_address, zip_code,
+                    ):
+                        continue
+                    return self._pattern_match_result(pattern, canonical_address, zip_code, parsed)
                 regex = pattern.get('regex', '')
                 if not re.search(regex, canonical_address, re.IGNORECASE):
                     continue
-                colocator = pattern.get('colocator', '')
-                if '{zip}' in colocator and zip_code:
-                    colocator = colocator.replace('{zip}', zip_code)
-                if '{city}' in colocator:
-                    m = re.search(r', ([^,]+), ([A-Z]{2}),', canonical_address)
-                    if m: colocator = colocator.replace('{city}', m.group(1).strip())
-                if '{state}' in colocator:
-                    m = re.search(r', ([A-Z]{2}),', canonical_address)
-                    if m: colocator = colocator.replace('{state}', m.group(1).strip())
-                if '{entity}' in colocator:
-                    m = re.match(r'c/o\s+(.+?)[,]', canonical_address, re.IGNORECASE)
-                    if m: colocator = colocator.replace('{entity}', m.group(1).strip())
-                if '{location}' in colocator:
-                    m = re.search(r'(.+?)\s+(mall|center|plaza)', canonical_address, re.IGNORECASE)
-                    if m: colocator = colocator.replace('{location}', m.group(1).strip())
-                if '{box}' in colocator:
-                    box_m = re.search(r'(?i)p\.?o\.?\s*box\s*#?\s*(\d+)', canonical_address)
-                    if box_m:
-                        colocator = colocator.replace('{box}', box_m.group(1))
-                status = 'owners' if colocator else pattern.get('status', 'pending')
-                return {
-                    'colocator': colocator,
-                    'status': status,
-                    'action': pattern.get('action', 'match'),
-                    'regex': regex,
-                    'fields': pattern.get('fields')
-                }
+                return self._pattern_match_result(pattern, canonical_address, zip_code, parsed)
         return None
+
+    def apply_preprocess_batch(
+        self, units: List[GeocodingWorkUnit],
+    ) -> tuple[List[GeocodingWorkUnit], int]:
+        """Run preprocess on work units; persist matches; return rows still needing geocoding."""
+        if not units:
+            return [], 0
+        survivors: List[GeocodingWorkUnit] = []
+        match_ctxs: List[PendingDatabaseContext] = []
+        matched = 0
+        for _flag, output in self._preprocess_handler(units):
+            if isinstance(output, ResultWorkUnit):
+                matched += 1
+                match_ctxs.append(output.data)
+            else:
+                survivors.append(output)
+        if match_ctxs:
+            merged = PendingDatabaseContext.merge(match_ctxs)
+            if merged.getOperationsCount() > 0:
+                merged.save_to_database(self._db_ops, checkpoint=True)
+        return survivors, matched
     
     def _update_geocoding_status(self,ctx: PendingDatabaseContext, unit: GeocodingWorkUnit, geocoding_id: str, status: str):
         now = datetime.now().isoformat()
@@ -886,14 +1491,18 @@ class GeocodingAPIProcessor(BaseProcessor):
     def _apply_po_box_match(self, unit: GeocodingWorkUnit, po_box: str, zip5: str) -> ResultWorkUnit:
         colocator = f"PO:{po_box}:{zip5}"
         lat = lon = None
-        try:
-            row = self.db_ops.execute_query(
-                "SELECT lat, lon FROM Zips WHERE zip = ? LIMIT 1", (zip5,)
-            ).fetchone()
-            if row:
-                lat, lon = row[0], row[1]
-        except Exception:
-            pass
+        coords = (self._us_zip_coords or {}).get(zip5)
+        if coords:
+            lat, lon = coords
+        else:
+            try:
+                row = self.db_ops.execute_query(
+                    "SELECT lat, lon FROM Zips WHERE zip = ? LIMIT 1", (zip5,)
+                ).fetchone()
+                if row:
+                    lat, lon = row[0], row[1]
+            except Exception:
+                pass
         return self._apply_geocoding_only_update(
             unit, 'Match:PO',
             colocator=colocator,
@@ -913,7 +1522,9 @@ class GeocodingAPIProcessor(BaseProcessor):
 
             po_box = parsed.get('po_box')
             if not po_box:
-                m = re.search(r'(?i)p\.?o\.?\s*box\s*#?\s*(\d+)', addr)
+                m = re.search(r'(?i)p[0o]\.?\s*o\.?\s*(?:box|drawer)\s*#?\s*(\d+)', addr)
+                if not m:
+                    m = re.search(r'(?i)\bdrawer\s+([a-z0-9#]+)\b', addr)
                 if m:
                     po_box = m.group(1)
             if po_box and zip_code:
@@ -921,10 +1532,18 @@ class GeocodingAPIProcessor(BaseProcessor):
                 self.run_stats.preprocess_match += 1
                 continue
 
-            pattern = self._check_geocoding_patterns(addr, zip_code, 'safe')
+            if parsed:
+                bogus = self._preprocess_bogus_shortcircuit(unit, parsed, zip_code)
+                if bogus:
+                    results.append(bogus)
+                    continue
+
+            pattern = self._check_geocoding_patterns(addr, zip_code, 'safe', parsed=parsed)
             if pattern:
                 if pattern['status'] == 'owners':
-                    colocator = pattern.get('colocator', '')
+                    colocator = self._expand_colocator(
+                        pattern.get('colocator', ''), addr, zip_code, parsed,
+                    )
                     if '{box}' in colocator and po_box:
                         colocator = colocator.replace('{box}', str(po_box))
                     results.append((True, self._apply_geocoding_only_update(
@@ -1000,12 +1619,13 @@ class GeocodingAPIProcessor(BaseProcessor):
     ) -> str:
         snap = self.run_stats.census_call_snapshot()
         pl = self.pipeline
-        fed = committed = in_flight = 0
+        fed = rows_saved = pdcs_saved = in_flight = 0
         queues = ""
         if pl is not None:
             fed = pl.metrics['overall'].get('total', 0)
-            committed = pl.metrics['overall'].get('success', 0)
-            in_flight = max(0, fed - committed)
+            rows_saved = pl.metrics['overall'].get('rows_committed', 0)
+            pdcs_saved = pl.metrics['overall'].get('success', 0)
+            in_flight = max(0, fed - rows_saved)
             queues = pl._format_queue_sizes()
 
         pct = (100.0 * matched / batch_size) if batch_size else 0.0
@@ -1022,8 +1642,8 @@ class GeocodingAPIProcessor(BaseProcessor):
             f"failures={snap['failures']} addrs_sent={snap['addrs_sent']:,} "
             f"rate={snap['rate_hr']:.1f}/hr "
             f"eta_census≈{eta_hr:.0f}h "
-            f"fed={fed:,} committed={committed:,} in_flight≈{in_flight:,} "
-            f"queues: {queues}"
+            f"fed={fed:,} rows_saved={rows_saved:,} in_flight≈{in_flight:,} "
+            f"pdcs={pdcs_saved:,} queues: {queues}"
         )
 
     def _log_census_progress(
@@ -1260,6 +1880,11 @@ class GeocodingAPIProcessor(BaseProcessor):
     def grok_geocode_model() -> str:
         return os.getenv("GROK_GEOCODE_MODEL", GROK_GEOCODE_MODEL_DEFAULT)
 
+    @staticmethod
+    def grok_geocode_batch_model() -> str:
+        from constants import GEOCODING_GROK_BATCH_MODEL
+        return os.getenv("GROK_GEOCODE_BATCH_MODEL", GEOCODING_GROK_BATCH_MODEL)
+
     @classmethod
     def grok_result_update_fields(
         cls,
@@ -1305,20 +1930,29 @@ class GeocodingAPIProcessor(BaseProcessor):
             canon = unit.canonical_address.strip()
             norm_str = json.dumps(unit.parsed_normalized, separators=(',', ':')) if unit.parsed_normalized else ""
             prompt_lines.append(f"ID: {unit.geocoding_id} | Raw: \"{canon}\" | Parsed JSON: {norm_str}")
+        min_conf = GEOCODING_GROK_MIN_CONFIDENCE_PCT
         system_prompt = f"""You are an expert geocoder for messy IRS 990 nonprofit addresses.
-These rows already failed Census, Photon, and paid geocoders — analyze WHY and classify failures.
+These rows already failed Census, Photon, and paid geocoders — your job is to geocode them when
+you can, and classify only when you truly cannot pick a location.
 Ignore C/O, Attn:, See Statement, personal names unless tied to a known org HQ.
 Use known entity HQs when obvious (e.g. First Citizens → Raleigh area).
-Return lat/long only if ≥75% confident in a real US street location.
+
+Geocoding bar: return lat/long when ≥{min_conf}% confident in ONE best US location. Prior API
+failure is not a reason to refuse — messy casing (9Th), rural routes, highways, campus buildings,
+and suite/room/building suffixes are common; geocode the building or street entrance when that is
+the clear best match (e.g. "520 S 9th … Ellis Library, Columbia, MO" → University of Missouri
+Ellis Library area). Campus/university building names with street+city+state+ZIP should be
+geocoded, not classified as UNKN.
 
 When you cannot geocode, you MUST set failure_code (not just null coords):
 - NOTA: not a postal address (org name only, "see statement", narrative, department label)
 - VAGUE: incomplete US address (city/state only, missing street number or name)
-- AMBIG: multiple plausible US street matches, cannot pick one
+- AMBIG: multiple equally plausible US street matches — cannot pick one (not "prior APIs failed")
 - REDACT: intentionally redacted or privacy placeholder
-- UNKN: foreign/non-US slip-through, none of the above, or genuinely unsure
+- UNKN: foreign/non-US, no plausible US match, or genuinely unsure — NOT for normal US streets
+  that prior geocoders missed
 
-Classify precisely — these labels feed pattern-rule mining to auto-handle similar addresses later."""
+Classify precisely — failure labels feed pattern-rule mining to auto-handle similar addresses later."""
         user_prompt = f"""Analyze these addresses — geocode when possible, otherwise classify the failure:
 
 {'\n'.join(prompt_lines)}
@@ -1327,7 +1961,7 @@ CRITICAL: For each result, set 'id' to the EXACT geocoding_id UUID shown at the 
 
 For each address provide:
 - id: geocoding_id UUID (required, exact match)
-- lat / long: floats when ≥75% confident in a US street location; otherwise null
+- lat / long: floats when ≥{min_conf}% confident in one best US location; otherwise null
 - matched_address: best full geocoded address when matched; otherwise null
 - failure_code: REQUIRED when lat/long are null — one of: {codes}
 - reason: one short sentence explaining the match or why this failure_code applies
@@ -1892,13 +2526,13 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
         return processed
 
     def setup_address_counts(self):
-        null_count = self.db_ops.execute_query(
-            "SELECT COUNT(*) FROM Geocoding WHERE address_count IS NULL"
+        stale_count = self.db_ops.execute_query(
+            "SELECT COUNT(*) FROM Geocoding WHERE address_count IS NULL OR address_count = 0"
         ).fetchone()[0]
-        if not null_count:
-            log_info("Skipping address_count backfill (none NULL)")
+        if not stale_count:
+            log_info("Skipping address_count backfill (all populated)")
             return
-        log_info(f"Backfilling address_count for {null_count:,} Geocoding rows")
+        log_info(f"Backfilling address_count for {stale_count:,} Geocoding rows")
         update_query = """
             UPDATE Geocoding
             SET address_count = (
@@ -1906,7 +2540,7 @@ Output ONLY the complete valid JSON object matching the schema. Include ALL addr
                 FROM Addresses
                 WHERE Addresses.geocoding_id = Geocoding.geocoding_id
             )
-            WHERE address_count IS NULL
+            WHERE address_count IS NULL OR address_count = 0
         """
         self.db_ops.execute_query(update_query)
             

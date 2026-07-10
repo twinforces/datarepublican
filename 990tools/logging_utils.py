@@ -77,9 +77,8 @@ def log_info(msg: str, *args, ein: Optional[str] = None, **kwargs):
             msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
     try:
         formatted_msg = msg.format(*args, **kwargs)
-    except KeyError as e:
-        # If still KeyError, log the original message without formatting
-        formatted_msg = msg
+    except (KeyError, ValueError):
+        formatted_msg = msg if not args else f"{msg} {' '.join(str(a) for a in args)}"
     if ein:
         logger.info(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:
@@ -99,9 +98,8 @@ def log_error(msg: str, *args, ein: Optional[str] = None, exc_info: bool = False
             msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
     try:
         formatted_msg = msg.format(*args, **kwargs)
-    except KeyError as e:
-        # If still KeyError, log the original message without formatting
-        formatted_msg = msg
+    except (KeyError, ValueError):
+        formatted_msg = msg if not args else f"{msg} {' '.join(str(a) for a in args)}"
     if ein:
         logger.error(f"{debug_prefix}[EIN:{ein}] {formatted_msg}", exc_info=exc_info)
     else:
@@ -121,9 +119,8 @@ def log_debug(msg: str, *args, ein: Optional[str] = None, **kwargs) -> None:
             msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
     try:
         formatted_msg = msg.format(*args, **kwargs)
-    except KeyError as e:
-        # If still KeyError, log the original message without formatting
-        formatted_msg = msg
+    except (KeyError, ValueError):
+        formatted_msg = msg if not args else f"{msg} {' '.join(str(a) for a in args)}"
     if ein:
         logger.debug(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:
@@ -143,9 +140,8 @@ def log_warning(msg: str, *args, ein: Optional[str] = None, **kwargs):
             msg = msg.replace(f'{{{placeholder}}}', '[MISSING]')
     try:
         formatted_msg = msg.format(*args, **kwargs)
-    except KeyError as e:
-        # If still KeyError, log the original message without formatting
-        formatted_msg = msg
+    except (KeyError, ValueError):
+        formatted_msg = msg if not args else f"{msg} {' '.join(str(a) for a in args)}"
     if ein:
         logger.warning(f"{debug_prefix}[EIN:{ein}] {formatted_msg}")
     else:

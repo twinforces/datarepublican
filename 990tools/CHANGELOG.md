@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 2026-07 (Geolocate Trilogy + Grok Failure Taxonomy)
 
+### Geocoding victory (Jul 9, 2026)
+- `declare_geocoding_victory.py`: tier low-weight `pending_api` → `geocode_tail`; export top `grok:UNKN`; set `victory_declared` on overnight state.
+- `preprocess_geocode_tail.py`: one-shot pattern pass over `geocode_tail` (155k rows → `Match:PatternOwners` in first run).
+- `GEOCODING_GROK_MIN_ADDRESS_COUNT` + `geocode_tail` status in `constants.py`; grok intake filters by `address_count`.
+- `geolocate_grok_overnight_loop.py`: exits when victory declared; auto-pattern mining after each iter.
+- New preprocess rules: `gen delivery` abbrev, Marshall Islands, privacy redaction (`Xxxx…`).
+- Final snapshot: ~378k `geocode_tail`, ~228k `Match:PatternOwners`, ~232k `Match:Grok-4`; bulk Grok/API autopilot off.
+
 ### Geolocate pipeline refactor
 - Split into `geolocate_prev` → `geolocate_new` → `geolocate_grok` → `geolocate_archive` (legacy aliases `geolocate`/`geolocate1` preserved).
 - `geolocate_new`: free APIs only (Census, Photon self-hosted, geocode.maps.co, OpenCage); inline Grok disabled — failures queue as `grok_pending` for batch step.

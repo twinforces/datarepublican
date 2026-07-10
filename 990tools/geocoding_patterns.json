@@ -21,7 +21,7 @@
     {
       "name": "mail_drop_addresses",
       "description": "All variants of PO Box / Box / Ppbox / Podrawer / Post Office (covers the new batch + legacy)",
-      "regex": "(?i)(p\\.?o\\.?\\s*box|po\\s*box|ppbox|podrawer|post\\s*office|box\\s*\\d+|rr\\s*\\d+\\s*box)",
+      "regex": "(?i)(p[0o]\\.?\\s*o\\.?\\s*(?:box|drawer)|po\\s*box|po\\s*bpx|ppbox|podrawer|post\\s*office|box\\s*\\d+|rr\\s*\\d+\\s*box|\\bdrawer\\s+[a-z0-9#]+)",
       "colocator": "PO:{box}:{zip}",
       "status": "owner",
       "priority": 2
@@ -329,7 +329,7 @@
       "name": "incomplete_addresses",
       "description": "Mark incomplete addresses",
       "regex": "(?i)^(n/a|na|street|road|avenue|drive|way|lane|place|court|circle|boulevard|parkway|available|unavailable|unknown address|unknown)$",
-      "colocator": "INCOMPLETE:{zip}",
+      "colocator": "BOGUS:{zip}",
       "status": "owner",
       "priority": 11
     },
@@ -348,7 +348,12 @@
     { "regex": "(?i)collections?\\s*ctr", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
     { "regex": "(?i)mail\\s*svc\\s*center", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
     { "regex": "(?i)paysphere\\s*circle", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
-    { "regex": "(?i)solutions\\s*center", "colocator": "PO:MAIL", "status": "owners", "action": "match" }
+    { "regex": "(?i)solutions\\s*(?:center|ctr)", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)remit(?:tance)?\\s*(?:dr|drive)", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)reliable\\s*pkwy", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)treasury\\s*ctr", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)mail\\s*service\\s*(?:center|ctr)", "colocator": "PO:MAIL", "status": "owners", "action": "match" },
+    { "regex": "(?i)mail\\s+location\\s+\\d+", "colocator": "PO:MAIL", "status": "owners", "action": "match" }
   ]
 },
 {
@@ -393,13 +398,105 @@
   ]
 },
 {
+  "name": "normalized_preprocess",
+  "description": "Predicates on normalized_address JSON (street/city/state/zip) — preferred over canonical regex",
+  "match_on": "normalized",
+  "priority": 14,
+  "patterns": [
+    {
+      "predicate": "city_zip_only",
+      "colocator": "VENDOR:{city}:{state}:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "predicate": "city_state_only",
+      "colocator": "VENDOR:{city}:{state}:",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "predicate": "city_zip_no_state",
+      "colocator": "VENDOR:{city}:{state}:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "predicate": "city_only_intl",
+      "colocator": "FA:INTL",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "predicate": "zip_only",
+      "colocator": "VENDOR::{state}:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "predicate": "us_territory",
+      "colocator": "VENDOR:{city}:{state}:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "fields": {"street": "^dept\\s+.+"},
+      "colocator": "DEPT:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "fields": {"street": "^(not present|no actual location|local|fellowship)$"},
+      "colocator": "BOGUS:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "fields": {"street": "^\\d+$"},
+      "colocator": "PARTIAL:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "fields": {"zip": "^(00000|99999)$"},
+      "colocator": "FA:INTL",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "fields": {"street": "^(attn|dba)\\s+.+"},
+      "colocator": "PERSON:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "fields": {"street": "^university at\\s+.+"},
+      "colocator": "UNIV:{zip}",
+      "status": "owners",
+      "action": "match"
+    }
+  ]
+},
+{
   "name": "fraud_source_addresses",
   "description": "NPPES/DOT/FEC bogus-address families mined from pending_api concordance (Jul 2026)",
   "priority": 15,
   "patterns": [
     {
-      "regex": "(?i)^(unknown|none|n/a|na|tbd|not available|general delivery)\\s*,",
-      "colocator": "INCOMPLETE:{zip}",
+      "regex": "(?i)^(unknown|none|n/a|na|tbd|not available|gen(?:eral)? delivery)\\s*,",
+      "colocator": "BOGUS:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\b(ajeltake|majuro|trust company complex)\\b",
+      "colocator": "FA:INTL",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)^(not releasable|not to be published|confidential location|please email instead|privacy reasons|x{3,}(?:\\s+x{3,})*)",
+      "colocator": "BOGUS:{zip}",
       "status": "owners",
       "action": "match"
     },
@@ -424,6 +521,30 @@
     {
       "regex": "(?i)^(?!.*\\b\\d{3,}\\b).*(?:\\b&\\b|\\band\\b).*(?:hwy|highway|interstate|i-\\d+)",
       "colocator": "PARTIAL:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)all\\s+over\\s+the\\s+state",
+      "colocator": "BOGUS:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\bpsc\\s+\\d+",
+      "colocator": "MILITARY:PSC:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\b(usnh|us\\s+army\\s+hospital|us\\s+army\\s+health)\\b.*\\b(italy|germany|japan|korea|okinawa|yokosuka|wiesbaden)\\b",
+      "colocator": "MILITARY:OVERSEAS:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\b(wiesbaden|yokosuka|okinawa|ramstein|stuttgart|kaiserslautern|chinhae)\\b",
+      "colocator": "FA:INTL",
       "status": "owners",
       "action": "match"
     }

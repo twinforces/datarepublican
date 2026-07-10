@@ -126,16 +126,35 @@ ENABLE_CHARITY_DEDUP_CHECK = False  # Controlled by command-line parameter
 FULL_DB_PATH = f"{DEFAULT_FINAL_DIR}/${DEFAULT_DB_PATH}"
 
 # Geocoding constants
-CENSUS_API_BATCH_SIZE = 10_000  # Census batch API limit per HTTP call (per geocoding.geo.census.gov docs)
-GEOCODING_API_WORKERS = 4       # Parallel census stage workers (each does one CENSUS_API_BATCH_SIZE call)
+CENSUS_API_BATCH_SIZE = 2_500  # Per HTTP call (Census allows 10k; 2.5k avoids ~60s truncation under load)
+GEOCODING_API_WORKERS = 2       # Parallel workers per census stage (census + census_strip)
+CENSUS_API_MIN_DELAY = 1.0      # Global min seconds between Census HTTP requests (all workers)
+CENSUS_API_RETRY_ATTEMPTS = 3   # Retries per chunk on connection resets before split
+CENSUS_API_RETRY_BACKOFF_BASE = 2.0  # Exponential backoff base (seconds)
+GEOCODING_PREPROCESS_BATCH_SIZE = CENSUS_API_BATCH_SIZE  # Local preprocess — match census batch size
 GEOCODING_FEED_BATCH_SIZE = CENSUS_API_BATCH_SIZE  # One DB pull = one census HTTP request
-GEOCODING_IN_FLIGHT_CAP = 10_000  # Match API throughput — 100k caused 4h+ feed stall while Grok drained
+GEOCODING_IN_FLIGHT_CAP = 10_000  # Legacy admission cap (unused when buffered_feed=True)
+GEOCODING_API_IN_FLIGHT_CAP = 2_000  # API pass: serial photon/opencage tail — smaller cap
+GEOCODING_WORKER_QUEUE_DEPTH = 2  # worker_queue slots = workers * depth (each slot = one batch)
+GEOCODING_FEED_BUFFER_BATCHES = 2 * GEOCODING_API_WORKERS  # feed buffer: 2× worker count
+GEOCODING_PENDING_API_BATCH_SIZE = 1_000  # ~10% of census batch — flush failures promptly
+GEOCODING_BATCHER_TIMEOUT = 5.0  # seconds — ~half a typical census/API HTTP round-trip
+GEOCODING_STATUS_PENDING_API = "pending_api"  # Census+strip exhausted; needs geolocate_api
+GEOCODING_STATUS_TAIL = "geocode_tail"  # Declared victory — low-weight tail, no API/Grok spend
+GEOCODING_GROK_INTAKE_STATUSES = ("grok_pending", "pending_api")  # Grok batch + preprocess loop
+GEOCODING_GROK_MIN_ADDRESS_COUNT = 10  # Victory tier: only rows affecting this many+ addresses
+GEOCODING_VICTORY_UNKN_EXPORT_ROWS = 5_000  # Top grok:UNKN by address_count for review
+GEOCODING_VICTORY_UNKN_EXPORT_FILE = "grok_high_value_unkn_review.tsv.gz"
+CENSUS_FAILURES_EXPORT_FILE = "pending_api_failures_for_patterns.tsv.gz"  # after geolocate_census drain
 GEOCODING_GROK_WORKERS = 12
 GEOCODING_GROK_BATCH_SIZE = 25       # addresses per realtime/batch prompt
 GEOCODING_GROK_EXPORT_ROWS = 5_000   # grok_pending rows per xAI batch job
 GEOCODING_GROK_POLL_INTERVAL = 60      # seconds between batch status checks
 GROK_FAILURES_EXPORT_FILE = "grok_failures_for_patterns.tsv.gz"  # written when grok_pending drained
 GROK_GEOCODE_MODEL_DEFAULT = "grok-4-latest"  # json_schema verified; override via GROK_GEOCODE_MODEL
+GEOCODING_GROK_BATCH_MODEL = "grok-4"  # xAI batch API — grok-4-latest is not batch-eligible
+GEOCODING_GROK_MIN_CONFIDENCE_PCT = 50  # return coords when this confident in a single US match
+GEOCODING_GROK_ITER1_TEST_SET = "geolocate_grok_iter1_test_ids.json"  # fixed regression set
 
 # Grok geocode failure taxonomy — stored as geocoding_status grok:<CODE> and archive colocator.
 # Collected for pattern-rule mining: cluster by code + canonical_address to derive preprocess rules.
@@ -170,7 +189,7 @@ GEOCODING_PHOTON_MIN_DELAY = 0.4
 GEOCODING_PHOTON_SELF_HOSTED_WORKERS = 32
 GEOCODING_PHOTON_SELF_HOSTED_MIN_DELAY = 0  # own VPS — no politeness throttle
 GEOCODING_BATCH_SIZE = GEOCODING_FEED_BATCH_SIZE  # alias for feed/get_work_batch
-GEOCODING_API_BATCH_SIZE = 10000  # unused legacy; census stage uses CENSUS_API_BATCH_SIZE
+GEOCODING_API_BATCH_SIZE = CENSUS_API_BATCH_SIZE  # legacy alias
 GEOCODING_FAST_WORKERS = 8  # Workers for fast local geocoding record creation
 GEOCODING_MAX_UPDATES_PER_BATCH = 10000  # Maximum estimated updates per batch to prevent commit hangs
 

@@ -9,6 +9,12 @@ geolocate_monitor.state
 geolocate_monitor.state.pending
 geolocate_step_*.log
 geolocate_grok_state.json
+geolocate_grok_overnight.lock
+geolocate_grok_overnight.log
+geolocate_grok_status_*.log
+preprocess_geocode_tail.log
+failures_iter*_mined.tsv
+archive/geolocate_grok_run_*/
 
 # Local DB copies (production lives on /Volumes/Data2/final)
 irs990.duckdb
