@@ -27,7 +27,7 @@
     )
 %>
     <h1>${_title_html}</h1>
-    <p class="meta">${generated_at} · suspicion score ${int(cluster.get('suspicion_score') or 0)}</p>
+    <p class="meta">${generated_at} · ${domain['label']} · score ${int(cluster.get('suspicion_score') or 0)}</p>
     <div class="chips">
 % for code in cluster['reason_codes']:
       <span class="chip">${code}</span>
@@ -39,8 +39,7 @@
   </header>
   <%include file="partials/widen_nav.mako"/>
 
-  <!-- Review Decision (client-side localStorage) -->
-  <section id="review-section" 
+  <section id="review-section"
            data-slug="${cluster.get('slug', '')}"
            style="margin: 1rem 0; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa;">
     <h3 style="margin-top:0; margin-bottom:0.5rem;">Review Decision</h3>
@@ -50,8 +49,8 @@
     </div>
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
       <button onclick="saveDecision('not')" style="background:#166534; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Not</button>
-      <button onclick="saveDecision('sus-dot')" style="background:#b91c1c; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-DOT</button>
-      <button onclick="saveDecision('sus-ins')" style="background:#d97706; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-Ins</button>
+      <button onclick="saveDecision('sus-${domain['review_tag']}')" style="background:#b91c1c; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-${domain['review_tag']}</button>
+      <button onclick="saveDecision('sus-other')" style="background:#d97706; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-other</button>
     </div>
     <div id="review-status" style="margin-top:0.5rem; font-size:0.85rem; color:#555;"></div>
   </section>
@@ -59,7 +58,6 @@
   <section class="physical">
     <h2>Physical Footprint Assessment</h2>
     <p>${physical_note or 'No manual physical note on file. Review Google Maps / Street View via the address link above.'}</p>
-
     <div style="margin-top: 0.5rem;">
       <a href="${cluster['maps_url']}" target="Maps" style="font-size: 0.9rem; color: #0b57d0; text-decoration: none;">
         Open in Google Maps →
@@ -69,60 +67,23 @@
 
   <section class="cards">
     <div class="card"><strong>${cluster['multi_type_count']}</strong><span>address types</span></div>
-    <div class="card"><strong>${cluster['dot_carrier_count']}</strong><span>DOT rows</span></div>
+    <div class="card"><strong>${cluster['focus_count']}</strong><span>focus entities</span></div>
+    <div class="card"><strong>${cluster.get('focus_amount_fmt') or '—'}</strong><span>${domain['amount_label']}</span></div>
     <div class="card"><strong>${cluster['total_rows']}</strong><span>total address rows</span></div>
     <div class="card"><strong>${cluster['charity_count']}</strong><span>charities</span></div>
     <div class="card"><strong>${cluster['grant_count']}</strong><span>grants</span></div>
+    <div class="card"><strong>${cluster.get('dot_carrier_count') or 0}</strong><span>DOT rows</span></div>
   </section>
 
-  <p class="types"><strong>Types present:</strong> ${', '.join(cluster['address_types'])}</p>
-% if show_address_subgroups and cluster.get('distinct_address_count'):
-  <p class="types"><strong>Distinct street addresses in cluster:</strong> ${int(cluster['distinct_address_count'])}</p>
-% endif
+  <p class="types"><strong>Types present:</strong> ${', '.join(cluster['address_types'] or [])}</p>
 % if map_points is not UNDEFINED and map_points:
   <%include file="partials/leaflet_map_embed.mako" args="map_points=map_points, map_root_id='leaflet-map-detail', map_height=320"/>
 % endif
 
-  <!-- Active vs Inactive Summary -->
+% if entities:
   <section>
-    <h2>DOT Carrier Status Summary</h2>
-    <div class="cards">
-      <div class="card">
-        <strong>${cluster.get('dot_active_count', 0)}</strong>
-        <span>Active (A)</span>
-        <div style="font-size:0.85rem; color:#166534;">${"{:,}".format(cluster.get('dot_active_power_units', 0))} Power Units</div>
-      </div>
-      <div class="card" style="border-color:#f87171;">
-        <strong>${cluster.get('dot_inactive_count', 0)}</strong>
-        <span>Inactive (I)</span>
-        <div style="font-size:0.85rem; color:#b91c1c;">${"{:,}".format(cluster.get('dot_inactive_power_units', 0))} Power Units</div>
-      </div>
-      <div class="card">
-        <strong>${cluster.get('inactive_pct', 0)}%</strong>
-        <span>Inactive Ratio</span>
-      </div>
-    </div>
-  </section>
-
-% if show_address_subgroups and address_subgroups:
-  <section>
-    <h2>Addresses in this cluster (${len(address_subgroups)})</h2>
-    <p style="font-size:0.85rem; color:#666; margin-bottom:0.5rem;">
-      Non-address slices (colocator / zip / loose grid) often span multiple suites or streets.
-      Sortable / filterable table of distinct <code>canonical_address</code> values.
-    </p>
-    <div id="ts-address-subgroups" class="ts-table-root"></div>
-  </section>
-% endif
-
-% if phone_groups or address_groups:
-  <section>
-    <h2>DOT carriers (all)</h2>
-    <p style="font-size:0.85rem; color:#666; margin-bottom:0.5rem;">
-      Flattened carrier list — sort by phone, status, or power units.
-      Filter for a shared phone or status <code>I</code> to surface inactive stacks.
-    </p>
-    <div id="ts-carriers" class="ts-table-root"></div>
+    <h2>${domain['entity_title']} (top ${len(entities)})</h2>
+    <div id="ts-entities" class="ts-table-root"></div>
   </section>
 % endif
 
@@ -166,7 +127,7 @@
 
 <%text>
 <script>
-const STORAGE_KEY = 'address_cluster_review_v2';
+const STORAGE_KEY = 'focus_cluster_review_v1';
 const reviewSection = document.getElementById('review-section');
 const SLUG = reviewSection ? reviewSection.dataset.slug : '';
 
@@ -176,50 +137,30 @@ function getReviewState() {
 function saveReviewState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
-
 function loadReview() {
   if (!SLUG) return;
   const state = getReviewState();
   const entry = state[SLUG];
   const textarea = document.getElementById('review-notes');
   const statusEl = document.getElementById('review-status');
-
   if (entry && typeof entry === 'object') {
     if (textarea) textarea.value = entry.notes || '';
     if (statusEl && entry.status) {
-      statusEl.innerHTML = `Current: <strong>${entry.status}</strong> <span style="color:#888;">(${new Date(entry.updated_at || '').toLocaleString()})</span>`;
+      statusEl.textContent = 'Saved: ' + entry.status + (entry.ts ? ' @ ' + entry.ts : '');
     }
-  } else if (entry === true) {
-    // legacy
-    if (statusEl) statusEl.innerHTML = `Current: <strong>sus-dot</strong> (legacy)`;
   }
 }
-
 function saveDecision(status) {
   if (!SLUG) return;
-  const textarea = document.getElementById('review-notes');
-  const notes = textarea ? textarea.value.trim() : '';
-
   const state = getReviewState();
-  state[SLUG] = {
-    status: status,
-    notes: notes,
-    updated_at: new Date().toISOString()
-  };
+  const notes = (document.getElementById('review-notes') || {}).value || '';
+  state[SLUG] = { status: status, notes: notes, ts: new Date().toISOString() };
   saveReviewState(state);
-
-  // brief visual feedback then go back
   const statusEl = document.getElementById('review-status');
-  if (statusEl) statusEl.innerHTML = `Saved as <strong>${status}</strong>. Returning to index...`;
-
-  setTimeout(() => {
-    window.location.href = 'index.html';
-  }, 650);
+  if (statusEl) statusEl.textContent = 'Saved: ' + status;
 }
-
-document.addEventListener('DOMContentLoaded', loadReview);
+loadReview();
 </script>
 </%text>
-
 </body>
 </html>

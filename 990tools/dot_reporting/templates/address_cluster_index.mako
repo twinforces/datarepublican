@@ -8,6 +8,7 @@
   </style>
 </head>
 <body>
+  <%include file="partials/breadcrumbs.mako"/>
   <header>
     <h1>Cluster Report${' — ' + slice_label if slice_label else ''}</h1>
     <p class="meta">Generated ${generated_at} · DB: ${db_path} · ${cluster_count} clusters</p>
@@ -34,6 +35,16 @@
     <span id="sus-count" style="font-size: 0.9rem; color: #666;"></span>
   </div>
 
+<%
+  _table_json = cluster_table_json if (cluster_table_json is not UNDEFINED and cluster_table_json) else '{"rows":[],"columns":[]}'
+%>
+  <p class="meta">Rank metric: <strong>active power units</strong> (then DOT carrier count). Table supports multi-column sort, search, pagination (TanStack Table).</p>
+% if map_points is not UNDEFINED and map_points:
+  <%include file="partials/leaflet_map_embed.mako" args="map_points=map_points, map_root_id='leaflet-map', map_height=400"/>
+% endif
+  <div id="ts-table-root"></div>
+  <!-- noscript / fallback static table -->
+  <noscript>
   <table id="clusters-table">
     <thead>
       <tr>
@@ -52,7 +63,7 @@
     </thead>
     <tbody>
 % for c in clusters:
-      <tr class="${'dot-heavy' if c['dot_carrier_count'] >= min_dot_carriers else ''}" 
+      <tr class="${'dot-heavy' if c['dot_carrier_count'] >= min_dot_carriers else ''}"
           data-slug="${c.get('slug', '')}"
           data-phy-po-box="${'true' if c.get('phy_is_po_box') else 'false'}"
           data-has-physical="${'true' if 'dot_carrier_phy' in c.get('address_types', []) else 'false'}">
@@ -60,7 +71,7 @@
         <td><a href="${c['maps_url']}" target="_blank" rel="noopener">${c['canonical_address']}</a></td>
         <td>${c['multi_type_count']}</td>
         <td>${c['dot_carrier_count']}</td>
-        <td>${'{:,}'.format(c.get('active_power_units') or 0)}</td>
+        <td>${'{:,}'.format(c.get('active_power_units') or c.get('dot_active_power_units') or 0)}</td>
         <td>${c['total_rows']}</td>
         <td>${'%.1f' % c['max_grift_ratio'] if c['max_grift_ratio'] is not None else '—'}</td>
         <td>${c['misrep_count']}</td>
@@ -75,6 +86,11 @@
 % endfor
     </tbody>
   </table>
+  </noscript>
+  <script>
+    window.__CLUSTER_TABLE__ = ${_table_json};
+  </script>
+  <%include file="partials/tanstack_table_assets.mako"/>
   <footer>
     <p>Full exports: <code>data/clusters.json</code> · Criteria: <code>export_metadata.json</code></p>
   </footer>

@@ -8,12 +8,17 @@ Slice modes group Addresses by different keys (same drill-down / DOT tooling):
   zipcode          — zip_code (5-digit when present)
   loose_colocator  — 0.5° grid (column if set, else derived from lat/lon)
 
+For non-address slices, each detail page also breaks the cluster into
+distinct canonical_address subgroups (suite/building splits) and groups
+DOT carriers by street address.
+
 Spec: address_cluster_report.md
 
 Usage:
   python generate_address_reports.py
   python generate_address_reports.py --db-path /Volumes/Data/final/irs990.duckdb.geolocate
   python generate_address_reports.py --slice-by colocator --min-dot-carriers 50
+  python generate_address_reports.py --slice-by colocator --lat-long   # LL: only (no PO boxes)
   python generate_address_reports.py --slice-by zipcode --max-clusters 50
   python generate_address_reports.py --slice-by loose_colocator --min-multi-type 5
 """
@@ -85,6 +90,31 @@ body { font-family: system-ui, -apple-system, sans-serif; margin: 1.5rem; color:
 header h1 { margin-bottom: 0.25rem; }
 .meta { color: #555; font-size: 0.9rem; }
 nav { margin-bottom: 1rem; }
+nav.breadcrumbs { margin: 0 0 1rem; font-size: 0.88rem; color: #555; line-height: 1.5; }
+nav.breadcrumbs a { color: #0b57d0; text-decoration: none; font-weight: 500; }
+nav.breadcrumbs a:hover { text-decoration: underline; }
+nav.breadcrumbs .bc-sep { margin: 0 0.35rem; color: #9ca3af; }
+nav.breadcrumbs .bc-current { color: #111; font-weight: 600; }
+.rank-dot {
+  display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.12); vertical-align: middle; margin-right: 0.35rem;
+}
+.rank-dot.high { background: #b91c1c; }
+.rank-dot.mid { background: #d97706; }
+.rank-dot.low { background: #2563eb; }
+.rank-dot.po { background: #a78bfa; border-color: #7c3aed; }
+.rank-dot.none { background: #e5e7eb; }
+.widen-nav {
+  margin: 0.5rem 0 1rem; padding: 0.55rem 0.75rem;
+  background: #f0f7ff; border: 1px solid #cfe2ff; border-radius: 8px;
+  font-size: 0.9rem;
+}
+.widen-nav .widen-label { color: #174ea6; margin-right: 0.5rem; }
+.widen-nav a.widen-link { color: #0b57d0; font-weight: 600; text-decoration: none; }
+.widen-nav a.widen-link:hover { text-decoration: underline; }
+.widen-nav a.widen-link.missing { opacity: 0.65; font-weight: 500; }
+.widen-nav .widen-sep { color: #94a3b8; margin: 0 0.35rem; }
+
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.88rem; }
 th, td { border: 1px solid #ddd; padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
 th { background: #f4f4f4; position: sticky; top: 0; }
@@ -114,9 +144,43 @@ def _addresses_has_column(conn: duckdb.DuckDBPyConnection, col: str) -> bool:
         return False
 
 
-def resolve_slice_mode(slice_by: str, conn: duckdb.DuckDBPyConnection | None = None) -> dict[str, str]:
-    """Copy of SLICE_MODES entry; upgrades loose_colocator when column exists on Addresses."""
+# Effective colocator: Addresses rarely stores LL: — most live on Geocoding after geocode.
+_COLOCATOR_KEY_EXPR = (
+    "COALESCE(NULLIF(TRIM(a.colocator), ''), NULLIF(TRIM(g.colocator), ''))"
+)
+_COLOCATOR_LL_KEY_EXPR = (
+    "COALESCE("
+    "CASE WHEN a.colocator LIKE 'LL:%' THEN a.colocator END, "
+    "CASE WHEN g.colocator LIKE 'LL:%' THEN g.colocator END, "
+    "CASE WHEN g.latitude IS NOT NULL AND g.longitude IS NOT NULL "
+    "THEN 'LL:' || CAST(g.latitude AS VARCHAR) || ':' || CAST(g.longitude AS VARCHAR) END, "
+    "CASE WHEN a.latitude IS NOT NULL AND a.longitude IS NOT NULL "
+    "THEN 'LL:' || CAST(a.latitude AS VARCHAR) || ':' || CAST(a.longitude AS VARCHAR) END"
+    ")"
+)
+_COLOCATOR_FROM = (
+    "FROM Addresses a "
+    "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id"
+)
+
+
+def resolve_slice_mode(
+    slice_by: str,
+    conn: duckdb.DuckDBPyConnection | None = None,
+    *,
+    lat_long: bool = False,
+) -> dict[str, str]:
+    """Copy of SLICE_MODES entry; upgrades colocator/loose for real production shape.
+
+    colocator keys resolve via Addresses LEFT JOIN Geocoding (Addresses.colocator is
+    often empty for LL: while Geocoding holds the LL: string / lat-lon).
+
+    lat_long: with --slice-by colocator, keep only LL:lat:lon keys (drop PO:/FA:/…).
+    """
     mode = dict(SLICE_MODES[slice_by])
+    mode.setdefault("from_sql", "FROM Addresses")
+    mode.setdefault("needs_geocoding_join", "0")
+
     if slice_by == "loose_colocator" and conn is not None and _addresses_has_column(conn, "loose_colocator"):
         mode["key_expr"] = (
             "COALESCE("
@@ -130,23 +194,64 @@ def resolve_slice_mode(slice_by: str, conn: duckdb.DuckDBPyConnection | None = N
             "(loose_colocator IS NOT NULL AND TRIM(loose_colocator) != '') "
             "OR (latitude IS NOT NULL AND longitude IS NOT NULL)"
         )
+
+    if slice_by == "colocator":
+        mode["needs_geocoding_join"] = "1"
+        mode["from_sql"] = _COLOCATOR_FROM
+        if lat_long:
+            mode["key_expr"] = _COLOCATOR_LL_KEY_EXPR
+            mode["where"] = (
+                "(a.colocator LIKE 'LL:%' OR g.colocator LIKE 'LL:%' "
+                "OR (g.latitude IS NOT NULL AND g.longitude IS NOT NULL) "
+                "OR (a.latitude IS NOT NULL AND a.longitude IS NOT NULL))"
+            )
+            mode["label"] = "colocator (LL: only, via Geocoding)"
+            mode["out_dir_prefix"] = "colocator_ll_clusters"
+        else:
+            mode["key_expr"] = _COLOCATOR_KEY_EXPR
+            mode["where"] = (
+                f"({_COLOCATOR_KEY_EXPR}) IS NOT NULL "
+                f"AND TRIM(CAST(({_COLOCATOR_KEY_EXPR}) AS VARCHAR)) != ''"
+            )
+            mode["label"] = "colocator (Addresses + Geocoding)"
+    elif lat_long:
+        raise ValueError("--lat-long only applies with --slice-by colocator")
+
     return mode
 
 
-def build_cluster_sql(slice_by: str, conn: duckdb.DuckDBPyConnection | None = None) -> str:
-    mode = resolve_slice_mode(slice_by, conn)
+def build_cluster_sql(
+    slice_by: str,
+    conn: duckdb.DuckDBPyConnection | None = None,
+    *,
+    lat_long: bool = False,
+) -> str:
+    mode = resolve_slice_mode(slice_by, conn, lat_long=lat_long)
     key = mode["key_expr"]
     where = mode["where"]
-    # Key expressions without table alias work in base; joins use a. prefix via subquery.
+    from_sql = mode.get("from_sql", "FROM Addresses")
+    # When joining Geocoding, key/where already use a./g. prefixes.
+    # Plain Address modes use bare column names on unaliased Addresses.
+    if mode.get("needs_geocoding_join") == "1":
+        canon = "a.canonical_address"
+        atype = "a.address_type"
+        owner = "a.owner_id"
+        aid = "a.address_id"
+    else:
+        canon = "canonical_address"
+        atype = "address_type"
+        owner = "owner_id"
+        aid = "address_id"
+
     return f"""
 WITH keyed AS (
     SELECT
         ({key}) AS cluster_key,
-        canonical_address,
-        address_type,
-        owner_id,
-        address_id
-    FROM Addresses
+        {canon} AS canonical_address,
+        {atype} AS address_type,
+        {owner} AS owner_id,
+        {aid} AS address_id
+    {from_sql}
     WHERE {where}
       AND ({key}) IS NOT NULL
       AND TRIM(CAST(({key}) AS VARCHAR)) != ''
@@ -328,8 +433,10 @@ def fetch_clusters(
     min_dot: int,
     require_grift: bool,
     limit: int,
+    *,
+    lat_long: bool = False,
 ) -> list[dict[str, Any]]:
-    sql = build_cluster_sql(slice_by, conn)
+    sql = build_cluster_sql(slice_by, conn, lat_long=lat_long)
     rows = conn.execute(
         sql,
         [min_multi, min_dot, 1 if require_grift else 0, limit],
@@ -351,18 +458,63 @@ def fetch_clusters(
     return clusters
 
 
-def _member_filter_sql(slice_by: str, conn: duckdb.DuckDBPyConnection) -> tuple[str, str]:
-    """Return (key_expr, where) for per-cluster entity queries on Addresses."""
-    mode = resolve_slice_mode(slice_by, conn)
-    return mode["key_expr"], mode["where"]
+# Columns that live on Addresses and must be qualified in JOINs (Charities/Grants also have colocator).
+_ADDRESSES_COLUMNS = (
+    "canonical_address",
+    "colocator",
+    "zip_code",
+    "loose_colocator",
+    "latitude",
+    "longitude",
+    "address_type",
+    "owner_id",
+    "address_line1",
+    "address_line2",
+    "city",
+    "state",
+    "po_box",
+)
 
 
-def fetch_charities(conn, slice_by: str, cluster_key: str, top_n: int) -> list[dict]:
-    key_expr, where = _member_filter_sql(slice_by, conn)
+def _qualify_addresses_expr(expr: str, alias: str = "a") -> str:
+    """Prefix Addresses column names so JOINs are unambiguous."""
+    out = expr
+    for col in sorted(_ADDRESSES_COLUMNS, key=len, reverse=True):
+        out = re.sub(rf"\b{re.escape(col)}\b", f"{alias}.{col}", out)
+    return out
+
+
+def _member_filter_sql(
+    slice_by: str,
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    lat_long: bool = False,
+) -> tuple[str, str, str]:
+    """Return (key_expr, where, from_join_extra) for per-cluster entity queries.
+
+    from_join_extra is '' or 'LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id'
+    (Addresses always aliased as a).
+    """
+    mode = resolve_slice_mode(slice_by, conn, lat_long=lat_long)
+    if mode.get("needs_geocoding_join") == "1":
+        # key/where already use a./g. — do not re-qualify
+        return mode["key_expr"], mode["where"], "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id"
+    return (
+        _qualify_addresses_expr(mode["key_expr"], "a"),
+        _qualify_addresses_expr(mode["where"], "a"),
+        "",
+    )
+
+
+def fetch_charities(
+    conn, slice_by: str, cluster_key: str, top_n: int, *, lat_long: bool = False
+) -> list[dict]:
+    key_expr, where, gjoin = _member_filter_sql(slice_by, conn, lat_long=lat_long)
     rows = conn.execute(
         f"""
         SELECT DISTINCT c.ein, c.filer_name, c.tax_year, c.receipt_amt, c.grift_ratio, c.domestic_misrep_flag
         FROM Addresses a
+        {gjoin}
         JOIN Charities c ON c.charity_id = a.owner_id
         WHERE ({key_expr}) = ?
           AND ({where})
@@ -383,12 +535,15 @@ def fetch_charities(conn, slice_by: str, cluster_key: str, top_n: int) -> list[d
     return out
 
 
-def fetch_officers(conn, slice_by: str, cluster_key: str, top_n: int) -> list[dict]:
-    key_expr, where = _member_filter_sql(slice_by, conn)
+def fetch_officers(
+    conn, slice_by: str, cluster_key: str, top_n: int, *, lat_long: bool = False
+) -> list[dict]:
+    key_expr, where, gjoin = _member_filter_sql(slice_by, conn, lat_long=lat_long)
     rows = conn.execute(
         f"""
         SELECT DISTINCT o.full_name, o.first_name, o.last_name, o.compensation, o.tax_year
         FROM Addresses a
+        {gjoin}
         JOIN Officers o ON o.officer_id = a.owner_id
         WHERE ({key_expr}) = ?
           AND ({where})
@@ -408,36 +563,55 @@ def fetch_officers(conn, slice_by: str, cluster_key: str, top_n: int) -> list[di
     return out
 
 
-def fetch_grants(conn, slice_by: str, cluster_key: str, top_n: int) -> list[dict]:
-    key_expr, where = _member_filter_sql(slice_by, conn)
+def fetch_grants(
+    conn, slice_by: str, cluster_key: str, top_n: int, *, lat_long: bool = False
+) -> list[dict]:
+    """Top grants for a cluster, excluding name-suppressed / privacy rollups.
+
+    Over-fetches (up to 10× or 1000) then filters via big_pharma_subsidy patterns
+    so the visible top_n are real grantees.
+    """
+    from grant_suppress import is_suppressed_grantee  # noqa: WPS433
+
+    key_expr, where, gjoin = _member_filter_sql(slice_by, conn, lat_long=lat_long)
+    fetch_n = max(top_n * 10, min(1000, top_n * 20))
+    # Alias Grants as gr — colocator mode already uses g for Geocoding.
     rows = conn.execute(
         f"""
-        SELECT DISTINCT g.filer_ein, g.grantee_name, g.grant_amt, g.tax_year
+        SELECT DISTINCT gr.filer_ein, gr.grantee_name, gr.grant_amt, gr.tax_year
         FROM Addresses a
-        JOIN Grants g ON g.grant_id = a.owner_id
+        {gjoin}
+        JOIN Grants gr ON gr.grant_id = a.owner_id
         WHERE ({key_expr}) = ?
           AND ({where})
           AND a.address_type = 'grant'
-        ORDER BY g.grant_amt DESC NULLS LAST
+        ORDER BY gr.grant_amt DESC NULLS LAST
         LIMIT ?
         """,
-        [cluster_key, top_n],
+        [cluster_key, fetch_n],
     ).fetchall()
-    return [
+    out = [
         {
             "filer_ein": fe, "grantee_name": gn, "grant_amt": amt,
             "amt_fmt": fmt_money(amt), "tax_year": yr,
         }
         for fe, gn, amt, yr in rows
+        if not is_suppressed_grantee(gn)
     ]
+    return out[:top_n]
 
 
-def fetch_dot_carriers(conn, slice_by: str, cluster_key: str, top_n: int) -> list[dict]:
-    key_expr, where = _member_filter_sql(slice_by, conn)
+def fetch_dot_carriers(
+    conn, slice_by: str, cluster_key: str, top_n: int, *, lat_long: bool = False
+) -> list[dict]:
+    key_expr, where, gjoin = _member_filter_sql(slice_by, conn, lat_long=lat_long)
     rows = conn.execute(
         f"""
-        SELECT DISTINCT d.dot_number, d.legal_name, d.dba_name, d.status_code, d.power_units, d.phone
+        SELECT DISTINCT
+            d.dot_number, d.legal_name, d.dba_name, d.status_code, d.power_units, d.phone,
+            a.canonical_address
         FROM Addresses a
+        {gjoin}
         JOIN dot_carriers d ON d.id = a.owner_id
         WHERE ({key_expr}) = ?
           AND ({where})
@@ -451,14 +625,151 @@ def fetch_dot_carriers(conn, slice_by: str, cluster_key: str, top_n: int) -> lis
         {
             "dot_number": dot, "legal_name": legal, "dba_name": dba,
             "status_code": status, "power_units": pu, "phone": phone,
+            "canonical_address": (canon or "").strip() or "(no street address)",
         }
-        for dot, legal, dba, status, pu, phone in rows
+        for dot, legal, dba, status, pu, phone, canon in rows
     ]
 
 
+def fetch_address_subgroups(
+    conn,
+    slice_by: str,
+    cluster_key: str,
+    *,
+    lat_long: bool = False,
+    max_addresses: int = 200,
+) -> list[dict]:
+    """Distinct canonical_address breakdown inside a non-address cluster.
+
+    Surfaces suite / building / PO-box splits within colocator, zip, or loose grid.
+    """
+    if slice_by == "address":
+        return []
+    key_expr, where, gjoin = _member_filter_sql(slice_by, conn, lat_long=lat_long)
+    rows = conn.execute(
+        f"""
+        WITH members AS (
+            SELECT
+                COALESCE(NULLIF(TRIM(a.canonical_address), ''), '(no street address)') AS addr,
+                a.address_type,
+                a.owner_id
+            FROM Addresses a
+            {gjoin}
+            WHERE ({key_expr}) = ?
+              AND ({where})
+        ),
+        base AS (
+            SELECT
+                addr AS canonical_address,
+                COUNT(*)::BIGINT AS total_rows,
+                COUNT(DISTINCT address_type)::BIGINT AS multi_type_count,
+                LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
+                SUM(CASE WHEN address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+                         THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
+                SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
+                SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
+                SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_count
+            FROM members
+            GROUP BY addr
+        ),
+        dot_stats AS (
+            SELECT
+                m.addr AS canonical_address,
+                SUM(CASE WHEN d.status_code = 'A' THEN 1 ELSE 0 END)::BIGINT AS dot_active_count,
+                SUM(CASE WHEN d.status_code = 'I' THEN 1 ELSE 0 END)::BIGINT AS dot_inactive_count,
+                SUM(CASE WHEN d.status_code = 'A' THEN COALESCE(d.power_units, 0) ELSE 0 END)::BIGINT
+                    AS active_power_units,
+                SUM(CASE WHEN d.status_code = 'I' THEN COALESCE(d.power_units, 0) ELSE 0 END)::BIGINT
+                    AS inactive_power_units
+            FROM members m
+            INNER JOIN dot_carriers d ON d.id = m.owner_id
+                AND m.address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+            GROUP BY m.addr
+        )
+        SELECT
+            b.canonical_address,
+            b.total_rows,
+            b.multi_type_count,
+            b.address_types,
+            b.dot_carrier_count,
+            b.charity_count,
+            b.grant_count,
+            b.officer_count,
+            COALESCE(ds.dot_active_count, 0),
+            COALESCE(ds.dot_inactive_count, 0),
+            COALESCE(ds.active_power_units, 0),
+            COALESCE(ds.inactive_power_units, 0)
+        FROM base b
+        LEFT JOIN dot_stats ds ON ds.canonical_address = b.canonical_address
+        ORDER BY b.dot_carrier_count DESC, b.total_rows DESC, b.canonical_address
+        LIMIT ?
+        """,
+        [cluster_key, max_addresses],
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        (
+            addr, total, multi, types, dots, charities, grants, officers,
+            act_n, ina_n, act_pu, ina_pu,
+        ) = row
+        if isinstance(types, str):
+            type_list = [t.strip() for t in types.strip("[]").split(",") if t.strip()]
+        elif types is None:
+            type_list = []
+        else:
+            type_list = list(types)
+        out.append({
+            "canonical_address": addr,
+            "total_rows": int(total or 0),
+            "multi_type_count": int(multi or 0),
+            "address_types": type_list,
+            "dot_carrier_count": int(dots or 0),
+            "charity_count": int(charities or 0),
+            "grant_count": int(grants or 0),
+            "officer_count": int(officers or 0),
+            "dot_active_count": int(act_n or 0),
+            "dot_inactive_count": int(ina_n or 0),
+            "active_power_units": int(act_pu or 0),
+            "inactive_power_units": int(ina_pu or 0),
+            "maps_url": google_maps_url(addr) if addr and not addr.startswith("(") else "",
+            "phy_is_po_box": is_po_box(addr),
+        })
+    return out
+
+
+def group_dot_by_address(dot_carriers: list[dict]) -> list[dict]:
+    """Group DOT carriers by street address; sort by total power units (desc)."""
+    groups: dict[str, list] = defaultdict(list)
+    for d in dot_carriers:
+        addr = d.get("canonical_address") or "(no street address)"
+        groups[addr].append(d)
+    out: list[dict] = []
+    for addr, carriers in sorted(
+        groups.items(),
+        key=lambda item: sum(x.get("power_units") or 0 for x in item[1]),
+        reverse=True,
+    ):
+        out.append({
+            "canonical_address": addr,
+            "carriers": carriers,
+            "maps_url": (
+                google_maps_url(addr)
+                if addr and not str(addr).startswith("(")
+                else ""
+            ),
+            "phy_is_po_box": is_po_box(addr),
+        })
+    return out
+
+
 def render_template(name: str, **kwargs) -> str:
-    path = SCRIPT_DIR / "templates" / name
-    tpl = Template(filename=str(path))
+    from mako.lookup import TemplateLookup
+
+    lookup = TemplateLookup(
+        directories=[str(SCRIPT_DIR / "templates")],
+        input_encoding="utf-8",
+    )
+    tpl = lookup.get_template(name)
     return tpl.render(css=CSS, **kwargs)
 
 
@@ -474,23 +785,33 @@ def write_report(
     physical_notes_path: Path,
     include_officers: bool,
     include_grants: bool,
+    *,
+    lat_long: bool = False,
 ) -> int:
     if slice_by not in SLICE_MODES:
         raise ValueError(f"Unknown slice-by {slice_by!r}; choose from {list(SLICE_MODES)}")
-
-    mode = SLICE_MODES[slice_by]
-    output_dir.mkdir(parents=True, exist_ok=True)
-    data_dir = output_dir / "data"
-    data_dir.mkdir(exist_ok=True)
-
-    notes = load_physical_notes(physical_notes_path)
-    generated_at = datetime.now().isoformat(timespec="seconds")
-    report_date = date.today().isoformat()
+    if lat_long and slice_by != "colocator":
+        raise ValueError("--lat-long only applies with --slice-by colocator")
 
     conn = duckdb.connect(db_path, read_only=True)
     try:
+        mode = resolve_slice_mode(slice_by, conn, lat_long=lat_long)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        data_dir = output_dir / "data"
+        data_dir.mkdir(exist_ok=True)
+
+        notes = load_physical_notes(physical_notes_path)
+        generated_at = datetime.now().isoformat(timespec="seconds")
+        report_date = date.today().isoformat()
+
         clusters_raw = fetch_clusters(
-            conn, slice_by, min_multi_type, min_dot_carriers, require_grift_signal, max_clusters
+            conn,
+            slice_by,
+            min_multi_type,
+            min_dot_carriers,
+            require_grift_signal,
+            max_clusters,
+            lat_long=lat_long,
         )
         if not clusters_raw:
             print("No clusters matched selection criteria.")
@@ -503,7 +824,9 @@ def write_report(
             slug = slugify_address(f"{slice_by}-{key}")
             detail_file = f"{slug}.html"
 
-            dot_carriers_full = fetch_dot_carriers(conn, slice_by, key, 9999)
+            dot_carriers_full = fetch_dot_carriers(
+                conn, slice_by, key, 9999, lat_long=lat_long
+            )
 
             active_count = sum(1 for d in dot_carriers_full if d.get("status_code") == "A")
             inactive_count = sum(1 for d in dot_carriers_full if d.get("status_code") == "I")
@@ -538,10 +861,20 @@ def write_report(
                 c["canonical_address"] = f"{key}  ·  e.g. {sample}" if sample != key else key
             clusters_out.append(c)
 
-            charities = fetch_charities(conn, slice_by, key, top_n)
-            officers = fetch_officers(conn, slice_by, key, top_n) if include_officers else []
-            grants = fetch_grants(conn, slice_by, key, top_n) if include_grants else []
-            dot_carriers_display = fetch_dot_carriers(conn, slice_by, key, top_n)
+            charities = fetch_charities(conn, slice_by, key, top_n, lat_long=lat_long)
+            officers = (
+                fetch_officers(conn, slice_by, key, top_n, lat_long=lat_long)
+                if include_officers
+                else []
+            )
+            grants = (
+                fetch_grants(conn, slice_by, key, top_n, lat_long=lat_long)
+                if include_grants
+                else []
+            )
+            dot_carriers_display = fetch_dot_carriers(
+                conn, slice_by, key, top_n, lat_long=lat_long
+            )
 
             phone_groups: dict[str, list] = defaultdict(list)
             for d in dot_carriers_full:
@@ -554,6 +887,62 @@ def write_report(
                 reverse=True,
             )
 
+            # Break carriers into street-address groups (always useful) and, for
+            # non-address slices, also list every distinct canonical_address in
+            # the cluster (suites / multi-street shells).
+            address_subgroups: list[dict] = []
+            address_groups_sorted = group_dot_by_address(dot_carriers_full)
+            if slice_by != "address":
+                address_subgroups = fetch_address_subgroups(
+                    conn, slice_by, key, lat_long=lat_long
+                )
+            c["distinct_address_count"] = (
+                len(address_subgroups)
+                if address_subgroups
+                else (1 if slice_by == "address" else len(address_groups_sorted) or 0)
+            )
+
+            from cluster_table_payload import (  # noqa: WPS433
+                build_detail_tables,
+                dumps_table_json,
+            )
+
+            detail_tables = build_detail_tables(
+                charities=charities,
+                officers=officers,
+                grants=grants,
+                address_subgroups=address_subgroups if slice_by != "address" else None,
+                phone_groups=phone_groups_sorted,
+                address_groups=address_groups_sorted,
+            )
+            from map_points import (  # noqa: WPS433
+                clusters_to_map_points,
+                single_point_from_key,
+            )
+
+            detail_map = clusters_to_map_points([c], slice_by=slice_by) or single_point_from_key(
+                key,
+                label=c.get("canonical_address") or key,
+                slice_by=slice_by,
+                sample_address=sample,
+            )
+            from breadcrumbs import crumbs_national_detail  # noqa: WPS433
+            from widen_links import build_widen_links  # noqa: WPS433
+
+            report_day = report_date
+            reports_root = SCRIPT_DIR / "reports"
+            widen_links = build_widen_links(
+                focus="dot",
+                slice_by=slice_by,
+                cluster_key=key,
+                sample_address=sample,
+                report_day=report_day,
+                reports_dir=reports_root,
+                output_dir=output_dir,
+                conn=conn,
+                lat_long=lat_long,
+                context="national",
+            )
             html = render_template(
                 "address_cluster_detail.mako",
                 cluster=c,
@@ -562,8 +951,19 @@ def write_report(
                 grants=grants,
                 dot_carriers=dot_carriers_display,
                 phone_groups=phone_groups_sorted,
+                address_subgroups=address_subgroups,
+                address_groups=address_groups_sorted,
+                show_address_subgroups=(slice_by != "address"),
                 physical_note=physical_note_for(sample, notes) or physical_note_for(key, notes),
                 generated_at=generated_at,
+                detail_tables_json=dumps_table_json(detail_tables),
+                map_points=detail_map,
+                breadcrumbs=crumbs_national_detail(
+                    focus="dot",
+                    slice_by=slice_by,
+                    detail_label=str(c.get("canonical_address") or key),
+                ),
+                widen_links=widen_links,
             )
             (output_dir / detail_file).write_text(html, encoding="utf-8")
 
@@ -578,10 +978,27 @@ def write_report(
                 "active_power_units": c.get("dot_active_power_units"),
                 "inactive_power_units": c.get("dot_inactive_power_units"),
                 "ia_ratio": c.get("ia_ratio"),
+                "distinct_address_count": c.get("distinct_address_count"),
                 "physical_note": physical_note_for(sample, notes),
+                "address_subgroups": address_subgroups,
+                "address_groups": [],
                 "phone_groups": [],
                 "generated_at": generated_at,
             }
+
+            for ag in address_groups_sorted:
+                carriers = ag["carriers"]
+                active = [d for d in carriers if d.get("status_code") == "A"]
+                inactive = [d for d in carriers if d.get("status_code") != "A"]
+                json_data["address_groups"].append({
+                    "canonical_address": ag["canonical_address"],
+                    "maps_url": ag.get("maps_url"),
+                    "total_power_units": sum((d.get("power_units") or 0) for d in carriers),
+                    "active_count": len(active),
+                    "inactive_count": len(inactive),
+                    "active": active,
+                    "inactive": inactive,
+                })
 
             for phone, carriers in phone_groups_sorted:
                 active = [d for d in carriers if d.get("status_code") == "A"]
@@ -598,6 +1015,24 @@ def write_report(
             json_path = data_dir / f"{slug}.json"
             json_path.write_text(json.dumps(json_data, indent=2, default=str), encoding="utf-8")
 
+        from cluster_table_payload import (  # noqa: WPS433
+            build_dot_cluster_table,
+            dumps_table_json,
+        )
+
+        # Ensure active_power_units is set for table (alias from enrich fields)
+        for c in clusters_out:
+            if c.get("active_power_units") is None:
+                c["active_power_units"] = c.get("dot_active_power_units") or 0
+
+        table_payload = build_dot_cluster_table(
+            clusters_out, min_dot_carriers=min_dot_carriers
+        )
+        from map_points import clusters_to_map_points  # noqa: WPS433
+
+        map_points = clusters_to_map_points(clusters_out, slice_by=slice_by)
+        from breadcrumbs import crumbs_national_index  # noqa: WPS433
+
         index_html = render_template(
             "address_cluster_index.mako",
             clusters=clusters_out,
@@ -610,7 +1045,14 @@ def write_report(
             require_grift_signal=require_grift_signal,
             slice_by=slice_by,
             slice_label=mode["label"],
+            cluster_table_json=dumps_table_json(table_payload),
+            map_points=map_points,
+            breadcrumbs=crumbs_national_index(focus="dot", slice_by=slice_by),
         )
+        if map_points:
+            (data_dir / "map_points.json").write_text(
+                json.dumps(map_points, indent=2), encoding="utf-8"
+            )
         (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
         serializable = []
@@ -626,21 +1068,24 @@ def write_report(
             "db_path": db_path,
             "slice_by": slice_by,
             "slice_label": mode["label"],
+            "lat_long": lat_long,
             "criteria": {
                 "min_multi_type": min_multi_type,
                 "min_dot_carriers": min_dot_carriers,
                 "require_grift_signal": require_grift_signal,
                 "top_n_entities": top_n,
                 "max_clusters": max_clusters,
+                "lat_long": lat_long,
             },
             "cluster_count": len(clusters_out),
         }
         with open(output_dir / "export_metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
+        ll_note = " `--lat-long` (LL: only)" if lat_long else ""
         readme = f"""# Cluster Report — {mode['label']} — {report_date}
 
-Static HTML drill-down grouped by **{mode['label']}** (`--slice-by {slice_by}`).
+Static HTML drill-down grouped by **{mode['label']}** (`--slice-by {slice_by}`{ll_note}).
 
 - Open `index.html` in a browser (no server required).
 - Map links use a sample street address from the cluster when the key is not a street.
@@ -654,6 +1099,8 @@ DB: {db_path}
 
         print(f"Wrote {len(clusters_out)} cluster pages to {output_dir}")
         print(f"  slice-by: {slice_by} ({mode['label']})")
+        if lat_long:
+            print("  lat-long: LL: only (PO/FA/… excluded)")
         print(f"  index: {output_dir / 'index.html'}")
         return len(clusters_out)
     finally:
@@ -671,6 +1118,13 @@ def main():
         default="address",
         help="Cluster key: address (default), colocator, zipcode, loose_colocator",
     )
+    parser.add_argument(
+        "--lat-long",
+        "--lat_long",
+        dest="lat_long",
+        action="store_true",
+        help="With --slice-by colocator: only LL:lat:lon keys (exclude PO:/FA:/…)",
+    )
     parser.add_argument("--output-dir", help="Output folder (default: reports/<slice>_YYYY-MM-DD)")
     parser.add_argument("--physical-notes", default=str(SCRIPT_DIR / "physical_notes.json"))
     parser.add_argument("--min-multi-type", type=int, default=7)
@@ -682,7 +1136,11 @@ def main():
     parser.add_argument("--no-grants", action="store_true")
     args = parser.parse_args()
 
-    prefix = SLICE_MODES[args.slice_by]["out_dir_prefix"]
+    if args.lat_long and args.slice_by != "colocator":
+        raise SystemExit("--lat-long only applies with --slice-by colocator")
+
+    # Resolve output prefix (may be colocator_ll_clusters when lat_long)
+    prefix = resolve_slice_mode(args.slice_by, lat_long=args.lat_long)["out_dir_prefix"]
     out = (
         Path(args.output_dir)
         if args.output_dir
@@ -703,6 +1161,7 @@ def main():
         physical_notes_path=Path(args.physical_notes),
         include_officers=not args.no_officers,
         include_grants=not args.no_grants,
+        lat_long=args.lat_long,
     )
 
 

@@ -613,6 +613,41 @@ CREATE INDEX IF NOT EXISTS idx_medicare_spending_billing_npi ON medicare_provide
 CREATE INDEX IF NOT EXISTS idx_medicare_spending_hcpcs ON medicare_provider_spending(hcpcs_code);
 CREATE INDEX IF NOT EXISTS idx_medicare_providers_npi ON medicare_providers(npi);
 
+-- Consolidated Medicare spend (built by build_medicare_provider_rollup.py from line grain).
+-- Most billing NPIs use a short HCPCS list (median ~4 types); these tables make $ ranking
+-- and type/$ detail pages cheap without scanning medicare_provider_spending (230M+).
+CREATE TABLE IF NOT EXISTS medicare_provider_hcpcs (
+    npi VARCHAR NOT NULL,
+    hcpcs_code VARCHAR NOT NULL,
+    spend_rows BIGINT,
+    total_claims BIGINT,
+    total_beneficiaries BIGINT,
+    total_paid DOUBLE,
+    first_month VARCHAR,
+    last_month VARCHAR
+);
+CREATE TABLE IF NOT EXISTS medicare_provider_rollup (
+    npi VARCHAR NOT NULL,
+    hcpcs_type_count BIGINT,
+    spend_rows BIGINT,
+    total_claims BIGINT,
+    total_beneficiaries BIGINT,
+    total_paid DOUBLE,
+    first_month VARCHAR,
+    last_month VARCHAR,
+    top_hcpcs_code VARCHAR,
+    top_hcpcs_paid DOUBLE,
+    provider_id UUID,
+    organization_name VARCHAR,
+    person_name VARCHAR,
+    entity_type_code VARCHAR
+);
+CREATE INDEX IF NOT EXISTS idx_medicare_provider_hcpcs_npi ON medicare_provider_hcpcs(npi);
+CREATE INDEX IF NOT EXISTS idx_medicare_provider_hcpcs_code ON medicare_provider_hcpcs(hcpcs_code);
+CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_npi ON medicare_provider_rollup(npi);
+CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_paid ON medicare_provider_rollup(total_paid);
+CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_provider_id ON medicare_provider_rollup(provider_id);
+
 -- Treasury OFAC SDN sanctions (Treasury sanctions list ingest)
 CREATE TABLE IF NOT EXISTS sanctioned_entities (
     id UUID DEFAULT uuidv7() PRIMARY KEY,

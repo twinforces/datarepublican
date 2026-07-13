@@ -38,3 +38,20 @@ __pycache__/
 # Cache / output scratch
 _cache/
 _output/
+
+# Dot reporting: generated HTML (large; rebuild via overnight_full_rebuild.sh)
+dot_reporting/reports/
+dot_reporting/*.log
+dot_reporting/*_HANDOFF.md
+dot_reporting/CHURCH_QUEUE_STATUS.md
+
+# Process / supervisor pid files
+*.pid
+backfill_colocators.pid
+geolocate_archive.pid
+grant_match.pid
+overnight_supervisor.pid
+
+# Local zip source backups
+US_zips.txt.gz.bak_*
+US_zips.header.txt
