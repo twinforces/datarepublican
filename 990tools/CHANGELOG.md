@@ -5,6 +5,25 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-08 (Focus report product + contractor owner_id)
+
+### Report admission = membership; rank + max_clusters (2026-08-01)
+- **Why:** Density floors (`min_multi`, `min_focus`) blocked pure Medicare mills (e.g. one HCPCS at one address) and were a poor substitute for ranking. Multi-type crossover was less useful than expected. `require-grift-signal` is a no-op (grift not calculated).
+- **Admission:** `focus_count > 0` (DOT: phy carrier count > 0). Optional `--min-multi-type` / `--min-focus` only if > 0.
+- **Suite size:** `--max-clusters` (default 100) after rank metric.
+- Medicare **rank:** `paid_per_hcpcs_type` (then $ , narrower books). FEC **rank:** entity-row density; detail resolves committee names; contributors first.
+- State focus detail pages load entities (HCPCS / contractors / FEC) like national.
+- Files: `dot_reporting/generate_focus_reports.py`, `generate_address_reports.py`, `generate_state_reports.py`, `state_research.py`, `domain_briefing.py`, `cluster_table_payload.py`, index templates.
+
+### Contractor Addresses.owner_id (2026-08-01)
+- **Bug:** `Contractor.build_address` set `owner_id` only when `contractor_id` was already assigned; at parse time it was always null → 100% contractor addresses unjoinable.
+- **Fix:** `owner_id=self.id` (generate UUID before address build), same as Grant/Officer.
+- **Backfill:** `scripts/backfill_contractor_owner_id.py` — name+colocator then name RN pairing; production **984,680** rows joined (0 null owners remaining).
+- File: `models/contractor.py`.
+
+### Film / demo
+- `demo.md` — walkthrough script (DOT phy, OKC mail trap, Medicare T1019, OFAC); suites day-stamped.
+
 ## [Unreleased] - 2026-07 (Geolocate Trilogy + Grok Failure Taxonomy)
 
 ### Pipeline order + DOT report slices (Jul 10, 2026)
@@ -12,9 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `dot_reporting/generate_address_reports.py`: `--slice-by address|colocator|zipcode|loose_colocator`
   (default DB `/Volumes/Data/final/irs990.duckdb.geolocate`).
 
+### geolocate bookends: prev=front, archive=back (Jul 10, 2026)
+
+- Pipeline: `geolocate_prev` → census → api → grok → `geolocate_archive`.
+- `geolocate_prev` is FRONT only (archive TSV load + early finalize).
+- `geolocate_archive` is BACK: runs `finalize_colocators_from_geocoding` (Geocoding →
+  Addresses → owners + lat/lon + loose) then exports TSV.
+- Always-on apply in geocode match path also writes Addresses + owners (not Geocoding-only).
+- `grant_match` uses **Grants/Charities** colocator (+ loose), not Addresses.
+
 ### geolocate_archive bookend (Jul 9, 2026)
 - Archive TSV columns: `canonical_address`, `colocator`, **`geocoding_status`** (legacy 2-col still loads).
-- `loose_colocator` is not archived; it lives on Addresses/owners and is computed later in `geolocate_prev`.
+- `loose_colocator` is not archived; it lives on Addresses/owners; computed at front (`geolocate_prev`)
+  after archive load and again at back (`geolocate_archive`) after census/api/grok.
 - `geolocate_prev` restores archived status onto Geocoding; then lat/lon + loose on Addresses/owners.
 - `geolocate_prev` deletes empty address shells (blank street/city/zip, null `geocoding_id`, no colocator)
   so officer/contractor XML stubs do not pollute stats; address-dedup never geocodes blank canonicals.

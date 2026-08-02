@@ -4,6 +4,25 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-08-01: Report suite — admission, ranking, contractor owner_id (in flight)
+
+**What:** Fix contractor `Addresses.owner_id` (pipeline + prod backfill). Rework focus/DOT **admission** to domain membership only (`focus_count > 0` / phy carriers > 0) — drop default `min_multi` / `min_focus` density floors. Medicare rank = **paid/HCPCS types**; FEC rank = density + resolve committee names; state focus pages load entities. Regen v2 running for medicare/contractor/fec national + by-state (`2026-08-01` suites). Film script: `demo.md`.
+
+**Why:** Film/review found empty contractor names (100% null `owner_id`), Medicare hospitals winning pure-$ sort, single-HCPCS single-address mills gated out by `min_focus=30`, and FEC mega-wires as bare committee IDs. Multi-type crossover floors were not useful.
+
+**How:**
+- `models/contractor.py`: `owner_id=self.id` (same pattern as Grant/Officer)
+- `scripts/backfill_contractor_owner_id.py` — prod backfill: **984,680** joinable (was 0)
+- `generate_focus_reports.py` / `generate_address_reports.py` / `generate_state_reports.py` / `state_research.py`: admission `focus>0`, optional floors only if `--min-* > 0`; Medicare `paid_per_hcpcs_type`; FEC contributors first + committee name join
+- `domain_briefing.py` + index templates: self-document rank/admission
+- Log: `dot_reporting/regen_focus_v2_*.log` (admission=focus>0)
+
+**Git hashes** (`grokrefactor3`): `18082440` (contractor owner_id + backfill), `a30ba6af` (admission/rank/entities); docs hygiene on branch tip after those two.
+
+**In progress:** full matrix regen v2 (national then by-state); master index refresh after each suite.
+
+---
+
 ## 2026-07-10: grant_match kickoff + DOT multi-slice reports
 
 **What:** Pipeline order: `geolocate_archive` → **`grant_match`** → `backfill` → **`photos`**. DOT cluster HTML generator accepts `--slice-by` address / colocator / zipcode / loose_colocator. Project hygiene commit; production `grant_match` started.
@@ -41,14 +60,14 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ## 2026-07-09: geolocate_archive + geolocate_prev bookend (status in TSV)
 
-**What:** Extend archive TSV so the next rebuild can restore **geocoding_status** with **colocator**, not only the colocator string. Correct model: `loose_colocator` lives on **Addresses** (and owners), is **calculated later** in `geolocate_prev`, and is **not** stored on Geocoding or required in the archive.
+**What:** Extend archive TSV so the next rebuild can restore **geocoding_status** with **colocator**, not only the colocator string. Correct model: `loose_colocator` lives on **Addresses** (and owners), is **not** stored on Geocoding or the archive. **`geolocate_prev` = FRONT** (archive load); **`geolocate_archive` = BACK** (finalize + export).
 
 **Why:** Paid/free geocode results must round-trip without re-spend; status (Match:Census, Match:Grok-4, grok:UNKN, …) matters for analytics and for not collapsing everything to Match:Archive.
 
 **How:**
 - Archive columns: `canonical_address`, `colocator`, `geocoding_status`
 - `geolocate_prev` restores status + colocator onto **Geocoding**; legacy 2-col TSV still works (infers Match:Archive / grok:*)
-- After load: lat/lon backfill, then **loose_colocator** on Addresses + owners from 0.5° grid
+- After front load **and** at back archive: `finalize_colocators_from_geocoding` → Addresses + owners + lat/lon + **loose_colocator**
 - Files: `geolocate_archive_processor.py`, `geolocate_prev_processor.py`
 
 **Production run (2026-07-09):** succeeded.
