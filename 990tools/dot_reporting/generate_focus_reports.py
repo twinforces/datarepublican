@@ -43,6 +43,7 @@ from generate_address_reports import (  # type: ignore  # noqa: E402
     is_po_box,
     load_physical_notes,
     physical_note_for,
+    mode_uses_alias,
     resolve_slice_mode,
     slugify_address,
     _member_filter_sql,
@@ -99,14 +100,16 @@ FOCUS_DOMAINS: dict[str, dict[str, Any]] = {
         "label": "Medicare / NPPES providers",
         "out_prefix": "medicare",
         "address_types": ("nppes_practice", "nppes_mailing"),
-        "min_focus_default": 30,
-        "min_multi_default": 5,
+        # Admission is focus_count > 0 only; rank + max_clusters select the suite.
+        "min_focus_default": 0,
+        "min_multi_default": 0,
         "entity_title": "Medicare / NPPES providers",
         "amount_label": "Medicare paid (billing NPI)",
         "review_tag": "medicare",
-        # Rank by $ from medicare_provider_rollup (NPI-level, not 230M line grain).
-        "rank_metric": "focus_amount",
-        "rank_label": "Medicare $",
+        # Mill signal: high $ per HCPCS type (narrow codebooks with big spend).
+        # Hospitals win pure $; paid/types surfaces personal-care / device stacks.
+        "rank_metric": "paid_per_hcpcs_type",
+        "rank_label": "Paid / HCPCS types",
     },
     "fec": {
         "label": "FEC political money",
@@ -118,20 +121,21 @@ FOCUS_DOMAINS: dict[str, dict[str, Any]] = {
             "fec_operating_expenditure",
             "fec_candidate_spending",
         ),
-        "min_focus_default": 80,
-        "min_multi_default": 5,
+        "min_focus_default": 0,
+        "min_multi_default": 0,
         "entity_title": "FEC entities",
         "amount_label": "Contribution / transaction $",
         "review_tag": "fec",
-        "rank_metric": "focus_amount",
-        "rank_label": "FEC $",
+        # Donor / entity density first — not committee mega-wires.
+        "rank_metric": "focus_count",
+        "rank_label": "FEC entity rows",
     },
     "contractor": {
         "label": "990 contractors",
         "out_prefix": "contractor",
         "address_types": ("contractor",),
-        "min_focus_default": 15,
-        "min_multi_default": 4,
+        "min_focus_default": 0,
+        "min_multi_default": 0,
         "entity_title": "Contractors",
         "amount_label": "Contractor payments",
         "review_tag": "contractor",
@@ -143,8 +147,8 @@ FOCUS_DOMAINS: dict[str, dict[str, Any]] = {
         "label": "990 grants",
         "out_prefix": "grants",
         "address_types": ("grant",),
-        "min_focus_default": 40,
-        "min_multi_default": 4,
+        "min_focus_default": 0,
+        "min_multi_default": 0,
         "entity_title": "Grants",
         "amount_label": "Grant amounts",
         "review_tag": "grants",
@@ -177,7 +181,8 @@ def build_focus_cluster_sql(
     key = mode["key_expr"]
     where = mode["where"]
     from_sql = mode.get("from_sql", "FROM Addresses")
-    if mode.get("needs_geocoding_join") == "1":
+    # mode_uses_alias: colocator (Geocoding) or zipcode (Zips) use Addresses a
+    if mode_uses_alias(mode):
         canon, atype, owner, aid = (
             "a.canonical_address",
             "a.address_type",
@@ -204,7 +209,8 @@ money AS (
         CAST(0 AS DOUBLE) AS focus_amount,
         CAST(0 AS BIGINT) AS hcpcs_type_count_sum,
         CAST(0 AS BIGINT) AS total_claims_sum,
-        CAST(0 AS BIGINT) AS npi_with_spend
+        CAST(0 AS BIGINT) AS npi_with_spend,
+        CAST(0 AS DOUBLE) AS paid_per_hcpcs_type
     WHERE FALSE
 )
 """
@@ -216,7 +222,15 @@ money AS (
         COALESCE(SUM(r.total_paid), 0)::DOUBLE AS focus_amount,
         COALESCE(SUM(r.hcpcs_type_count), 0)::BIGINT AS hcpcs_type_count_sum,
         COALESCE(SUM(r.total_claims), 0)::BIGINT AS total_claims_sum,
-        COUNT(DISTINCT r.npi)::BIGINT AS npi_with_spend
+        COUNT(DISTINCT r.npi)::BIGINT AS npi_with_spend,
+        -- Cluster intensity: total $ / total HCPCS type rows across NPIs.
+        -- High when a few codes carry most of the money (mill-shaped).
+        CASE
+            WHEN COALESCE(SUM(r.hcpcs_type_count), 0) > 0
+            THEN COALESCE(SUM(r.total_paid), 0)::DOUBLE
+                 / SUM(r.hcpcs_type_count)::DOUBLE
+            ELSE 0::DOUBLE
+        END AS paid_per_hcpcs_type
     FROM keyed k
     INNER JOIN medicare_providers m
         ON m.id = k.owner_id
@@ -226,25 +240,47 @@ money AS (
 )
 """
     elif focus == "fec":
+        # $ still computed for display; default rank is focus_count (density).
         money_cte = f"""
 money AS (
-    SELECT cluster_key, SUM(amt)::DOUBLE AS focus_amount FROM (
-        SELECT k.cluster_key, COALESCE(f.contribution_amount, 0) AS amt
+    SELECT
+        cluster_key,
+        SUM(amt)::DOUBLE AS focus_amount,
+        COUNT(DISTINCT CASE WHEN kind = 'contributor' THEN entity_key END)::BIGINT
+            AS distinct_contributors
+    FROM (
+        SELECT
+            k.cluster_key,
+            COALESCE(f.contribution_amount, 0) AS amt,
+            'contributor' AS kind,
+            COALESCE(NULLIF(TRIM(f.contributor_name), ''), CAST(f.id AS VARCHAR)) AS entity_key
         FROM keyed k
         INNER JOIN fec_individual_contributions f
             ON f.id = k.owner_id AND k.address_type = 'fec_contributor'
         UNION ALL
-        SELECT k.cluster_key, COALESCE(t.transaction_amount, 0)
+        SELECT
+            k.cluster_key,
+            COALESCE(t.transaction_amount, 0),
+            'transaction',
+            COALESCE(NULLIF(TRIM(t.fec_cmte_id), ''), CAST(t.id AS VARCHAR))
         FROM keyed k
         INNER JOIN fec_committee_transactions t
             ON t.id = k.owner_id AND k.address_type = 'fec_committee_transaction'
         UNION ALL
-        SELECT k.cluster_key, COALESCE(o.expenditure_amount, 0)
+        SELECT
+            k.cluster_key,
+            COALESCE(o.expenditure_amount, 0),
+            'expenditure',
+            COALESCE(NULLIF(TRIM(o.fec_cmte_id), ''), CAST(o.id AS VARCHAR))
         FROM keyed k
         INNER JOIN fec_operating_expenditures o
             ON o.id = k.owner_id AND k.address_type = 'fec_operating_expenditure'
         UNION ALL
-        SELECT k.cluster_key, COALESCE(c.spending_amount, 0)
+        SELECT
+            k.cluster_key,
+            COALESCE(c.spending_amount, 0),
+            'candidate',
+            COALESCE(NULLIF(TRIM(c.fec_cand_id), ''), CAST(c.id AS VARCHAR))
         FROM keyed k
         INNER JOIN fec_candidate_spendings c
             ON c.id = k.owner_id AND k.address_type = 'fec_candidate_spending'
@@ -284,17 +320,35 @@ money AS (
     # Per-focus ORDER BY for "top" clusters
     rank_metric = domain.get("rank_metric", "focus_count")
     if focus == "medicare":
-        # $ first; prefer fewer HCPCS types (home-care / device grift often narrow)
-        # then density of NPIs with spend.
+        # paid/types first (mill intensity); then raw $; prefer narrower books on ties.
         order_by = (
+            "COALESCE(m.paid_per_hcpcs_type, 0) DESC, "
             "COALESCE(m.focus_amount, 0) DESC, "
+            "COALESCE(m.hcpcs_type_count_sum, 0) ASC, "
             "COALESCE(m.npi_with_spend, 0) DESC, "
             "b.focus_count DESC"
         )
         money_select_extra = (
             ", COALESCE(m.hcpcs_type_count_sum, 0) AS hcpcs_type_count_sum, "
             "COALESCE(m.total_claims_sum, 0) AS total_claims_sum, "
-            "COALESCE(m.npi_with_spend, 0) AS npi_with_spend"
+            "COALESCE(m.npi_with_spend, 0) AS npi_with_spend, "
+            "COALESCE(m.paid_per_hcpcs_type, 0) AS paid_per_hcpcs_type, "
+            "0::BIGINT AS distinct_contributors"
+        )
+    elif focus == "fec":
+        # Density of FEC rows first; $ secondary so mega-wires don't own the list.
+        order_by = (
+            "b.focus_count DESC, "
+            "COALESCE(m.distinct_contributors, 0) DESC, "
+            "COALESCE(m.focus_amount, 0) DESC, "
+            "b.total_rows DESC"
+        )
+        money_select_extra = (
+            ", 0::BIGINT AS hcpcs_type_count_sum, "
+            "0::BIGINT AS total_claims_sum, "
+            "0::BIGINT AS npi_with_spend, "
+            "0::DOUBLE AS paid_per_hcpcs_type, "
+            "COALESCE(m.distinct_contributors, 0) AS distinct_contributors"
         )
     elif rank_metric == "focus_amount":
         order_by = (
@@ -303,7 +357,9 @@ money AS (
         money_select_extra = (
             ", 0::BIGINT AS hcpcs_type_count_sum, "
             "0::BIGINT AS total_claims_sum, "
-            "0::BIGINT AS npi_with_spend"
+            "0::BIGINT AS npi_with_spend, "
+            "0::DOUBLE AS paid_per_hcpcs_type, "
+            "0::BIGINT AS distinct_contributors"
         )
     elif rank_metric == "distinct_addresses":
         order_by = (
@@ -313,7 +369,9 @@ money AS (
         money_select_extra = (
             ", 0::BIGINT AS hcpcs_type_count_sum, "
             "0::BIGINT AS total_claims_sum, "
-            "0::BIGINT AS npi_with_spend"
+            "0::BIGINT AS npi_with_spend, "
+            "0::DOUBLE AS paid_per_hcpcs_type, "
+            "0::BIGINT AS distinct_contributors"
         )
     else:
         order_by = (
@@ -322,7 +380,9 @@ money AS (
         money_select_extra = (
             ", 0::BIGINT AS hcpcs_type_count_sum, "
             "0::BIGINT AS total_claims_sum, "
-            "0::BIGINT AS npi_with_spend"
+            "0::BIGINT AS npi_with_spend, "
+            "0::DOUBLE AS paid_per_hcpcs_type, "
+            "0::BIGINT AS distinct_contributors"
         )
 
     return f"""
@@ -348,7 +408,7 @@ base AS (
         COUNT(DISTINCT CASE WHEN {type_pred}
             THEN COALESCE(NULLIF(TRIM(canonical_address), ''), CAST(address_id AS VARCHAR))
             END)::BIGINT AS distinct_focus_addresses,
-        SUM(CASE WHEN address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+        SUM(CASE WHEN address_type = 'dot_carrier_phy'
                  THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
         SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
         SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
@@ -399,15 +459,18 @@ SELECT
 FROM base b
 LEFT JOIN charity_signals cs ON cs.cluster_key = b.cluster_key
 LEFT JOIN money m ON m.cluster_key = b.cluster_key
-WHERE (
-    b.multi_type_count >= ?
-    OR b.focus_count >= ?
-)
-AND (
-    ? = 0
-    OR COALESCE(cs.max_grift_ratio, 0) > 5
-    OR COALESCE(cs.misrep_count, 0) > 0
-)
+WHERE
+    -- Domain membership only: at least one focus address row at this key.
+    -- No min_multi / min_focus density floors — rank metric + LIMIT pick the suite.
+    b.focus_count > 0
+    -- Optional legacy floors (0 = off). Prefer omitting; use rank + max_clusters.
+    AND (? <= 0 OR b.multi_type_count >= ?)
+    AND (? <= 0 OR b.focus_count >= ?)
+    AND (
+        ? = 0
+        OR COALESCE(cs.max_grift_ratio, 0) > 5
+        OR COALESCE(cs.misrep_count, 0) > 0
+    )
 ORDER BY {order_by}
 LIMIT ?
 """
@@ -470,8 +533,17 @@ def fetch_clusters_focus(
         sql_limit = max(limit * 10, min(1000, limit * 15))
 
     sql = build_focus_cluster_sql(slice_by, focus, conn, lat_long=lat_long)
+    # Bind: multi floor (twice), focus floor (twice), grift flag, limit
     rows = conn.execute(
-        sql, [min_multi, min_focus, 1 if require_grift else 0, sql_limit]
+        sql,
+        [
+            int(min_multi or 0),
+            int(min_multi or 0),
+            int(min_focus or 0),
+            int(min_focus or 0),
+            1 if require_grift else 0,
+            sql_limit,
+        ],
     ).fetchall()
     cols = [
         "cluster_key",
@@ -494,6 +566,8 @@ def fetch_clusters_focus(
         "hcpcs_type_count_sum",
         "total_claims_sum",
         "npi_with_spend",
+        "paid_per_hcpcs_type",
+        "distinct_contributors",
     ]
     out = []
     for row in rows:
@@ -510,6 +584,10 @@ def fetch_clusters_focus(
         if rank_metric == "distinct_addresses":
             c["rank_metric_value"] = int(c.get("distinct_focus_addresses") or 0)
             c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
+        elif rank_metric == "paid_per_hcpcs_type":
+            c["rank_metric_value"] = float(c.get("paid_per_hcpcs_type") or 0)
+            c["rank_metric_fmt"] = fmt_money(c["rank_metric_value"])
+            c["paid_per_hcpcs_type_fmt"] = c["rank_metric_fmt"]
         elif rank_metric == "focus_amount":
             c["rank_metric_value"] = float(c.get("focus_amount") or 0)
             c["rank_metric_fmt"] = c["focus_amount_fmt"]
@@ -599,6 +677,9 @@ def fetch_focus_entities(
 
         npis = [r[0] for r in rows if r[0]]
         hcpcs_by_npi: dict[str, list[dict]] = {str(n): [] for n in npis}
+        from provider_pages import format_hcpcs_label, load_hcpcs_labels  # noqa: WPS433
+
+        hcpcs_labels = load_hcpcs_labels(conn)
         if npis and has_rollup:
             try:
                 h_rows = conn.execute(
@@ -614,9 +695,11 @@ def fetch_focus_entities(
                     bucket = hcpcs_by_npi.setdefault(str(npi), [])
                     if len(bucket) >= 12:
                         continue  # cap types shown per provider on cluster page
+                    raw = code or "—"
                     bucket.append(
                         {
-                            "hcpcs_code": code or "—",
+                            "hcpcs_code": raw,
+                            "hcpcs_label": format_hcpcs_label(raw, hcpcs_labels),
                             "claims": int(claims or 0),
                             "paid": float(paid or 0),
                             "paid_fmt": fmt_money(paid),
@@ -641,6 +724,7 @@ def fetch_focus_entities(
             top_paid,
         ) in rows:
             paid_f = float(paid or 0)
+            top_label = format_hcpcs_label(top_code, hcpcs_labels) if top_code else None
             detail_bits = [
                 f"NPI {npi}",
                 f"entity={etc or '—'}",
@@ -651,9 +735,9 @@ def fetch_focus_entities(
                 detail_bits.append(f"{int(htypes)} HCPCS types")
             if claims:
                 detail_bits.append(f"{int(claims):,} claims")
-            if top_code:
+            if top_label:
                 detail_bits.append(
-                    f"top {top_code} {fmt_money(top_paid) if top_paid else ''}".strip()
+                    f"top {top_label} {fmt_money(top_paid) if top_paid else ''}".strip()
                 )
             out.append(
                 {
@@ -666,20 +750,29 @@ def fetch_focus_entities(
                     "canonical_address": (canon or "").strip() or "(no street)",
                     "hcpcs_type_count": int(htypes or 0),
                     "total_claims": int(claims or 0),
+                    "top_hcpcs_code": top_code,
+                    "top_hcpcs_label": top_label,
                     "hcpcs": hcpcs_by_npi.get(str(npi), []),
                 }
             )
         return out
 
     if focus == "fec":
+        # Prefer contributor density on the page: contributors first by $ within
+        # kind, resolve committee IDs to names, include expenditures.
         rows = conn.execute(
             f"""
             SELECT * FROM (
                 SELECT
                     f.contributor_name AS name,
                     'contributor' AS kind,
+                    0 AS kind_rank,
                     f.contribution_amount AS amount,
-                    f.occupation AS detail,
+                    COALESCE(
+                        NULLIF(TRIM(f.occupation), ''),
+                        NULLIF(TRIM(f.employer), ''),
+                        f.fec_cmte_id
+                    ) AS detail,
                     a.address_type,
                     a.canonical_address
                 FROM Addresses a
@@ -689,8 +782,9 @@ def fetch_focus_entities(
                   AND a.address_type = 'fec_contributor'
                 UNION ALL
                 SELECT
-                    c.name,
+                    COALESCE(NULLIF(TRIM(c.name), ''), c.fec_cmte_id),
                     'committee',
+                    1,
                     NULL,
                     c.fec_cmte_id,
                     a.address_type,
@@ -702,34 +796,79 @@ def fetch_focus_entities(
                   AND a.address_type = 'fec_committee'
                 UNION ALL
                 SELECT
-                    COALESCE(t.fec_cmte_id, t.other_cmte_id),
+                    COALESCE(
+                        NULLIF(TRIM(cm.name), ''),
+                        NULLIF(TRIM(t.fec_cmte_id), ''),
+                        NULLIF(TRIM(t.other_cmte_id), ''),
+                        'committee transaction'
+                    ),
                     'transaction ' || COALESCE(t.transaction_type, ''),
+                    2,
                     t.transaction_amount,
-                    CAST(t.transaction_date AS VARCHAR),
+                    COALESCE(t.fec_cmte_id, '') || ' · ' || COALESCE(CAST(t.transaction_date AS VARCHAR), ''),
                     a.address_type,
                     a.canonical_address
                 FROM Addresses a
                 {gjoin}
                 JOIN fec_committee_transactions t ON t.id = a.owner_id
+                LEFT JOIN fec_committees cm ON cm.fec_cmte_id = t.fec_cmte_id
                 WHERE ({key_expr}) = ? AND ({where})
                   AND a.address_type = 'fec_committee_transaction'
+                UNION ALL
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(o.payee_name), ''),
+                        NULLIF(TRIM(cm.name), ''),
+                        o.fec_cmte_id,
+                        'expenditure'
+                    ),
+                    'expenditure',
+                    2,
+                    o.expenditure_amount,
+                    COALESCE(o.purpose, '') || ' · ' || COALESCE(o.fec_cmte_id, ''),
+                    a.address_type,
+                    a.canonical_address
+                FROM Addresses a
+                {gjoin}
+                JOIN fec_operating_expenditures o ON o.id = a.owner_id
+                LEFT JOIN fec_committees cm ON cm.fec_cmte_id = o.fec_cmte_id
+                WHERE ({key_expr}) = ? AND ({where})
+                  AND a.address_type = 'fec_operating_expenditure'
+                UNION ALL
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(s.payee_name), ''),
+                        s.fec_cand_id,
+                        'candidate spend'
+                    ),
+                    'candidate spend',
+                    2,
+                    s.spending_amount,
+                    COALESCE(s.purpose, '') || ' · ' || COALESCE(s.fec_cmte_id, ''),
+                    a.address_type,
+                    a.canonical_address
+                FROM Addresses a
+                {gjoin}
+                JOIN fec_candidate_spendings s ON s.id = a.owner_id
+                WHERE ({key_expr}) = ? AND ({where})
+                  AND a.address_type = 'fec_candidate_spending'
             ) u
-            ORDER BY amount DESC NULLS LAST, name
+            ORDER BY kind_rank ASC, amount DESC NULLS LAST, name
             LIMIT ?
             """,
-            [cluster_key, cluster_key, cluster_key, top_n],
+            [cluster_key, cluster_key, cluster_key, cluster_key, cluster_key, top_n],
         ).fetchall()
         return [
             {
                 "id": kind,
                 "name": name or "(unnamed)",
-                "detail": detail or "",
+                "detail": (detail or "").strip(" ·"),
                 "amount": amt,
                 "amount_fmt": fmt_money(amt),
                 "address_type": at,
                 "canonical_address": (canon or "").strip() or "(no street)",
             }
-            for name, kind, amt, detail, at, canon in rows
+            for name, kind, _krank, amt, detail, at, canon in rows
         ]
 
     if focus == "contractor":
@@ -902,9 +1041,20 @@ def write_focus_report(
         generated_at = datetime.now().isoformat(timespec="seconds")
         report_date = date.today().isoformat()
 
+        from domain_briefing import (  # noqa: WPS433
+            annotate_cluster_percentile_chips,
+            cutpoints_for_focus,
+            ensure_population_cutpoints,
+            index_methodology_context,
+        )
+
+        pop_cache = ensure_population_cutpoints(conn)
+        pop_cutpoints = cutpoints_for_focus(focus, pop_cache)
+
         print(
             f"  fetching clusters focus={focus} slice={slice_by} "
-            f"min_multi={min_multi_type} min_focus={min_focus}...",
+            f"admission=focus>0 (optional floors multi={min_multi_type} "
+            f"focus={min_focus}) max_clusters={max_clusters}...",
             flush=True,
         )
         try:
@@ -929,6 +1079,10 @@ def write_focus_report(
             return 0
 
         clusters_out = []
+        # Stable provider dossiers for medicare focus (shared across slices).
+        providers_dir = SCRIPT_DIR / "reports" / "providers"
+        written_npis: set[str] = set()
+        provider_index_rows: list[dict] = []
         for i, c in enumerate(clusters_raw, 1):
             key = str(c["cluster_key"])
             sample = c.get("sample_address") or key
@@ -956,6 +1110,9 @@ def write_focus_report(
                 c["canonical_address"] = (
                     f"{key}  ·  e.g. {sample}" if sample != key else key
                 )
+            c["percentile_chips"] = annotate_cluster_percentile_chips(
+                c, focus, pop_cutpoints
+            )
             clusters_out.append(c)
 
             if i == 1 or i % 10 == 0:
@@ -964,6 +1121,38 @@ def write_focus_report(
             entities = fetch_focus_entities(
                 conn, slice_by, key, focus, top_n, lat_long=lat_long
             )
+            if focus == "medicare":
+                from provider_pages import (  # noqa: WPS433
+                    provider_detail_href,
+                    write_provider_page,
+                )
+
+                for ent in entities:
+                    npi = str(ent.get("id") or "").strip()
+                    if not npi:
+                        continue
+                    ent["detail_href"] = provider_detail_href(npi)
+                    if npi not in written_npis:
+                        path = write_provider_page(
+                            conn,
+                            npi,
+                            providers_dir,
+                            generated_at=generated_at,
+                        )
+                        if path:
+                            written_npis.add(npi)
+                            provider_index_rows.append(
+                                {
+                                    "npi": npi,
+                                    "display_name": ent.get("name") or npi,
+                                    "total_paid": float(ent.get("amount") or 0),
+                                    "total_paid_fmt": ent.get("amount_fmt") or "—",
+                                    "hcpcs_type_count": int(
+                                        ent.get("hcpcs_type_count") or 0
+                                    ),
+                                    "total_claims": int(ent.get("total_claims") or 0),
+                                }
+                            )
             charities = fetch_charities(conn, slice_by, key, top_n, lat_long=lat_long)
             officers = (
                 fetch_officers(conn, slice_by, key, top_n, lat_long=lat_long)
@@ -1059,6 +1248,22 @@ def write_focus_report(
                 encoding="utf-8",
             )
 
+        if focus == "medicare" and written_npis:
+            print(
+                f"  wrote {len(written_npis)} provider detail pages → {providers_dir}",
+                flush=True,
+            )
+            try:
+                from provider_pages import write_provider_index  # noqa: WPS433
+
+                write_provider_index(
+                    providers_dir,
+                    provider_index_rows,
+                    generated_at=generated_at,
+                )
+            except Exception as e:
+                print(f"  provider index warn: {e}", flush=True)
+
         from cluster_table_payload import (  # noqa: WPS433
             build_focus_cluster_table,
             dumps_table_json,
@@ -1076,6 +1281,7 @@ def write_focus_report(
         map_points = clusters_to_map_points(clusters_out, slice_by=slice_by)
         from breadcrumbs import crumbs_national_index  # noqa: WPS433
 
+        methodology = index_methodology_context(focus, pop_cutpoints)
         index_html = render_template(
             "focus_cluster_index.mako",
             clusters=clusters_out,
@@ -1085,6 +1291,7 @@ def write_focus_report(
             db_path=db_path,
             min_multi_type=min_multi_type,
             min_focus=min_focus,
+            max_clusters=max_clusters,
             require_grift_signal=require_grift_signal,
             slice_by=slice_by,
             slice_label=mode["label"],
@@ -1095,6 +1302,7 @@ def write_focus_report(
             cluster_table_json=dumps_table_json(table_payload),
             map_points=map_points,
             breadcrumbs=crumbs_national_index(focus=focus, slice_by=slice_by),
+            methodology=methodology,
         )
         if map_points:
             (data_dir / "map_points.json").write_text(
@@ -1125,6 +1333,13 @@ def write_focus_report(
                 "max_clusters": max_clusters,
             },
             "cluster_count": len(clusters_out),
+            "population_cutpoints": pop_cutpoints,
+            "population_cutpoints_generated_at": pop_cache.get("generated_at"),
+            "methodology": {
+                "question": methodology.get("question"),
+                "signals": methodology.get("signals"),
+                "rank": methodology.get("rank"),
+            },
         }
         with open(output_dir / "export_metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
@@ -1166,11 +1381,31 @@ def main() -> int:
     p.add_argument("--lat-long", action="store_true")
     p.add_argument("--output-dir")
     p.add_argument("--physical-notes", default=str(SCRIPT_DIR / "physical_notes.json"))
-    p.add_argument("--min-multi-type", type=int, default=None)
-    p.add_argument("--min-focus", type=int, default=None, help="Min focus entity rows")
-    p.add_argument("--require-grift-signal", action="store_true")
+    p.add_argument(
+        "--min-multi-type",
+        type=int,
+        default=None,
+        help="Deprecated optional floor on distinct address_types (0=off, default)",
+    )
+    p.add_argument(
+        "--min-focus",
+        type=int,
+        default=None,
+        help="Deprecated optional floor on focus rows (0=off, default). "
+        "Suite size is max_clusters after rank.",
+    )
+    p.add_argument(
+        "--require-grift-signal",
+        action="store_true",
+        help="Unused in practice (grift_ratio not populated); leave off.",
+    )
     p.add_argument("--top-n", type=int, default=25)
-    p.add_argument("--max-clusters", type=int, default=100)
+    p.add_argument(
+        "--max-clusters",
+        type=int,
+        default=100,
+        help="Keep top N clusters after rank (the real suite cap)",
+    )
     p.add_argument("--no-officers", action="store_true")
     p.add_argument("--no-grants", action="store_true")
     args = p.parse_args()

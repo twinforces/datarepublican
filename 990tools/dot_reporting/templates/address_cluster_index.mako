@@ -12,8 +12,14 @@
   <header>
     <h1>Cluster Report${' — ' + slice_label if slice_label else ''}</h1>
     <p class="meta">Generated ${generated_at} · DB: ${db_path} · ${cluster_count} clusters</p>
-    <p class="meta">Slice: ${slice_by if slice_by else 'address'} · Criteria: multi_type ≥ ${min_multi_type} OR dot_carriers ≥ ${min_dot_carriers}</p>
+    <p class="meta">Slice: ${slice_by if slice_by else 'address'} · Admission: phy carriers &gt; 0 · suite cap after rank (active PUs)
+% if min_multi_type or min_dot_carriers:
+ · Optional floors: multi≥${min_multi_type} carriers≥${min_dot_carriers}
+% endif
+</p>
   </header>
+
+  <%include file="partials/domain_methodology.mako"/>
 
   <!-- Review Shell Controls -->
   <div style="margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
@@ -38,7 +44,7 @@
 <%
   _table_json = cluster_table_json if (cluster_table_json is not UNDEFINED and cluster_table_json) else '{"rows":[],"columns":[]}'
 %>
-  <p class="meta">Rank metric: <strong>active power units</strong> (then DOT carrier count). Table supports multi-column sort, search, pagination (TanStack Table).</p>
+  <p class="meta">Rank metric: <strong>active power units</strong> (then <strong>physical</strong> DOT carrier count — mailing excluded). Table supports multi-column sort, search, pagination (TanStack Table).</p>
 % if map_points is not UNDEFINED and map_points:
   <%include file="partials/leaflet_map_embed.mako" args="map_points=map_points, map_root_id='leaflet-map', map_height=400"/>
 % endif

@@ -32,6 +32,11 @@
 % for code in cluster['reason_codes']:
       <span class="chip">${code}</span>
 % endfor
+% if cluster.get('percentile_chips'):
+% for chip in cluster['percentile_chips']:
+      <span class="chip" style="background:#ede9fe; color:#5b21b6;" title="Absolute population percentile (full DB)">${chip}</span>
+% endfor
+% endif
 % if cluster.get('phy_is_po_box'):
       <span class="chip" style="background:#fee2e2; color:#991b1b;">phy_po_box</span>
 % endif
@@ -49,7 +54,7 @@
     </div>
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
       <button onclick="saveDecision('not')" style="background:#166534; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Not</button>
-      <button onclick="saveDecision('sus-${domain['review_tag']}')" style="background:#b91c1c; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-${domain['review_tag']}</button>
+      <button onclick="saveDecision('sus-${domain.get('review_tag', 'focus')}')" style="background:#b91c1c; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-${domain.get('review_tag', 'focus')}</button>
       <button onclick="saveDecision('sus-other')" style="background:#d97706; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">Sus-other</button>
     </div>
     <div id="review-status" style="margin-top:0.5rem; font-size:0.85rem; color:#555;"></div>

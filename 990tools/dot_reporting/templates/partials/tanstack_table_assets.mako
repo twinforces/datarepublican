@@ -45,6 +45,12 @@ Note: do not use ## comments inside <%text> — they are emitted literally.
   #ts-table-root tr.sus-row { background: #fee2e2 !important; }
   .ts-meta { font-size: 0.85rem; color: #666; }
   .ts-empty { color: #888; font-size: 0.9rem; padding: 0.5rem 0; }
+  button.ts-filter-phone {
+    border: none; background: none; padding: 0; margin: 0;
+    color: #0b57d0; font: inherit; font-weight: 600; cursor: pointer;
+    text-decoration: none;
+  }
+  button.ts-filter-phone:hover { text-decoration: underline; }
 </style>
 <script type="module">
 import {
@@ -120,6 +126,18 @@ export function mountTanStackTable(root, cfg) {
   };
   const enableReviewFilter = !!cfg.enableReviewFilter;
   const columns = buildColumns(cfg.columns);
+
+  // External filter API (phone stack → carriers table)
+  root.__tsApi = {
+    setFilter(q) {
+      globalFilter = q == null ? "" : String(q);
+      pagination = { ...pagination, pageIndex: 0 };
+      redraw();
+    },
+    getFilter() {
+      return globalFilter;
+    },
+  };
 
   function tableState() {
     return {
@@ -341,6 +359,22 @@ function boot() {
       const id = cfg.rootId || cfg.id;
       const root = id ? document.getElementById(id) : null;
       if (root) mountTanStackTable(root, cfg);
+    });
+  }
+  // Phone stack → filter carriers table (classic shell breakout UX)
+  if (!window.__TS_PHONE_FILTER_BOUND__) {
+    window.__TS_PHONE_FILTER_BOUND__ = true;
+    document.addEventListener("click", (e) => {
+      const btn = e.target && e.target.closest && e.target.closest("button.ts-filter-phone");
+      if (!btn) return;
+      e.preventDefault();
+      const phone = btn.getAttribute("data-phone") || "";
+      const targetId = btn.getAttribute("data-target") || "ts-carriers";
+      const target = document.getElementById(targetId);
+      if (target && target.__tsApi && typeof target.__tsApi.setFilter === "function") {
+        target.__tsApi.setFilter(phone);
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     });
   }
   // data-ts-config elements: <div id="x" class="ts-table-root" data-ts-config='...'></div>

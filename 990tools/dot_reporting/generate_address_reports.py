@@ -5,12 +5,15 @@ generate_address_reports.py — Static HTML cluster reports for fraud precursor 
 Slice modes group Addresses by different keys (same drill-down / DOT tooling):
   address          — canonical_address (default, original behavior)
   colocator        — tight colocator (LL:/PO:/FA:…)
-  zipcode          — zip_code (5-digit when present)
+  zipcode          — Addresses.zip_code equality (valid US zips via JOIN Zips)
   loose_colocator  — 0.5° grid (column if set, else derived from lat/lon)
 
 For non-address slices, each detail page also breaks the cluster into
 distinct canonical_address subgroups (suite/building splits) and groups
 DOT carriers by street address.
+
+DOT matching is **physical only** (`dot_carrier_phy`). Mailing
+(`dot_carrier_mail`) is not counted for stacks — see dot_policy.py.
 
 Spec: address_cluster_report.md
 
@@ -58,15 +61,10 @@ SLICE_MODES: dict[str, dict[str, str]] = {
     },
     "zipcode": {
         "label": "zip code",
-        # Prefer 5-digit US zip; keep foreign/odd values as-is when short.
-        "key_expr": (
-            "CASE "
-            "WHEN zip_code IS NULL OR TRIM(zip_code) = '' THEN NULL "
-            "WHEN LENGTH(REGEXP_REPLACE(TRIM(zip_code), '[^0-9]', '', 'g')) >= 5 "
-            "THEN SUBSTRING(REGEXP_REPLACE(TRIM(zip_code), '[^0-9]', '', 'g'), 1, 5) "
-            "ELSE TRIM(zip_code) END"
-        ),
-        "where": "zip_code IS NOT NULL AND TRIM(zip_code) != ''",
+        # Bare column — upstream split_zip_code already stores ZIP5 (+ zip4 separate).
+        # resolve_slice_mode() upgrades to INNER JOIN Zips (valid US catalog) when present.
+        "key_expr": "zip_code",
+        "where": "zip_code IS NOT NULL AND zip_code != ''",
         "out_dir_prefix": "zipcode_clusters",
     },
     "loose_colocator": {
@@ -102,6 +100,7 @@ nav.breadcrumbs .bc-current { color: #111; font-weight: 600; }
 .rank-dot.high { background: #b91c1c; }
 .rank-dot.mid { background: #d97706; }
 .rank-dot.low { background: #2563eb; }
+.rank-dot.top { background: #7f1d1d; box-shadow: 0 0 0 1px #fecaca; } /* ≥p99 within list */
 .rank-dot.po { background: #a78bfa; border-color: #7c3aed; }
 .rank-dot.none { background: #e5e7eb; }
 .widen-nav {
@@ -144,6 +143,19 @@ def _addresses_has_column(conn: duckdb.DuckDBPyConnection, col: str) -> bool:
         return False
 
 
+def _table_exists(conn: duckdb.DuckDBPyConnection, name: str) -> bool:
+    try:
+        tables = {str(r[0]) for r in conn.execute("SHOW TABLES").fetchall()}
+        return name in tables or name.lower() in {t.lower() for t in tables}
+    except Exception:
+        return False
+
+
+def mode_uses_alias(mode: dict[str, str]) -> bool:
+    """True when from_sql aliases Addresses as `a` (colocator Geocoding join or Zips join)."""
+    return mode.get("needs_geocoding_join") == "1" or mode.get("uses_alias") == "1"
+
+
 # Effective colocator: Addresses rarely stores LL: — most live on Geocoding after geocode.
 _COLOCATOR_KEY_EXPR = (
     "COALESCE(NULLIF(TRIM(a.colocator), ''), NULLIF(TRIM(g.colocator), ''))"
@@ -162,6 +174,11 @@ _COLOCATOR_FROM = (
     "FROM Addresses a "
     "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id"
 )
+# Valid US ZIP catalog (PK on Zips.zip). Equality join is sargable; no REGEXP.
+_ZIP_FROM = (
+    "FROM Addresses a "
+    "INNER JOIN Zips z ON z.zip = a.zip_code"
+)
 
 
 def resolve_slice_mode(
@@ -170,16 +187,22 @@ def resolve_slice_mode(
     *,
     lat_long: bool = False,
 ) -> dict[str, str]:
-    """Copy of SLICE_MODES entry; upgrades colocator/loose for real production shape.
+    """Copy of SLICE_MODES entry; upgrades colocator/loose/zip for real production shape.
 
     colocator keys resolve via Addresses LEFT JOIN Geocoding (Addresses.colocator is
     often empty for LL: while Geocoding holds the LL: string / lat-lon).
+
+    zipcode uses bare Addresses.zip_code (already ZIP5 from split_zip_code). When the
+    Zips catalog table is present, INNER JOIN Zips filters to valid US zips and keeps
+    predicates sargable (a.zip_code = ? / z.zip = a.zip_code). Never REGEXP_REPLACE.
 
     lat_long: with --slice-by colocator, keep only LL:lat:lon keys (drop PO:/FA:/…).
     """
     mode = dict(SLICE_MODES[slice_by])
     mode.setdefault("from_sql", "FROM Addresses")
     mode.setdefault("needs_geocoding_join", "0")
+    mode.setdefault("uses_alias", "0")
+    mode.setdefault("member_join_extra", "")
 
     if slice_by == "loose_colocator" and conn is not None and _addresses_has_column(conn, "loose_colocator"):
         mode["key_expr"] = (
@@ -194,6 +217,21 @@ def resolve_slice_mode(
             "(loose_colocator IS NOT NULL AND TRIM(loose_colocator) != '') "
             "OR (latitude IS NOT NULL AND longitude IS NOT NULL)"
         )
+
+    if slice_by == "zipcode":
+        if conn is not None and _table_exists(conn, "Zips"):
+            # Catalog-validated, index-friendly equality — no report-time normalization.
+            mode["key_expr"] = "a.zip_code"
+            mode["where"] = "a.zip_code IS NOT NULL AND a.zip_code != ''"
+            mode["from_sql"] = _ZIP_FROM
+            mode["uses_alias"] = "1"
+            # Member fetches: equality on zip_code is enough (keys only come from Zips).
+            mode["member_join_extra"] = ""
+            mode["label"] = "zip code (zip_code ∈ Zips)"
+        else:
+            mode["key_expr"] = "zip_code"
+            mode["where"] = "zip_code IS NOT NULL AND zip_code != ''"
+            mode["label"] = "zip code (Addresses.zip_code)"
 
     if slice_by == "colocator":
         mode["needs_geocoding_join"] = "1"
@@ -230,9 +268,9 @@ def build_cluster_sql(
     key = mode["key_expr"]
     where = mode["where"]
     from_sql = mode.get("from_sql", "FROM Addresses")
-    # When joining Geocoding, key/where already use a./g. prefixes.
+    # Aliased modes (Geocoding / Zips): key/where already use a./g./z. prefixes.
     # Plain Address modes use bare column names on unaliased Addresses.
-    if mode.get("needs_geocoding_join") == "1":
+    if mode_uses_alias(mode):
         canon = "a.canonical_address"
         atype = "a.address_type"
         owner = "a.owner_id"
@@ -262,7 +300,7 @@ base AS (
         COUNT(*) AS total_rows,
         COUNT(DISTINCT address_type) AS multi_type_count,
         LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
-        SUM(CASE WHEN address_type IN ('dot_carrier_phy', 'dot_carrier_mail') THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
+        SUM(CASE WHEN address_type = 'dot_carrier_phy' THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
         SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
         SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
         SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_count,
@@ -291,7 +329,7 @@ dot_active AS (
         SUM(CASE WHEN d.status_code = 'A' THEN COALESCE(d.power_units, 0) ELSE 0 END)::BIGINT AS active_power_units
     FROM keyed k
     INNER JOIN dot_carriers d ON d.id = k.owner_id
-        AND k.address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+        AND k.address_type = 'dot_carrier_phy'
     GROUP BY k.cluster_key
 )
 SELECT
@@ -310,15 +348,17 @@ SELECT
 FROM base b
 LEFT JOIN charity_signals cs ON cs.cluster_key = b.cluster_key
 LEFT JOIN dot_active da ON da.cluster_key = b.cluster_key
-WHERE (
-    b.multi_type_count >= ?
-    OR b.dot_carrier_count >= ?
-)
-AND (
-    ? = 0
-    OR COALESCE(cs.max_grift_ratio, 0) > 5
-    OR COALESCE(cs.misrep_count, 0) > 0
-)
+WHERE
+    -- Phy carriers only; rank (active PUs) + LIMIT select the suite.
+    -- Optional legacy floors (0 = off).
+    b.dot_carrier_count > 0
+    AND (? <= 0 OR b.multi_type_count >= ?)
+    AND (? <= 0 OR b.dot_carrier_count >= ?)
+    AND (
+        ? = 0
+        OR COALESCE(cs.max_grift_ratio, 0) > 5
+        OR COALESCE(cs.misrep_count, 0) > 0
+    )
 ORDER BY COALESCE(da.active_power_units, 0) DESC, b.dot_carrier_count DESC
 LIMIT ?
 """
@@ -439,7 +479,14 @@ def fetch_clusters(
     sql = build_cluster_sql(slice_by, conn, lat_long=lat_long)
     rows = conn.execute(
         sql,
-        [min_multi, min_dot, 1 if require_grift else 0, limit],
+        [
+            int(min_multi or 0),
+            int(min_multi or 0),
+            int(min_dot or 0),
+            int(min_dot or 0),
+            1 if require_grift else 0,
+            limit,
+        ],
     ).fetchall()
     cols = [
         "cluster_key", "sample_address", "total_rows", "multi_type_count", "address_types",
@@ -492,13 +539,20 @@ def _member_filter_sql(
 ) -> tuple[str, str, str]:
     """Return (key_expr, where, from_join_extra) for per-cluster entity queries.
 
-    from_join_extra is '' or 'LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id'
-    (Addresses always aliased as a).
+    from_join_extra is '' , Geocoding LEFT JOIN, or empty for zip (Addresses always `a`).
+    Zip uses sargable ``a.zip_code = ?`` — no REGEXP, no Zips re-join (keys already valid).
     """
     mode = resolve_slice_mode(slice_by, conn, lat_long=lat_long)
     if mode.get("needs_geocoding_join") == "1":
         # key/where already use a./g. — do not re-qualify
-        return mode["key_expr"], mode["where"], "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id"
+        return (
+            mode["key_expr"],
+            mode["where"],
+            "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id",
+        )
+    if mode.get("uses_alias") == "1":
+        # key/where already qualified (e.g. a.zip_code); optional extra joins
+        return mode["key_expr"], mode["where"], mode.get("member_join_extra") or ""
     return (
         _qualify_addresses_expr(mode["key_expr"], "a"),
         _qualify_addresses_expr(mode["where"], "a"),
@@ -615,7 +669,7 @@ def fetch_dot_carriers(
         JOIN dot_carriers d ON d.id = a.owner_id
         WHERE ({key_expr}) = ?
           AND ({where})
-          AND a.address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+          AND a.address_type = 'dot_carrier_phy'
         ORDER BY d.power_units DESC NULLS LAST, d.legal_name
         LIMIT ?
         """,
@@ -664,7 +718,7 @@ def fetch_address_subgroups(
                 COUNT(*)::BIGINT AS total_rows,
                 COUNT(DISTINCT address_type)::BIGINT AS multi_type_count,
                 LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
-                SUM(CASE WHEN address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+                SUM(CASE WHEN address_type = 'dot_carrier_phy'
                          THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
                 SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
                 SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
@@ -683,7 +737,7 @@ def fetch_address_subgroups(
                     AS inactive_power_units
             FROM members m
             INNER JOIN dot_carriers d ON d.id = m.owner_id
-                AND m.address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+                AND m.address_type = 'dot_carrier_phy'
             GROUP BY m.addr
         )
         SELECT
@@ -804,6 +858,16 @@ def write_report(
         generated_at = datetime.now().isoformat(timespec="seconds")
         report_date = date.today().isoformat()
 
+        from domain_briefing import (  # noqa: WPS433
+            annotate_cluster_percentile_chips,
+            cutpoints_for_focus,
+            ensure_population_cutpoints,
+            index_methodology_context,
+        )
+
+        pop_cache = ensure_population_cutpoints(conn)
+        pop_cutpoints = cutpoints_for_focus("dot", pop_cache)
+
         clusters_raw = fetch_clusters(
             conn,
             slice_by,
@@ -854,6 +918,9 @@ def write_report(
             c["detail_file"] = detail_file
             c["slug"] = slug
             c["sample_address"] = sample
+            c["percentile_chips"] = annotate_cluster_percentile_chips(
+                c, "dot", pop_cutpoints
+            )
             # Index/detail title
             if slice_by == "address":
                 c["canonical_address"] = key
@@ -1033,6 +1100,7 @@ def write_report(
         map_points = clusters_to_map_points(clusters_out, slice_by=slice_by)
         from breadcrumbs import crumbs_national_index  # noqa: WPS433
 
+        methodology = index_methodology_context("dot", pop_cutpoints)
         index_html = render_template(
             "address_cluster_index.mako",
             clusters=clusters_out,
@@ -1048,6 +1116,7 @@ def write_report(
             cluster_table_json=dumps_table_json(table_payload),
             map_points=map_points,
             breadcrumbs=crumbs_national_index(focus="dot", slice_by=slice_by),
+            methodology=methodology,
         )
         if map_points:
             (data_dir / "map_points.json").write_text(
@@ -1066,6 +1135,7 @@ def write_report(
         metadata = {
             "generated_at": generated_at,
             "db_path": db_path,
+            "focus": "dot",
             "slice_by": slice_by,
             "slice_label": mode["label"],
             "lat_long": lat_long,
@@ -1078,6 +1148,13 @@ def write_report(
                 "lat_long": lat_long,
             },
             "cluster_count": len(clusters_out),
+            "population_cutpoints": pop_cutpoints,
+            "population_cutpoints_generated_at": pop_cache.get("generated_at"),
+            "methodology": {
+                "question": methodology.get("question"),
+                "signals": methodology.get("signals"),
+                "rank": methodology.get("rank"),
+            },
         }
         with open(output_dir / "export_metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
@@ -1127,11 +1204,31 @@ def main():
     )
     parser.add_argument("--output-dir", help="Output folder (default: reports/<slice>_YYYY-MM-DD)")
     parser.add_argument("--physical-notes", default=str(SCRIPT_DIR / "physical_notes.json"))
-    parser.add_argument("--min-multi-type", type=int, default=7)
-    parser.add_argument("--min-dot-carriers", type=int, default=50)
-    parser.add_argument("--require-grift-signal", action="store_true")
+    parser.add_argument(
+        "--min-multi-type",
+        type=int,
+        default=0,
+        help="Deprecated optional floor on address_types (0=off)",
+    )
+    parser.add_argument(
+        "--min-dot-carriers",
+        type=int,
+        default=0,
+        help="Deprecated optional floor on phy carriers (0=off). "
+        "Suite size is max_clusters after rank.",
+    )
+    parser.add_argument(
+        "--require-grift-signal",
+        action="store_true",
+        help="Unused in practice (grift_ratio not populated); leave off.",
+    )
     parser.add_argument("--top-n", type=int, default=20)
-    parser.add_argument("--max-clusters", type=int, default=100)
+    parser.add_argument(
+        "--max-clusters",
+        type=int,
+        default=100,
+        help="Keep top N clusters after rank (the real suite cap)",
+    )
     parser.add_argument("--no-officers", action="store_true")
     parser.add_argument("--no-grants", action="store_true")
     args = parser.parse_args()

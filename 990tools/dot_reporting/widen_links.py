@@ -148,6 +148,96 @@ def os_path_rel(from_dir: Path, to_path: Path) -> str:
     return os.path.relpath(str(to_path), str(from_dir))
 
 
+def _detail_path(
+    *,
+    reports_dir: Path,
+    focus: str,
+    target_slice: str,
+    target_key: str,
+    report_day: str,
+    by_state: bool = False,
+    state_code: str | None = None,
+) -> Path:
+    if by_state and state_code:
+        suite = suite_dirname(focus, target_slice, report_day, by_state=True)
+        if target_key == "__STATE_INDEX__":
+            return reports_dir / suite / "states" / state_code / "index.html"
+        fn = detail_filename(target_slice, target_key, state=state_code)
+        return reports_dir / suite / "states" / state_code / fn
+    suite = suite_dirname(focus, target_slice, report_day, by_state=False)
+    fn = detail_filename(target_slice, target_key)
+    return reports_dir / suite / fn
+
+
+def _find_existing_detail(
+    *,
+    reports_dir: Path,
+    focus: str,
+    target_slice: str,
+    target_key: str,
+    report_day: str,
+    state_code: str | None = None,
+) -> tuple[Path, str] | None:
+    """Prefer same-day national, then same-day by-state, then any-day fallbacks.
+
+    National suites only keep top-N clusters, so address → colocator often needs
+    the by-state detail page (fuller coverage for that state).
+    """
+    candidates: list[tuple[Path, str]] = []
+    candidates.append(
+        (
+            _detail_path(
+                reports_dir=reports_dir,
+                focus=focus,
+                target_slice=target_slice,
+                target_key=target_key,
+                report_day=report_day,
+            ),
+            "national",
+        )
+    )
+    if state_code:
+        candidates.append(
+            (
+                _detail_path(
+                    reports_dir=reports_dir,
+                    focus=focus,
+                    target_slice=target_slice,
+                    target_key=target_key,
+                    report_day=report_day,
+                    by_state=True,
+                    state_code=state_code,
+                ),
+                "by_state",
+            )
+        )
+    for path, kind in candidates:
+        if path.exists():
+            return path, kind
+
+    # Cross-day: national *_{slice}_clusters_*/detail or by-state packs
+    fn_nat = detail_filename(target_slice, target_key)
+    if focus in ("", "dot", None):
+        nat_glob = f"{target_slice}_clusters_*/{fn_nat}"
+        st_glob = f"dot_{target_slice}_by_state_*/states/{state_code}/{detail_filename(target_slice, target_key, state=state_code)}" if state_code else None
+    else:
+        nat_glob = f"{focus}_{target_slice}_clusters_*/{fn_nat}"
+        st_glob = (
+            f"{focus}_{target_slice}_by_state_*/states/{state_code}/"
+            f"{detail_filename(target_slice, target_key, state=state_code)}"
+            if state_code
+            else None
+        )
+    for pattern in (nat_glob, st_glob):
+        if not pattern:
+            continue
+        hits = sorted(reports_dir.glob(pattern), reverse=True)
+        if hits:
+            kind = "by_state" if "_by_state_" in str(hits[0]) else "national"
+            return hits[0], kind
+    return None
+
+
 def build_widen_links(
     *,
     focus: str,
@@ -196,39 +286,86 @@ def build_widen_links(
         m = re.search(r",\s*([A-Za-z]{2})\s*,\s*\d{5}", sample)
         if m:
             st = m.group(1).upper()
+    if not st and key:
+        m = re.search(r",\s*([A-Za-z]{2})\s*,\s*\d{5}", key)
+        if m:
+            st = m.group(1).upper()
 
-    def add(level: str, label: str, target_slice: str, target_key: str, *, by_state: bool = False, state_code: str | None = None):
-        if by_state and state_code:
-            suite = suite_dirname(focus, target_slice, report_day, by_state=True)
-            # state index vs detail
-            if target_key == "__STATE_INDEX__":
-                target = reports_dir / suite / "states" / state_code / "index.html"
-            else:
-                fn = detail_filename(target_slice, target_key, state=state_code)
-                target = reports_dir / suite / "states" / state_code / fn
-        else:
-            suite = suite_dirname(focus, target_slice, report_day, by_state=False)
-            fn = detail_filename(target_slice, target_key)
-            target = reports_dir / suite / fn
+    def add(
+        level: str,
+        label: str,
+        target_slice: str,
+        target_key: str,
+        *,
+        by_state: bool = False,
+        state_code: str | None = None,
+        prefer_existing: bool = False,
+    ):
+        target: Path | None = None
+        exists = "0"
+        resolved_kind = "national" if not by_state else "by_state"
+
+        if prefer_existing:
+            found = _find_existing_detail(
+                reports_dir=reports_dir,
+                focus=focus,
+                target_slice=target_slice,
+                target_key=target_key,
+                report_day=report_day,
+                state_code=state_code or st,
+            )
+            if found:
+                target, resolved_kind = found
+                exists = "1"
+                if resolved_kind == "by_state" and "state" not in label.lower():
+                    label = f"{label} · state pack"
+
+        if target is None:
+            # Address → colocator/loose: national top-N often omits the key.
+            # Prefer by-state href when we know the state (fuller coverage).
+            use_state = by_state or (
+                prefer_existing
+                and bool(state_code or st)
+                and target_slice in ("colocator", "loose_colocator")
+                and slice_by == "address"
+            )
+            sc = state_code or st
+            target = _detail_path(
+                reports_dir=reports_dir,
+                focus=focus,
+                target_slice=target_slice,
+                target_key=target_key,
+                report_day=report_day,
+                by_state=use_state,
+                state_code=sc if use_state else state_code,
+            )
+            exists = "1" if target.exists() else "0"
+            if use_state:
+                resolved_kind = "by_state"
+                if "state" not in label.lower() and "state pack" not in label.lower():
+                    label = f"{label} · state pack"
+
         href = os_path_rel(output_dir, target)
-        # Prefer linking even if not generated yet (overnight lag)
         links.append(
             {
                 "level": level,
                 "label": label,
                 "href": href,
                 "key": target_key if target_key != "__STATE_INDEX__" else state_code or "",
-                "exists": "1" if target.exists() else "0",
+                "exists": exists,
+                "scope": resolved_kind,
             }
         )
 
-    # 1) Address → colocator
+    # 1) Address → colocator (national top-N often omits; fall back to by-state)
     if slice_by == "address" and colocator_key:
         add(
             "colocator",
             "Colocator (all address variants)",
             "colocator",
             colocator_key,
+            prefer_existing=True,
+            state_code=st,
         )
 
     # 2) Colocator (or address with colocator) → loose
@@ -238,6 +375,8 @@ def build_widen_links(
             "Loose colocator (0.5° cell)",
             "loose_colocator",
             loose_key,
+            prefer_existing=True,
+            state_code=st,
         )
 
     # 3) Zip / address / colocator / loose → state index

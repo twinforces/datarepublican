@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from html_format import linkify_zip_codes, zip_link_html  # noqa: E402
+from percentiles import MetricScale  # noqa: E402
 
 
 def _esc(s: Any) -> str:
@@ -15,7 +16,7 @@ def _esc(s: Any) -> str:
 
 
 def metric_tier(value: float, vmax: float) -> str:
-    """Same bands as Leaflet legend: low / mid / high."""
+    """Legacy bands vs max (value/vmax tertiles). Prefer MetricScale.tier()."""
     if vmax <= 0 or value is None:
         return "none"
     t = min(1.0, float(value) / float(vmax))
@@ -26,13 +27,33 @@ def metric_tier(value: float, vmax: float) -> str:
     return "low"
 
 
-def rank_dot_html(value: float, vmax: float, *, kind: str | None = None) -> str:
+def rank_dot_html(
+    value: float,
+    vmax: float | None = None,
+    *,
+    kind: str | None = None,
+    scale: Any | None = None,
+    label: str = "metric",
+) -> str:
+    """Colored rank pip.
+
+    Prefer passing ``scale=MetricScale.from_values(...)`` so color + tooltip
+    use empirical percentiles (p50/p90/p99) within the series, not value/max.
+    """
     if kind == "po_zip":
         cls = "po"
         title = "PO Box (zip centroid)"
+    elif scale is not None:
+        cls = scale.tier(value)
+        title = scale.tier_title(value, label=label)
     else:
-        cls = metric_tier(value, vmax)
-        title = {"high": "Higher rank metric", "mid": "Mid rank metric", "low": "Lower rank metric", "none": "No metric"}.get(cls, "")
+        cls = metric_tier(value, float(vmax or 0))
+        title = {
+            "high": "Higher rank metric",
+            "mid": "Mid rank metric",
+            "low": "Lower rank metric",
+            "none": "No metric",
+        }.get(cls, "")
     return f'<span class="rank-dot {cls}" title="{_esc(title)}"></span>'
 
 
@@ -41,7 +62,8 @@ def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> d
         float(c.get("active_power_units") or c.get("dot_active_power_units") or 0)
         for c in clusters
     ]
-    vmax = max(metrics) if metrics else 0.0
+    scale = MetricScale.from_values(metrics)
+    vmax = scale.vmax
     rows = []
     for c in clusters:
         maps = c.get("maps_url") or "#"
@@ -71,11 +93,16 @@ def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> d
                 f'<a href="{_esc(maps)}" target="_blank" rel="noopener">'
                 f"{linkify_zip_codes(addr)}</a>"
             )
+        pct = scale.percentile(active_pu)
         rows.append(
             {
                 "slug": slug,
                 "rank": active_pu,
-                "rank_html": rank_dot_html(active_pu, vmax, kind=kind) + _esc(f"{active_pu:,}"),
+                "rank_html": rank_dot_html(
+                    active_pu, vmax, kind=kind, scale=scale, label="active PU"
+                )
+                + _esc(f"{active_pu:,}"),
+                "percentile": pct,
                 "score": int(c.get("suspicion_score") or 0),
                 "address": addr,
                 "address_html": addr_html,
@@ -138,6 +165,8 @@ def build_focus_cluster_table(
         if mv is None:
             if rank_metric in ("focus_amount", "grant_dollars", "fec_dollars"):
                 mv = float(c.get("focus_amount") or 0)
+            elif rank_metric in ("paid_per_hcpcs_type",):
+                mv = float(c.get("paid_per_hcpcs_type") or c.get("rank_metric_value") or 0)
             elif rank_metric in ("active_power_units",):
                 mv = float(c.get("active_power_units") or 0)
             elif rank_metric in ("distinct_addresses", "address_count"):
@@ -145,7 +174,8 @@ def build_focus_cluster_table(
             else:
                 mv = float(c.get("focus_count") or 0)
         metric_vals.append(float(mv or 0))
-    vmax = max(metric_vals) if metric_vals else 0.0
+    scale = MetricScale.from_values(metric_vals)
+    vmax = scale.vmax
 
     rows = []
     for c, metric_val in zip(clusters, metric_vals):
@@ -161,7 +191,14 @@ def build_focus_cluster_table(
             moneyish = (
                 rank_metric.endswith("amount")
                 or "dollar" in rank_metric
-                or rank_metric in ("focus_amount", "grant_dollars", "fec_dollars")
+                or "paid_per" in rank_metric
+                or rank_metric
+                in (
+                    "focus_amount",
+                    "grant_dollars",
+                    "fec_dollars",
+                    "paid_per_hcpcs_type",
+                )
             )
             if moneyish and isinstance(metric_val, (int, float)):
                 from generate_address_reports import fmt_money  # noqa: WPS433
@@ -198,8 +235,15 @@ def build_focus_cluster_table(
                 "focus_n": int(c.get("focus_count") or 0),
                 "rank_metric": metric_val,
                 "rank_metric_display": metric_display,
-                "rank_metric_html": rank_dot_html(metric_val, vmax, kind=kind)
+                "rank_metric_html": rank_dot_html(
+                    metric_val,
+                    vmax,
+                    kind=kind,
+                    scale=scale,
+                    label=rank_label or "metric",
+                )
                 + _esc(str(metric_display)),
+                "percentile": scale.percentile(metric_val),
                 "rows": int(c.get("total_rows") or 0),
                 "max_grift": grift_s,
                 "misrep": int(c.get("misrep_count") or 0),
@@ -250,9 +294,13 @@ def _dot_link_html(dot_number: Any) -> str:
     if not d:
         return "—"
     return (
-        f'<a href="https://searchcarriers.com/company/{d}" target="_blank">{d}</a> '
-        f'<small>[<a href="https://searchcarriers.com/company/{d}" target="_blank">SC</a>] '
-        f'[<a href="https://motus.dot.gov/customer/{d}/account" target="_blank">MOTUS</a>]</small>'
+        f'<a href="https://searchcarriers.com/company/{d}" target="_blank" rel="noopener">{d}</a> '
+        f'<small>['
+        f'<a href="https://searchcarriers.com/company/{d}" target="_blank" rel="noopener">SC</a>] '
+        f'[<a href="https://searchcarriers.com/map/company/{d}" target="_blank" rel="noopener" '
+        f'title="Search Carriers map" aria-label="Search Carriers map">🌐</a>] '
+        f'[<a href="https://motus.dot.gov/customer/{d}/account" target="_blank" rel="noopener">MOTUS</a>]'
+        f"</small>"
     )
 
 
@@ -322,6 +370,79 @@ def build_detail_tables(
             }
         )
 
+    # Phone stacks (classic breakout: one row per phone × active/inactive counts)
+    # Built before the flat carrier list so analysts see shared-phone shells first.
+    phone_stack_rows: list[dict] = []
+    if phone_groups:
+        for phone, carriers in phone_groups:
+            active = [d for d in carriers if d.get("status_code") == "A"]
+            inactive = [d for d in carriers if d.get("status_code") != "A"]
+            act_pu = sum(int(d.get("power_units") or 0) for d in active)
+            ina_pu = sum(int(d.get("power_units") or 0) for d in inactive)
+            n = len(carriers)
+            ia_pct = round(100.0 * len(inactive) / n, 1) if n else 0.0
+            ph_disp = phone if phone and phone != "No Phone" else "—"
+            names: list[str] = []
+            for d in sorted(
+                carriers,
+                key=lambda x: (
+                    0 if x.get("status_code") == "A" else 1,
+                    -(x.get("power_units") or 0),
+                ),
+            ):
+                nm = (d.get("legal_name") or d.get("dba_name") or "").strip()
+                if nm and nm not in names:
+                    names.append(nm)
+                if len(names) >= 4:
+                    break
+            sample = ", ".join(names)
+            if len(names) >= 4 and n > 4:
+                sample += f" … (+{n - len(names)} more)"
+            # Clickable phone → filters the carriers table (see tanstack_table_assets)
+            phone_html = (
+                f'<button type="button" class="ts-filter-phone" '
+                f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
+                f'title="Filter carriers by this phone">{_esc(ph_disp)}</button>'
+            )
+            phone_stack_rows.append(
+                {
+                    "phone": ph_disp,
+                    "phone_html": phone_html,
+                    "carriers": n,
+                    "active": len(active),
+                    "inactive": len(inactive),
+                    "active_pu": act_pu,
+                    "inactive_pu": ina_pu,
+                    "ia_pct": ia_pct,
+                    "sample": sample,
+                    # highlight shared phones and inactive-heavy stacks
+                    "dot_heavy": n >= 5 or (n >= 3 and ia_pct >= 40),
+                }
+            )
+        if phone_stack_rows:
+            phone_stack_rows.sort(
+                key=lambda r: (int(r["carriers"]), int(r["inactive_pu"]), int(r["active_pu"])),
+                reverse=True,
+            )
+            tables.append(
+                {
+                    "rootId": "ts-phone-groups",
+                    "pageSize": 25,
+                    "initialSort": [{"id": "carriers", "desc": True}],
+                    "columns": [
+                        {"id": "phone", "header": "Phone"},
+                        {"id": "carriers", "header": "Carriers"},
+                        {"id": "active", "header": "Active (A)"},
+                        {"id": "inactive", "header": "Inactive (I)"},
+                        {"id": "active_pu", "header": "Active PU"},
+                        {"id": "inactive_pu", "header": "Inactive PU"},
+                        {"id": "ia_pct", "header": "Inactive %"},
+                        {"id": "sample", "header": "Sample legal names"},
+                    ],
+                    "rows": phone_stack_rows,
+                }
+            )
+
     # Flatten all DOT carriers from phone groups and/or address groups
     carriers_flat: list[dict] = []
     seen_dot: set[str] = set()
@@ -336,12 +457,18 @@ def build_detail_tables(
                 status = r.get("status_code") or ""
                 pu = r.get("power_units")
                 street = r.get("canonical_address") or ""
+                ph_disp = phone if phone != "No Phone" else (r.get("phone") or "—")
                 carriers_flat.append(
                     {
                         "dot": dn,
                         "dot_html": _dot_link_html(dn),
                         "name": r.get("legal_name") or r.get("dba_name") or "",
-                        "phone": phone if phone != "No Phone" else (r.get("phone") or "—"),
+                        "phone": ph_disp,
+                        "phone_html": (
+                            f'<button type="button" class="ts-filter-phone" '
+                            f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
+                            f'title="Filter to this phone">{_esc(ph_disp)}</button>'
+                        ),
                         "status": status or "—",
                         "power_units": pu if pu is not None else None,
                         "address": street,
@@ -360,12 +487,20 @@ def build_detail_tables(
                 status = r.get("status_code") or ""
                 pu = r.get("power_units")
                 street = ag.get("canonical_address") or r.get("canonical_address") or ""
+                ph_disp = r.get("phone") or "—"
                 carriers_flat.append(
                     {
                         "dot": dn,
                         "dot_html": _dot_link_html(dn),
                         "name": r.get("legal_name") or r.get("dba_name") or "",
-                        "phone": r.get("phone") or "—",
+                        "phone": ph_disp,
+                        "phone_html": (
+                            f'<button type="button" class="ts-filter-phone" '
+                            f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
+                            f'title="Filter to this phone">{_esc(ph_disp)}</button>'
+                            if ph_disp and ph_disp != "—"
+                            else _esc(ph_disp)
+                        ),
                         "status": status or "—",
                         "power_units": pu if pu is not None else None,
                         "address": street,
@@ -374,20 +509,31 @@ def build_detail_tables(
                     }
                 )
     if carriers_flat:
-        vmax = max(
-            (float(r["power_units"]) for r in carriers_flat if r.get("power_units") is not None),
-            default=0.0,
-        )
+        pu_vals = [
+            float(r["power_units"])
+            for r in carriers_flat
+            if r.get("power_units") is not None
+        ]
+        pu_scale = MetricScale.from_values(pu_vals)
+        vmax = pu_scale.vmax
         for r in carriers_flat:
             pu = float(r["power_units"]) if r.get("power_units") is not None else 0.0
-            r["power_units_html"] = rank_dot_html(pu, vmax) + (
+            r["power_units_html"] = rank_dot_html(
+                pu, vmax, scale=pu_scale, label="power units"
+            ) + (
                 _esc(f"{int(pu):,}") if r.get("power_units") is not None else "—"
             )
+            r["percentile"] = pu_scale.percentile(pu)
+        # Default: group by phone, active first, then power units (classic stack view)
         tables.append(
             {
                 "rootId": "ts-carriers",
                 "pageSize": 50,
-                "initialSort": [{"id": "power_units", "desc": True}],
+                "initialSort": [
+                    {"id": "phone", "desc": False},
+                    {"id": "status", "desc": False},
+                    {"id": "power_units", "desc": True},
+                ],
                 "columns": [
                     {"id": "dot", "header": "DOT#"},
                     {"id": "name", "header": "Legal name"},
@@ -404,8 +550,16 @@ def build_detail_tables(
         rows = []
         for r in entities:
             street = r.get("canonical_address") or ""
+            name = r.get("name") or "—"
+            detail_href = (r.get("detail_href") or "").strip()
+            name_html = (
+                f'<a href="{_esc(detail_href)}">{_esc(name)}</a>'
+                if detail_href
+                else _esc(name)
+            )
             row = {
-                "name": r.get("name") or "—",
+                "name": name,
+                "name_html": name_html,
                 "detail": r.get("detail") or r.get("id") or "—",
                 "amount": float(r.get("amount") or 0) if r.get("amount") is not None else None,
                 "amount_display": r.get("amount_fmt") or "—",
@@ -416,14 +570,33 @@ def build_detail_tables(
             }
             # sort amount by numeric; display via amount_html when we map column amount
             if focus == "medicare":
+                from provider_pages import format_hcpcs_label  # noqa: WPS433
+
                 row["hcpcs_types"] = int(r.get("hcpcs_type_count") or 0)
                 row["claims"] = int(r.get("total_claims") or 0)
-                # compact HCPCS summary for search/filter
+                npi = str(r.get("id") or "").strip()
+                if npi and detail_href:
+                    row["detail"] = r.get("detail") or f"NPI {npi}"
+                    row["detail_html"] = (
+                        f'<a href="{_esc(detail_href)}">{_esc(row["detail"])}</a>'
+                    )
+                # Prefer human labels: "Therapeutic activities (97530) $2.97M"
                 hlist = r.get("hcpcs") or []
-                row["hcpcs_summary"] = ", ".join(
-                    f"{h.get('hcpcs_code')} {h.get('paid_fmt') or ''}".strip()
-                    for h in hlist[:8]
+                bits = []
+                for h in hlist[:8]:
+                    label = (
+                        h.get("hcpcs_label")
+                        or format_hcpcs_label(h.get("hcpcs_code"))
+                        or h.get("hcpcs_code")
+                        or "—"
+                    )
+                    paid = (h.get("paid_fmt") or "").strip()
+                    bits.append(f"{label} {paid}".strip())
+                row["hcpcs_summary"] = ", ".join(bits)
+                top_lab = r.get("top_hcpcs_label") or format_hcpcs_label(
+                    r.get("top_hcpcs_code")
                 )
+                row["top_service"] = top_lab if top_lab and top_lab != "—" else "—"
             rows.append(row)
         cols = [
             {"id": "name", "header": "Name"},
@@ -433,9 +606,10 @@ def build_detail_tables(
         if focus == "medicare":
             cols.extend(
                 [
-                    {"id": "hcpcs_types", "header": "HCPCS types"},
+                    {"id": "hcpcs_types", "header": "Code types"},
                     {"id": "claims", "header": "Claims"},
-                    {"id": "hcpcs_summary", "header": "Top HCPCS"},
+                    {"id": "top_service", "header": "Top service"},
+                    {"id": "hcpcs_summary", "header": "Top services ($)"},
                 ]
             )
         cols.extend(
@@ -444,14 +618,17 @@ def build_detail_tables(
                 {"id": "street", "header": "Street"},
             ]
         )
-        vmax = max(
-            (float(r["amount"]) for r in rows if r.get("amount") is not None),
-            default=0.0,
+        amt_scale = MetricScale.from_values(
+            float(r["amount"]) for r in rows if r.get("amount") is not None
         )
+        vmax = amt_scale.vmax
         for row in rows:
             amt = float(row["amount"]) if row.get("amount") is not None else 0.0
             disp = row.get("amount_display") or "—"
-            row["amount_html"] = rank_dot_html(amt, vmax) + _esc(str(disp))
+            row["amount_html"] = rank_dot_html(
+                amt, vmax, scale=amt_scale, label="amount"
+            ) + _esc(str(disp))
+            row["percentile"] = amt_scale.percentile(amt)
         tables.append(
             {
                 "rootId": "ts-entities",

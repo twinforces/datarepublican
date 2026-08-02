@@ -32,6 +32,11 @@
 % for code in cluster['reason_codes']:
       <span class="chip">${code}</span>
 % endfor
+% if cluster.get('percentile_chips'):
+% for chip in cluster['percentile_chips']:
+      <span class="chip" style="background:#ede9fe; color:#5b21b6;" title="Absolute population percentile (full DB)">${chip}</span>
+% endfor
+% endif
 % if cluster.get('phy_is_po_box'):
       <span class="chip" style="background:#fee2e2; color:#991b1b;">phy_po_box</span>
 % endif
@@ -117,10 +122,22 @@
 
 % if phone_groups or address_groups:
   <section>
-    <h2>DOT carriers (all)</h2>
+    <h2>DOT by shared phone</h2>
     <p style="font-size:0.85rem; color:#666; margin-bottom:0.5rem;">
-      Flattened carrier list — sort by phone, status, or power units.
-      Filter for a shared phone or status <code>I</code> to surface inactive stacks.
+      Physical addresses only (<code>dot_carrier_phy</code>) — mailing / UPS-store rows are excluded.
+      Classic shell breakout: one row per phone with active vs inactive counts and power units.
+      Click a phone number to filter the carrier list below to that stack
+      (e.g. one dispatcher number reused across dozens of paper carriers).
+    </p>
+    <div id="ts-phone-groups" class="ts-table-root"></div>
+  </section>
+  <section>
+    <h2>DOT carriers (physical)</h2>
+    <p style="font-size:0.85rem; color:#666; margin-bottom:0.5rem;">
+      Carriers with this key as <strong>physical</strong> address only.
+      Default sort: phone → status (A before I) → power units.
+      Search for a phone or status <code>I</code>, or click a phone above to filter.
+      Live MCS-150 on Search Carriers may show a newer physical than this snapshot.
     </p>
     <div id="ts-carriers" class="ts-table-root"></div>
   </section>

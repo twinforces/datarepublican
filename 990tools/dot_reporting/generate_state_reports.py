@@ -11,7 +11,7 @@ Flow:
 
 Location slices:
   address  — cluster key = canonical_address, partitioned by Addresses.state
-  zipcode  — cluster key = 5-digit zip, partitioned by Addresses.state
+  zipcode  — cluster key = Addresses.zip_code (∈ Zips), partitioned by Addresses.state
   colocator / loose_colocator — cluster key as usual, partitioned by Addresses.state
     (rows missing state are dropped from by-state views)
 
@@ -48,6 +48,7 @@ from generate_address_reports import (  # noqa: E402
     is_po_box,
     load_physical_notes,
     physical_note_for,
+    mode_uses_alias,
     resolve_slice_mode,
     slugify_address,
     reason_codes,
@@ -60,6 +61,10 @@ from generate_address_reports import (  # noqa: E402
     group_dot_by_address,
 )
 from state_research import FOCUSES, US_STATES, show_cap, open_db  # noqa: E402
+from generate_focus_reports import (  # noqa: E402
+    FOCUS_DOMAINS,
+    fetch_focus_entities,
+)
 from us_state_map import render_heatmap_svg  # noqa: E402
 from collections import defaultdict  # noqa: E402
 
@@ -68,8 +73,28 @@ DEFAULT_DB = "/Volumes/Data/final/irs990.duckdb"
 
 def _type_sql_for_focus(focus: str) -> str:
     if focus == "dot":
-        return "address_type IN ('dot_carrier_phy', 'dot_carrier_mail')"
+        return "address_type = 'dot_carrier_phy'"
     return FOCUSES[focus]["type_sql"] if focus in FOCUSES else "TRUE"
+
+
+def _domain_for_focus(focus: str) -> dict[str, Any]:
+    """Domain dict for focus templates (review_tag / amount_label / entity_title).
+
+    state_research.FOCUSES only has label + thresholds; national FOCUS_DOMAINS
+    has the template fields. Merge so by-state detail pages don't KeyError.
+    """
+    base = dict(FOCUSES.get(focus) or {})
+    rich = FOCUS_DOMAINS.get(focus) or {}
+    return {
+        "label": rich.get("label") or base.get("label") or focus,
+        "entity_title": rich.get("entity_title") or base.get("label") or focus,
+        "amount_label": rich.get("amount_label") or "$",
+        "review_tag": rich.get("review_tag") or focus,
+        "rank_metric": rich.get("rank_metric") or "focus_count",
+        "rank_label": rich.get("rank_label") or "Focus count",
+        **base,
+        **{k: v for k, v in rich.items() if k not in ("min_focus_default", "min_multi_default")},
+    }
 
 
 def research_states(
@@ -86,8 +111,8 @@ def research_states(
     from_sql = mode.get("from_sql", "FROM Addresses")
     type_sql = _type_sql_for_focus(focus)  # uses bare address_type (set in keyed)
 
-    if mode.get("needs_geocoding_join") == "1":
-        # colocator path: alias a / g already in key/where/from
+    if mode_uses_alias(mode):
+        # colocator / zip: Addresses aliased as a (optional Geocoding or Zips join)
         keyed = f"""
         SELECT
             UPPER(TRIM(a.state)) AS st,
@@ -131,11 +156,21 @@ def research_states(
         COUNT(*)::BIGINT AS pass_clusters,
         SUM(focus_n)::BIGINT AS focus_rows
     FROM base
-    WHERE multi >= ? OR focus_n >= ?
+    WHERE focus_n > 0
+      AND (? <= 0 OR multi >= ?)
+      AND (? <= 0 OR focus_n >= ?)
     GROUP BY st
     ORDER BY pass_clusters DESC
     """
-    rows = con.execute(sql, [min_multi, min_focus]).fetchall()
+    rows = con.execute(
+        sql,
+        [
+            int(min_multi or 0),
+            int(min_multi or 0),
+            int(min_focus or 0),
+            int(min_focus or 0),
+        ],
+    ).fetchall()
     out = []
     have = set()
     for st, pass_c, focus_rows in rows:
@@ -175,6 +210,7 @@ def fetch_state_clusters(
     from_sql = mode.get("from_sql", "FROM Addresses")
     type_sql = _type_sql_for_focus(focus)
     st = state.upper()
+    use_fec_fast_path = False
 
     if focus == "dot":
         rank_expr = "COALESCE(da.active_power_units, 0) DESC, b.focus_n DESC"
@@ -185,48 +221,29 @@ def fetch_state_clusters(
                        AS active_power_units
             FROM keyed k
             INNER JOIN dot_carriers d ON d.id = k.owner_id
-                AND k.address_type IN ('dot_carrier_phy', 'dot_carrier_mail')
+                AND k.address_type = 'dot_carrier_phy'
             GROUP BY k.cluster_key
         ) da ON da.cluster_key = b.cluster_key
         """
         extra_select = (
             "COALESCE(da.active_power_units, 0) AS active_power_units, "
             "0::DOUBLE AS focus_amount, "
-            "b.distinct_focus_addresses"
+            "b.distinct_focus_addresses, "
+            "0::DOUBLE AS paid_per_hcpcs_type"
         )
     elif focus == "fec":
-        # Rank by FEC $ (sum of contribution/transaction/expenditure amounts)
-        rank_expr = "COALESCE(m.focus_amount, 0) DESC, b.focus_n DESC"
-        metric_join = f"""
-        LEFT JOIN (
-            SELECT cluster_key, SUM(amt)::DOUBLE AS focus_amount FROM (
-                SELECT k.cluster_key, COALESCE(f.contribution_amount, 0) AS amt
-                FROM keyed k
-                INNER JOIN fec_individual_contributions f
-                    ON f.id = k.owner_id AND k.address_type = 'fec_contributor'
-                UNION ALL
-                SELECT k.cluster_key, COALESCE(t.transaction_amount, 0)
-                FROM keyed k
-                INNER JOIN fec_committee_transactions t
-                    ON t.id = k.owner_id AND k.address_type = 'fec_committee_transaction'
-                UNION ALL
-                SELECT k.cluster_key, COALESCE(o.expenditure_amount, 0)
-                FROM keyed k
-                INNER JOIN fec_operating_expenditures o
-                    ON o.id = k.owner_id AND k.address_type = 'fec_operating_expenditure'
-                UNION ALL
-                SELECT k.cluster_key, COALESCE(c.spending_amount, 0)
-                FROM keyed k
-                INNER JOIN fec_candidate_spendings c
-                    ON c.id = k.owner_id AND k.address_type = 'fec_candidate_spending'
-            ) u GROUP BY cluster_key
-        ) m ON m.cluster_key = b.cluster_key
-        """
+        # Density first (focus_n); optional $ on candidates via fast path.
+        # Full-state 4-way FEC money joins on 50M address rows are prohibitively slow
+        # when repeated for every state.
+        rank_expr = "b.focus_n DESC, COALESCE(m.focus_amount, 0) DESC"
+        metric_join = ""  # money attached via fec-specific SQL path below
         extra_select = (
             "0::BIGINT AS active_power_units, "
             "COALESCE(m.focus_amount, 0) AS focus_amount, "
-            "b.distinct_focus_addresses"
+            "b.distinct_focus_addresses, "
+            "0::DOUBLE AS paid_per_hcpcs_type"
         )
+        use_fec_fast_path = True
     elif focus == "contractor":
         rank_expr = (
             "b.distinct_focus_addresses DESC, b.focus_n DESC, "
@@ -244,7 +261,8 @@ def fetch_state_clusters(
         extra_select = (
             "0::BIGINT AS active_power_units, "
             "COALESCE(m.focus_amount, 0) AS focus_amount, "
-            "b.distinct_focus_addresses"
+            "b.distinct_focus_addresses, "
+            "0::DOUBLE AS paid_per_hcpcs_type"
         )
     elif focus == "grants":
         from grant_suppress import suppressed_sql_predicate  # noqa: WPS433
@@ -264,19 +282,30 @@ def fetch_state_clusters(
         extra_select = (
             "0::BIGINT AS active_power_units, "
             "COALESCE(m.focus_amount, 0) AS focus_amount, "
-            "b.distinct_focus_addresses"
+            "b.distinct_focus_addresses, "
+            "0::DOUBLE AS paid_per_hcpcs_type"
         )
-    else:  # medicare — $ via NPI rollup (not 230M line grain)
+    else:  # medicare — paid/types via NPI rollup (not 230M line grain)
         from generate_focus_reports import ensure_medicare_rollup  # noqa: WPS433
 
         has_rollup = ensure_medicare_rollup(con)
-        rank_expr = "COALESCE(m.focus_amount, 0) DESC, b.focus_n DESC"
+        rank_expr = (
+            "COALESCE(m.paid_per_hcpcs_type, 0) DESC, "
+            "COALESCE(m.focus_amount, 0) DESC, "
+            "b.focus_n DESC"
+        )
         if has_rollup:
             metric_join = """
             LEFT JOIN (
                 SELECT
                     k.cluster_key,
-                    COALESCE(SUM(r.total_paid), 0)::DOUBLE AS focus_amount
+                    COALESCE(SUM(r.total_paid), 0)::DOUBLE AS focus_amount,
+                    CASE
+                        WHEN COALESCE(SUM(r.hcpcs_type_count), 0) > 0
+                        THEN COALESCE(SUM(r.total_paid), 0)::DOUBLE
+                             / SUM(r.hcpcs_type_count)::DOUBLE
+                        ELSE 0::DOUBLE
+                    END AS paid_per_hcpcs_type
                 FROM keyed k
                 INNER JOIN medicare_providers mp
                     ON mp.id = k.owner_id
@@ -288,7 +317,8 @@ def fetch_state_clusters(
             extra_select = (
                 "0::BIGINT AS active_power_units, "
                 "COALESCE(m.focus_amount, 0) AS focus_amount, "
-                "b.distinct_focus_addresses"
+                "b.distinct_focus_addresses, "
+                "COALESCE(m.paid_per_hcpcs_type, 0) AS paid_per_hcpcs_type"
             )
         else:
             rank_expr = "b.focus_n DESC, b.total_rows DESC"
@@ -296,12 +326,14 @@ def fetch_state_clusters(
             extra_select = (
                 "0::BIGINT AS active_power_units, "
                 "0::DOUBLE AS focus_amount, "
-                "b.distinct_focus_addresses"
+                "b.distinct_focus_addresses, "
+                "0::DOUBLE AS paid_per_hcpcs_type"
             )
 
-    if mode.get("needs_geocoding_join") == "1":
-        sql = f"""
-        WITH keyed AS (
+    # Shared keyed/base fragments
+    if mode_uses_alias(mode):
+        keyed_cte = f"""
+        keyed AS (
             SELECT
                 ({key}) AS cluster_key,
                 a.canonical_address AS canonical_address,
@@ -312,40 +344,10 @@ def fetch_state_clusters(
               AND UPPER(TRIM(a.state)) = ?
               AND ({key}) IS NOT NULL
               AND TRIM(CAST(({key}) AS VARCHAR)) != ''
-        ),
-        base AS (
-            SELECT
-                cluster_key,
-                COUNT(*)::BIGINT AS total_rows,
-                COUNT(DISTINCT address_type)::BIGINT AS multi_type_count,
-                LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
-                SUM(CASE WHEN {type_sql} THEN 1 ELSE 0 END)::BIGINT AS focus_n,
-                COUNT(DISTINCT CASE WHEN {type_sql}
-                    THEN COALESCE(NULLIF(TRIM(canonical_address), ''), CAST(owner_id AS VARCHAR))
-                    END)::BIGINT AS distinct_focus_addresses,
-                SUM(CASE WHEN address_type IN ('dot_carrier_phy','dot_carrier_mail')
-                         THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
-                SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
-                SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
-                SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_count,
-                ANY_VALUE(CASE WHEN canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
-                          THEN canonical_address END) AS sample_address
-            FROM keyed
-            GROUP BY cluster_key
-        )
-        SELECT
-            b.cluster_key, b.sample_address, b.total_rows, b.multi_type_count,
-            b.address_types, b.focus_n, b.dot_carrier_count, b.charity_count,
-            b.grant_count, b.officer_count, {extra_select}
-        FROM base b
-        {metric_join}
-        WHERE b.multi_type_count >= ? OR b.focus_n >= ?
-        ORDER BY {rank_expr}
-        LIMIT ?
-        """
+        )"""
     else:
-        sql = f"""
-        WITH keyed AS (
+        keyed_cte = f"""
+        keyed AS (
             SELECT
                 ({key}) AS cluster_key,
                 canonical_address,
@@ -356,7 +358,9 @@ def fetch_state_clusters(
               AND UPPER(TRIM(state)) = ?
               AND ({key}) IS NOT NULL
               AND TRIM(CAST(({key}) AS VARCHAR)) != ''
-        ),
+        )"""
+
+    base_cte = f"""
         base AS (
             SELECT
                 cluster_key,
@@ -367,7 +371,7 @@ def fetch_state_clusters(
                 COUNT(DISTINCT CASE WHEN {type_sql}
                     THEN COALESCE(NULLIF(TRIM(canonical_address), ''), CAST(owner_id AS VARCHAR))
                     END)::BIGINT AS distinct_focus_addresses,
-                SUM(CASE WHEN address_type IN ('dot_carrier_phy','dot_carrier_mail')
+                SUM(CASE WHEN address_type = 'dot_carrier_phy'
                          THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
                 SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
                 SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
@@ -376,29 +380,177 @@ def fetch_state_clusters(
                           THEN canonical_address END) AS sample_address
             FROM keyed
             GROUP BY cluster_key
-        )
-        SELECT
-            b.cluster_key, b.sample_address, b.total_rows, b.multi_type_count,
-            b.address_types, b.focus_n, b.dot_carrier_count, b.charity_count,
-            b.grant_count, b.officer_count, {extra_select}
-        FROM base b
-        {metric_join}
-        WHERE b.multi_type_count >= ? OR b.focus_n >= ?
-        ORDER BY {rank_expr}
-        LIMIT ?
-        """
+        )"""
 
     # Grants: over-fetch then take top `limit` (SQL already ranks by clean $)
     sql_limit = limit
     if focus == "grants":
         sql_limit = max(limit * 10, min(1000, limit * 15))
 
-    rows = con.execute(sql, [st, min_multi, min_focus, sql_limit]).fetchall()
+    if use_fec_fast_path:
+        # Speed path for FEC (~50M address rows):
+        # 1) Aggregate *only* fec% rows (not full Addresses) by cluster key + state
+        # 2) Take top candidates by focus_n
+        # 3) Money joins only for those keys / owner_ids
+        # 4) Multi-type count for final keys only (cheap IN-list scan)
+        cand_n = max(limit * 8, min(800, limit * 12))
+        if mode_uses_alias(mode):
+            fec_keyed = f"""
+            fec_keyed AS (
+                SELECT
+                    ({key}) AS cluster_key,
+                    a.canonical_address AS canonical_address,
+                    a.address_type AS address_type,
+                    a.owner_id AS owner_id
+                {from_sql}
+                WHERE {where}
+                  AND UPPER(TRIM(a.state)) = ?
+                  AND a.address_type LIKE 'fec%'
+                  AND ({key}) IS NOT NULL
+                  AND TRIM(CAST(({key}) AS VARCHAR)) != ''
+            )"""
+        else:
+            fec_keyed = f"""
+            fec_keyed AS (
+                SELECT
+                    ({key}) AS cluster_key,
+                    canonical_address,
+                    address_type,
+                    owner_id
+                {from_sql}
+                WHERE {where}
+                  AND UPPER(TRIM(state)) = ?
+                  AND address_type LIKE 'fec%'
+                  AND ({key}) IS NOT NULL
+                  AND TRIM(CAST(({key}) AS VARCHAR)) != ''
+            )"""
+        sql = f"""
+        WITH {fec_keyed},
+        base AS (
+            SELECT
+                cluster_key,
+                COUNT(*)::BIGINT AS total_rows,
+                COUNT(DISTINCT address_type)::BIGINT AS fec_type_count,
+                LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
+                COUNT(*)::BIGINT AS focus_n,
+                COUNT(DISTINCT COALESCE(NULLIF(TRIM(canonical_address), ''),
+                    CAST(owner_id AS VARCHAR)))::BIGINT AS distinct_focus_addresses,
+                0::BIGINT AS dot_carrier_count,
+                0::BIGINT AS charity_count,
+                0::BIGINT AS grant_count,
+                0::BIGINT AS officer_count,
+                ANY_VALUE(CASE WHEN canonical_address IS NOT NULL
+                    AND TRIM(canonical_address) != '' THEN canonical_address END)
+                    AS sample_address
+            FROM fec_keyed
+            GROUP BY cluster_key
+        ),
+        candidates AS (
+            SELECT *
+            FROM base
+            WHERE focus_n > 0
+              AND (? <= 0 OR focus_n >= ?)
+            ORDER BY focus_n DESC, total_rows DESC
+            LIMIT ?
+        ),
+        money AS (
+            SELECT cluster_key, SUM(amt)::DOUBLE AS focus_amount FROM (
+                SELECT k.cluster_key, COALESCE(f.contribution_amount, 0) AS amt
+                FROM fec_keyed k
+                INNER JOIN candidates c ON c.cluster_key = k.cluster_key
+                INNER JOIN fec_individual_contributions f
+                    ON f.id = k.owner_id AND k.address_type = 'fec_contributor'
+                UNION ALL
+                SELECT k.cluster_key, COALESCE(t.transaction_amount, 0)
+                FROM fec_keyed k
+                INNER JOIN candidates c ON c.cluster_key = k.cluster_key
+                INNER JOIN fec_committee_transactions t
+                    ON t.id = k.owner_id AND k.address_type = 'fec_committee_transaction'
+                UNION ALL
+                SELECT k.cluster_key, COALESCE(o.expenditure_amount, 0)
+                FROM fec_keyed k
+                INNER JOIN candidates c ON c.cluster_key = k.cluster_key
+                INNER JOIN fec_operating_expenditures o
+                    ON o.id = k.owner_id AND k.address_type = 'fec_operating_expenditure'
+                UNION ALL
+                SELECT k.cluster_key, COALESCE(cs.spending_amount, 0)
+                FROM fec_keyed k
+                INNER JOIN candidates c ON c.cluster_key = k.cluster_key
+                INNER JOIN fec_candidate_spendings cs
+                    ON cs.id = k.owner_id AND k.address_type = 'fec_candidate_spending'
+            ) u
+            GROUP BY cluster_key
+        ),
+        multi AS (
+            SELECT
+                ({key}) AS cluster_key,
+                COUNT(DISTINCT {"a.address_type" if mode_uses_alias(mode) else "address_type"})
+                    ::BIGINT AS multi_type_count
+            {from_sql}
+            WHERE {where}
+              AND UPPER(TRIM({"a.state" if mode_uses_alias(mode) else "state"})) = ?
+              AND ({key}) IN (SELECT cluster_key FROM candidates)
+            GROUP BY 1
+        )
+        SELECT
+            b.cluster_key, b.sample_address, b.total_rows,
+            COALESCE(mu.multi_type_count, b.fec_type_count) AS multi_type_count,
+            b.address_types, b.focus_n, b.dot_carrier_count, b.charity_count,
+            b.grant_count, b.officer_count,
+            0::BIGINT AS active_power_units,
+            COALESCE(m.focus_amount, 0) AS focus_amount,
+            b.distinct_focus_addresses,
+            0::DOUBLE AS paid_per_hcpcs_type
+        FROM candidates b
+        LEFT JOIN money m ON m.cluster_key = b.cluster_key
+        LEFT JOIN multi mu ON mu.cluster_key = b.cluster_key
+        ORDER BY b.focus_n DESC, COALESCE(m.focus_amount, 0) DESC
+        LIMIT ?
+        """
+        # st for fec_keyed, focus floor×2, cand_n, st for multi, limit
+        rows = con.execute(
+            sql,
+            [
+                st,
+                int(min_focus or 0),
+                int(min_focus or 0),
+                cand_n,
+                st,
+                limit,
+            ],
+        ).fetchall()
+    else:
+        sql = f"""
+        WITH {keyed_cte},
+        {base_cte}
+        SELECT
+            b.cluster_key, b.sample_address, b.total_rows, b.multi_type_count,
+            b.address_types, b.focus_n, b.dot_carrier_count, b.charity_count,
+            b.grant_count, b.officer_count, {extra_select}
+        FROM base b
+        {metric_join}
+        WHERE b.focus_n > 0
+          AND (? <= 0 OR b.multi_type_count >= ?)
+          AND (? <= 0 OR b.focus_n >= ?)
+        ORDER BY {rank_expr}
+        LIMIT ?
+        """
+        rows = con.execute(
+            sql,
+            [
+                st,
+                int(min_multi or 0),
+                int(min_multi or 0),
+                int(min_focus or 0),
+                int(min_focus or 0),
+                sql_limit,
+            ],
+        ).fetchall()
     cols = [
         "cluster_key", "sample_address", "total_rows", "multi_type_count",
         "address_types", "focus_n", "dot_carrier_count", "charity_count",
         "grant_count", "officer_count", "active_power_units", "focus_amount",
-        "distinct_focus_addresses",
+        "distinct_focus_addresses", "paid_per_hcpcs_type",
     ]
     out = []
     for row in rows:
@@ -423,9 +575,16 @@ def fetch_state_clusters(
         elif focus == "contractor":
             c["rank_metric_value"] = int(c.get("distinct_focus_addresses") or 0)
             c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
-        elif focus in ("fec", "grants"):
+        elif focus == "medicare":
+            c["rank_metric_value"] = float(c.get("paid_per_hcpcs_type") or 0)
+            c["rank_metric_fmt"] = fmt_money(c["rank_metric_value"])
+            c["paid_per_hcpcs_type_fmt"] = c["rank_metric_fmt"]
+        elif focus == "grants":
             c["rank_metric_value"] = float(c.get("focus_amount") or 0)
             c["rank_metric_fmt"] = c["focus_amount_fmt"]
+        elif focus == "fec":
+            c["rank_metric_value"] = int(c.get("focus_count") or 0)
+            c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
         else:
             c["rank_metric_value"] = int(c.get("focus_count") or 0)
             c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
@@ -458,6 +617,19 @@ def write_state_suite(
 ) -> dict[str, Any]:
     con = open_db(db_path)
     try:
+        from domain_briefing import (  # noqa: WPS433
+            annotate_cluster_percentile_chips,
+            cutpoints_for_focus,
+            ensure_population_cutpoints,
+            index_methodology_context,
+        )
+
+        pop_cache = ensure_population_cutpoints(con)
+        pop_cutpoints = cutpoints_for_focus(focus if focus != "dot" else "dot", pop_cache)
+        methodology = index_methodology_context(
+            focus if focus != "dot" else "dot", pop_cutpoints
+        )
+
         print(
             f"Researching states focus={focus} slice={slice_by} "
             f"(using Addresses.state column)...",
@@ -526,6 +698,17 @@ def write_state_suite(
             )
             + "</nav>"
         )
+        # Inline methodology (same content as suite index pages)
+        from mako.lookup import TemplateLookup  # noqa: WPS433
+
+        _lookup = TemplateLookup(
+            directories=[str(SCRIPT_DIR / "templates")],
+            input_encoding="utf-8",
+        )
+        methodology_html = _lookup.get_template(
+            "partials/domain_methodology.mako"
+        ).render(methodology=methodology)
+
         index_html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>{label} — US heatmap</title>
@@ -540,6 +723,7 @@ table.state-table {{ font-size: 0.85rem; }}
   Cap: min(100, max(1, pass//10)) · {total_pass:,} pass clusters → {total_pages:,} detail pages
   · Generated {datetime.now().isoformat(timespec="seconds")}</p>
 </header>
+{methodology_html}
 <section>{heatmap}</section>
 <section>
   <h2>All states</h2>
@@ -649,11 +833,19 @@ Detail pages: {total_pages:,}
                     c["canonical_address"] = (
                         f"{key}  ·  e.g. {sample}" if sample != key else key
                     )
+                c["percentile_chips"] = annotate_cluster_percentile_chips(
+                    c, focus if focus != "dot" else "dot", pop_cutpoints
+                )
                 clusters_out.append(c)
 
-                charities = fetch_charities(con, slice_by, key, top_n)
-                officers = fetch_officers(con, slice_by, key, top_n)
-                grants = fetch_grants(con, slice_by, key, top_n)
+                # Secondary entity fetches are expensive on dense FEC zips/colocators.
+                # Skip for FEC by-state (focus tables empty; rank/$ already on cluster).
+                if focus == "fec":
+                    charities, officers, grants = [], [], []
+                else:
+                    charities = fetch_charities(con, slice_by, key, top_n)
+                    officers = fetch_officers(con, slice_by, key, top_n)
+                    grants = fetch_grants(con, slice_by, key, top_n)
 
                 # Prefer focus detail template for non-dot; trucking for dot
                 if focus == "dot":
@@ -754,19 +946,50 @@ Detail pages: {total_pages:,}
                         widen_links=widen_links,
                     )
                 else:
-                    domain = FOCUSES.get(focus, {"label": focus, "entity_title": focus,
-                                                  "amount_label": "$", "review_tag": focus})
-                    # minimal entities: reuse grants/charities as secondary only
+                    domain = _domain_for_focus(focus)
+                    # Same entity load as national focus reports (names, HCPCS, FEC, …)
+                    entities = fetch_focus_entities(
+                        con,
+                        slice_by,
+                        key,
+                        focus,
+                        top_n,
+                        lat_long=False,
+                    )
+                    if focus == "medicare":
+                        from provider_pages import (  # noqa: WPS433
+                            provider_detail_href,
+                        )
+
+                        for ent in entities:
+                            npi = str(ent.get("id") or "").strip()
+                            if npi:
+                                ent["detail_href"] = provider_detail_href(npi)
                     from cluster_table_payload import (  # noqa: WPS433
                         build_detail_tables,
                         dumps_table_json,
                     )
 
                     detail_tables = build_detail_tables(
+                        entities=entities,
                         charities=charities,
                         officers=officers,
                         grants=grants if focus != "grants" else [],
                         focus=focus,
+                        entity_title=domain.get("entity_title", "Entities"),
+                    )
+                    from map_points import (  # noqa: WPS433
+                        clusters_to_map_points,
+                        single_point_from_key,
+                    )
+
+                    detail_map = clusters_to_map_points(
+                        [c], slice_by=slice_by
+                    ) or single_point_from_key(
+                        key,
+                        label=c.get("canonical_address") or key,
+                        slice_by=slice_by,
+                        sample_address=sample,
                     )
                     from breadcrumbs import crumbs_by_state_detail  # noqa: WPS433
                     from widen_links import build_widen_links  # noqa: WPS433
@@ -784,7 +1007,8 @@ Detail pages: {total_pages:,}
                         report_day=report_day,
                         reports_dir=SCRIPT_DIR / "reports",
                         output_dir=st_dir,
-                        conn=con,
+                        # FEC: skip DB colocator resolve (major per-page cost)
+                        conn=None if focus == "fec" else con,
                         context="by_state",
                     )
                     html = render_tpl(
@@ -796,8 +1020,9 @@ Detail pages: {total_pages:,}
                             or c.get("rank_metric_fmt")
                             or "—",
                             "focus_label": domain.get("label", focus),
+                            "review_tag": domain.get("review_tag", focus),
                         },
-                        entities=[],
+                        entities=entities,
                         charities=charities,
                         officers=officers,
                         grants=grants if focus != "grants" else [],
@@ -806,6 +1031,7 @@ Detail pages: {total_pages:,}
                         physical_note=physical_note_for(sample, notes),
                         generated_at=generated_at,
                         detail_tables_json=dumps_table_json(detail_tables),
+                        map_points=detail_map,
                         breadcrumbs=crumbs_by_state_detail(
                             focus=focus,
                             slice_by=slice_by,
@@ -835,8 +1061,8 @@ Detail pages: {total_pages:,}
                 rank_label = "Active PUs"
             else:
                 rank_map = {
-                    "medicare": ("focus_count", "Provider rows"),
-                    "fec": ("focus_amount", "FEC $"),
+                    "medicare": ("paid_per_hcpcs_type", "Paid / HCPCS types"),
+                    "fec": ("focus_count", "FEC entity rows"),
                     "contractor": ("distinct_addresses", "Distinct addresses"),
                     "grants": ("focus_amount", "Grant $ (excl. suppressed)"),
                 }
@@ -873,17 +1099,39 @@ Detail pages: {total_pages:,}
                 slice_label=f"{slice_by} · state={st}",
                 focus=focus,
                 focus_label=f"{label} — {st}",
-                domain=FOCUSES.get(focus, {"label": focus}),
+                domain=_domain_for_focus(focus) if focus != "dot" else {"label": label},
                 rank_label=rank_label,
                 cluster_table_json=dumps_table_json(table_payload),
                 map_points=map_points,
                 breadcrumbs=crumbs_by_state_state(
                     focus=focus, slice_by=slice_by, state=st
                 ),
+                methodology=methodology,
             )
             (st_dir / "index.html").write_text(st_index, encoding="utf-8")
             with open(st_data / "clusters.json", "w", encoding="utf-8") as f:
                 json.dump(clusters_out, f, indent=2, default=str)
+
+        # Suite-level metadata (cutpoints + methodology) for the by-state pack
+        meta = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "db_path": db_path,
+            "focus": focus,
+            "slice_by": slice_by,
+            "criteria": {"min_multi": min_multi, "min_focus": min_focus},
+            "total_pass_clusters": total_pass,
+            "total_detail_pages": total_pages,
+            "population_cutpoints": pop_cutpoints,
+            "population_cutpoints_generated_at": pop_cache.get("generated_at"),
+            "methodology": {
+                "question": methodology.get("question"),
+                "signals": methodology.get("signals"),
+                "rank": methodology.get("rank"),
+            },
+        }
+        (output_dir / "export_metadata.json").write_text(
+            json.dumps(meta, indent=2), encoding="utf-8"
+        )
 
         print(f"Done → {output_dir / 'index.html'}", flush=True)
         return {"total_pages": total_pages, "total_pass": total_pass, "output": str(output_dir)}
@@ -919,8 +1167,8 @@ def main() -> int:
     args = p.parse_args()
 
     if args.focus == "dot":
-        min_multi = args.min_multi_type if args.min_multi_type is not None else 7
-        min_focus = args.min_focus if args.min_focus is not None else 50
+        min_multi = args.min_multi_type if args.min_multi_type is not None else 0
+        min_focus = args.min_focus if args.min_focus is not None else 0
     else:
         cfg = FOCUSES[args.focus]
         min_multi = (

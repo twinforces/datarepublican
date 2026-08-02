@@ -37,35 +37,36 @@ US_STATES = (
 
 # Focus definitions: SQL predicate on Addresses.address_type
 FOCUSES: dict[str, dict[str, Any]] = {
+    # min_* kept for CLI/compat; admission is focus_n > 0, then rank + show_n/max.
     "dot": {
         "label": "DOT carriers",
-        "type_sql": "address_type IN ('dot_carrier_phy', 'dot_carrier_mail')",
-        "min_multi": 7,
-        "min_focus": 50,
+        "type_sql": "address_type = 'dot_carrier_phy'",
+        "min_multi": 0,
+        "min_focus": 0,
     },
     "medicare": {
         "label": "Medicare / NPPES",
         "type_sql": "address_type IN ('nppes_practice', 'nppes_mailing')",
-        "min_multi": 5,
-        "min_focus": 30,
+        "min_multi": 0,
+        "min_focus": 0,
     },
     "fec": {
         "label": "FEC",
         "type_sql": "address_type LIKE 'fec%'",
-        "min_multi": 5,
-        "min_focus": 80,
+        "min_multi": 0,
+        "min_focus": 0,
     },
     "contractor": {
         "label": "Contractors",
         "type_sql": "address_type = 'contractor'",
-        "min_multi": 4,
-        "min_focus": 15,
+        "min_multi": 0,
+        "min_focus": 0,
     },
     "grants": {
         "label": "Grants",
         "type_sql": "address_type = 'grant'",
-        "min_multi": 4,
-        "min_focus": 40,
+        "min_multi": 0,
+        "min_focus": 0,
     },
 }
 

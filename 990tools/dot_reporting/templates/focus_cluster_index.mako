@@ -14,9 +14,14 @@
     <p class="meta">Generated ${generated_at} · DB: ${db_path} · ${cluster_count} clusters</p>
     <p class="meta">
       Focus: <strong>${focus}</strong> · Slice: ${slice_by}${(' — ' + slice_label) if slice_label else ''}
-      · Criteria: multi_type ≥ ${min_multi_type} OR focus_entities ≥ ${min_focus}
+      · Admission: focus rows &gt; 0 · suite cap ${max_clusters if max_clusters is not UNDEFINED else 100} after rank
+% if min_multi_type or min_focus:
+      · Optional floors: multi≥${min_multi_type} focus≥${min_focus}
+% endif
     </p>
   </header>
+
+  <%include file="partials/domain_methodology.mako"/>
 
   <div style="margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
     <div>
