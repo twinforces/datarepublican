@@ -16,7 +16,7 @@ from .address import Address
 class Contractor(BaseModel):
     """Represents an independent contractor paid by a charity"""
 
-    contractor_id: Optional[int] = None
+    contractor_id: Optional[str] = None
     charity_id: Optional[str] = None
     filer_ein: str = ""
     name: str = ""
@@ -33,10 +33,22 @@ class Contractor(BaseModel):
         """Check if contractor compensation exceeds $100,000"""
         return self.amount > 100000.0
 
+    @property
+    def id(self) -> str:
+        """Primary key; generate UUID v7 on first access (same pattern as Grant/Officer)."""
+        if self.contractor_id is None or self.contractor_id == "":
+            self.contractor_id = self.generate_id()
+        return str(self.contractor_id)
+
     def build_address(self, address_line1: Optional[str] = None, address_line2: Optional[str] = None,
                      city: Optional[str] = None, state: Optional[str] = None, zip_code: Optional[str] = None,
                      zip4: Optional[str] = None) -> Address:
-        """Build an Address dataclass record owned by this contractor"""
+        """Build an Address dataclass record owned by this contractor.
+
+        Always sets owner_id via self.id so Addresses can join back to Contractors.
+        (Older code used contractor_id only when already set — it was None at parse
+        time, so production rows landed with owner_id NULL.)
+        """
         address = Address(
             ein=self.ein or "",
             name=self.name,
@@ -47,15 +59,18 @@ class Contractor(BaseModel):
             zip_code=zip_code,
             zip4=zip4,
             address_type="contractor",
-            owner_id=str(self.contractor_id) if self.contractor_id is not None else None  # Convert to string
+            owner_id=self.id,
         )
         address.prep_for_insert()
-        if address.colocator: self.colocator = address.colocator
+        if address.colocator:
+            self.colocator = address.colocator
         return address
 
     def prep_for_insert(self):
         """Prepare the record for database insertion"""
         super().prep_for_insert()
+        # Ensure contractor_id exists even if build_address was never called
+        _ = self.id
         pass
 
     @classmethod
