@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import Dict, Optional
@@ -84,6 +85,30 @@ class MedicareProcessor:
         return downloaded
 
     def _ensure_hcpcs_codes(self) -> bool:
+        """Prefer CMS Level II + PFS RVU loader; fall back to legacy TSV."""
+        # New path: load_hcpcs_from_cms.py (Level II quarterly + PFS RVU short labels)
+        try:
+            from load_hcpcs_from_cms import main as load_hcpcs_main
+
+            log_info("Loading hcpcs_codes from CMS Level II + PFS RVU…")
+            old = sys.argv[:]
+            try:
+                sys.argv = [
+                    "load_hcpcs_from_cms",
+                    "--db-path",
+                    str(self.db_ops.db_path),
+                    "--cache-dir",
+                    str(self.data_dir / "hcpcs_cms"),
+                ]
+                rc = load_hcpcs_main()
+            finally:
+                sys.argv = old
+            if rc == 0:
+                return True
+            log_warning(f"CMS HCPCS loader rc={rc}; trying legacy TSV")
+        except Exception as e:
+            log_warning(f"CMS HCPCS loader failed ({e}); trying legacy TSV")
+
         dest = self.data_dir / "HCPC_CODES.tsv"
         legacy = LEGACY_DATA_DIR / "HCPC_CODES.tsv"
         if not dest.exists() and legacy.exists():
@@ -226,8 +251,12 @@ class MedicareProcessor:
             return self._find_npidata_csv()
 
         dest = self.data_dir / Path(npi_name).name
+        gz_dest = Path(str(dest) + ".gz")
+        # Prefer existing plain or gzipped extract over re-unzip.
         if dest.exists():
             return dest
+        if gz_dest.exists():
+            return gz_dest
 
         log_info(f"Extracting {npi_name} from {zip_path.name}")
         subprocess.run(
@@ -237,11 +266,28 @@ class MedicareProcessor:
         return dest if dest.exists() else None
 
     def _find_npidata_csv(self) -> Optional[Path]:
+        """Locate npidata CSV; accept plain .csv or .csv.gz (newest mtime wins)."""
+        candidates: list[Path] = []
         for d in (self.data_dir, LEGACY_DATA_DIR):
-            matches = sorted(d.glob("npidata_pfile_*.csv"))
-            if matches:
-                return matches[-1]
-        return None
+            if not d.exists():
+                continue
+            candidates.extend(d.glob("npidata_pfile_*.csv.gz"))
+            candidates.extend(d.glob("npidata_pfile_*.csv"))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+
+    @staticmethod
+    def _open_nppes_csv(csv_path: Path):
+        """Open NPPES CSV as text; transparent gzip for *.csv.gz."""
+        name = csv_path.name.lower()
+        if name.endswith(".gz") or csv_path.suffix == ".gz":
+            import gzip
+
+            return gzip.open(
+                csv_path, mode="rt", encoding="utf-8", errors="replace", newline=""
+            )
+        return open(csv_path, newline="", encoding="utf-8", errors="replace")
 
     @staticmethod
     def _trim(value) -> Optional[str]:
@@ -356,7 +402,7 @@ class MedicareProcessor:
                 """
             )
 
-        with open(csv_path, newline="", encoding="utf-8", errors="replace") as fh:
+        with self._open_nppes_csv(csv_path) as fh:
             for row in csv.DictReader(fh):
                 if not self._trim(row.get("NPI")):
                     continue
