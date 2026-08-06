@@ -275,11 +275,19 @@ def build_cluster_sql(
         atype = "a.address_type"
         owner = "a.owner_id"
         aid = "a.address_id"
+        zipc = "a.zip_code"
+        lat = "a.latitude"
+        lon = "a.longitude"
+        colo = "a.colocator"
     else:
         canon = "canonical_address"
         atype = "address_type"
         owner = "owner_id"
         aid = "address_id"
+        zipc = "zip_code"
+        lat = "latitude"
+        lon = "longitude"
+        colo = "colocator"
 
     return f"""
 WITH keyed AS (
@@ -288,7 +296,11 @@ WITH keyed AS (
         {canon} AS canonical_address,
         {atype} AS address_type,
         {owner} AS owner_id,
-        {aid} AS address_id
+        {aid} AS address_id,
+        {zipc} AS zip_code,
+        {lat} AS latitude,
+        {lon} AS longitude,
+        {colo} AS colocator
     {from_sql}
     WHERE {where}
       AND ({key}) IS NOT NULL
@@ -307,7 +319,12 @@ base AS (
         -- Representative street address for maps / notes (any non-empty canonical in cluster)
         ANY_VALUE(CASE
             WHEN canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
-            THEN canonical_address END) AS sample_address
+            THEN canonical_address END) AS sample_address,
+        -- Structured geo from Addresses (maps must not re-parse street text)
+        ANY_VALUE(NULLIF(TRIM(zip_code), '')) AS zip_code,
+        ANY_VALUE(latitude) AS latitude,
+        ANY_VALUE(longitude) AS longitude,
+        ANY_VALUE(NULLIF(TRIM(colocator), '')) AS colocator
     FROM keyed
     GROUP BY cluster_key
 ),
@@ -344,7 +361,11 @@ SELECT
     b.officer_count,
     cs.max_grift_ratio,
     COALESCE(cs.misrep_count, 0) AS misrep_count,
-    COALESCE(da.active_power_units, 0) AS active_power_units
+    COALESCE(da.active_power_units, 0) AS active_power_units,
+    b.zip_code,
+    b.latitude,
+    b.longitude,
+    b.colocator
 FROM base b
 LEFT JOIN charity_signals cs ON cs.cluster_key = b.cluster_key
 LEFT JOIN dot_active da ON da.cluster_key = b.cluster_key
@@ -492,6 +513,7 @@ def fetch_clusters(
         "cluster_key", "sample_address", "total_rows", "multi_type_count", "address_types",
         "dot_carrier_count", "charity_count", "grant_count", "officer_count",
         "max_grift_ratio", "misrep_count", "active_power_units",
+        "zip_code", "latitude", "longitude", "colocator",
     ]
     clusters = []
     for row in rows:

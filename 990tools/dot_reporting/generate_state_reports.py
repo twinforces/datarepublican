@@ -330,7 +330,7 @@ def fetch_state_clusters(
                 "0::DOUBLE AS paid_per_hcpcs_type"
             )
 
-    # Shared keyed/base fragments
+    # Shared keyed/base fragments (include Addresses geo columns for maps)
     if mode_uses_alias(mode):
         keyed_cte = f"""
         keyed AS (
@@ -338,7 +338,11 @@ def fetch_state_clusters(
                 ({key}) AS cluster_key,
                 a.canonical_address AS canonical_address,
                 a.address_type AS address_type,
-                a.owner_id AS owner_id
+                a.owner_id AS owner_id,
+                a.zip_code AS zip_code,
+                a.latitude AS latitude,
+                a.longitude AS longitude,
+                a.colocator AS colocator
             {from_sql}
             WHERE {where}
               AND UPPER(TRIM(a.state)) = ?
@@ -352,7 +356,11 @@ def fetch_state_clusters(
                 ({key}) AS cluster_key,
                 canonical_address,
                 address_type,
-                owner_id
+                owner_id,
+                zip_code,
+                latitude,
+                longitude,
+                colocator
             {from_sql}
             WHERE {where}
               AND UPPER(TRIM(state)) = ?
@@ -377,7 +385,11 @@ def fetch_state_clusters(
                 SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
                 SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_count,
                 ANY_VALUE(CASE WHEN canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
-                          THEN canonical_address END) AS sample_address
+                          THEN canonical_address END) AS sample_address,
+                ANY_VALUE(NULLIF(TRIM(zip_code), '')) AS zip_code,
+                ANY_VALUE(latitude) AS latitude,
+                ANY_VALUE(longitude) AS longitude,
+                ANY_VALUE(NULLIF(TRIM(colocator), '')) AS colocator
             FROM keyed
             GROUP BY cluster_key
         )"""
@@ -401,7 +413,11 @@ def fetch_state_clusters(
                     ({key}) AS cluster_key,
                     a.canonical_address AS canonical_address,
                     a.address_type AS address_type,
-                    a.owner_id AS owner_id
+                    a.owner_id AS owner_id,
+                    a.zip_code AS zip_code,
+                    a.latitude AS latitude,
+                    a.longitude AS longitude,
+                    a.colocator AS colocator
                 {from_sql}
                 WHERE {where}
                   AND UPPER(TRIM(a.state)) = ?
@@ -416,7 +432,11 @@ def fetch_state_clusters(
                     ({key}) AS cluster_key,
                     canonical_address,
                     address_type,
-                    owner_id
+                    owner_id,
+                    zip_code,
+                    latitude,
+                    longitude,
+                    colocator
                 {from_sql}
                 WHERE {where}
                   AND UPPER(TRIM(state)) = ?
@@ -441,7 +461,11 @@ def fetch_state_clusters(
                 0::BIGINT AS officer_count,
                 ANY_VALUE(CASE WHEN canonical_address IS NOT NULL
                     AND TRIM(canonical_address) != '' THEN canonical_address END)
-                    AS sample_address
+                    AS sample_address,
+                ANY_VALUE(NULLIF(TRIM(zip_code), '')) AS zip_code,
+                ANY_VALUE(latitude) AS latitude,
+                ANY_VALUE(longitude) AS longitude,
+                ANY_VALUE(NULLIF(TRIM(colocator), '')) AS colocator
             FROM fec_keyed
             GROUP BY cluster_key
         ),
@@ -500,7 +524,8 @@ def fetch_state_clusters(
             0::BIGINT AS active_power_units,
             COALESCE(m.focus_amount, 0) AS focus_amount,
             b.distinct_focus_addresses,
-            0::DOUBLE AS paid_per_hcpcs_type
+            0::DOUBLE AS paid_per_hcpcs_type,
+            b.zip_code, b.latitude, b.longitude, b.colocator
         FROM candidates b
         LEFT JOIN money m ON m.cluster_key = b.cluster_key
         LEFT JOIN multi mu ON mu.cluster_key = b.cluster_key
@@ -526,7 +551,8 @@ def fetch_state_clusters(
         SELECT
             b.cluster_key, b.sample_address, b.total_rows, b.multi_type_count,
             b.address_types, b.focus_n, b.dot_carrier_count, b.charity_count,
-            b.grant_count, b.officer_count, {extra_select}
+            b.grant_count, b.officer_count, {extra_select},
+            b.zip_code, b.latitude, b.longitude, b.colocator
         FROM base b
         {metric_join}
         WHERE b.focus_n > 0
@@ -551,6 +577,7 @@ def fetch_state_clusters(
         "address_types", "focus_n", "dot_carrier_count", "charity_count",
         "grant_count", "officer_count", "active_power_units", "focus_amount",
         "distinct_focus_addresses", "paid_per_hcpcs_type",
+        "zip_code", "latitude", "longitude", "colocator",
     ]
     out = []
     for row in rows:

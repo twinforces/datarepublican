@@ -123,14 +123,33 @@ def load_zip_centroids(
     return out
 
 
+def _valid_lat_lon(lat: float, lon: float) -> bool:
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return False
+    if lat == 0 and lon == 0:
+        return False
+    return True
+
+
 def resolve_geo(
     key: str | None,
     *,
     sample_address: str | None = None,
     slice_by: str | None = None,
     zip_centroids: dict[str, tuple[float, float]] | None = None,
+    zip_code: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    colocator: str | None = None,
 ) -> dict[str, Any] | None:
-    """Resolve geometry for a cluster key.
+    """Resolve geometry for a cluster.
+
+    Preference order (structured Addresses fields first — no street parsing):
+      1. latitude / longitude columns
+      2. colocator when it is an LL:lat:lon token
+      3. zip_code column → zip centroid
+      4. cluster *key* when it is already LL: / bare ZIP / PO:box:zip
+      5. trailing ZIP in sample_address (legacy fallback only)
 
     Returns dict with:
       kind: 'll' | 'loose' | 'zip' | 'po_zip'
@@ -142,11 +161,51 @@ def resolve_geo(
     raw = str(key or "").strip()
     sb = (slice_by or "").lower()
 
+    # 1) Structured lat/lon from Addresses (or aggregated ANY_VALUE)
+    if latitude is not None and longitude is not None:
+        try:
+            lat_f, lon_f = float(latitude), float(longitude)
+        except (TypeError, ValueError):
+            lat_f = lon_f = None  # type: ignore[assignment]
+        if lat_f is not None and lon_f is not None and _valid_lat_lon(lat_f, lon_f):
+            if sb in ("loose_colocator", "loose"):
+                b = loose_cell_bounds(lat_f, lon_f)
+                return {
+                    "kind": "loose",
+                    "lat": lat_f,
+                    "lon": lon_f,
+                    "bounds": b,
+                }
+            return {"kind": "ll", "lat": lat_f, "lon": lon_f}
+
+    # 2) Structured colocator token (LL:… or PO:…)
+    colo = str(colocator or "").strip()
+    if colo:
+        ll_c = parse_ll(colo)
+        if ll_c:
+            lat, lon = ll_c
+            if sb in ("loose_colocator", "loose"):
+                b = loose_cell_bounds(lat, lon)
+                return {"kind": "loose", "lat": lat, "lon": lon, "bounds": b}
+            return {"kind": "ll", "lat": lat, "lon": lon}
+        po_c = _PO_RE.match(colo)
+        if po_c:
+            z = po_c.group(1)
+            if z in cents:
+                lat, lon = cents[z]
+                return {"kind": "po_zip", "lat": lat, "lon": lon, "zip": z}
+
+    # 3) Structured zip_code column (already ZIP5 from split_zip_code)
+    z_col = parse_zip5(zip_code) if zip_code else None
+    if z_col and z_col in cents:
+        lat, lon = cents[z_col]
+        return {"kind": "zip", "lat": lat, "lon": lon, "zip": z_col}
+
+    # 4) Cluster key semantics (zipcode / colocator / loose slices)
     ll = parse_ll(raw)
     if ll:
         lat, lon = ll
-        # Loose colocator: 0.5° grid cell → center + min/max bounds rectangle
-        if sb == "loose_colocator" or sb == "loose":
+        if sb in ("loose_colocator", "loose"):
             b = loose_cell_bounds(lat, lon)
             return {
                 "kind": "loose",
@@ -154,10 +213,8 @@ def resolve_geo(
                 "lon": lon,
                 "bounds": b,
             }
-        # Tight colocator (or LL: used as point elsewhere)
         return {"kind": "ll", "lat": lat, "lon": lon}
 
-    # PO:box:zip
     po = _PO_RE.match(raw)
     if po:
         z = po.group(1)
@@ -165,13 +222,12 @@ def resolve_geo(
             lat, lon = cents[z]
             return {"kind": "po_zip", "lat": lat, "lon": lon, "zip": z}
 
-    # bare zip cluster key
     z = parse_zip5(raw)
     if z and z in cents:
         lat, lon = cents[z]
         return {"kind": "zip", "lat": lat, "lon": lon, "zip": z}
 
-    # sample address trailing zip (PO boxes often have zip in sample)
+    # 5) Legacy: trailing ZIP in free-text sample only
     z2 = zip_from_text(sample_address)
     if z2 and z2 in cents:
         lat, lon = cents[z2]
@@ -187,12 +243,20 @@ def point_from_cluster_key(
     slice_by: str | None = None,
     zip_centroids: dict[str, tuple[float, float]] | None = None,
     sample_address: str | None = None,
+    zip_code: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    colocator: str | None = None,
 ) -> tuple[float, float] | None:
     g = resolve_geo(
         key,
         sample_address=sample_address,
         slice_by=slice_by,
         zip_centroids=zip_centroids,
+        zip_code=zip_code,
+        latitude=latitude,
+        longitude=longitude,
+        colocator=colocator,
     )
     if not g:
         return None
@@ -218,6 +282,10 @@ def clusters_to_map_points(
             sample_address=sample,
             slice_by=slice_by,
             zip_centroids=cents,
+            zip_code=c.get("zip_code"),
+            latitude=c.get("latitude"),
+            longitude=c.get("longitude"),
+            colocator=c.get("colocator"),
         )
         if not geo:
             continue
@@ -292,8 +360,20 @@ def single_point_from_key(
     href: str = "",
     slice_by: str | None = None,
     sample_address: str | None = None,
+    zip_code: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    colocator: str | None = None,
 ) -> list[dict[str, Any]]:
-    geo = resolve_geo(key, sample_address=sample_address, slice_by=slice_by)
+    geo = resolve_geo(
+        key,
+        sample_address=sample_address,
+        slice_by=slice_by,
+        zip_code=zip_code,
+        latitude=latitude,
+        longitude=longitude,
+        colocator=colocator,
+    )
     if not geo:
         return []
     lat, lon = float(geo["lat"]), float(geo["lon"])

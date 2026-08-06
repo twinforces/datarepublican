@@ -189,12 +189,24 @@ def build_focus_cluster_sql(
             "a.owner_id",
             "a.address_id",
         )
+        zipc, lat, lon, colo = (
+            "a.zip_code",
+            "a.latitude",
+            "a.longitude",
+            "a.colocator",
+        )
     else:
         canon, atype, owner, aid = (
             "canonical_address",
             "address_type",
             "owner_id",
             "address_id",
+        )
+        zipc, lat, lon, colo = (
+            "zip_code",
+            "latitude",
+            "longitude",
+            "colocator",
         )
 
     # Money metric join varies by focus.
@@ -392,7 +404,11 @@ WITH keyed AS (
         {canon} AS canonical_address,
         {atype} AS address_type,
         {owner} AS owner_id,
-        {aid} AS address_id
+        {aid} AS address_id,
+        {zipc} AS zip_code,
+        {lat} AS latitude,
+        {lon} AS longitude,
+        {colo} AS colocator
     {from_sql}
     WHERE {where}
       AND ({key}) IS NOT NULL
@@ -419,7 +435,11 @@ base AS (
                  THEN 1 ELSE 0 END)::BIGINT AS medicare_count,
         ANY_VALUE(CASE
             WHEN canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
-            THEN canonical_address END) AS sample_address
+            THEN canonical_address END) AS sample_address,
+        ANY_VALUE(NULLIF(TRIM(zip_code), '')) AS zip_code,
+        ANY_VALUE(latitude) AS latitude,
+        ANY_VALUE(longitude) AS longitude,
+        ANY_VALUE(NULLIF(TRIM(colocator), '')) AS colocator
     FROM keyed
     GROUP BY cluster_key
 ),
@@ -455,7 +475,11 @@ SELECT
     cs.max_grift_ratio,
     COALESCE(cs.misrep_count, 0) AS misrep_count,
     COALESCE(m.focus_amount, 0) AS focus_amount
-    {money_select_extra}
+    {money_select_extra},
+    b.zip_code,
+    b.latitude,
+    b.longitude,
+    b.colocator
 FROM base b
 LEFT JOIN charity_signals cs ON cs.cluster_key = b.cluster_key
 LEFT JOIN money m ON m.cluster_key = b.cluster_key
@@ -568,6 +592,10 @@ def fetch_clusters_focus(
         "npi_with_spend",
         "paid_per_hcpcs_type",
         "distinct_contributors",
+        "zip_code",
+        "latitude",
+        "longitude",
+        "colocator",
     ]
     out = []
     for row in rows:
