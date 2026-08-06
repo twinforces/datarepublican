@@ -988,10 +988,14 @@ Detail pages: {total_pages:,}
                             provider_detail_href,
                         )
 
+                        # Detail pages live at suite/states/ST/*.html; shared
+                        # NPI dossiers are at reports/providers/ → three levels up.
                         for ent in entities:
                             npi = str(ent.get("id") or "").strip()
                             if npi:
-                                ent["detail_href"] = provider_detail_href(npi)
+                                ent["detail_href"] = provider_detail_href(
+                                    npi, relative="../../../providers"
+                                )
                     from cluster_table_payload import (  # noqa: WPS433
                         build_detail_tables,
                         dumps_table_json,
