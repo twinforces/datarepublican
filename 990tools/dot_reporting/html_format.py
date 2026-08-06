@@ -8,8 +8,10 @@ import re
 from typing import Any
 from urllib.parse import quote_plus
 
-# US ZIP or ZIP+4 — capture 5-digit core for search
-_ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
+# US ZIP or ZIP+4 — capture 5-digit core for search.
+# Negative lookahead: do not treat house numbers as ZIPs
+# ("32405 Diagonal Rd" — digits followed by a street word).
+_ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b(?!\s*[A-Za-z])")
 
 
 def esc(s: Any) -> str:

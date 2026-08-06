@@ -29,7 +29,10 @@ _LL_RE = re.compile(
 )
 # PO:<box>:<zip5>  (zip is the last colon field)
 _PO_RE = re.compile(r"^PO:\s*[^:]+:\s*(\d{5})\s*$", re.IGNORECASE)
-_ZIP_RE = re.compile(r"^(\d{5})\b")
+# Bare zip cluster key ONLY — entire key is ZIP5 or ZIP+4.
+# Do NOT use ^(\d{5})\b: street addresses like "32405 Diagonal Rd…, 97838"
+# would wrongly take the house number as a Florida (etc.) zip centroid.
+_ZIP_ONLY_RE = re.compile(r"^(\d{5})(?:-\d{4})?\s*$")
 _ZIP_TRAIL_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\s*$")
 
 
@@ -51,10 +54,11 @@ def parse_ll(key: str | None) -> tuple[float, float] | None:
 
 
 def parse_zip5(key: str | None) -> str | None:
+    """Return ZIP5 only when *key* is a bare zip (or PO:box:zip), not a street address."""
     if not key:
         return None
     s = str(key).strip()
-    m = _ZIP_RE.match(s)
+    m = _ZIP_ONLY_RE.match(s)
     if m:
         return m.group(1)
     m = _PO_RE.match(s)
