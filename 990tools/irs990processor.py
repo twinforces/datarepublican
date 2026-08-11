@@ -1070,11 +1070,19 @@ def main():
                 action()
             log_info(f"Completed step: {step}")
  
-            # Optimize database after each major processing step
-            log_info(f"Optimizing database after {step}")
-            print(f"DEBUG: About to call optimize_database after {step}")
-            processor.db_ops.optimize_database()
-            print(f"DEBUG: optimize_database completed after {step}")
+            # Optimize after each major step — skip for chunked overnight loops
+            # (ANALYZE Addresses/Geocoding can take longer than the work itself).
+            skip_opt = (
+                os.environ.get("SKIP_POST_STEP_OPTIMIZE", "").strip() in ("1", "true", "yes")
+                or (getattr(processor, "max_files", None) is not None and int(processor.max_files or 0) > 0)
+            )
+            if skip_opt:
+                log_info(f"Skipping optimize_database after {step} (chunked/SKIP_POST_STEP_OPTIMIZE)")
+            else:
+                log_info(f"Optimizing database after {step}")
+                print(f"DEBUG: About to call optimize_database after {step}")
+                processor.db_ops.optimize_database()
+                print(f"DEBUG: optimize_database completed after {step}")
  
             # Generate stats report after each step (unless --nostats is specified)
             if not global_config.nostats:

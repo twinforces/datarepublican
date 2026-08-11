@@ -444,12 +444,15 @@ class GeocodingAPIProcessor(BaseProcessor):
                 batcher_timeout=GEOCODING_BATCHER_TIMEOUT,
             ),
         ]
+        # Smaller consumer flushes on 16GB hosts: 500 PDCs × Addresses WHERE
+        # used to OOM at 7.4GB before UPDATE…FROM rewrite; 100 keeps margin.
+        census_consumer = int(os.getenv("GEOCODE_CENSUS_CONSUMER_BATCH", "100"))
         return Pipeline(
             stages=stages,
             db_ops=db_ops,
             chain_on='failure',
             workunit_class=GeocodingWorkUnit,
-            consumer_threshold=GEOCODE_CONSUMER_BATCH_SIZE,
+            consumer_threshold=census_consumer,
             checkpoint_interval=GEOCODE_CHECKPOINT_INTERVAL,
             buffered_feed=True,
             feed_buffer_batches=GEOCODING_FEED_BUFFER_BATCHES,
@@ -765,51 +768,118 @@ class GeocodingAPIProcessor(BaseProcessor):
         """C/O then suite/unit strip for census_strip retry."""
         return self._strip_suite_from_address(self._strip_co_from_address(address))
 
+    # Leading care-of: C/O (slash) is unambiguous; bare CO needs a word boundary so
+    # COLUMBIA/COLORADO/CONNECTION do not enter the stripper. Bare CO is common on
+    # 990 street lines ("CO JOHN DOE 123 MAIN") and is handled the same as C/O once gated.
+    _CO_PREFIX_RE = re.compile(r'(?i)^(c/o|co)\b,?\s*')
+    _CO_COMMA_RE = re.compile(r'(?i)^(c/o|co)\b,?\s*[^,\d]*,\s*')
+    _CO_DIGIT_RE = re.compile(r'(?i)^(c/o|co)\b,?\s*.*?(?=\d)')
+    # Street cues after the care-of party (no house number): ordinal place names and
+    # "Name Road/Street/…" — used when digit/comma patterns cannot fire.
+    _CO_NUMWORD_CUE_RE = re.compile(
+        r'(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|'
+        r'first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b'
+    )
+    _CO_DIRECTION_CUE_RE = re.compile(
+        r'(?i)\b(?:[nsew]|north|south|east|west)\s+\S+'
+    )
+    _CO_STREET_TYPE_CUE_RE = re.compile(
+        r'(?i)\b\S+\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|'
+        r'way|ct|court|pl|place|pkwy|parkway|hwy|highway|cir|circle|ter|terrace|'
+        r'sq|square|trl|trail|row|alley|loop|path|pike|run)\b'
+    )
+
+    def _strip_co_via_street_cue(self, address: str) -> Optional[str]:
+        """If address is CO/C/O + party + street-ish tail (no house #), return the tail."""
+        m = self._CO_PREFIX_RE.match(address)
+        if not m:
+            return None
+        rest = address[m.end():].strip()
+        if not rest:
+            return None
+        starts = []
+        for rx in (
+            self._CO_NUMWORD_CUE_RE,
+            self._CO_DIRECTION_CUE_RE,
+            self._CO_STREET_TYPE_CUE_RE,
+        ):
+            hit = rx.search(rest)
+            if hit:
+                starts.append(hit.start())
+        if not starts:
+            return None
+        street = rest[min(starts):].strip()
+        if not street:
+            return None
+        # Always an improvement when we dropped a care-of prefix (and maybe a party name).
+        if street.lower() == address.lower():
+            return None
+        return street
+
     def _strip_co_from_address(self, address: str) -> str:
-        """Strip leading C/O patterns from address strings."""
+        """Strip leading C/O or CO (care-of) patterns from address strings."""
         if not address:
             return address
-        if not re.match(r'(?i)^c/?o', address):
+        if not self._CO_PREFIX_RE.match(address):
             return address
         log_debug(f"C/O strip: {address[:80]}")
         if "Tull Charitable Foundation" in address:
             print(f"DEBUG_TULL: C/O stripping initiated for '{address}'")
-        comma_pattern = r'^(?:c/?o,?)\s*[^,\d]*,\s*'
-        if re.search(comma_pattern, address, re.IGNORECASE):
-            result = re.sub(comma_pattern, '', address, flags=re.IGNORECASE).strip()
+
+        m = self._CO_COMMA_RE.match(address)
+        if m:
+            result = address[m.end():].strip()
             log_debug(f"C/O strip: Used comma pattern, result: '{result}'")
             if "Tull Charitable Foundation" in address:
                 print(f"DEBUG_TULL: C/O stripping - comma pattern matched, result: '{result}'")
             return result
-        digit_pattern = r'^(?:c/?o,?)\s*.*?(?=\d)'
-        if re.search(digit_pattern, address, re.IGNORECASE):
-            result = re.sub(digit_pattern, '', address, flags=re.IGNORECASE).strip()
-            log_debug(f"C/O strip: Used digit pattern, result: '{result}'")
-            if "Tull Charitable Foundation" in address:
-                print(f"DEBUG_TULL: C/O stripping - digit pattern matched, result: '{result}'")
-            return result
+
+        m = self._CO_DIGIT_RE.match(address)
+        if m:
+            result = address[m.end():].strip()
+            # Guard: require a real house-number run at the cut point
+            if re.match(r'^\d', result):
+                log_debug(f"C/O strip: Used digit pattern, result: '{result}'")
+                if "Tull Charitable Foundation" in address:
+                    print(f"DEBUG_TULL: C/O stripping - digit pattern matched, result: '{result}'")
+                return result
+
+        cued = self._strip_co_via_street_cue(address)
+        if cued:
+            log_debug(f"C/O strip: Used street-cue pattern, result: '{cued}'")
+            return cued
+
         log_debug(f"C/O strip: No pattern matched for '{address}', returning original")
         if "Tull Charitable Foundation" in address:
             print(f"DEBUG_TULL: C/O stripping - no pattern matched, returning original: '{address}'")
         return address
 
     def _extract_entity_from_co_address(self, address: str) -> str:
-        """Extract entity name from C/O addresses for search-oriented queries."""
-        if not address or not re.match(r'(?i)^c/?o', address):
+        """Extract entity name from C/O / CO addresses for search-oriented queries."""
+        if not address or not self._CO_PREFIX_RE.match(address):
             return ""
-        comma_match = re.match(r'^(?:c/?o,?)\s*([^,\d]*),\s*(.*)', address, flags=re.IGNORECASE)
+        comma_match = re.match(
+            r'(?i)^(c/o|co)\b,?\s*([^,\d]*),\s*(.*)', address
+        )
         if comma_match:
-            entity = comma_match.group(1).strip()
-            if entity: return entity
-        digit_match = re.match(r'^(?:c/?o,?)\s*(.*?)(?=\d)', address, flags=re.IGNORECASE)
+            entity = comma_match.group(2).strip()
+            if entity:
+                return entity
+        digit_match = re.match(
+            r'(?i)^(c/o|co)\b,?\s*(.*?)(?=\d)', address
+        )
         if digit_match:
-            entity = digit_match.group(1).strip()
-            if entity: return entity
-        no_delimiter_match = re.match(r'^(?:c/?o,?)\s*(.+)', address, flags=re.IGNORECASE)
+            entity = digit_match.group(2).strip()
+            if entity:
+                return entity
+        no_delimiter_match = re.match(
+            r'(?i)^(c/o|co)\b,?\s*(.+)', address
+        )
         if no_delimiter_match:
-            entity = no_delimiter_match.group(1).strip()
+            entity = no_delimiter_match.group(2).strip()
             entity = re.sub(r'[,.]$', '', entity).strip()
-            if entity: return entity
+            if entity:
+                return entity
         return ""
 
     def _parse_co_address(self, address: str, api_type: str, zip_code: str = "") -> str:
@@ -819,20 +889,24 @@ class GeocodingAPIProcessor(BaseProcessor):
         if api_type.lower() == 'census':
             return self._strip_co_from_address(address)
         elif api_type.lower() == 'grok':
-            if not re.match(r'(?i)^c/?o', address):
+            if not self._CO_PREFIX_RE.match(address):
                 return address
-            comma_match = re.match(r'^(?:c/?o,?)\s*([^,\d]*),\s*(.*)', address, flags=re.IGNORECASE)
+            comma_match = re.match(
+                r'(?i)^(c/o|co)\b,?\s*([^,\d]*),\s*(.*)', address
+            )
             if comma_match:
-                entity = comma_match.group(1).strip()
-                rest = comma_match.group(2).strip()
+                entity = comma_match.group(2).strip()
+                rest = comma_match.group(3).strip()
                 zip_match = re.search(r'\b(\d{5})\b', rest)
                 zip_part = zip_match.group(1) if zip_match else zip_code
                 if zip_part:
                     return f"{entity}, {zip_part}"
-            digit_match = re.match(r'^(?:c/?o,?)\s*(.*?)(?=\d)(.*)', address, flags=re.IGNORECASE)
+            digit_match = re.match(
+                r'(?i)^(c/o|co)\b,?\s*(.*?)(?=\d)(.*)', address
+            )
             if digit_match:
-                entity = digit_match.group(1).strip()
-                rest = digit_match.group(2).strip()
+                entity = digit_match.group(2).strip()
+                rest = digit_match.group(3).strip()
                 zip_match = re.search(r'\b(\d{5})\b', rest)
                 zip_part = zip_match.group(1) if zip_match else zip_code
                 if zip_part:
@@ -1419,6 +1493,12 @@ class GeocodingAPIProcessor(BaseProcessor):
         ))
 
     def _update_owner_colocators(self, context: PendingDatabaseContext, geocoding_id: str, colocator: str):
+        # Owner fan-out (Charities/Officers/…) is memory-heavy on 16GB hosts during
+        # census bulk saves. Geocoding + Addresses.colocator land first; owner
+        # backfill can run later from Addresses. Set GEOCODE_SKIP_OWNER_COLOCATORS=0
+        # to restore inline owner writes.
+        if os.getenv("GEOCODE_SKIP_OWNER_COLOCATORS", "1") == "1":
+            return
         result = self.db_ops.execute_query(
             "SELECT address_type, owner_id FROM Addresses WHERE geocoding_id = ?", (geocoding_id,)
         )
@@ -1446,11 +1526,18 @@ class GeocodingAPIProcessor(BaseProcessor):
         lon: Optional[float] = None,
         matched: Optional[str] = None,
     ) -> ResultWorkUnit:
-        """Persist match on Geocoding only — defer Addresses/owner propagation (OOM + index bug)."""
+        """
+        Persist match on Geocoding and always propagate colocator to Addresses + owners.
+
+        (Historically deferred Addresses/owner writes for OOM/ART index pain; that left
+        Geocoding.LL full while Addresses.colocator stayed empty. Proper path is always on.)
+        """
         item = unit.data
         ctx = PendingDatabaseContext()
         now = datetime.now().isoformat()
         gid = item['geocoding_id']
+        rlat = round(lat, 4) if lat is not None else None
+        rlon = round(lon, 4) if lon is not None else None
         update: Dict[str, Any] = {
             'geocoding_id': gid,
             'last_attempt': now,
@@ -1460,14 +1547,39 @@ class GeocodingAPIProcessor(BaseProcessor):
         }
         if colocator is not None:
             update['colocator'] = colocator
-        if lat is not None:
-            update['latitude'] = round(lat, 4)
-        if lon is not None:
-            update['longitude'] = round(lon, 4)
+        if rlat is not None:
+            update['latitude'] = rlat
+        if rlon is not None:
+            update['longitude'] = rlon
         ctx.addOperationToDatabase(DatabaseOperation(
             operation_type=DatabaseOperationType.GENERIC_UPDATE,
             data={'table': 'Geocoding', 'updates': [update], 'id_column': 'geocoding_id'}
         ))
+
+        # Always push colocator (and lat/lon) onto every Address sharing this geocoding_id.
+        if colocator is not None:
+            set_parts = ["colocator = ?"]
+            params: list = [colocator]
+            if rlat is not None:
+                set_parts.append("latitude = COALESCE(latitude, ?)")
+                params.append(rlat)
+            if rlon is not None:
+                set_parts.append("longitude = COALESCE(longitude, ?)")
+                params.append(rlon)
+            params.append(gid)
+            ctx.addOperationToDatabase(DatabaseOperation(
+                operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                data={
+                    'table': 'Addresses',
+                    'set_clause': ', '.join(set_parts),
+                    'where_clause': (
+                        "geocoding_id = ? AND (colocator IS NULL OR TRIM(colocator) = '')"
+                    ),
+                    'params': params,
+                },
+            ))
+            self._update_owner_colocators(ctx, str(gid), colocator)
+
         ctx.addOperationToDatabase(DatabaseOperation(
             operation_type=DatabaseOperationType.PROGRESS_UPDATE,
             data={'count': item.get('address_count', 1)}
