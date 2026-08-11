@@ -852,6 +852,7 @@ def render_ein_detail(
   {ofac_tbl}
 </section>
 <footer>
+{COLOCATION_DISCLAIMER_HTML}
   <p class="disclaimer">BMF is the IRS exempt-organization master file. Absence of a 990
     filing in this DB does not mean the org never filed; coverage depends on ingest years.</p>
   <p><a href="../index.html">← OFAC reports</a></p>
@@ -1011,8 +1012,9 @@ COLOCATION_DISCLAIMER_HTML = """
     <strong>Do not assume.</strong> Co-location means a shared street / building / ZIP key
     in the data—not control, ownership, conspiracy, or the same conduct.
     Jeffrey Dahmer was a cannibal; his neighbors were not cannibals—just neighbors.
-    Living in a bordello does not make you a sex worker: a teenage runaway can share a
-    roof while waiting to join the Air Force. <em>Same footprint ≠ same role.</em>
+    My father-in-law lived in a bordello; he was not a whore—he was a teenage runaway
+    hiding from his stepfather until he could join the Air Force.
+    <em>Same footprint ≠ same role.</em>
   </p>
   <p class="disclaimer">
     Analytic research product (not an official OFAC product). OFAC UID / primary names
@@ -1034,7 +1036,8 @@ def banner_html() -> str:
   <br>Source list: Treasury OFAC advanced SDN XML (ingested into local research DB).
   This is an analytic package, not an official OFAC product.
   <br><strong>Do not assume:</strong> Dahmer’s neighbors were not cannibals—just neighbors.
-  Shared address is a lead, not guilt.
+  My father-in-law lived in a bordello; he was not a whore—just a teenage runaway
+  waiting to join the Air Force. Shared address is a lead, not guilt.
 </div>
 """
 # (banner intentionally has no third-party site names)

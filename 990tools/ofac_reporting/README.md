@@ -57,7 +57,7 @@ Detail pages include OFAC UID, primary name, list type, program codes, aliases, 
 **Do not assume.** Co-location is a **shared footprint** in the data, not guilt, control, or the same conduct.
 
 > Jeffrey Dahmer was a cannibal. His neighbors were not cannibals—just neighbors.  
-> Living in a bordello does not make you a sex worker: a teenage runaway can share a roof while waiting to join the Air Force.  
+> My father-in-law lived in a bordello; he was not a whore—he was a teenage runaway hiding from his stepfather until he could join the Air Force.  
 > **Same address ≠ same role.**
 
 - Co-location is by **shared address key**, not by corporate control or name identity.  
