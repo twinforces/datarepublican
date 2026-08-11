@@ -4,28 +4,50 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-08-11: API tail → grant_match → OFAC + grok_pending pattern prep (DONE ops; code uncommitted)
+
+**What:** After census `pending=0`, ran free/public Photon + geocode.maps.co + OpenCage on `pending_api`, then **grant_match** + OFAC reports. Followed with a **preprocess-only** pass on `grok_pending` so Grok does not re-pay for structural FA/military/vendor/partial cases.
+
+**Why:**
+- Self-hosted Photon VPS is offline; public Photon is slow but free; maps.co + OpenCage burn credits productively on residual.
+- DuckDB unique ART **FATAL** on large in-place `UPDATE` of Grants/Charities lat/lon (PK “duplicate key” on commit) blocked grant_match.
+- Nested-loop CTAS (`LIKE` join to Zips) ran multi-hour; equality-join key extraction is ART-safe *and* fast.
+- `grok_pending` rows predate current preprocess short-circuits; re-running preprocess is free before `geolocate_grok`.
+
+**How (ops — production DB `/Volumes/Data/final/irs990.duckdb`):**
+- Launchers: `overnight_api_grant_reports_run.sh`, `overnight_resume_api_grant_reports_run.sh` (chunked API, 35m round timeout, free Photon via unset `PHOTON_*`).
+- API: `pending_api` **8,784 → 0** (Photon modest; Maps/OpenCage carried most). Fail-stage join hangs killed+resumed with chunk 400.
+- **grant_match** success **2026-08-11 05:36** after Grants/Charities ART rebuild + equality-join lat/lon; GIN floaters **765k → 0**; **145,396** grant→charity matches.
+- OFAC reports **rc=0** (~05:40): `ofac_reporting/reports/index.html` (colocator 17 / zipcode 200 clusters).
+- Pattern prep: `preprocess_grok_pending.py` — **9,624** → `Match:PatternOwners`; **`grok_pending` 48,661 → 39,037** (almost all residual = full US street for Grok).
+- Export: `/Volumes/Data/final/grok_pending_for_patterns.tsv`.
+- Docs: `docs/overnight_api_grant_reports.md`, `docs/preprocess_grok_pending.md`.
+
+**How (code — dirty on `grokrefactor3`, not yet committed):**
+- `grant_match_processor.py`: `ensure_charities_writable` / `rebuild_charities_table`; lat/lon via zip-key table + hash join to Zips + CTAS swap (not in-place UPDATE).
+- `geocoding_api_processor.py`: highway/RR PARTIAL only when **no** street number (was vacuuming real `N E HWY` addresses).
+- `preprocess_grok_pending.py` (new): one-shot preprocess over `grok_pending`.
+- Overnight shell chains + resume with per-round timeout.
+
+**Failures recorded (do not repeat):**
+- WAL aside after SIGABRT/FATAL when open fails with “Bad file descriptor” on replay.
+- Large PDC save OOM at 11 GiB during API; chunk + smaller consumer.
+- Pipeline **fail-stage join hang** (`unfinished_tasks=2–3`, 0% CPU, CLOSE_WAIT) — kill and resume; shell timeout helps.
+- NL-join CTAS lat fill — replace with equality joins.
+
+**Next:** Controlled `geolocate_grok` on ~**39k** residual (optional cost cap). Still deferred: colocator owner backfill / `geolocate_archive` bookend polish; full owner fan-out if reports need it.
+
+**Git hashes:** pending commit units (see hygiene report). Prior census chain tip `a846c269`.
+
+---
+
 ## 2026-08-10: Overnight pipeline — census drain on 16GB host (DONE)
 
-**What:** Unattended ingest/geocode night: zip/xml → address → einless/match → geolocate_prev (archive) → **chunked Census** until `pending=0`. Landed DuckDB OOM hard-exit + bulk-write fixes so the chunk loop can finish without babysitting. Production census finished **2026-08-10 14:59** (`remaining_pending=0`, `overall_rc=0`).
+**What:** Chunked Census to `pending=0` on 16GB host; DuckDB OOM hard-exit + bulk `UPDATE…FROM VALUES`; CO street-cue strip.
 
-**Why:** Full-feed Census + per-row `bulk_update` hit DuckDB’s ~7–8GB cap; worker `sys.exit` left zombies in pipeline shutdown; post-step `ANALYZE` after every 500-row chunk was slower than the work; bare `CO` care-of lines needed the same strip path as `C/O` for census_strip recovery.
+**Ops:** `overnight_census_chunked_run.sh` finished **2026-08-10 14:59**; `pending_api≈8.8k` then drained by API pass (2026-08-11).
 
-**How (ops):**
-- Launcher: `overnight_census_chunked_run.sh` — `CENSUS_CHUNK=500`, `DUCKDB_MEMORY_LIMIT=12GB`, `GEOCODE_SKIP_OWNER_COLOCATORS=1`, `SKIP_POST_STEP_OPTIMIZE=1`, max-files loop, status in `overnight_geolocate_status.txt`
-- Log: `logs/overnight_census_chunked_20260810_100841.log` (~135 rounds)
-- DB: `/Volumes/Data/final/irs990.duckdb` — end state `pending=0`, `pending_api≈8.8k` exported → `/Volumes/Data/final/pending_api_failures_for_patterns.tsv.gz`
-- Docs: `docs/overnight_census_chunked.md`
-
-**How (code — uncommitted on `grokrefactor3`):**
-- `database_operations.py`: `_oom_hard_exit` → `os._exit(75)`; `UPDATE…FROM (VALUES…)` bulk path; Addresses colocator WHERE→FROM VALUES
-- `pending_database_context.py`: consolidate traditional bulk updates on merge (incl. single fat PDC); intermediate commit after Geocoding/Addresses; OOM on commit hard-exits
-- `geocoding_api_processor.py`: skip owner colocator fan-out by default; CO/`C/O` word-boundary + street-cue strip; smaller census consumer batch
-- `irs990processor.py`: skip post-step optimize when `--max-files` or `SKIP_POST_STEP_OPTIMIZE=1`
-- Also touched in same working tree (same OOM/chunk theme): `geolocate_prev_processor.py`, `address_matcher.py`, `address_deduplication_processor.py`, `download_utils.py`, `pipeline.py`
-
-**Git hashes** (`grokrefactor3`): `adb7b587` (duckdb OOM/bulk), `ff60daa8` (chunked census + CO), `68d55559` (prev/address/pipeline), `da71e9df` (ingest zips), `d66204e6` (grant_match ART), `45adc2cc` (archive/monitor), `b5f9f0f3` (docs), plus `dot_reporting` refinements on tip.
-
-**Next (not started):** `geolocate_api` / Photon (paid instance offline; public throttled); deferred colocator finalize + archive bookend; `grant_match` → backfill → export.
+**Hashes:** `adb7b587`, `ff60daa8`, `68d55559`, `da71e9df`, `d66204e6`, `45adc2cc`, `b5f9f0f3`, `a846c269`. Doc: `docs/overnight_census_chunked.md`.
 
 ---
 

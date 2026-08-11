@@ -5,6 +5,31 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-08-11 (API tail, grant_match ART-safe lat/lon, OFAC, grok_pending preprocess)
+
+### geolocate_api tail (Photon free + maps.co + OpenCage)
+- **Why:** After Census `pending=0`, residual needed paid/free geocoders before Grok. Self-hosted Photon (`45.61…`) timed out; use public Photon + maps.co + OpenCage.
+- **Ops:** `overnight_api_grant_reports_run.sh` / `overnight_resume_api_grant_reports_run.sh` — unset `PHOTON_*`, chunked `--max-files` (400–800), 35 min round timeout after fail-stage join hangs, `GEOCODE_SKIP_OWNER_COLOCATORS=1`.
+- **Result:** `pending_api` **8784 → 0**. Gains mainly Match:GeocodeMapsCo / OpenCage; Photon modest. End state before Grok prep: `grok_pending≈48.7k`.
+- **Failures:** Consumer OOM at ~11 GiB (rc 75 hard-exit); fail-stage join idle hang with CLOSE_WAIT — kill tree and resume.
+
+### grant_match: ART heal + equality-join lat/lon (success)
+- **Failure:** DuckDB FATAL on `PRIMARY_Grants` / `PRIMARY_Charities` unique ART during large lat/lon `UPDATE` (SIGABRT 134). Single-row probe can pass while bulk UPDATE fatals.
+- **Failure:** First CTAS lat fill joined Zips with `colocator LIKE …` → nested-loop multi-hour grind.
+- **Fix:** CTAS rebuild helpers for Grants and Charities; lat/lon fill extracts zip/LL keys → hash-join Zips → CTAS swap on `grant_id` / `charity_id` only.
+- **Ops result (2026-08-11 ~05:36):** grant_match **rc=0**; GIN floaters cleared; **145,396** matches in parallel phase. OFAC HTML reports **rc=0** (`ofac_reporting/reports/`).
+- **Files:** `grant_match_processor.py`, overnight grant launch wrappers.
+
+### grok_pending pattern preprocess (before Grok spend)
+- **Why:** Many `grok_pending` rows never re-hit current FA/MILITARY/VENDOR/PARTIAL short-circuits; re-preprocess is free.
+- **Fix:** `preprocess_grok_pending.py`; highway/RR PARTIAL only when street has **no** house number (false PARTIAL on `2418 E HWY 66…`).
+- **Result:** **9,624** → `Match:PatternOwners`; **`grok_pending` 48,661 → 39,037** (~20% free). Residual almost all full US street+city+state+zip.
+- **Files:** `preprocess_grok_pending.py`, `geocoding_api_processor.py`.
+- **Docs:** `docs/preprocess_grok_pending.md`, `docs/overnight_api_grant_reports.md`.
+
+### WAL recovery note
+- After FATAL/abort, DuckDB sometimes cannot replay WAL (“Bad file descriptor”). **Back up then aside** `.wal`, open base file, `CHECKPOINT`. Uncommitted tail lost; committed work retained.
+
 ## [Unreleased] - 2026-08-10 (Overnight census drain + DuckDB OOM survival)
 
 ### Chunked Census overnight (production success)
