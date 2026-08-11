@@ -4,7 +4,9 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
-## 2026-08-11: geolocate_grok drain + pattern pack (DONE; commit this session)
+## 2026-08-11: geolocate_grok drain + pattern pack (DONE; pushed)
+
+**Hash:** `869a428d` on `grokrefactor3`.
 
 **What:** Full xAI batch `geolocate_grok` on residual `grok_pending`; mined failures; free-win pattern pack (foreign cities bootstrap, state/ZIP `AMBIG` on Address, lockbox/BNY/military/narrative); re-preprocess all `grok:*`.
 
