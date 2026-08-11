@@ -56,6 +56,9 @@ class GrantMatchProcessor(BaseProcessor):
     def match_grants(self) -> int:
         """Run the grant matching process"""
 
+        # Heal corrupted Grants primary ART index if UPDATEs are fatal (DuckDB ART bug).
+        self.ensure_grants_writable()
+
         # === VERY FIRST STEP: Foreign EINs ===
         self.apply_foreign_eins()
         self.build_zips_table()
@@ -79,15 +82,112 @@ class GrantMatchProcessor(BaseProcessor):
             self.build_authoritative_ein_table()
             self.mass_pre_match_exact_colocator()
             self.mass_pre_match_loose_colocator()
-            self.backfill_gins_for_remaining_floating()
         else:
-            log_info("AuthoritativeEin table exists → skipping initialization")
+            log_info("AuthoritativeEin table exists → skipping rebuild / mass pre-match")
+
+        # GIN for remaining floating (colocator-null) grants — always, idempotent
+        self.backfill_gins_for_remaining_floating()
 
         # === Tier 4: Parallel matching on remaining loose grants ===
         processed = self.process_parallel(global_config.max_files, global_config.workers)
 
         return processed
-    
+
+    def ensure_grants_writable(self) -> None:
+        """
+        Probe Grants UPDATE. If PRIMARY ART index is corrupt, rebuild via CTAS.
+        Uses the app pool connection (must share DuckDB config with open handles).
+        """
+        log_info("Probing Grants writability (PRIMARY ART health)...")
+        try:
+            self.db_ops.execute_query("""
+                UPDATE Grants SET recipient_ein = recipient_ein
+                WHERE grant_id = (SELECT grant_id FROM Grants LIMIT 1)
+            """)
+            log_info("Grants UPDATE probe OK")
+            return
+        except Exception as e:
+            msg = str(e)
+            log_info(f"Grants probe result: {e}")
+            if "PRIMARY_Grants" not in msg and "gated leaf" not in msg and "Corrupted unique ART" not in msg:
+                log_info("Non-ART probe failure — continuing without rebuild")
+                return
+
+        log_info("Grants PRIMARY ART corrupt — rebuilding table")
+        # Pool write conn is likely invalidated after FATAL; reconnect before CTAS.
+        try:
+            pool = type(self.db_ops).get_pool()
+            if pool is not None and getattr(pool, "write_conn", None) is not None:
+                try:
+                    pool.write_conn.close()
+                except Exception:
+                    pass
+                pool.write_conn = pool._new_conn(read_only=False)
+                log_info("Reconnected pool write connection after ART fatal")
+        except Exception as recon_e:
+            log_info(f"Write reconnect note: {recon_e}")
+
+        self.rebuild_grants_table(reason="heal corrupted PRIMARY_Grants ART index")
+
+    def rebuild_grants_table(self, reason: str = "") -> None:
+        """Copy Grants → drop → rename; recreate PK + secondary indexes. Expensive but safe."""
+        log_info(f"Rebuilding Grants table ({reason or 'no reason'})...")
+        print(f"[grant_match] Rebuilding Grants table: {reason}", flush=True)
+
+        # Fresh write path — CTAS copies heap without broken ART leaf state
+        self.db_ops.execute_query("DROP TABLE IF EXISTS Grants_rebuild")
+        self.db_ops.execute_query("""
+            CREATE TABLE Grants_rebuild AS
+            SELECT * FROM Grants
+        """)
+        count = self.db_ops.execute_query("SELECT COUNT(*) FROM Grants_rebuild").fetchone()[0]
+        log_info(f"Grants_rebuild has {count:,} rows — swapping")
+        print(f"[grant_match] Grants_rebuild rows={count:,}; swapping", flush=True)
+
+        self.db_ops.execute_query("DROP TABLE Grants")
+        self.db_ops.execute_query("ALTER TABLE Grants_rebuild RENAME TO Grants")
+
+        # Primary key (unique ART rebuilt clean)
+        try:
+            self.db_ops.execute_query("ALTER TABLE Grants ADD PRIMARY KEY (grant_id)")
+        except Exception as e:
+            log_info(f"ADD PRIMARY KEY failed ({e}); using UNIQUE INDEX fallback")
+            self.db_ops.execute_query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS PRIMARY_Grants_0 ON Grants(grant_id)"
+            )
+
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_grants_filer_ein ON Grants(filer_ein)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_recipient_ein ON Grants(recipient_ein)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_tax_year ON Grants(tax_year)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_colocator ON Grants(colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_filer_colocator ON Grants(filer_colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_grant_id ON Grants(grant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_lat ON Grants(lat)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_lon ON Grants(lon)",
+            "CREATE INDEX IF NOT EXISTS idx_grant_backfill_ein ON Grants(recipient_ein_backfilled)",
+            "CREATE INDEX IF NOT EXISTS idx_grant_bmf_name ON Grants(grantee_name_bmf)",
+            "CREATE INDEX IF NOT EXISTS idx_grant_geo_name ON Grants(grantee_name_geo)",
+        ):
+            try:
+                self.db_ops.execute_query(ddl)
+            except Exception as e:
+                log_info(f"Index recreate skipped/failed: {ddl[:60]}… ({e})")
+
+        try:
+            self.db_ops.execute_query("CHECKPOINT")
+        except Exception:
+            pass
+
+        # Re-probe
+        self.db_ops.execute_query("""
+            UPDATE Grants SET recipient_ein = recipient_ein
+            WHERE grant_id = (SELECT grant_id FROM Grants LIMIT 1)
+        """)
+        log_info("Grants table rebuild complete — UPDATE probe OK")
+        print("[grant_match] Grants rebuild complete", flush=True)
+
     def apply_foreign_eins(self):
         """Foreign EINs as the very first step. Updates Grants + populates Backfill."""
         log_info("Applying foreign EINs from country codes...")
@@ -199,42 +299,156 @@ class GrantMatchProcessor(BaseProcessor):
         log_info("Mass pre-match on loose_colocator complete")
 
     def backfill_gins_for_remaining_floating(self):
-        """Step 3: GINs for remaining floating grants using full SHA256."""
+        """
+        GINs for remaining floating grants (no colocator) using full SHA256.
+
+        Avoids one giant JOIN UPDATE on Grants (corrupts DuckDB PRIMARY ART under load).
+        Uses name→GIN map + batched grant_id updates, falling back to CTAS rebuild.
+        """
+        log_info("GIN backfill for floating grants (no colocator or BOGUS:)...")
+        print("[grant_match] GIN backfill starting...", flush=True)
+
+        floating = self.db_ops.execute_query("""
+            SELECT COUNT(*) FROM Grants
+            WHERE (recipient_ein IS NULL OR recipient_ein = '8686')
+              AND (colocator IS NULL OR colocator LIKE 'BOGUS:%')
+        """).fetchone()[0]
+        log_info(f"Floating grants needing GIN: {floating:,}")
+        if floating == 0:
+            log_info("No floating grants for GIN — skip")
+            return
+
+        try:
+            self.db_ops.execute_query("DROP INDEX IF EXISTS idx_backfill_recipient_ein")
+        except Exception:
+            pass
+        try:
+            self.db_ops.execute_query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_backfill_recipient_ein ON Backfill (recipient_ein)"
+            )
+        except Exception as e:
+            log_info(f"Backfill unique index note: {e}")
+
+        self.db_ops.execute_query("DROP TABLE IF EXISTS temp_gins")
         self.db_ops.execute_query("""
-        drop index idx_backfill_recipient_ein; CREATE UNIQUE INDEX idx_backfill_recipient_ein ON Backfill (recipient_ein);
+            CREATE TABLE temp_gins AS
+            SELECT DISTINCT
+                g.grantee_name,
+                '70' || HEX(SHA256(
+                    UPPER(TRIM(REGEXP_REPLACE(
+                        g.grantee_name,
+                        '\\s+(INC|CORP|LLC|FOUNDATION|MINISTRY|ASSOCIATION|CHURCH)$',
+                        '', 'gi'
+                    )))
+                )) AS generated_gin
+            FROM Grants g
+            WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '8686')
+              AND (g.colocator IS NULL OR g.colocator LIKE 'BOGUS:%')
         """)
+        n_names = self.db_ops.execute_query("SELECT COUNT(*) FROM temp_gins").fetchone()[0]
+        log_info(f"temp_gins distinct names: {n_names:,}")
 
         self.db_ops.execute_query("""
-       CREATE TEMP TABLE temp_gins AS
-        SELECT DISTINCT 
-            g.grantee_name,
-            '70' || HEX(SHA256(
-                UPPER(TRIM(REGEXP_REPLACE(g.grantee_name, '\\s+(INC|CORP|LLC|FOUNDATION|MINISTRY|ASSOCIATION|CHURCH)$', '', 'gi')))
-            )) AS generated_gin
-        FROM Grants g
-        WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '8686')
-          AND g.colocator IS NULL;
+            INSERT INTO Backfill (recipient_ein, name, source)
+            SELECT generated_gin, grantee_name, 'gin'
+            FROM temp_gins
+            ON CONFLICT (recipient_ein) DO NOTHING
         """)
 
-        self.db_ops.execute_query("""
-        INSERT INTO Backfill (recipient_ein, name, source)
-        SELECT generated_gin, grantee_name, 'gin'
-        FROM temp_gins
-        ON CONFLICT (recipient_ein) DO NOTHING;
-        """)
+        # Large floating sets: CTAS rebuild (avoids ART corruption + avoids N× join-LIMIT thrash).
+        # Small sets: single UPDATE is fine after PRIMARY heal.
+        applied = floating
+        if floating >= 100_000:
+            log_info(f"GIN CTAS rebuild path ({floating:,} floating grants)...")
+            print(f"[grant_match] GIN CTAS rebuild for {floating:,} rows...", flush=True)
+            self.db_ops.execute_query("DROP TABLE IF EXISTS Grants_rebuild")
+            self.db_ops.execute_query("""
+                CREATE TABLE Grants_rebuild AS
+                SELECT
+                    g.grant_id,
+                    g.filer_ein,
+                    g.filer_name,
+                    g.grantee_name,
+                    g.grantee_sndx,
+                    CASE
+                        WHEN (g.recipient_ein IS NULL OR g.recipient_ein = '8686')
+                             AND (g.colocator IS NULL OR g.colocator LIKE 'BOGUS:%')
+                             AND t.generated_gin IS NOT NULL
+                        THEN t.generated_gin
+                        ELSE g.recipient_ein
+                    END AS recipient_ein,
+                    g.grant_amt,
+                    g.tax_year,
+                    g.colocator,
+                    g.filer_colocator,
+                    g.created_at,
+                    g.recipient_ein_backfilled,
+                    g.grantee_name_bmf,
+                    g.grantee_name_geo,
+                    g.grantee_name_conc,
+                    g.lat,
+                    g.lon,
+                    g.loose_colocator
+                FROM Grants g
+                LEFT JOIN temp_gins t
+                  ON g.grantee_name = t.grantee_name
+                 AND (g.colocator IS NULL OR g.colocator LIKE 'BOGUS:%')
+                 AND (g.recipient_ein IS NULL OR g.recipient_ein = '8686')
+            """)
+            n_new = self.db_ops.execute_query("SELECT COUNT(*) FROM Grants_rebuild").fetchone()[0]
+            log_info(f"Grants_rebuild rows={n_new:,}; swapping")
+            self.db_ops.execute_query("DROP TABLE Grants")
+            self.db_ops.execute_query("ALTER TABLE Grants_rebuild RENAME TO Grants")
+            try:
+                self.db_ops.execute_query("ALTER TABLE Grants ADD PRIMARY KEY (grant_id)")
+            except Exception:
+                self.db_ops.execute_query(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS PRIMARY_Grants_0 ON Grants(grant_id)"
+                )
+            for ddl in (
+                "CREATE INDEX IF NOT EXISTS idx_grants_filer_ein ON Grants(filer_ein)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_recipient_ein ON Grants(recipient_ein)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_tax_year ON Grants(tax_year)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_colocator ON Grants(colocator)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_filer_colocator ON Grants(filer_colocator)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_grant_id ON Grants(grant_id)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_lat ON Grants(lat)",
+                "CREATE INDEX IF NOT EXISTS idx_grants_lon ON Grants(lon)",
+            ):
+                try:
+                    self.db_ops.execute_query(ddl)
+                except Exception:
+                    pass
+            try:
+                self.db_ops.execute_query("CHECKPOINT")
+            except Exception:
+                pass
+        else:
+            log_info(f"GIN single UPDATE path ({floating:,} floating)...")
+            self.db_ops.execute_query("""
+                UPDATE Grants g
+                SET recipient_ein = t.generated_gin
+                FROM temp_gins t
+                WHERE g.grantee_name = t.grantee_name
+                  AND (g.colocator IS NULL OR g.colocator LIKE 'BOGUS:%')
+                  AND (g.recipient_ein IS NULL OR g.recipient_ein = '8686')
+            """)
 
-        self.db_ops.execute_query("""
-        UPDATE Grants g
-        SET recipient_ein = t.generated_gin
-        FROM temp_gins t
-        WHERE g.grantee_name = t.grantee_name
-          AND g.colocator IS NULL
-          AND (g.recipient_ein IS NULL OR g.recipient_ein = '8686');
-        """)
+        self.db_ops.execute_query("DROP TABLE IF EXISTS temp_gins")
+        remaining = self.db_ops.execute_query("""
+            SELECT COUNT(*) FROM Grants
+            WHERE (recipient_ein IS NULL OR recipient_ein = '8686')
+              AND (colocator IS NULL OR colocator LIKE 'BOGUS:%')
+        """).fetchone()[0]
+        log_info(
+            f"GIN backfill done — target ~{applied:,}; floating remaining {remaining:,}"
+        )
+        print(
+            f"[grant_match] GIN done target~{applied:,} floating_left={remaining:,}",
+            flush=True,
+        )
 
-        self.db_ops.execute_query("DROP TABLE IF EXISTS temp_gins;")
-        log_info("Backfill full-SHA256 GINs created for remaining floating grants")
-        
     def build_zips_table(self):
         """Build the Zips table from US_zips.txt.gz (12 columns, deduplicate on zip)."""
         log_info("Building Zips table from US_zips.txt.gz...")
@@ -322,28 +536,12 @@ class GrantMatchProcessor(BaseProcessor):
         
     def populate_lat_lon_columns(self):
         """Step #1: Add and populate lat/lon columns on Grants and Charities.
-        100% safe idempotent check using pragma_table_info (no Binder Error)."""
-        log_info("Populating lat/lon columns (safe idempotent check first)...")
 
-        # Safe column existence check (works even if column doesn't exist)
-        def column_exists(table: str, col: str) -> bool:
-            row = self.db_ops.execute_query(
-                "SELECT 1 FROM pragma_table_info(?) WHERE name = ? LIMIT 1",
-                [table, col]
-            ).fetchone()
-            return row is not None
-
-        grants_done = column_exists('Grants', 'lat') and self.db_ops.execute_query(
-            "SELECT 1 FROM Grants WHERE lat IS NOT NULL LIMIT 1"
-        ).fetchone() is not None
-
-        charities_done = column_exists('Charities', 'lat') and self.db_ops.execute_query(
-            "SELECT 1 FROM Charities WHERE lat IS NOT NULL LIMIT 1"
-        ).fetchone() is not None
-
-        if grants_done and charities_done:
-            log_info("lat/lon columns already populated — skipping")
-            return
+        Always fills rows still missing lat (idempotent via ``lat IS NULL`` guards).
+        PO zips missing from Zips are marked ``BOGUS:{zip5}`` so they exit the
+        geo-match work set (same convention as geocoding_api_processor).
+        """
+        log_info("Populating lat/lon columns (fill remaining nulls)...")
 
         # Add columns if missing
         self.db_ops.execute_query("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS lat DOUBLE;")
@@ -358,6 +556,16 @@ class GrantMatchProcessor(BaseProcessor):
         FROM Zips z
         WHERE g.colocator LIKE 'PO:%'
           AND z.zip = split_part(g.colocator, ':', 3)
+          AND g.lat IS NULL;
+        """)
+
+        # === Grants: MULTI:{city}:{state}:{zip5} — zip is last field ===
+        self.db_ops.execute_query("""
+        UPDATE Grants g
+        SET lat = z.lat, lon = z.lon
+        FROM Zips z
+        WHERE g.colocator LIKE 'MULTI:%'
+          AND z.zip = split_part(g.colocator, ':', -1)
           AND g.lat IS NULL;
         """)
 
@@ -418,6 +626,22 @@ class GrantMatchProcessor(BaseProcessor):
                                   UPDATE Charities
                             SET loose_colocator = 'LL:' || ROUND(lat / 0.5) * 0.5 || ':' || ROUND(lon / 0.5) * 0.5
                             WHERE loose_colocator IS NULL AND lat IS NOT NULL""");
+
+        # PO / MULTI / PRIV with no gazetteer hit → mark bogus (keep original zip for audit)
+        # Only touch still-unmatched grants so we don't rewrite historical colocators.
+        self.db_ops.execute_query("""
+        UPDATE Grants
+        SET colocator = 'BOGUS:' || COALESCE(NULLIF(split_part(colocator, ':', -1), ''), '00000')
+        WHERE recipient_ein IS NULL
+          AND lat IS NULL
+          AND colocator IS NOT NULL
+          AND (
+                colocator LIKE 'PO:%'
+             OR colocator LIKE 'MULTI:%'
+             OR colocator LIKE 'PRIV:%'
+          )
+          AND colocator NOT LIKE 'BOGUS:%';
+        """)
 
         #-- Index (already working for you)
         self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator);")
@@ -524,7 +748,11 @@ class GrantMatchProcessor(BaseProcessor):
         return "70" + hash_obj.hexdigest()
 
     def get_work_count(self, max_files: Optional[int] = None) -> int:
-        query = "SELECT COUNT(*) FROM Grants WHERE recipient_ein IS NULL and colocator IS NOT NULL"
+        # Must match _get_work_batch predicate (feeder only enqueues loose_colocator rows).
+        query = (
+            "SELECT COUNT(*) FROM Grants "
+            "WHERE recipient_ein IS NULL AND loose_colocator IS NOT NULL"
+        )
         result = self.db_ops.execute_query(query)
         total = result.fetchone()[0]
         if max_files:
