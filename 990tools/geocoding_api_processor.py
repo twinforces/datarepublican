@@ -1325,10 +1325,20 @@ class GeocodingAPIProcessor(BaseProcessor):
         if re.search(r'(?i)\bcrdamc\b', addr):
             return self._apply_preprocess_shortcircuit(unit, f'DEPT:{zip5 or "00000"}')
 
-        if street and re.search(r'(?i)\b(highway|hwy|county rd|county road|state hwy|state road|us highway)\b', street):
+        # Highway / county-road without a house number → not Census-grade.
+        # With a street number (e.g. "2418 E HWY 66") these are real addresses —
+        # do NOT short-circuit (was incorrectly vacuuming ~5k grok_pending weight).
+        if (
+            street
+            and re.search(
+                r'(?i)\b(highway|hwy|county rd|county road|state hwy|state road|us highway)\b',
+                street,
+            )
+            and not self._street_has_number(street)
+        ):
             return self._apply_preprocess_shortcircuit(unit, f'PARTIAL:{zip5 or "00000"}')
 
-        if street and re.match(r'(?i)^(rr|rt|route)\s*\d', street):
+        if street and re.match(r'(?i)^(rr|rt|route)\s*\d', street) and not self._street_has_number(street):
             return self._apply_preprocess_shortcircuit(unit, f'RR:{zip5 or "00000"}')
 
         return None
