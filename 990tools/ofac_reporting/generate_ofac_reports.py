@@ -1983,18 +1983,19 @@ def main() -> int:
         print(f"DB not found: {args.db_path}", file=sys.stderr)
         return 1
 
-    day = date.today().isoformat()
+    # Stable paths for public deploy (grumpytechbro.com) — no date suffix.
+    # Generated-at timestamps still appear inside HTML metadata.
     print(f"Opening {args.db_path} (read_only)…", flush=True)
     con = open_db(args.db_path)
     suites_meta = []
     try:
         for sl in slices:
-            out = args.output_root / f"ofac_{sl}_clusters_{day}"
+            out = args.output_root / f"ofac_{sl}_clusters"
             print(f"---- OFAC slice={sl} → {out} ----", flush=True)
             meta = write_suite(
                 con, sl, out, max_clusters=args.max_clusters, top_n=args.top_n
             )
-            rel = f"ofac_{sl}_clusters_{day}/index.html"
+            rel = f"ofac_{sl}_clusters/index.html"
             suites_meta.append(
                 {
                     "label": f"OFAC × {sl}",

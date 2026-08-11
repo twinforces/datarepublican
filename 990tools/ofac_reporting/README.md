@@ -31,6 +31,9 @@ python3 -u ofac_reporting/generate_ofac_reports.py --all-slices \
   --db-path /Volumes/Data/final/irs990.duckdb
 ```
 
+Suite dirs are **stable** (no date in path) for public deploy — e.g. `ofac_colocator_clusters/`.  
+Regenerate overwrites in place; `Generated …` timestamps still appear in page metadata.
+
 Options:
 
 - `--slice-by colocator|address|zipcode` — one suite only  
@@ -39,9 +42,9 @@ Options:
 
 ## How to read the suites
 
-1. **`ofac_address_clusters_*`** — exact `canonical_address` match (strongest “same building / mail drop”). City-only strings (no street number) are dropped.  
-2. **`ofac_colocator_clusters_*`** — tight colocator keys only: `LL:lat:lon` or `PO:box:zip5`. Excludes `FA:` / `VENDOR:` / geocode junk, and **city-only shells** (Dubai, London, “Miami, Fl, 33102” with no street number) even when they carry an LL: from bad geocoding.  
-3. **`ofac_zipcode_clusters_*`** — same valid US ZIP (`INNER JOIN Zips`). **Widen / context only**; high false-positive rate.
+1. **`ofac_address_clusters/`** — exact `canonical_address` match (strongest “same building / mail drop”). City-only strings (no street number) are dropped.  
+2. **`ofac_colocator_clusters/`** — tight colocator keys only: `LL:lat:lon` or `PO:box:zip5`. Excludes `FA:` / `VENDOR:` / geocode junk, and **city-only shells** (Dubai, London, “Miami, Fl, 33102” with no street number) even when they carry an LL: from bad geocoding.  
+3. **`ofac_zipcode_clusters/`** — same valid US ZIP (`INNER JOIN Zips`). **Widen / context only**; high false-positive rate.
 
 **Links:** 990 filer EINs → ProPublica Nonprofit Explorer  
 `https://projects.propublica.org/nonprofits/organizations/<ein>`.  
@@ -74,9 +77,10 @@ ofac_reporting/
   generate_ofac_reports.py
   reports/
     index.html                 # master
-    ofac_colocator_clusters_YYYY-MM-DD/
-    ofac_address_clusters_YYYY-MM-DD/
-    ofac_zipcode_clusters_YYYY-MM-DD/
+    ofac_colocator_clusters/
+    ofac_address_clusters/
+    ofac_zipcode_clusters/
+    eins/                      # BMF-only EIN detail pages
 ```
 
 JSON sidecars under each suite’s `data/` folder support offline review and spreadsheet export.

@@ -489,8 +489,13 @@ class BaseProcessor:
         # Setup progress bar
         total, unit, desc = self.get_progress_config(max_files)
         if total == 0:
-            log_info("No work to do - exiting")
-            sys.exit(1)
+            # Empty work set is success (e.g. grant_match parallel tier already drained).
+            # Do not sys.exit(1) — chains (grant_match → OFAC) must not abort on done.
+            log_info(f"No work to do for this step ({desc or 'work'} = 0) — success")
+            if self.queue_status_display:
+                self.queue_status_display.stop()
+            self._teardown_profiling("process_parallel", start_time, 0)
+            return 0
         self.pbar = start_progress_reporting(total=total, desc=desc, unit=unit)
 
         self.total_processed = 0
