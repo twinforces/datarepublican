@@ -99,9 +99,19 @@ class GeocodeResult(BaseModel):
     matched_address: Optional[str] = None
     failure_code: Optional[str] = Field(
         None,
-        description="Required when lat/long are null. One of: NOTA, VAGUE, AMBIG, REDACT, UNKN",
+        description=(
+            "Required when lat/long are null. One of: NOTA, VAGUE, AMBIG, REDACT, UNKN. "
+            "UNKN is only for foreign/non-US or unparseable junk — never for a complete "
+            "US street+city+state+ZIP and never because an external geocoder is unavailable."
+        ),
     )
-    reason: Optional[str] = Field(None, description="Brief explanation of match or failure")
+    reason: Optional[str] = Field(
+        None,
+        description=(
+            "Brief explanation of match or failure. Do not cite missing tools/APIs or "
+            "prior geocoder failure as the reason."
+        ),
+    )
 
 class BatchGeocodeOutput(BaseModel):
     results: List[GeocodeResult]
@@ -2215,20 +2225,35 @@ you can, and classify only when you truly cannot pick a location.
 Ignore C/O, Attn:, See Statement, personal names unless tied to a known org HQ.
 Use known entity HQs when obvious (e.g. First Citizens → Raleigh area).
 
-Geocoding bar: return lat/long when ≥{min_conf}% confident in ONE best US location. Prior API
-failure is not a reason to refuse — messy casing (9Th), rural routes, highways, campus buildings,
-and suite/room/building suffixes are common; geocode the building or street entrance when that is
-the clear best match (e.g. "520 S 9th … Ellis Library, Columbia, MO" → University of Missouri
-Ellis Library area). Campus/university building names with street+city+state+ZIP should be
-geocoded, not classified as UNKN.
+You have NO external geocoder API in this task. That is intentional. Use your geographic
+knowledge of US streets, cities, ZIP regions, campuses, and well-known buildings. Never
+refuse because you "lack a tool," "need an external geocoder," "prior APIs failed," or are
+"genuinely unsure without lookup." Those are invalid reasons.
+
+Geocoding bar: return lat/long when ≥{min_conf}% confident in ONE best US location.
+Prior pipeline failure is not a reason to refuse — messy casing (9Th), rural routes, highways,
+campus buildings, and suite/room/building suffixes are common; geocode the building or street
+entrance when that is the clear best match (e.g. "520 S 9th … Ellis Library, Columbia, MO" →
+University of Missouri Ellis Library area). Campus/university building names with
+street+city+state+ZIP should be geocoded, not classified as UNKN.
+
+COMPLETE US STREET RULE (mandatory):
+If the address has a street (with number or clear street name), US city, 2-letter state, and
+5-digit ZIP that together form one plausible US location, you MUST either:
+  (a) return lat/long for the best single location, OR
+  (b) failure_code=AMBIG if two+ equally good street matches exist, OR
+  (c) failure_code=VAGUE only if the street is incomplete (no number/name usable).
+You MUST NOT use failure_code=UNKN for a complete US street address. Approximate the
+block/building from knowledge when exact suite/floor is unknown — suite/floor rarely needs
+its own coordinate.
 
 When you cannot geocode, you MUST set failure_code (not just null coords):
 - NOTA: not a postal address (org name only, "see statement", narrative, department label)
 - VAGUE: incomplete US address (city/state only, missing street number or name)
 - AMBIG: multiple equally plausible US street matches — cannot pick one (not "prior APIs failed")
 - REDACT: intentionally redacted or privacy placeholder
-- UNKN: foreign/non-US, no plausible US match, or genuinely unsure — NOT for normal US streets
-  that prior geocoders missed
+- UNKN: ONLY foreign/non-US, unparseable garbage with no US place, or no plausible US location.
+  NEVER for normal complete US streets. NEVER because tools/APIs are unavailable.
 
 Classify precisely — failure labels feed pattern-rule mining to auto-handle similar addresses later."""
         user_prompt = f"""Analyze these addresses — geocode when possible, otherwise classify the failure:
@@ -2243,6 +2268,7 @@ For each address provide:
 - matched_address: best full geocoded address when matched; otherwise null
 - failure_code: REQUIRED when lat/long are null — one of: {codes}
 - reason: one short sentence explaining the match or why this failure_code applies
+  (Do not cite missing tools, missing APIs, or "prior geocoders failed" as the reason.)
 
 Output ONLY the complete valid JSON object matching the schema. Include ALL addresses."""
         return system_prompt, user_prompt

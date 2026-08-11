@@ -4,29 +4,25 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-08-11: Grok prompt — ban tool-refusal UNKN (DONE)
+
+**What:** Tightened `build_grok_geocode_messages` so complete US street+city+state+ZIP cannot be classified UNKN for missing tools / prior API failure.
+
+**Why:** ~30k residual `grok:UNKN` were real US streets refused with “no geocoder tool.” Patterns cannot fix that.
+
+**How:** COMPLETE US STREET RULE + no-external-API instruction; schema field descriptions aligned; unit test. `GEOCODING_GROK_MIN_ADDRESS_COUNT` default **10** unchanged (cost filter).
+
+**Next:** Optional re-run on residual (reset `grok:UNKN` → `grok_pending` first; use min_address as desired). Deferred: archive bookend.
+
+---
+
 ## 2026-08-11: geolocate_grok drain + pattern pack (DONE; pushed)
 
-**Hash:** `869a428d` on `grokrefactor3`.
+**Hashes:** `869a428d` pattern pack · `d85388cd` RECENTGOALS hash note.
 
-**What:** Full xAI batch `geolocate_grok` on residual `grok_pending`; mined failures; free-win pattern pack (foreign cities bootstrap, state/ZIP `AMBIG` on Address, lockbox/BNY/military/narrative); re-preprocess all `grok:*`.
+**What:** Full Grok drain (~39k, 81.6% match) + free-win patterns + Address `AMBIG` state/ZIP; 1,182 more PatternOwners.
 
-**Ops (prod `/Volumes/Data/final/irs990.duckdb`):** 8 batches, **39,037** applied, **81.6%** match; export 41,876 cumulative `grok:*`; pattern reprocess **1,182** → PatternOwners; **~40.7k** `grok:*` residual.
-
-**How:** `major_foreign_cities.json`, `us_zip_lookup.py`, `Address.canonicalize` → `AMBIG:{state}:{zip}`, `geocoding_patterns.json` v1.3, `preprocess_grok_pending.py --grok-failures`. Docs: `docs/preprocess_grok_pending.md`, `docs/us_zip_lookup.md`, `docs/major_foreign_cities.md`.
-
-### Decisions (clarified)
-
-**1. Residual `grok:UNKN` bulk (~30k+ digit streets) — not a pattern problem**
-- **Finding:** Reasons are “no geocoder tool / genuinely unsure / prior APIs failed” on complete street+city+state+ZIP. Patterns and free geocoders already failed; regex mining will not move this mass.
-- **Decision now:** Leave residual as **hard classified tail** (`grok:UNKN` etc.). Do **not** re-spend Grok or invent loose patterns to force coords.
-- **Later (optional product work):** tighten Grok system prompt so complete US streets must return coords or VAGUE/AMBIG — not UNKN for “lack of tool access.” That is a separate prompt/regression change, not this pattern pack.
-
-**2. `GEOCODING_GROK_MIN_ADDRESS_COUNT` default = 10**
-- **Intent (victory era):** high-value-only Grok — only rows with `address_count >= 10` so overnight loop did not burn budget on singletons after bulk drain.
-- **Footgun:** After victory/preprocess, residual often has **max address_count &lt; 10** (this run: **0** rows at ≥10). Unset env → **silent empty run**.
-- **Decision:** Keep default **10** for victory/high-value mode. Any **full residual drain** must set **`GEOCODING_GROK_MIN_ADDRESS_COUNT=0`** (or `1`) explicitly. Document in launchers/ops notes; do not change default without revisiting victory policy.
-
-**Next:** Deferred owner colocator backfill / `geolocate_archive` bookend. Optional Grok prompt tighten (decision 1 later).
+**Decisions:** min_address default **10** kept for $; full residual drains set env `=0`.
 
 ---
 

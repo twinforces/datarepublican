@@ -167,7 +167,8 @@ GROK_FAILURE_CODES = frozenset({
     "VAGUE",   # Too incomplete (city/state only, missing street number/name)
     "AMBIG",   # Multiple plausible US matches — cannot disambiguate
     "REDACT",  # Intentionally redacted / privacy placeholder
-    "UNKN",    # Unclassified (foreign slip-through, API/parse miss, or Grok unsure)
+    # Foreign / unparseable only — NOT complete US streets; NOT "no tool" refusals
+    "UNKN",
 })
 
 

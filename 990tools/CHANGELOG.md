@@ -25,8 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs:** `docs/preprocess_grok_pending.md`.
 
 ### Decisions recorded
-- **UNKN bulk:** leave as hard tail; no more Grok spend or loose patterns. Optional later: prompt fix so complete US streets cannot refuse for “no tool.”
-- **`GEOCODING_GROK_MIN_ADDRESS_COUNT` default 10:** keep (victory high-value filter). Full residual drains must set env **`=0`** or they process nothing.
+- **`GEOCODING_GROK_MIN_ADDRESS_COUNT` default 10:** keep (victory high-value / cost filter). Full residual drains must set env **`=0`** or they process nothing.
+
+### Grok prompt: ban tool-refusal UNKN (2026-08-11)
+- **Why:** ~30k residual UNKN were complete US streets refused with “no tool / prior APIs failed.”
+- **Fix:** `build_grok_geocode_messages` — explicit no-external-API instruction; **COMPLETE US STREET RULE** (coords or VAGUE/AMBIG only; UNKN never for complete US streets); schema/reason field text matches.
+- **Files:** `geocoding_api_processor.py`, `constants.py` (UNKN comment), `test_preprocess_bogus.py`.
 
 ### Landed hashes (pushed before this unit)
 - Prior tip `c5a72fd7` docs hygiene.

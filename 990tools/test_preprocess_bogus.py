@@ -431,6 +431,17 @@ class TestPreprocessBogus(unittest.TestCase):
         addr.canonicalize_address()
         self.assertEqual(addr.colocator, 'AMBIG:NJ:30339')
 
+    def test_grok_prompt_bans_tool_refusal_unkn(self):
+        """Complete US streets must not be UNKN for missing tools / prior API failure."""
+        unit = self._unit('3645 Grand Ave, Oakland, Ca, 94610', {
+            'street': '3645 Grand Ave', 'city': 'Oakland', 'state': 'CA', 'zip': '94610',
+        })
+        sys_p, user_p = GeocodingAPIProcessor.build_grok_geocode_messages([unit])
+        self.assertIn('COMPLETE US STREET RULE', sys_p)
+        self.assertIn('MUST NOT use failure_code=UNKN for a complete US street', sys_p)
+        self.assertIn('NO external geocoder API', sys_p)
+        self.assertIn('missing tools', user_p.lower())
+
     def test_state_zip_match_ok(self):
         unit = self._unit('123 Main St, Atlanta, Ga, 30339', {
             'street': '123 Main St', 'city': 'Atlanta', 'state': 'GA', 'zip': '30339',
