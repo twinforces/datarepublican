@@ -4,27 +4,41 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
+## 2026-08-11: geolocate_grok drain + pattern pack (DONE; commit this session)
+
+**What:** Full xAI batch `geolocate_grok` on residual `grok_pending`; mined failures; free-win pattern pack (foreign cities bootstrap, state/ZIP `AMBIG` on Address, lockbox/BNY/military/narrative); re-preprocess all `grok:*`.
+
+**Ops (prod `/Volumes/Data/final/irs990.duckdb`):** 8 batches, **39,037** applied, **81.6%** match; export 41,876 cumulative `grok:*`; pattern reprocess **1,182** → PatternOwners; **~40.7k** `grok:*` residual.
+
+**How:** `major_foreign_cities.json`, `us_zip_lookup.py`, `Address.canonicalize` → `AMBIG:{state}:{zip}`, `geocoding_patterns.json` v1.3, `preprocess_grok_pending.py --grok-failures`. Docs: `docs/preprocess_grok_pending.md`, `docs/us_zip_lookup.md`, `docs/major_foreign_cities.md`.
+
+### Decisions (clarified)
+
+**1. Residual `grok:UNKN` bulk (~30k+ digit streets) — not a pattern problem**
+- **Finding:** Reasons are “no geocoder tool / genuinely unsure / prior APIs failed” on complete street+city+state+ZIP. Patterns and free geocoders already failed; regex mining will not move this mass.
+- **Decision now:** Leave residual as **hard classified tail** (`grok:UNKN` etc.). Do **not** re-spend Grok or invent loose patterns to force coords.
+- **Later (optional product work):** tighten Grok system prompt so complete US streets must return coords or VAGUE/AMBIG — not UNKN for “lack of tool access.” That is a separate prompt/regression change, not this pattern pack.
+
+**2. `GEOCODING_GROK_MIN_ADDRESS_COUNT` default = 10**
+- **Intent (victory era):** high-value-only Grok — only rows with `address_count >= 10` so overnight loop did not burn budget on singletons after bulk drain.
+- **Footgun:** After victory/preprocess, residual often has **max address_count &lt; 10** (this run: **0** rows at ≥10). Unset env → **silent empty run**.
+- **Decision:** Keep default **10** for victory/high-value mode. Any **full residual drain** must set **`GEOCODING_GROK_MIN_ADDRESS_COUNT=0`** (or `1`) explicitly. Document in launchers/ops notes; do not change default without revisiting victory policy.
+
+**Next:** Deferred owner colocator backfill / `geolocate_archive` bookend. Optional Grok prompt tighten (decision 1 later).
+
+---
+
 ## 2026-08-11: API tail → grant_match → OFAC + grok_pending pattern prep (DONE; pushed)
 
-**What:** After census `pending=0`, free/public Photon + maps.co + OpenCage drained `pending_api`; **grant_match** + OFAC reports; preprocess-only pass on `grok_pending` before Grok.
+**What:** After census `pending=0`, free/public Photon + maps.co + OpenCage drained `pending_api`; **grant_match** + OFAC; preprocess **9,624** free PatternOwners; `grok_pending` **48,661 → 39,037**.
 
-**Why:** See CHANGELOG 2026-08-11 — ART FATAL on lat/lon UPDATEs, NL-join CTAS too slow, fail-stage hangs, parked `grok_pending` never re-hit new short-circuits.
-
-**Ops (prod `/Volumes/Data/final/irs990.duckdb`):** `pending_api` **→ 0**; grant_match **rc=0** (~05:36); OFAC **rc=0**; preprocess **9,624** free PatternOwners; **`grok_pending` 48,661 → 39,037**.
-
-**Hashes (`grokrefactor3` → origin):** `deef07d1` grant_match lat/lon · `aa252eb2` grok_pending preprocess · `a8af7238` overnight launchers · `e8c22f94` docs · `07f8513e` US_zips + name_rules_v19.gz (see name-rules note below).
-
-**Next:** Controlled `geolocate_grok` on ~**39k**. Deferred: owner colocator backfill / archive bookend.
+**Hashes:** `deef07d1` · `aa252eb2` · `a8af7238` · `e8c22f94` · `07f8513e` · `c5a72fd7` (hygiene docs).
 
 ---
 
 ## 2026-08-11: Name rules — ignore v19 auto-gen path (decision)
 
-**What:** Clarified which name-rules artifact production uses; marked pre-Phone-Book auto-gen as obsolete.
-
-**Why:** `address_matcher` hard-loads **`name_rules.json.gz`** (unversioned). `name_rules_v19*` came from automatic rule generation before the Phone Book / cream algorithm; not on the live match path. Tiny tracked `name_rules_v19.json.gz` (~493 rules) is not a real ruleset; uncompressed `name_rules_v19.json` (154 MB) must not enter git.
-
-**How / decision:** Prefer `name_rules.json.gz` only for matcher; treat `v19*` / `generate_name_rules_v19*` as archive. Optional later cleanup: stop refreshing v19 in git; retarget analyze-script defaults away from v19.1.
+**What:** Live matcher uses **`name_rules.json.gz` only**; `name_rules_v19*` is pre-Phone-Book archive — do not track uncompressed v19.
 
 ---
 

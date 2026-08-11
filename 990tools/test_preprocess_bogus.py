@@ -379,6 +379,94 @@ class TestPreprocessBogus(unittest.TestCase):
         _, result = results[0]
         self.assertEqual(result.data.operations[0].data['updates'][0]['colocator'], 'BOGUS:76544')
 
+    def test_major_foreign_city_name_only(self):
+        unit = self._unit('Moscow', {
+            'street': 'Moscow', 'city': '', 'state': '', 'zip': '',
+        })
+        hit = self.proc._preprocess_bogus_shortcircuit(unit, unit.parsed_normalized, '')
+        self.assertIsNotNone(hit)
+        _, result = hit
+        self.assertEqual(result.data.operations[0].data['updates'][0]['colocator'], 'FA:INTL')
+
+    def test_major_foreign_country_name_only(self):
+        unit = self._unit('Nicaragua', {
+            'street': 'Nicaragua', 'city': '', 'state': '', 'zip': '',
+        })
+        hit = self.proc._preprocess_bogus_shortcircuit(unit, unit.parsed_normalized, '')
+        self.assertIsNotNone(hit)
+        _, result = hit
+        self.assertEqual(result.data.operations[0].data['updates'][0]['colocator'], 'FA:INTL')
+
+    def test_us_city_paris_tx_not_foreign(self):
+        """Paris TX has a valid US state+ZIP anchor — not FA:INTL."""
+        unit = self._unit('Paris, Tx, 75460', {
+            'street': 'Paris', 'city': 'Paris', 'state': 'TX', 'zip': '75460',
+        })
+        hit = self.proc._preprocess_bogus_shortcircuit(unit, unit.parsed_normalized, '75460')
+        if hit is not None:
+            coloc = hit[1].data.operations[0].data['updates'][0]['colocator']
+            self.assertFalse(str(coloc).startswith('FA:'), coloc)
+
+    def test_state_zip_mismatch(self):
+        unit = self._unit('1100 Circle 75 Pkwy, Atlanta, Nj, 30339', {
+            'street': '1100 Circle 75 Pkwy', 'city': 'Atlanta', 'state': 'NJ', 'zip': '30339',
+        })
+        hit = self.proc._preprocess_bogus_shortcircuit(unit, unit.parsed_normalized, '30339')
+        self.assertIsNotNone(hit)
+        _, result = hit
+        self.assertEqual(
+            result.data.operations[0].data['updates'][0]['colocator'],
+            'AMBIG:NJ:30339',
+        )
+
+    def test_address_model_sets_ambig_colocator(self):
+        """Primary path: Address.canonicalize sets AMBIG colocator on state/ZIP conflict."""
+        from models.address import Address
+        addr = Address(
+            address_line1='1100 Circle 75 Pkwy',
+            city='Atlanta',
+            state='NJ',
+            zip_code='30339',
+        )
+        addr.canonicalize_address()
+        self.assertEqual(addr.colocator, 'AMBIG:NJ:30339')
+
+    def test_state_zip_match_ok(self):
+        unit = self._unit('123 Main St, Atlanta, Ga, 30339', {
+            'street': '123 Main St', 'city': 'Atlanta', 'state': 'GA', 'zip': '30339',
+        })
+        hit = self.proc._preprocess_bogus_shortcircuit(unit, unit.parsed_normalized, '30339')
+        self.assertIsNone(hit)
+
+    def test_same_as_above_placeholder(self):
+        unit = self._unit('Same As Above, Houston, Tx, 77002', {
+            'street': 'Same As Above', 'city': 'Houston', 'state': 'TX', 'zip': '77002',
+        })
+        hit = self.proc._preprocess_bogus_shortcircuit(unit, unit.parsed_normalized, '77002')
+        self.assertIsNotNone(hit)
+        _, result = hit
+        self.assertEqual(result.data.operations[0].data['updates'][0]['colocator'], 'BOGUS:77002')
+
+    def test_momentum_place_lockbox_pattern(self):
+        unit = self._unit('3781 Momentum Pl, Chicago, Il, 60689', {
+            'street': '3781 Momentum Pl', 'city': 'Chicago', 'state': 'IL', 'zip': '60689',
+        })
+        results = self.proc._preprocess_handler([unit])
+        self.assertEqual(len(results), 1)
+        _, result = results[0]
+        coloc = result.data.operations[0].data['updates'][0]['colocator']
+        self.assertTrue(str(coloc).startswith('PO:MAIL'), coloc)
+
+    def test_bny_mellon_safe_pattern(self):
+        unit = self._unit('C/O Bny Mellon Na, New York, Ny, 10019', {
+            'street': 'C/O Bny Mellon Na', 'city': 'New York', 'state': 'NY', 'zip': '10019',
+        })
+        results = self.proc._preprocess_handler([unit])
+        self.assertEqual(len(results), 1)
+        _, result = results[0]
+        coloc = result.data.operations[0].data['updates'][0]['colocator']
+        self.assertIn('BNY Mellon', str(coloc))
+
 
 if __name__ == '__main__':
     unittest.main()

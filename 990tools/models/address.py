@@ -10,6 +10,7 @@ Colocator Format:
   EIN:<EIN>           - Used for grants that provide an EIN so we don't need to geolocate an Address
   PO:<po_box>:<zip5> - Used for addresses that are PO Boxes. No need to geolocate, it would be the post office anyways
   FA:<countrycode>    - Used for foreign addresses
+  AMBIG:<state>:<zip5> - Declared state disagrees with US_zips primary state for that ZIP
 
 This allows downstream database joins by location.
 """
@@ -22,6 +23,7 @@ from countryCodes import lookupCC
 from .base import BaseModel
 from models.geocoding import Geocoding
 from logging_utils import log_debug
+from us_zip_lookup import ambig_colocator, is_state_zip_mismatch
 
 
 @dataclass
@@ -146,6 +148,10 @@ class Address(BaseModel):
             else:
                 # Specific PO Box number
                 self.colocator = f"PO:{self.po_box}:{self.zip_code}"
+        elif self.state and self.zip_code and is_state_zip_mismatch(self.state, self.zip_code):
+            # Declared state vs ZIP region conflict (e.g. Atlanta, NJ 30339)
+            # Prefer ZIP's geography for joins; keep declared state in the tag.
+            self.colocator = ambig_colocator(self.state, self.zip_code)
 
         # Build canonical address with comma-separated components
         canonical_parts = []

@@ -254,12 +254,16 @@ class GeocodingAPIProcessor(BaseProcessor):
     _us_zip_codes: Optional[frozenset[str]] = None
     _us_zip_states: Optional[Dict[str, str]] = None
     _us_zip_coords: Optional[Dict[str, Tuple[float, float]]] = None
+    _major_foreign_cities: Optional[frozenset[str]] = None
+    _major_foreign_countries: Optional[frozenset[str]] = None
+    _foreign_shell_phrases: Optional[tuple[re.Pattern, ...]] = None
 
     def __init__(self, db_ops: DatabaseOperations, batch_size: int = GEOCODING_FEED_BATCH_SIZE):
         super().__init__(db_ops)
         self.batch_size = batch_size
         self._thread_local = threading.local()
         self._ensure_us_zip_lookup(db_ops)
+        self._ensure_major_foreign_places()
         self.geocoding_patterns = self._load_geocoding_patterns()
         self._census_strip_suite_regexes = self._load_census_strip_suite_regexes()
         self.run_stats = GeocodeRunStats()
@@ -728,6 +732,87 @@ class GeocodingAPIProcessor(BaseProcessor):
             log_warning(f"Failed to load geocoding_patterns.json: {e}")
             return []
 
+    @classmethod
+    def _major_foreign_cities_path(cls) -> str:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for candidate in (
+            os.path.join(os.getcwd(), 'major_foreign_cities.json'),
+            os.path.join(here, 'major_foreign_cities.json'),
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+        return os.path.join(here, 'major_foreign_cities.json')
+
+    @classmethod
+    def _ensure_major_foreign_places(cls) -> None:
+        """Load major_foreign_cities.json once (cities/countries/shell phrases)."""
+        if cls._major_foreign_cities is not None:
+            return
+        path = cls._major_foreign_cities_path()
+        cities: set[str] = set()
+        countries: set[str] = set()
+        shell_rx: List[re.Pattern] = []
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            for item in data.get('cities') or []:
+                t = str(item).strip().lower()
+                if t:
+                    cities.add(t)
+            for item in data.get('countries') or []:
+                t = str(item).strip().lower()
+                if t:
+                    countries.add(t)
+            for phrase in data.get('shell_phrases') or []:
+                p = str(phrase).strip()
+                if p:
+                    shell_rx.append(re.compile(r'(?i)\b' + re.escape(p) + r'\b'))
+            print(
+                f"Loaded major foreign places: {len(cities)} cities, "
+                f"{len(countries)} countries from {os.path.basename(path)}",
+                flush=True,
+            )
+        except FileNotFoundError:
+            log_warning(f"major_foreign_cities.json not found at {path}")
+        except Exception as e:
+            log_warning(f"Failed to load major_foreign_cities.json: {e}")
+        cls._major_foreign_cities = frozenset(cities)
+        cls._major_foreign_countries = frozenset(countries)
+        cls._foreign_shell_phrases = tuple(shell_rx)
+
+    @classmethod
+    def _normalize_place_token(cls, text: str) -> str:
+        t = (text or '').strip().lower()
+        t = re.sub(r'\s+', ' ', t)
+        t = t.strip('.,;:')
+        return t
+
+    def _is_major_foreign_place_name(self, text: str) -> bool:
+        """Exact match against bootstrap foreign city/country list."""
+        self._ensure_major_foreign_places()
+        token = self._normalize_place_token(text)
+        if not token or re.search(r'\d', token):
+            return False
+        if token in (self._major_foreign_cities or ()):
+            return True
+        if token in (self._major_foreign_countries or ()):
+            return True
+        return False
+
+    def _has_foreign_shell_phrase(self, text: str) -> bool:
+        self._ensure_major_foreign_places()
+        if not text:
+            return False
+        for rx in self._foreign_shell_phrases or ():
+            if rx.search(text):
+                return True
+        return False
+
+    def _is_state_zip_mismatch(self, state: str, zip5: str) -> bool:
+        """Delegate to shared lookup (same rule as Address.canonicalize colocator)."""
+        from us_zip_lookup import is_state_zip_mismatch
+        return is_state_zip_mismatch(state, zip5)
+
     def _load_census_strip_suite_regexes(self) -> List[re.Pattern]:
         """Suite/unit strip patterns for census_strip (colocator is round(lat,4) — suite irrelevant)."""
         regexes: List[str] = []
@@ -922,8 +1007,10 @@ class GeocodingAPIProcessor(BaseProcessor):
             return address
 
     _PLACEHOLDER_STREET = re.compile(
-        r'(?i)^(unknown|none|n/a|na|tbd|not available|general delivery|address unknown|no street address|'
-        r'not present|no actual location|local|fellowship)\b'
+        r'(?i)^(unknown|none|n/a|na|tbd|not available|general delivery|gen delivery|address unknown|'
+        r'no street address|no address|unable to locate|same as(?:\s+(?:above|below|c\s+above))?|'
+        r'see statement|see schedule|not present|no actual location|local|fellowship|oth|'
+        r'telehealth|general telehealth|remote telehealth)\b'
     )
     _US_TERRITORIES = frozenset({'PR', 'VI', 'GU', 'AS', 'MP', 'FM', 'MH', 'PW'})
     _MILITARY_STATES = frozenset({'AP', 'AE', 'AA'})
@@ -1145,6 +1232,8 @@ class GeocodingAPIProcessor(BaseProcessor):
             return False
         if city.upper() in VALID_STATES:
             return False
+        if self._is_major_foreign_place_name(city):
+            return True
         if self._FOREIGN_COUNTRY_MARKERS.search(city):
             return True
         if self._CA_PROVINCE.match(city):
@@ -1152,6 +1241,49 @@ class GeocodingAPIProcessor(BaseProcessor):
         if self._MX_BORDER_CITY.search(city):
             return True
         return True
+
+    def _is_foreign_name_only_address(
+        self,
+        street: str,
+        city: str,
+        state: str,
+        zip5: str,
+        canonical: str = "",
+    ) -> bool:
+        """
+        Foreign city/country as the only place token (e.g. street='Moscow' with empty city,
+        or country name 'Nicaragua' alone). Avoids treating 'Paris TX' as foreign when
+        state+ZIP are a valid agreeing US pair.
+        """
+        # Shell / offshore registration phrases (Marshall Islands etc.)
+        if self._has_foreign_shell_phrase(canonical) or self._has_foreign_shell_phrase(street):
+            return True
+
+        state_u = (state or '').strip().upper()
+        has_us_anchor = (
+            len(state_u) == 2
+            and state_u in VALID_STATES
+            and bool(zip5)
+            and self._is_valid_us_zip(zip5)
+            and not self._is_state_zip_mismatch(state_u, zip5)
+        )
+        if has_us_anchor:
+            return False
+
+        if self._street_has_number(street or ''):
+            return False
+
+        # Street is exactly a foreign city/country
+        if street and self._is_major_foreign_place_name(street):
+            return True
+        # City alone is foreign (no street)
+        if city and not street and self._is_major_foreign_place_name(city):
+            return True
+        # Country marker as the sole place token
+        blob = (street or city or '').strip()
+        if blob and self._FOREIGN_COUNTRY_MARKERS.fullmatch(blob):
+            return True
+        return False
 
     def _preprocess_bogus_shortcircuit(
         self,
@@ -1171,11 +1303,23 @@ class GeocodingAPIProcessor(BaseProcessor):
             tag = country[:2] if len(country) >= 2 else 'XX'
             return self._apply_preprocess_shortcircuit(unit, f'FA:{tag}')
 
+        # State vs ZIP region disagreement (e.g. Atlanta, NJ 30339).
+        # Primary assignment is Address.canonicalize → AMBIG:{state}:{zip}; this
+        # residual path covers Geocoding rows that never re-pass Address.
+        if state and zip5 and self._is_state_zip_mismatch(state, zip5):
+            from us_zip_lookup import ambig_colocator
+            return self._apply_preprocess_shortcircuit(
+                unit, ambig_colocator(state, zip5),
+            )
+
         if state and self._CA_PROVINCE.match(state):
             return self._apply_preprocess_shortcircuit(unit, 'FA:CA')
 
         if city and self._MX_BORDER_CITY.search(city):
             return self._apply_preprocess_shortcircuit(unit, 'FA:MX')
+
+        if self._is_foreign_name_only_address(street, city, state, zip5, addr):
+            return self._apply_preprocess_shortcircuit(unit, 'FA:INTL')
 
         if self._is_us_territory_parsed(state):
             return self._apply_preprocess_shortcircuit(
@@ -1399,6 +1543,18 @@ class GeocodingAPIProcessor(BaseProcessor):
         if predicate == 'us_territory':
             street, city, state, zip5 = self._parsed_address_fields(parsed)
             return self._is_us_territory_parsed(state)
+
+        if predicate == 'state_zip_mismatch':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            zip5 = zip5 or zip_code
+            return self._is_state_zip_mismatch(state, zip5)
+
+        if predicate == 'foreign_name_only':
+            street, city, state, zip5 = self._parsed_address_fields(parsed)
+            zip5 = zip5 or zip_code
+            return self._is_foreign_name_only_address(
+                street, city, state, zip5, canonical_address,
+            )
 
         for field in sub.get('require') or []:
             if not (parsed.get(field) or '').strip():

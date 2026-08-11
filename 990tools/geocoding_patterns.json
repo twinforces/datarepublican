@@ -1,6 +1,6 @@
 {
-  "version": "1.2",
-  "description": "Geocoding patterns for automatic resolution of common IRS 990 address issues (expanded major_institutions for latest 200 No_Match batch)",
+  "version": "1.3",
+  "description": "Geocoding patterns for automatic resolution of common IRS 990 address issues. v1.3: grok residual free-wins (foreign cities bootstrap, state/zip mismatch, narrative/lockbox/military).",
   "patterns": [
     {
       "name": "privacy_addresses",
@@ -368,7 +368,11 @@
   "priority": 30,
   "patterns": [
     { "regex": "(?i)address\\s*unknown|no\\s*street\\s*address|000\\s*address", "colocator": "PO:UNKNOWN", "status": "owners", "action": "match" },
-    { "regex": "(?i)\\d+-?xxx-?\\d+", "colocator": "PO:UNKNOWN", "status": "owners", "action": "match" }
+    { "regex": "(?i)\\d+-?xxx-?\\d+", "colocator": "PO:UNKNOWN", "status": "owners", "action": "match" },
+    { "regex": "(?i)\\bxxxx+\\b|\\bx{3,}\\b", "colocator": "BOGUS:{zip}", "status": "owners", "action": "match" },
+    { "regex": "(?i)^(not releasable|not to be published|confidential location|please email instead|home address)\\b", "colocator": "BOGUS:{zip}", "status": "owners", "action": "match" },
+    { "regex": "(?i)^(same as(?:\\s+(?:above|below|c\\s+above))?|see statement|see schedule|no address|unable to locate)\\b", "colocator": "BOGUS:{zip}", "status": "owners", "action": "match" },
+    { "regex": "(?i)^(oth|telehealth|general telehealth|remote telehealth)\\b", "colocator": "BOGUS:{zip}", "status": "owners", "action": "match" }
   ]
 },
 {
@@ -440,6 +444,18 @@
       "action": "match"
     },
     {
+      "predicate": "state_zip_mismatch",
+      "colocator": "AMBIG:{state}:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "predicate": "foreign_name_only",
+      "colocator": "FA:INTL",
+      "status": "owners",
+      "action": "match"
+    },
+    {
       "fields": {"street": "^dept\\s+.+"},
       "colocator": "DEPT:{zip}",
       "status": "owners",
@@ -479,7 +495,7 @@
 },
 {
   "name": "fraud_source_addresses",
-  "description": "NPPES/DOT/FEC bogus-address families mined from pending_api concordance (Jul 2026)",
+  "description": "NPPES/DOT/FEC + grok residual free-wins (Aug 2026). Safe preprocess group.",
   "priority": 15,
   "patterns": [
     {
@@ -537,14 +553,56 @@
       "action": "match"
     },
     {
-      "regex": "(?i)\\b(usnh|us\\s+army\\s+hospital|us\\s+army\\s+health)\\b.*\\b(italy|germany|japan|korea|okinawa|yokosuka|wiesbaden)\\b",
+      "regex": "(?i)\\bcmr\\s+\\d+",
+      "colocator": "MILITARY:CMR:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\b(usnh|us\\s+army\\s+hospital|us\\s+army\\s+health)\\b.*\\b(italy|germany|japan|korea|okinawa|yokosuka|wiesbaden|landstuhl)\\b",
       "colocator": "MILITARY:OVERSEAS:{zip}",
       "status": "owners",
       "action": "match"
     },
     {
-      "regex": "(?i)\\b(wiesbaden|yokosuka|okinawa|ramstein|stuttgart|kaiserslautern|chinhae)\\b",
+      "regex": "(?i)\\b(wiesbaden|yokosuka|okinawa|ramstein|stuttgart|kaiserslautern|chinhae|landstuhl)\\b",
       "colocator": "FA:INTL",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\bmomentum\\s+pl(?:ace)?\\b",
+      "colocator": "PO:MAIL:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\b(?:gift|donation|credit\\s+card)\\s+processing(?:\\s+center)?\\b",
+      "colocator": "PO:MAIL:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)^file\\s+\\d{3,}\\b",
+      "colocator": "PO:MAIL:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)c/?o\\s+bny\\s+mellon(?:\\s+na)?\\b|\\bbny\\s+mellon\\s+na\\b|paid\\s+by\\s+bny\\s+mellon\\b",
+      "colocator": "MAJOR:BNY Mellon:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\b(apo|fpo|dpo)\\s+(ae|ap|aa)\\b",
+      "colocator": "MILITARY:APO:{zip}",
+      "status": "owners",
+      "action": "match"
+    },
+    {
+      "regex": "(?i)\\bcorner\\s+of\\b",
+      "colocator": "PARTIAL:{zip}",
       "status": "owners",
       "action": "match"
     }

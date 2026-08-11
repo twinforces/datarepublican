@@ -142,7 +142,10 @@ GEOCODING_BATCHER_TIMEOUT = 5.0  # seconds — ~half a typical census/API HTTP r
 GEOCODING_STATUS_PENDING_API = "pending_api"  # Census+strip exhausted; needs geolocate_api
 GEOCODING_STATUS_TAIL = "geocode_tail"  # Declared victory — low-weight tail, no API/Grok spend
 GEOCODING_GROK_INTAKE_STATUSES = ("grok_pending", "pending_api")  # Grok batch + preprocess loop
-GEOCODING_GROK_MIN_ADDRESS_COUNT = 10  # Victory tier: only rows affecting this many+ addresses
+# Victory / high-value filter: only intake rows with address_count >= N.
+# Full residual drains after victory often have max count < 10 — set env
+# GEOCODING_GROK_MIN_ADDRESS_COUNT=0 (or 1) or the step processes nothing.
+GEOCODING_GROK_MIN_ADDRESS_COUNT = 10
 GEOCODING_VICTORY_UNKN_EXPORT_ROWS = 5_000  # Top grok:UNKN by address_count for review
 GEOCODING_VICTORY_UNKN_EXPORT_FILE = "grok_high_value_unkn_review.tsv.gz"
 CENSUS_FAILURES_EXPORT_FILE = "pending_api_failures_for_patterns.tsv.gz"  # after geolocate_census drain

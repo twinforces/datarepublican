@@ -5,6 +5,32 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-08-11 (geolocate_grok drain + pattern pack)
+
+### geolocate_grok full residual (ops success)
+- **Why:** After API + free preprocess, ~39k `grok_pending` needed paid Grok. Default `GEOCODING_GROK_MIN_ADDRESS_COUNT=10` would select **0** rows (none ≥10 refs); must run with **`=0`**.
+- **Ops:** 8× xAI batch jobs; **39,037** rows applied; **81.6%** matched (`Match:Grok-4` +31,840); classified 7,197. Drain complete (`grok_pending`/`pending_api` intake empty).
+- **Export:** cumulative `grok_failures_for_patterns.tsv.gz` — 41,876 rows (AMBIG/NOTA/REDACT/UNKN/VAGUE).
+- **Finding:** ~30k+ UNKN are normal digit streets with “no geocoder tool / genuinely unsure” reasons — **prompt/model refusal**, not missing regexes. Patterns cannot clear that bulk.
+
+### Pattern pack free-wins (code; uncommitted)
+- **Why:** Structural residuals should become `Match:PatternOwners` at zero model cost; foreign city-only and state≠ZIP should never re-enter Grok.
+- **`major_foreign_cities.json`:** bootstrap cities/countries/shell phrases → name-only `FA:INTL` (dual US place names pruned, e.g. Paris TX kept US).
+- **`us_zip_lookup.py`:** shared ZIP→state from `US_zips.txt.gz`.
+- **`Address.canonicalize`:** primary path sets **`AMBIG:{state}:{zip}`** when declared state disagrees with ZIP’s primary state (after PO; FA early-return). Preprocess residual uses same helper for parked `Geocoding` rows.
+- **`geocoding_patterns.json` v1.3:** safe rules — Same As Above / Unable To Locate / OTH / REDACT, Momentum Place + File NNNN, BNY Mellon C/O (safe path; was dangerous-only), CMR/Landstuhl/APO AE|AP, corner-of PARTIAL; predicates `state_zip_mismatch` / `foreign_name_only`.
+- **`preprocess_grok_pending.py`:** `--grok-failures` / `--statuses` to reprocess classified `grok:*`.
+- **Prod reprocess:** **1,182** → PatternOwners; **~40.7k** `grok:*` left.
+- **Files:** `geocoding_api_processor.py`, `models/address.py`, `geocoding_patterns.json`, `major_foreign_cities.json`, `us_zip_lookup.py`, `preprocess_grok_pending.py`, `test_preprocess_bogus.py`.
+- **Docs:** `docs/preprocess_grok_pending.md`.
+
+### Decisions recorded
+- **UNKN bulk:** leave as hard tail; no more Grok spend or loose patterns. Optional later: prompt fix so complete US streets cannot refuse for “no tool.”
+- **`GEOCODING_GROK_MIN_ADDRESS_COUNT` default 10:** keep (victory high-value filter). Full residual drains must set env **`=0`** or they process nothing.
+
+### Landed hashes (pushed before this unit)
+- Prior tip `c5a72fd7` docs hygiene.
+
 ## [Unreleased] - 2026-08-11 (API tail, grant_match ART-safe lat/lon, OFAC, grok_pending preprocess)
 
 ### geolocate_api tail (Photon free + maps.co + OpenCage)

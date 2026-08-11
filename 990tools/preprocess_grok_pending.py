@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-preprocess_grok_pending.py — One-shot preprocess pass over grok_pending rows.
+preprocess_grok_pending.py — One-shot preprocess pass over geocode residual statuses.
 
 Re-applies structured short-circuits + geocoding_patterns.json without API/Grok spend.
-Many grok_pending rows predate current FA/MILITARY/VENDOR/PARTIAL rules.
 
-Matched → Match:PatternOwners; unmatched stay grok_pending for geolocate_grok.
+Default intake is grok_pending (pre-Grok queue). Use --statuses to re-process
+classified Grok failures (e.g. grok:UNKN) after pattern pack updates.
+
+Matched → Match:PatternOwners; unmatched keep their prior status.
 
 Usage:
   python3 preprocess_grok_pending.py --dry-run
   python3 preprocess_grok_pending.py
+  python3 preprocess_grok_pending.py --statuses grok:UNKN,grok:VAGUE,grok:NOTA,grok:AMBIG,grok:REDACT
   python3 preprocess_grok_pending.py --max-rows 10000
 """
 
@@ -20,7 +23,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence, Tuple
 
 from config import global_config
 from constants import GEOCODING_PREPROCESS_BATCH_SIZE
@@ -30,7 +33,14 @@ from geocoding_api_processor import GeocodingAPIProcessor, GeocodingWorkUnit
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = "/Volumes/Data/final/irs990.duckdb"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
-STATUS = "grok_pending"
+DEFAULT_STATUSES = ("grok_pending",)
+GROK_FAILURE_STATUSES = (
+    "grok:UNKN",
+    "grok:VAGUE",
+    "grok:NOTA",
+    "grok:AMBIG",
+    "grok:REDACT",
+)
 
 
 def log(msg: str) -> None:
@@ -46,31 +56,40 @@ def _json_safe(val: Any) -> Any:
     return str(val)
 
 
+def _status_sql(statuses: Sequence[str]) -> Tuple[str, Tuple[str, ...]]:
+    placeholders = ", ".join("?" for _ in statuses)
+    return f"geocoding_status IN ({placeholders})", tuple(statuses)
+
+
 def fetch_batch(
     db_ops: DatabaseOperations,
+    statuses: Sequence[str],
     limit: int,
     after_id: Optional[str] = None,
 ) -> List[tuple]:
+    status_sql, status_params = _status_sql(statuses)
     if after_id:
         return db_ops.execute_query(
-            """
-            SELECT geocoding_id, normalized_address, attempt_count, canonical_address, address_count
+            f"""
+            SELECT geocoding_id, normalized_address, attempt_count, canonical_address,
+                   address_count, geocoding_status
             FROM Geocoding
-            WHERE geocoding_status = ? AND geocoding_id > ?
+            WHERE {status_sql} AND geocoding_id > ?
             ORDER BY geocoding_id
             LIMIT ?
             """,
-            (STATUS, after_id, limit),
+            (*status_params, after_id, limit),
         ).fetchall()
     return db_ops.execute_query(
-        """
-        SELECT geocoding_id, normalized_address, attempt_count, canonical_address, address_count
+        f"""
+        SELECT geocoding_id, normalized_address, attempt_count, canonical_address,
+               address_count, geocoding_status
         FROM Geocoding
-        WHERE geocoding_status = ?
+        WHERE {status_sql}
         ORDER BY geocoding_id
         LIMIT ?
         """,
-        (STATUS, limit),
+        (*status_params, limit),
     ).fetchall()
 
 
@@ -89,28 +108,55 @@ def rows_to_units(rows: List[tuple]) -> List[GeocodingWorkUnit]:
             "attempt_count": row[2] or 0,
             "canonical_address": row[3],
             "address_count": row[4] or 0,
-            "geocoding_status": STATUS,
+            "geocoding_status": row[5] if len(row) > 5 else DEFAULT_STATUSES[0],
         }
         units.append(GeocodingWorkUnit.work_item("grok_pending_preprocess", data))
     return units
 
 
-def count_status(db_ops: DatabaseOperations, status: str) -> int:
+def count_statuses(db_ops: DatabaseOperations, statuses: Sequence[str]) -> int:
+    status_sql, status_params = _status_sql(statuses)
     row = db_ops.execute_query(
-        "SELECT COUNT(*) FROM Geocoding WHERE geocoding_status = ?",
-        (status,),
+        f"SELECT COUNT(*) FROM Geocoding WHERE {status_sql}",
+        status_params,
     ).fetchone()
     return int(row[0]) if row else 0
 
 
+def count_status(db_ops: DatabaseOperations, status: str) -> int:
+    return count_statuses(db_ops, (status,))
+
+
+def parse_statuses(raw: Optional[str], grok_failures: bool) -> Tuple[str, ...]:
+    if grok_failures:
+        return GROK_FAILURE_STATUSES
+    if not raw:
+        return DEFAULT_STATUSES
+    parts = tuple(s.strip() for s in raw.split(",") if s.strip())
+    if not parts:
+        return DEFAULT_STATUSES
+    return parts
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Preprocess grok_pending with pattern rules")
+    parser = argparse.ArgumentParser(description="Preprocess grok residual with pattern rules")
     parser.add_argument("--db-path", default=DEFAULT_DB)
     parser.add_argument("--final-dir", default=DEFAULT_FINAL_DIR)
     parser.add_argument("--batch-size", type=int, default=GEOCODING_PREPROCESS_BATCH_SIZE)
     parser.add_argument("--max-rows", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--statuses",
+        default=None,
+        help="Comma-separated geocoding_status values (default: grok_pending)",
+    )
+    parser.add_argument(
+        "--grok-failures",
+        action="store_true",
+        help="Shorthand for all grok:UNKN/VAGUE/NOTA/AMBIG/REDACT statuses",
+    )
     args = parser.parse_args()
+    statuses = parse_statuses(args.statuses, args.grok_failures)
 
     # Public Photon only — avoid hanging probe on offline self-host
     os.environ.pop("PHOTON_DOMAIN", None)
@@ -123,12 +169,23 @@ def main() -> int:
         import duckdb
 
         con = duckdb.connect(args.db_path, read_only=True)
+        status_sql, status_params = _status_sql(statuses)
         pending = con.execute(
-            "SELECT COUNT(*) FROM Geocoding WHERE geocoding_status = ?",
-            [STATUS],
+            f"SELECT COUNT(*) FROM Geocoding WHERE {status_sql}",
+            list(status_params),
         ).fetchone()[0]
+        by = con.execute(
+            f"""
+            SELECT geocoding_status, COUNT(*)::BIGINT
+            FROM Geocoding WHERE {status_sql}
+            GROUP BY 1 ORDER BY 2 DESC
+            """,
+            list(status_params),
+        ).fetchall()
         con.close()
-        log(f"DRY RUN — {pending:,} {STATUS} rows would be scanned")
+        log(f"DRY RUN — {pending:,} rows in statuses={list(statuses)}")
+        for st, n in by:
+            log(f"  {st}={n:,}")
         return 0
 
     DatabaseOperations.closePool()
@@ -137,8 +194,11 @@ def main() -> int:
     proc = GeocodingAPIProcessor(db_ops)
     proc.pipeline_step = "grok_pending_preprocess"
 
-    total_pending = count_status(db_ops, STATUS)
-    log(f"Starting grok_pending preprocess: {total_pending:,} rows (batch={args.batch_size:,})")
+    total_pending = count_statuses(db_ops, statuses)
+    log(
+        f"Starting preprocess: {total_pending:,} rows "
+        f"statuses={list(statuses)} batch={args.batch_size:,}"
+    )
 
     scanned = 0
     matched = 0
@@ -155,7 +215,7 @@ def main() -> int:
             if limit <= 0:
                 break
 
-        rows = fetch_batch(db_ops, limit, after_id=after_id)
+        rows = fetch_batch(db_ops, statuses, limit, after_id=after_id)
         if not rows:
             break
 
@@ -165,21 +225,22 @@ def main() -> int:
         scanned += len(rows)
         matched += batch_matched
         batches += 1
-        remaining = count_status(db_ops, STATUS)
+        remaining = count_statuses(db_ops, statuses)
         log(
             f"batch {batches}: scanned={len(rows):,} matched={batch_matched:,} "
-            f"cumulative={matched:,}/{scanned:,} grok_pending_left={remaining:,}"
+            f"cumulative={matched:,}/{scanned:,} intake_left={remaining:,}"
         )
         if len(rows) < limit:
             break
 
     owners = count_status(db_ops, "Match:PatternOwners")
-    remaining = count_status(db_ops, STATUS)
+    remaining = count_statuses(db_ops, statuses)
     log("")
-    log("════ GROK_PENDING PREPROCESS DONE ════")
+    log("════ GROK RESIDUAL PREPROCESS DONE ════")
+    log(f"  statuses:      {list(statuses)}")
     log(f"  scanned:       {scanned:,}")
     log(f"  matched:       {matched:,} → Match:PatternOwners")
-    log(f"  grok_pending:  {remaining:,}")
+    log(f"  intake_left:   {remaining:,}")
     log(f"  PatternOwners: {owners:,}")
     log("═" * 36)
     db_ops.close()
