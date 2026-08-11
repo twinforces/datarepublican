@@ -141,7 +141,15 @@ class IRSFetchConsumer(BaseConsumer):
         return True
 
     def _download_urls(self, urls: List[str], dest_folder: str) -> bool:
-        """Download a list of URLs using curl (reliable, with retries)"""
+        """Download a list of URLs using curl (reliable, with retries).
+
+        Treats missing, zero-byte, and tiny stub files as not present so a
+        failed partial (or empty 200) never blocks re-download forever.
+        """
+        # IRS monthly TEOS zips are typically tens–hundreds of MB; anything
+        # under this is almost certainly a stub / failed write.
+        MIN_VALID_ZIP_BYTES = 1024
+
         downloaded = 0
         for url in urls:
             if self.exit_processing:
@@ -149,18 +157,43 @@ class IRSFetchConsumer(BaseConsumer):
             filename = url.split('/')[-1]
             dest_path = os.path.join(dest_folder, filename)
             if os.path.exists(dest_path):
-                log_info(f"Skipping {filename} - already exists")
-                continue
+                try:
+                    size = os.path.getsize(dest_path)
+                except OSError:
+                    size = 0
+                if size >= MIN_VALID_ZIP_BYTES:
+                    log_info(f"Skipping {filename} - already exists ({size:,} bytes)")
+                    continue
+                log_warning(
+                    f"Removing bogus {filename} ({size} bytes) before re-download"
+                )
+                try:
+                    os.unlink(dest_path)
+                except OSError as e:
+                    log_error(f"Could not remove bogus {dest_path}: {e}")
+                    return False
 
-            # Use curl with retries, follow redirects, fail on error, timeout
+            # Use curl with retries, follow redirects, fail on error.
+            # max-time is per-attempt; large monthly zips can exceed 5 minutes.
             cmd = [
                 "curl", "-L", "--fail", "--retry", "3", "--retry-delay", "5",
-                "--connect-timeout", "30", "--max-time", "300",
+                "--connect-timeout", "30", "--max-time", "1800",
                 "-o", dest_path, url
             ]
             try:
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                log_info(f"Downloaded {filename}")
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+                try:
+                    size = os.path.getsize(dest_path)
+                except OSError:
+                    size = 0
+                if size < MIN_VALID_ZIP_BYTES:
+                    log_error(
+                        f"Downloaded {filename} is bogus ({size} bytes) — removing"
+                    )
+                    if os.path.exists(dest_path):
+                        os.unlink(dest_path)
+                    return False
+                log_info(f"Downloaded {filename} ({size:,} bytes)")
                 downloaded += 1
             except subprocess.CalledProcessError as e:
                 log_error(f"Failed to download {url}: {e.stderr}")

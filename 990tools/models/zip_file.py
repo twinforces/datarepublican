@@ -30,25 +30,12 @@ class ZipFile(BaseModel):
 
     def is_processed_successfully(self) -> bool:
         """Check if ZIP file was processed without errors"""
-        return self.processed and not self.error_message
+        return self.status == 'processed'
 
     def mark_processed(self, xml_count: int = 0, error_message: Optional[str] = None):
-        """Mark ZIP file as processed"""
-        self.processed = True
-        self.processed_at = datetime.now()
-        self.xml_count = xml_count
-        self.error_message = error_message
-
-    def is_processed_successfully(self) -> bool:
-        """Check if ZIP file was processed without errors"""
-        return self.status == 'processed' and not self.error_message
-
-    def mark_processed(self, xml_count: int = 0, error_message: Optional[str] = None):
-        """Mark ZIP file as processed"""
+        """Mark ZIP file as fully registered (XmlFiles rows written / already present)."""
         self.status = 'processed'
         self.processed_date = datetime.now()
-        # self.xml_count = xml_count  # Not in schema
-        # self.error_message = error_message  # Not in schema
 
     # get_db_field_names is now inherited from BaseModel and uses dataclass fields
 

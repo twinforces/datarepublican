@@ -66,6 +66,8 @@ class ZipProducer(BaseProducer):
 
         # Create a single master context for the batch
         master_context = PendingDatabaseContext()
+        # Existing ZipFiles rows that only need XmlFiles + a status flip after save
+        self._zips_to_mark_processed: List[str] = getattr(self, "_zips_to_mark_processed", [])
 
         for zip_path in batch:
             # Check if ZIP file already exists in database
@@ -76,21 +78,36 @@ class ZipProducer(BaseProducer):
             ).fetchone()
 
             if existing_zip and existing_zip[1] == 'processed':
-                # ZIP file already processed, skip it
+                # ZIP file already fully registered, skip it
                 continue
 
             # Create ZipFile using factory method
             tax_year = int(zip_path.name[:4]) if zip_path.name[:4].isdigit() else 0
             zip_file = ZipFile.create_from_path(str(zip_path), tax_year)
 
-            # If ZIP file exists but not processed, update it; otherwise add new
             if existing_zip:
-                # Update existing ZIP file status to processing
-                zip_file.zip_id = existing_zip[0]  # Use existing zip_id
-                # Don't add to context for insert, just update XML files
+                zip_id = existing_zip[0]
+                zip_file.zip_id = zip_id
+                # If XmlFiles were already registered, never re-INSERT them —
+                # that hits UNIQUE(zip_id, filename). Just flip status.
+                existing_xml_count = self.db_ops.execute_query(
+                    "SELECT COUNT(*) FROM XmlFiles WHERE zip_id = ?",
+                    (zip_id,),
+                ).fetchone()[0]
+                if existing_xml_count and existing_xml_count > 0:
+                    log_info(
+                        f"ZIP {zip_filename} already has {existing_xml_count:,} "
+                        f"XmlFiles — marking status=processed (no re-insert)"
+                    )
+                    self.db_ops.update_zip_status(str(zip_id), "processed")
+                    continue
+                # Zip row exists but members never registered (e.g. partial prior run)
+                self._zips_to_mark_processed.append(str(zip_id))
             else:
                 # New ZIP file, add to context for insertion
                 zip_file.prep_for_insert()  # Generate zip_id
+                # Root cause fix: land as processed so re-runs skip this archive
+                zip_file.mark_processed()
                 master_context.addObjectToDatabase(zip_file)
 
             # Extract XML file listing and sizes in one pass
@@ -106,6 +123,11 @@ class ZipProducer(BaseProducer):
                 )
                 xml_file.prep_for_insert()  # Generate xml_id
                 master_context.addObjectToDatabase(xml_file)
+
+            log_info(
+                f"Queuing {len(xml_files):,} XmlFiles for {zip_filename} "
+                f"(zip_id={zip_file.zip_id})"
+            )
 
         return master_context
 
@@ -159,30 +181,155 @@ class ZipProcessor:
         )
         self.thread_pool_manager = ThreadPoolManager(thread_config, self)
 
+    # Small chunks: full-zip bulk insert OOMs on the 94GB production DB even at 16GB limit.
+    XML_REGISTER_CHUNK = 2000
+
     def process_zip_files(self, start_year: int, end_year: int) -> List[Path]:
-        """Process ZIP files and register XML files using producer-consumer pattern with PendingDatabaseContext"""
-        log_info(f"Processing ZIP files from {start_year} to {end_year} using producer-consumer pattern with PendingDatabaseContext")
+        """Register ZIP archives and their XmlFiles members (chunked inserts)."""
+        log_info(
+            f"Processing ZIP files from {start_year} to {end_year} "
+            f"(chunked XmlFiles inserts, size={self.XML_REGISTER_CHUNK})"
+        )
 
         try:
-            # Collect contexts using the new PendingDatabaseContext approach
-            # But filter by year range first
-            contexts = self._collect_contexts_with_year_filter(start_year, end_year)
+            # Repair prior runs that registered XmlFiles but left status='downloaded'
+            self._mark_registered_zips_processed()
 
-            if not contexts or contexts.isEmpty():
+            zip_files = self._list_zips_in_year_range(start_year, end_year)
+            if not zip_files:
                 log_info("No ZIP files to process")
                 return []
 
-            log_info(f"Collected ZIP processing context")
+            total_xml = 0
+            for zip_path in zip_files:
+                log_info(f"Registering ZIP: {zip_path.name}")
+                n = self._register_one_zip_chunked(zip_path)
+                total_xml += n
+                log_info(f"Finished registering {zip_path.name} (+{n:,} XmlFiles)")
 
-            # Execute contexts using consumer
-            total_processed = self.consumer.execute_contexts_batch(contexts)
-
-            log_info(f"ZIP file processing complete: {total_processed} operations processed")
-            return []  # Return empty list since we can't extract paths from single context
+            self._mark_registered_zips_processed()
+            log_info(f"ZIP file processing complete: {total_xml:,} XmlFiles inserted this run")
+            return []
 
         except Exception as e:
             log_error(f"ZIP processing failed: {e}", exc_info=True)
             return []
+
+    def _list_zips_in_year_range(self, start_year: int, end_year: int) -> List[Path]:
+        """ZIP paths under zips_dir whose filename year is in [start_year, end_year]."""
+        zip_files: List[Path] = []
+        for zip_path in sorted(Path(self.zips_dir).glob("*.zip")):
+            filename_year_str = zip_path.name[:4]
+            if filename_year_str.isdigit():
+                filename_year = int(filename_year_str)
+                if start_year <= filename_year <= end_year:
+                    zip_files.append(zip_path)
+        return zip_files
+
+    def _register_one_zip_chunked(self, zip_path: Path) -> int:
+        """Register one archive's members in small committed batches. Returns XmlFiles inserted."""
+        zip_filename = zip_path.name
+        existing = self.db_ops.execute_query(
+            "SELECT zip_id, status FROM ZipFiles WHERE filename = ?",
+            (zip_filename,),
+        ).fetchone()
+
+        if existing and existing[1] == "processed":
+            log_info(f"Skipping {zip_filename} — already status=processed")
+            return 0
+
+        tax_year = int(zip_filename[:4]) if zip_filename[:4].isdigit() else 0
+        zip_file = ZipFile.create_from_path(str(zip_path), tax_year)
+
+        if existing:
+            zip_id = existing[0]
+            zip_file.zip_id = zip_id
+        else:
+            zip_file.prep_for_insert()
+            zip_file.mark_processed()  # will be true after members land; status set again at end
+            # Insert zip row alone first (tiny)
+            self.db_ops.bulk_insert([zip_file], batch_size=1, commit_batches=True)
+            zip_id = zip_file.zip_id
+
+        zip_id_str = str(zip_id)
+
+        # Members already on disk listing
+        xml_sizes = self._get_all_xml_sizes_static(zip_path)
+        all_names = list(xml_sizes.keys())
+        if not all_names:
+            log_warning(f"{zip_filename}: no .xml members — marking processed")
+            self.db_ops.update_zip_status(zip_id_str, "processed")
+            return 0
+
+        # Skip names already registered (resume after partial OOM)
+        existing_names = {
+            r[0]
+            for r in self.db_ops.execute_query(
+                "SELECT filename FROM XmlFiles WHERE zip_id = ?",
+                (zip_id,),
+            ).fetchall()
+        }
+        pending = [n for n in all_names if n not in existing_names]
+        log_info(
+            f"{zip_filename}: {len(all_names):,} members, "
+            f"{len(existing_names):,} already registered, {len(pending):,} to insert"
+        )
+        if not pending:
+            self.db_ops.update_zip_status(zip_id_str, "processed")
+            return 0
+
+        inserted = 0
+        chunk = self.XML_REGISTER_CHUNK
+        for i in range(0, len(pending), chunk):
+            batch_names = pending[i : i + chunk]
+            objs = []
+            for xml_filename in batch_names:
+                xml_file = zip_file.create_xml_file(
+                    filename=xml_filename,
+                    internal_path=xml_filename,
+                    file_size=xml_sizes[xml_filename],
+                )
+                xml_file.prep_for_insert()
+                objs.append(xml_file)
+            self.db_ops.bulk_insert(objs, batch_size=chunk, commit_batches=True)
+            inserted += len(objs)
+            log_info(
+                f"{zip_filename}: inserted {inserted:,}/{len(pending):,} "
+                f"(chunk {i // chunk + 1})"
+            )
+
+        self.db_ops.update_zip_status(zip_id_str, "processed")
+        return inserted
+
+    def _mark_registered_zips_processed(self) -> int:
+        """Set status=processed for ZipFiles that already have XmlFiles rows.
+
+        Root-cause repair: skip logic keys off status=='processed', but older runs
+        left status at 'downloaded' forever, so every zip re-ran and re-INSERTed
+        members into UNIQUE(zip_id, filename).
+        """
+        result = self.db_ops.execute_query(
+            """
+            SELECT COUNT(*) FROM ZipFiles z
+            WHERE (z.status IS NULL OR z.status != 'processed')
+              AND EXISTS (SELECT 1 FROM XmlFiles x WHERE x.zip_id = z.zip_id)
+            """
+        ).fetchone()
+        n = int(result[0]) if result else 0
+        if n <= 0:
+            return 0
+        self.db_ops.execute_query(
+            """
+            UPDATE ZipFiles z
+            SET status = 'processed',
+                processed_date = CURRENT_TIMESTAMP
+            WHERE (z.status IS NULL OR z.status != 'processed')
+              AND EXISTS (SELECT 1 FROM XmlFiles x WHERE x.zip_id = z.zip_id)
+            """
+        )
+        self.db_ops.commit()
+        log_info(f"Marked {n:,} ZipFiles as processed (already had XmlFiles registered)")
+        return n
 
     def _producer_wrapper(self, zip_files: List[Path], work_queue, result_queue, thread_id: int, num_threads: int):
         """Wrapper for producer thread execution"""
@@ -215,23 +362,13 @@ class ZipProcessor:
             result_queue.put(None)
 
     def _collect_contexts_with_year_filter(self, start_year: int, end_year: int) -> Optional['PendingDatabaseContext']:
-        """Collect ZIP files filtered by year range and create a PendingDatabaseContext"""
-        # Get all ZIP files from the directory
-        zip_files = []
-        for zip_path in Path(self.zips_dir).glob("*.zip"):
-            # Extract year from first 4 characters of filename
-            filename_year_str = zip_path.name[:4]
-            if filename_year_str.isdigit():
-                filename_year = int(filename_year_str)
-                # Check if year is within range
-                if start_year <= filename_year <= end_year:
-                    zip_files.append(zip_path)
+        """Collect ZIP files filtered by year range and create a PendingDatabaseContext.
 
-        # If no files match the filter, return None
+        Prefer process_zip_files() which registers one archive at a time to avoid OOM.
+        """
+        zip_files = self._list_zips_in_year_range(start_year, end_year)
         if not zip_files:
             return None
-
-        # Use producer to process the filtered batch into a context
         return self.producer._process_work_batch_to_context(zip_files)
 
     def _consumer_wrapper(self, result_queue, thread_id: int, num_producers: int, progress_bar=None):
@@ -287,9 +424,6 @@ class ZipProcessor:
         from pending_database_context import PendingDatabaseContext
         context = PendingDatabaseContext()
 
-        # Add ZIP file to context
-        context.addObjectToDatabase(zip_file)
-
         # Extract XML file listing and sizes in one pass
         xml_sizes = self._get_all_xml_sizes(zip_path)
         xml_files = list(xml_sizes.keys())
@@ -300,6 +434,10 @@ class ZipProcessor:
         if xml_files:
             print(f"DEBUG: First 5 XML files: {xml_files[:5]}")
             print(f"DEBUG: XML file sizes: {list(xml_sizes.values())[:5]}")
+
+        zip_file.mark_processed()
+        # Add ZIP file to context
+        context.addObjectToDatabase(zip_file)
 
         # Create XML file objects and add to context
         for xml_filename in xml_files:
@@ -321,7 +459,7 @@ class ZipProcessor:
         zip_id = result[0] if result else None
 
         if zip_id:
-            log_info(f"Registered ZIP file: {zip_filename} (ID: {zip_id})")
+            log_info(f"Registered ZIP file: {zip_filename} (ID: {zip_id}, status=processed)")
         else:
             log_warning(f"Could not determine zip_id for {zip_filename}")
 
