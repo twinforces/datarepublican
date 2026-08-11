@@ -304,15 +304,67 @@ FOCUS_BRIEFINGS: dict[str, dict[str, Any]] = {
     },
     "grants": {
         "title": "What this view is for",
-        "question": "Where does Form 990 grant money land or concentrate by address?",
+        "question": (
+            "Where does Form 990 grant money *land* — grantee / grant addresses "
+            "(incoming NGO grants by recipient geography)?"
+        ),
         "signals": [
             "High grant $ (excluding known name-suppressed privacy rollups when applied)",
             "Many grant rows / grantees at one key",
             "Co-location with contractors, officers, or OFAC",
         ],
-        "rank": "Default rank: grant $ (suppressed-name exclusions when configured).",
+        "rank": "Default rank: incoming grant $ (suppressed-name exclusions when configured).",
         "thresholds": "Big foundations and universities dominate; look for odd multi-type stacks.",
         "caveats": "Name-suppressed rows can distort $; check suite notes.",
+        "cutpoint_keys": [],
+        "chip_rules": [],
+    },
+    "grants_out": {
+        "title": "What this view is for",
+        "question": (
+            "Where do Form 990 *filers* that grant money out concentrate — "
+            "charity addresses ranked by grants_to_others?"
+        ),
+        "signals": [
+            "High grants_to_others $ at a filer address / colocator / ZIP",
+            "Foundation / pass-through shells with thin multi-type co-tenants",
+            "Same footprint as large incoming-grant recipients or USG-funded orgs",
+        ],
+        "rank": (
+            "Default rank: sum of Charities.grants_to_others across filer rows "
+            "at the geographic key (multi-year filings add)."
+        ),
+        "thresholds": "Large private foundations and national charities dominate the top.",
+        "caveats": (
+            "This is the *giver* side (filer geography), not where the money landed. "
+            "Compare with NGO Grants (incoming) for recipient addresses."
+        ),
+        "cutpoint_keys": [],
+        "chip_rules": [],
+    },
+    "usg": {
+        "title": "What this view is for",
+        "question": (
+            "Where do nonprofits that report government funding concentrate — "
+            "charity addresses ranked by Form 990 govt_amt?"
+        ),
+        "signals": [
+            "High govt_amt (government grants / contributions reported on the 990)",
+            "Contractor / research institutes and healthcare systems with federal money",
+            "Multi-year filings stacked at one suite / campus",
+        ],
+        "rank": (
+            "Default rank: sum of Charities.govt_amt across filer rows at the key "
+            "(multi-year filings add)."
+        ),
+        "thresholds": (
+            "National labs, hospitals, and large contractors often top pure $. "
+            "Look for odd small orgs with high govt_amt relative to footprint."
+        ),
+        "caveats": (
+            "govt_amt is filer-reported government support on the 990 — not a "
+            "complete USAspending award ledger. Multi-year rows can inflate SUM ranks."
+        ),
         "cutpoint_keys": [],
         "chip_rules": [],
     },

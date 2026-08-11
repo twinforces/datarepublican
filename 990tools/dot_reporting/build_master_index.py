@@ -21,8 +21,13 @@ FOCUS_LABELS = {
     "medicare": "Medicare / NPPES",
     "fec": "FEC political money",
     "contractor": "990 contractors",
-    "grants": "990 grants",
+    "grants": "NGO Grants (incoming)",
+    "grants_out": "NGO Grants (outgoing)",
+    "usg": "USG NGO Funding",
 }
+
+# Longer focus tokens first so grants_out is not parsed as grants + "out".
+_FOCUS_ALT = "grants_out|dot|medicare|fec|contractor|grants|usg"
 
 SLICE_LABELS = {
     "address": "Address",
@@ -46,7 +51,7 @@ def parse_suite(name: str) -> dict | None:
         return None
 
     m = re.match(
-        r"^(?P<focus>dot|medicare|fec|contractor|grants)_"
+        rf"^(?P<focus>{_FOCUS_ALT})_"
         r"(?P<slice>address|colocator|loose_colocator|zipcode|colocator_ll)"
         r"_by_state_(?P<day>\d{4}-\d{2}-\d{2})$",
         name,
@@ -61,7 +66,7 @@ def parse_suite(name: str) -> dict | None:
         }
 
     m = re.match(
-        r"^(?P<focus>medicare|fec|contractor|grants)_"
+        rf"^(?P<focus>{_FOCUS_ALT})_"
         r"(?P<slice>address|colocator|loose_colocator|zipcode|colocator_ll)"
         r"_clusters_(?P<day>\d{4}-\d{2}-\d{2})$",
         name,
@@ -141,7 +146,7 @@ def pick_latest(suites: list[dict]) -> list[dict]:
 
 def render_html(suites: list[dict], *, all_suites: list[dict], reports_dir: Path) -> str:
     generated = datetime.now().isoformat(timespec="seconds")
-    focuses = ["dot", "medicare", "fec", "contractor", "grants"]
+    focuses = ["dot", "medicare", "fec", "contractor", "grants", "grants_out", "usg"]
     slices = ["colocator", "zipcode", "loose_colocator", "address"]
     geos = [("national", "National clusters"), ("by_state", "By-state maps & details")]
 

@@ -72,10 +72,14 @@ def main():
 
             for carrier in pg.get("active", []):
                 total_carriers += 1
+                dot = carrier.get("dot_number")
                 all_rows.append({
                     "cluster_address": cluster.get("canonical_address"),
                     "slug": slug,
-                    "dot_number": carrier.get("dot_number"),
+                    "dot_number": dot,
+                    "searchcarriers_url": f"https://searchcarriers.com/company/{dot}" if dot else "",
+                    "searchcarriers_map_url": f"https://searchcarriers.com/map/company/{dot}" if dot else "",
+                    "motus_url": f"https://motus.dot.gov/customer/{dot}/account" if dot else "",
                     "legal_name": carrier.get("legal_name"),
                     "status_code": "A",
                     "power_units": carrier.get("power_units") or 0,
@@ -87,10 +91,14 @@ def main():
 
             for carrier in pg.get("inactive", []):
                 total_carriers += 1
+                dot = carrier.get("dot_number")
                 all_rows.append({
                     "cluster_address": cluster.get("canonical_address"),
                     "slug": slug,
-                    "dot_number": carrier.get("dot_number"),
+                    "dot_number": dot,
+                    "searchcarriers_url": f"https://searchcarriers.com/company/{dot}" if dot else "",
+                    "searchcarriers_map_url": f"https://searchcarriers.com/map/company/{dot}" if dot else "",
+                    "motus_url": f"https://motus.dot.gov/customer/{dot}/account" if dot else "",
                     "legal_name": carrier.get("legal_name"),
                     "status_code": "I",
                     "power_units": carrier.get("power_units") or 0,
@@ -111,8 +119,9 @@ def main():
         args.output_tsv = args.output_dir / f"dot_carrier_lookup_{date_str}.tsv"
 
     fieldnames = [
-        "cluster_address", "slug", "dot_number", "legal_name",
-        "status_code", "power_units", "phone",
+        "cluster_address", "slug", "dot_number",
+        "searchcarriers_url", "searchcarriers_map_url", "motus_url",
+        "legal_name", "status_code", "power_units", "phone",
         "review_status", "review_notes", "maps_url"
     ]
 

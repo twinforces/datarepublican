@@ -285,6 +285,31 @@ def fetch_state_clusters(
             "b.distinct_focus_addresses, "
             "0::DOUBLE AS paid_per_hcpcs_type"
         )
+    elif focus in ("grants_out", "usg"):
+        # Charity filer geography × grants_to_others or govt_amt.
+        from generate_focus_reports import FOCUS_DOMAINS  # noqa: WPS433
+
+        amt_col = (FOCUS_DOMAINS.get(focus) or {}).get("charity_amount_col") or (
+            "grants_to_others" if focus == "grants_out" else "govt_amt"
+        )
+        if amt_col not in ("grants_to_others", "govt_amt"):
+            raise ValueError(f"unsupported charity amount column: {amt_col}")
+        rank_expr = "COALESCE(m.focus_amount, 0) DESC, b.focus_n DESC"
+        metric_join = f"""
+        LEFT JOIN (
+            SELECT k.cluster_key, COALESCE(SUM(c.{amt_col}), 0)::DOUBLE AS focus_amount
+            FROM keyed k
+            INNER JOIN Charities c
+                ON c.charity_id = k.owner_id AND k.address_type = 'charity'
+            GROUP BY k.cluster_key
+        ) m ON m.cluster_key = b.cluster_key
+        """
+        extra_select = (
+            "0::BIGINT AS active_power_units, "
+            "COALESCE(m.focus_amount, 0) AS focus_amount, "
+            "b.distinct_focus_addresses, "
+            "0::DOUBLE AS paid_per_hcpcs_type"
+        )
     else:  # medicare — paid/types via NPI rollup (not 230M line grain)
         from generate_focus_reports import ensure_medicare_rollup  # noqa: WPS433
 
@@ -606,7 +631,7 @@ def fetch_state_clusters(
             c["rank_metric_value"] = float(c.get("paid_per_hcpcs_type") or 0)
             c["rank_metric_fmt"] = fmt_money(c["rank_metric_value"])
             c["paid_per_hcpcs_type_fmt"] = c["rank_metric_fmt"]
-        elif focus == "grants":
+        elif focus in ("grants", "grants_out", "usg"):
             c["rank_metric_value"] = float(c.get("focus_amount") or 0)
             c["rank_metric_fmt"] = c["focus_amount_fmt"]
         elif focus == "fec":
@@ -867,8 +892,13 @@ Detail pages: {total_pages:,}
 
                 # Secondary entity fetches are expensive on dense FEC zips/colocators.
                 # Skip for FEC by-state (focus tables empty; rank/$ already on cluster).
+                # Charity-based focuses list filers as primary entities (skip dup table).
                 if focus == "fec":
                     charities, officers, grants = [], [], []
+                elif focus in ("grants_out", "usg"):
+                    charities = []
+                    officers = fetch_officers(con, slice_by, key, top_n)
+                    grants = fetch_grants(con, slice_by, key, top_n)
                 else:
                     charities = fetch_charities(con, slice_by, key, top_n)
                     officers = fetch_officers(con, slice_by, key, top_n)
@@ -1001,11 +1031,16 @@ Detail pages: {total_pages:,}
                         dumps_table_json,
                     )
 
+                    # Charity-based focuses already list filers as entities.
+                    charities_for_page = (
+                        [] if focus in ("grants_out", "usg") else charities
+                    )
+                    grants_for_page = [] if focus == "grants" else grants
                     detail_tables = build_detail_tables(
                         entities=entities,
-                        charities=charities,
+                        charities=charities_for_page,
                         officers=officers,
-                        grants=grants if focus != "grants" else [],
+                        grants=grants_for_page,
                         focus=focus,
                         entity_title=domain.get("entity_title", "Entities"),
                     )
@@ -1054,9 +1089,9 @@ Detail pages: {total_pages:,}
                             "review_tag": domain.get("review_tag", focus),
                         },
                         entities=entities,
-                        charities=charities,
+                        charities=charities_for_page,
                         officers=officers,
-                        grants=grants if focus != "grants" else [],
+                        grants=grants_for_page,
                         focus=focus,
                         domain=domain,
                         physical_note=physical_note_for(sample, notes),
@@ -1176,7 +1211,7 @@ def main() -> int:
     p.add_argument(
         "--focus",
         default="dot",
-        choices=["dot", "medicare", "fec", "contractor", "grants"],
+        choices=["dot", "medicare", "fec", "contractor", "grants", "grants_out", "usg"],
     )
     p.add_argument(
         "--slice-by",

@@ -77,16 +77,16 @@ for slice in colocator zipcode loose_colocator address; do
 done
 
 # Phase 2 — national focus types × location + address
-log "=== PHASE 2: National focus (medicare/fec/contractor/grants × 4) ==="
-for focus in medicare fec contractor grants; do
+log "=== PHASE 2: National focus (medicare/fec/contractor/grants/grants_out/usg × 4) ==="
+for focus in medicare fec contractor grants grants_out usg; do
   for slice in colocator zipcode loose_colocator address; do
     run_focus_national "$focus" "$slice"
   done
 done
 
 # Phase 3 — full by-state (heatmap + details)
-log "=== PHASE 3: By-state full details (5 types × 4 slices) ==="
-for focus in dot medicare fec contractor grants; do
+log "=== PHASE 3: By-state full details (7 types × 4 slices) ==="
+for focus in dot medicare fec contractor grants grants_out usg; do
   for slice in colocator zipcode loose_colocator address; do
     run_state_full "$focus" "$slice"
   done

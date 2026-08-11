@@ -63,8 +63,20 @@ FOCUSES: dict[str, dict[str, Any]] = {
         "min_focus": 0,
     },
     "grants": {
-        "label": "Grants",
+        "label": "NGO Grants (incoming)",
         "type_sql": "address_type = 'grant'",
+        "min_multi": 0,
+        "min_focus": 0,
+    },
+    "grants_out": {
+        "label": "NGO Grants (outgoing)",
+        "type_sql": "address_type = 'charity'",
+        "min_multi": 0,
+        "min_focus": 0,
+    },
+    "usg": {
+        "label": "USG NGO Funding",
+        "type_sql": "address_type = 'charity'",
         "min_multi": 0,
         "min_focus": 0,
     },

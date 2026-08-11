@@ -16,7 +16,9 @@ def focus_label(focus: str | None) -> str:
         "medicare": "Medicare / NPPES",
         "fec": "FEC",
         "contractor": "Contractors",
-        "grants": "Grants",
+        "grants": "NGO Grants (in)",
+        "grants_out": "NGO Grants (out)",
+        "usg": "USG NGO Funding",
     }.get(focus or "dot", focus or "Report")
 
 

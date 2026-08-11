@@ -8,13 +8,17 @@ primary entity focus and ranking:
   medicare    — NPPES practice/mailing + optional Medicare spending
   fec         — FEC contributors / committees / transactions / expenditures
   contractor  — 990 Schedule C contractors
-  grants      — 990 grantee addresses
+  grants      — NGO grants (incoming) — grantee / grant addresses
+  grants_out  — NGO grants (outgoing) — charity filer addresses × grants_to_others
+  usg         — USG NGO funding — charity addresses × govt_amt
 
 Usage:
   python generate_focus_reports.py --focus medicare --slice-by colocator
   python generate_focus_reports.py --focus fec --slice-by zipcode --max-clusters 100
   python generate_focus_reports.py --focus contractor --slice-by address
   python generate_focus_reports.py --focus grants --slice-by loose_colocator
+  python generate_focus_reports.py --focus grants_out --slice-by address
+  python generate_focus_reports.py --focus usg --slice-by colocator
 """
 
 from __future__ import annotations
@@ -144,17 +148,45 @@ FOCUS_DOMAINS: dict[str, dict[str, Any]] = {
         "rank_label": "Distinct addresses",
     },
     "grants": {
-        "label": "990 grants",
+        "label": "NGO Grants (incoming)",
         "out_prefix": "grants",
         "address_types": ("grant",),
         "min_focus_default": 0,
         "min_multi_default": 0,
-        "entity_title": "Grants",
-        "amount_label": "Grant amounts",
+        "entity_title": "Incoming grants (grantee addresses)",
+        "amount_label": "Grant amounts received",
         "review_tag": "grants",
         # $ after excluding name-suppressed / privacy rollups (big_pharma_subsidy.json).
         "rank_metric": "focus_amount",
-        "rank_label": "Grant $ (excl. suppressed names)",
+        "rank_label": "Incoming grant $ (excl. suppressed names)",
+    },
+    "grants_out": {
+        "label": "NGO Grants (outgoing)",
+        "out_prefix": "grants_out",
+        "address_types": ("charity",),
+        "min_focus_default": 0,
+        "min_multi_default": 0,
+        "entity_title": "Charities granting out",
+        "amount_label": "Grants to others (filer)",
+        "review_tag": "grants_out",
+        # Form 990 filer address × Charities.grants_to_others (multi-year sum).
+        "rank_metric": "focus_amount",
+        "rank_label": "Outgoing grant $ (grants_to_others)",
+        "charity_amount_col": "grants_to_others",
+    },
+    "usg": {
+        "label": "USG NGO Funding",
+        "out_prefix": "usg",
+        "address_types": ("charity",),
+        "min_focus_default": 0,
+        "min_multi_default": 0,
+        "entity_title": "Charities with government funding",
+        "amount_label": "Government funding (govt_amt)",
+        "review_tag": "usg",
+        # Form 990 filer address × Charities.govt_amt (multi-year sum).
+        "rank_metric": "focus_amount",
+        "rank_label": "USG / government $ (govt_amt)",
+        "charity_amount_col": "govt_amt",
     },
 }
 
@@ -312,7 +344,8 @@ money AS (
     GROUP BY k.cluster_key
 )
 """
-    else:  # grants — exclude name-suppressed / privacy rollups from $
+    elif focus == "grants":
+        # Incoming grants — exclude name-suppressed / privacy rollups from $
         from grant_suppress import suppressed_sql_predicate  # noqa: WPS433
 
         keep = suppressed_sql_predicate("g.grantee_name")
@@ -328,6 +361,26 @@ money AS (
     GROUP BY k.cluster_key
 )
 """
+    elif focus in ("grants_out", "usg"):
+        # Charity filer addresses × Charities.grants_to_others or govt_amt.
+        amt_col = domain.get("charity_amount_col") or (
+            "grants_to_others" if focus == "grants_out" else "govt_amt"
+        )
+        if amt_col not in ("grants_to_others", "govt_amt"):
+            raise ValueError(f"unsupported charity amount column: {amt_col}")
+        money_cte = f"""
+money AS (
+    SELECT
+        k.cluster_key,
+        COALESCE(SUM(c.{amt_col}), 0)::DOUBLE AS focus_amount
+    FROM keyed k
+    INNER JOIN Charities c
+        ON c.charity_id = k.owner_id AND k.address_type = 'charity'
+    GROUP BY k.cluster_key
+)
+"""
+    else:
+        raise ValueError(f"unknown focus for money CTE: {focus}")
 
     # Per-focus ORDER BY for "top" clusters
     rank_metric = domain.get("rank_metric", "focus_count")
@@ -396,6 +449,134 @@ money AS (
             "0::DOUBLE AS paid_per_hcpcs_type, "
             "0::BIGINT AS distinct_contributors"
         )
+
+    # Charity $ focuses (grants_out / usg): rank from charity rows only (~3M), then
+    # expand multi-type / co-tenant counts for the short candidate list. Full-table
+    # keyed scans OOM on the 80M+ Addresses heap when memory is tight.
+    if focus in ("grants_out", "usg"):
+        amt_col = domain.get("charity_amount_col") or (
+            "grants_to_others" if focus == "grants_out" else "govt_amt"
+        )
+        return f"""
+WITH charity_keyed AS (
+    SELECT
+        ({key}) AS cluster_key,
+        {canon} AS canonical_address,
+        {atype} AS address_type,
+        {owner} AS owner_id,
+        {aid} AS address_id,
+        {zipc} AS zip_code,
+        {lat} AS latitude,
+        {lon} AS longitude,
+        {colo} AS colocator
+    {from_sql}
+    WHERE {where}
+      AND {atype} = 'charity'
+      AND ({key}) IS NOT NULL
+      AND TRIM(CAST(({key}) AS VARCHAR)) != ''
+),
+money AS (
+    SELECT
+        k.cluster_key,
+        COALESCE(SUM(c.{amt_col}), 0)::DOUBLE AS focus_amount,
+        COUNT(*)::BIGINT AS focus_count,
+        COUNT(DISTINCT COALESCE(NULLIF(TRIM(k.canonical_address), ''),
+            CAST(k.address_id AS VARCHAR)))::BIGINT AS distinct_focus_addresses,
+        ANY_VALUE(CASE
+            WHEN k.canonical_address IS NOT NULL AND TRIM(k.canonical_address) != ''
+            THEN k.canonical_address END) AS sample_address,
+        ANY_VALUE(NULLIF(TRIM(k.zip_code), '')) AS zip_code,
+        ANY_VALUE(k.latitude) AS latitude,
+        ANY_VALUE(k.longitude) AS longitude,
+        ANY_VALUE(NULLIF(TRIM(k.colocator), '')) AS colocator,
+        MAX(c.grift_ratio) AS max_grift_ratio,
+        SUM(CASE
+            WHEN UPPER(CAST(c.domestic_misrep_flag AS VARCHAR))
+                 IN ('TRUE', '1', 'Y', 'YES', 'T')
+            THEN 1 ELSE 0
+        END)::BIGINT AS misrep_count
+    FROM charity_keyed k
+    INNER JOIN Charities c ON c.charity_id = k.owner_id
+    GROUP BY k.cluster_key
+),
+candidates AS (
+    -- Bind signature matches fetch_clusters_focus:
+    --   min_multi×2, min_focus×2, grift_flag, limit
+    -- Multi-type floor is applied after base expand (legacy; usually 0).
+    SELECT *
+    FROM money
+    WHERE focus_count > 0
+      AND (? <= 0 OR TRUE)
+      AND (? <= 0 OR TRUE)
+      AND (? <= 0 OR focus_count >= ?)
+      AND (
+          ? = 0
+          OR COALESCE(max_grift_ratio, 0) > 5
+          OR COALESCE(misrep_count, 0) > 0
+      )
+    ORDER BY focus_amount DESC, focus_count DESC
+    LIMIT ?
+),
+keyed AS (
+    SELECT
+        ({key}) AS cluster_key,
+        {canon} AS canonical_address,
+        {atype} AS address_type,
+        {owner} AS owner_id,
+        {aid} AS address_id,
+        {zipc} AS zip_code,
+        {lat} AS latitude,
+        {lon} AS longitude,
+        {colo} AS colocator
+    {from_sql}
+    WHERE {where}
+      AND ({key}) IN (SELECT cluster_key FROM candidates)
+),
+base AS (
+    SELECT
+        cluster_key,
+        COUNT(*)::BIGINT AS total_rows,
+        COUNT(DISTINCT address_type)::BIGINT AS multi_type_count,
+        LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
+        SUM(CASE WHEN address_type = 'dot_carrier_phy'
+                 THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
+        SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
+        SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
+        SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_count,
+        SUM(CASE WHEN address_type = 'contractor' THEN 1 ELSE 0 END)::BIGINT AS contractor_count,
+        SUM(CASE WHEN address_type LIKE 'fec%' THEN 1 ELSE 0 END)::BIGINT AS fec_count,
+        SUM(CASE WHEN address_type IN ('nppes_practice', 'nppes_mailing')
+                 THEN 1 ELSE 0 END)::BIGINT AS medicare_count
+    FROM keyed
+    GROUP BY cluster_key
+)
+SELECT
+    c.cluster_key,
+    c.sample_address,
+    COALESCE(b.total_rows, c.focus_count) AS total_rows,
+    COALESCE(b.multi_type_count, 1) AS multi_type_count,
+    COALESCE(b.address_types, CAST(['charity'] AS VARCHAR[])) AS address_types,
+    c.focus_count,
+    c.distinct_focus_addresses,
+    COALESCE(b.dot_carrier_count, 0) AS dot_carrier_count,
+    COALESCE(b.charity_count, c.focus_count) AS charity_count,
+    COALESCE(b.grant_count, 0) AS grant_count,
+    COALESCE(b.officer_count, 0) AS officer_count,
+    COALESCE(b.contractor_count, 0) AS contractor_count,
+    COALESCE(b.fec_count, 0) AS fec_count,
+    COALESCE(b.medicare_count, 0) AS medicare_count,
+    c.max_grift_ratio,
+    COALESCE(c.misrep_count, 0) AS misrep_count,
+    COALESCE(c.focus_amount, 0) AS focus_amount
+    {money_select_extra},
+    c.zip_code,
+    c.latitude,
+    c.longitude,
+    c.colocator
+FROM candidates c
+LEFT JOIN base b ON b.cluster_key = c.cluster_key
+ORDER BY COALESCE(c.focus_amount, 0) DESC, c.focus_count DESC
+"""
 
     return f"""
 WITH keyed AS (
@@ -549,9 +730,9 @@ def fetch_clusters_focus(
 ) -> list[dict[str, Any]]:
     domain = FOCUS_DOMAINS[focus]
     rank_metric = domain.get("rank_metric", "focus_count")
-    # Grants: over-fetch candidates then keep top `limit` by clean $ (already
-    # filtered in SQL). Still over-fetch so borderline multi_type-only clusters
-    # with suppressed-only $ don't crowd out real ones after any post-filter.
+    # Grants (incoming): over-fetch candidates then keep top `limit` by clean $
+    # (already filtered in SQL). Still over-fetch so borderline multi_type-only
+    # clusters with suppressed-only $ don't crowd out real ones after any post-filter.
     sql_limit = limit
     if focus == "grants":
         sql_limit = max(limit * 10, min(1000, limit * 15))
@@ -932,48 +1113,93 @@ def fetch_focus_entities(
             for name, fe, amt, yr, canon in rows
         ]
 
-    # grants — over-fetch then drop name-suppressed / privacy rollups
-    from grant_suppress import is_suppressed_grantee  # noqa: WPS433
-
-    fetch_n = max(top_n * 10, min(1000, top_n * 20))
-    rows = conn.execute(
-        f"""
-        SELECT
-            gr.grantee_name,
-            gr.filer_ein,
-            gr.grant_amt,
-            gr.tax_year,
-            gr.recipient_ein,
-            a.canonical_address
-        FROM Addresses a
-        {gjoin}
-        JOIN Grants gr ON gr.grant_id = a.owner_id
-        WHERE ({key_expr}) = ?
-          AND ({where})
-          AND a.address_type = 'grant'
-        ORDER BY gr.grant_amt DESC NULLS LAST
-        LIMIT ?
-        """,
-        [cluster_key, fetch_n],
-    ).fetchall()
-    out = []
-    for gname, fe, amt, yr, rein, canon in rows:
-        if is_suppressed_grantee(gname):
-            continue
-        out.append(
+    if focus in ("grants_out", "usg"):
+        # Charity filer stack: amount is grants_to_others or govt_amt.
+        amt_col = FOCUS_DOMAINS[focus].get("charity_amount_col") or (
+            "grants_to_others" if focus == "grants_out" else "govt_amt"
+        )
+        if amt_col not in ("grants_to_others", "govt_amt"):
+            raise ValueError(f"unsupported charity amount column: {amt_col}")
+        amt_label = "out grants" if focus == "grants_out" else "govt"
+        rows = conn.execute(
+            f"""
+            SELECT
+                COALESCE(NULLIF(TRIM(c.filer_name), ''), NULLIF(TRIM(a.name), ''), c.ein)
+                    AS display_name,
+                c.ein,
+                c.{amt_col},
+                c.tax_year,
+                a.canonical_address,
+                c.receipt_amt
+            FROM Addresses a
+            {gjoin}
+            JOIN Charities c ON c.charity_id = a.owner_id
+            WHERE ({key_expr}) = ?
+              AND ({where})
+              AND a.address_type = 'charity'
+            ORDER BY c.{amt_col} DESC NULLS LAST, c.receipt_amt DESC NULLS LAST
+            LIMIT ?
+            """,
+            [cluster_key, top_n],
+        ).fetchall()
+        return [
             {
-                "id": rein or "",
-                "name": gname or "(unnamed)",
-                "detail": f"filer {fe or '—'} · recip {rein or '—'} · {yr or '—'}",
+                "id": ein or "",
+                "name": name or "(unnamed)",
+                "detail": f"EIN {ein or '—'} · {yr or '—'} · {amt_label}",
                 "amount": amt,
                 "amount_fmt": fmt_money(amt),
-                "address_type": "grant",
+                "address_type": "charity",
                 "canonical_address": (canon or "").strip() or "(no street)",
             }
-        )
-        if len(out) >= top_n:
-            break
-    return out
+            for name, ein, amt, yr, canon, _receipt in rows
+        ]
+
+    if focus == "grants":
+        # Incoming grants — over-fetch then drop name-suppressed / privacy rollups
+        from grant_suppress import is_suppressed_grantee  # noqa: WPS433
+
+        fetch_n = max(top_n * 10, min(1000, top_n * 20))
+        rows = conn.execute(
+            f"""
+            SELECT
+                gr.grantee_name,
+                gr.filer_ein,
+                gr.grant_amt,
+                gr.tax_year,
+                gr.recipient_ein,
+                a.canonical_address
+            FROM Addresses a
+            {gjoin}
+            JOIN Grants gr ON gr.grant_id = a.owner_id
+            WHERE ({key_expr}) = ?
+              AND ({where})
+              AND a.address_type = 'grant'
+            ORDER BY gr.grant_amt DESC NULLS LAST
+            LIMIT ?
+            """,
+            [cluster_key, fetch_n],
+        ).fetchall()
+        out = []
+        for gname, fe, amt, yr, rein, canon in rows:
+            if is_suppressed_grantee(gname):
+                continue
+            out.append(
+                {
+                    "id": rein or "",
+                    "name": gname or "(unnamed)",
+                    "detail": f"filer {fe or '—'} · recip {rein or '—'} · {yr or '—'}",
+                    "amount": amt,
+                    "amount_fmt": fmt_money(amt),
+                    "address_type": "grant",
+                    "canonical_address": (canon or "").strip() or "(no street)",
+                }
+            )
+            if len(out) >= top_n:
+                break
+        return out
+
+    raise ValueError(f"unknown focus for entity fetch: {focus}")
 
 
 def fetch_grants_simple(conn, slice_by, cluster_key, top_n, *, lat_long=False):
@@ -1181,12 +1407,18 @@ def write_focus_report(
                                     "total_claims": int(ent.get("total_claims") or 0),
                                 }
                             )
-            charities = fetch_charities(conn, slice_by, key, top_n, lat_long=lat_long)
+            # Charity-based focuses list filers as primary entities (ranked by $).
+            charities = (
+                []
+                if focus in ("grants_out", "usg")
+                else fetch_charities(conn, slice_by, key, top_n, lat_long=lat_long)
+            )
             officers = (
                 fetch_officers(conn, slice_by, key, top_n, lat_long=lat_long)
                 if include_officers
                 else []
             )
+            # Incoming-grant focus already lists grants as primary entities.
             grants = (
                 fetch_grants_simple(conn, slice_by, key, top_n, lat_long=lat_long)
                 if include_grants and focus != "grants"
@@ -1392,7 +1624,10 @@ DB: {db_path}
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="Focus cluster reports (medicare / fec / contractor / grants)"
+        description=(
+            "Focus cluster reports (medicare / fec / contractor / grants / "
+            "grants_out / usg)"
+        )
     )
     p.add_argument("--db-path", default=os.environ.get("IRS990_DB_PATH", DEFAULT_DB))
     p.add_argument(
