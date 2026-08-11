@@ -65,6 +65,28 @@ from loggingDuckDB import LoggingDuckDBConnection
 from constants import ENABLE_CHARITY_DEDUP_CHECK
 
 
+def _oom_hard_exit(context: str, exc: BaseException) -> None:
+    """Force-kill the whole process on DuckDB OOM.
+
+    ``sys.exit`` only raises SystemExit in the *current* thread. Geocoding
+    workers call bulk_update from non-main threads, so sys.exit left a zombie
+    pipeline stuck in shutdown queue-join while the write connection was
+    already invalidated. ``os._exit`` terminates immediately so an outer
+    max-files / chunk loop can start a fresh process.
+    """
+    log_error(f"Out of memory error detected in {context}: {exc}")
+    log_error(
+        "Hard-exiting process (os._exit) so outer chunk loop can continue "
+        "with a clean DuckDB connection"
+    )
+    try:
+        sys.stderr.flush()
+        sys.stdout.flush()
+    except Exception:
+        pass
+    os._exit(75)  # EX_TEMPFAIL-ish; non-zero for shell loops
+
+
 _WRITE_KEYWORD_PATTERN = re.compile(
     r'^(CREATE|DROP|INSERT|UPDATE|DELETE|ALTER|VACUUM|CHECKPOINT)\s',
     re.IGNORECASE
@@ -93,9 +115,12 @@ class DuckDBPool:
         self.wal_timer = threading.Timer(WAL_COMPACTION_TIMEOUT, wal_compaction_timer)
         self.wal_timer.start()
         
-        # Build shared config dictionary that EVERY connection will use
+        # Build shared config dictionary that EVERY connection will use.
+        # DUCKDB_MEMORY_LIMIT lets overnight co-runs (grant_match + snapshot backfill)
+        # share a 16GB host without both claiming 8–12GB.
+        _mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "6GB")
         self.shared_config = {
-            "memory_limit": "8GB",
+            "memory_limit": _mem,
             "threads": str(global_config.db_threads),
             #"access_mode": "READ_ONLY",
             #"enable_progress_bar": "false",
@@ -113,6 +138,8 @@ class DuckDBPool:
         with self.acquire_write() as conn:
             self._init_schema()
             # Skip CHECKPOINT on init — production DB hits DuckDB UUID/VARCHAR index bug on checkpoint.
+            # After unclean shutdown + ART SIGSEGV: stop pipeline, move .wal aside (see repair_geocoding_indexes.py),
+            # drop idx_geocoding_status / idx_geocoding_canonical, then restart.
         self.wal_timer.cancel()
         self.wal_timer= None
         self.max_read = max_read
@@ -414,7 +441,27 @@ class DatabaseOperations:
     def acquire_write_conn(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
         with self._pool.acquire_write() as conn:
             yield conn
-    
+
+    def commit(self) -> None:
+        """Commit pending writes on the shared writer connection.
+
+        Many call sites (update_zip_status, ratio updates, etc.) invoke self.commit().
+        DuckDBPool.acquire_write already issues COMMIT on release; this method makes
+        that contract explicit and safe when no transaction is open.
+        """
+        if self._pool is None:
+            return
+        with self.acquire_write_conn() as conn:
+            try:
+                conn.commit()
+            except duckdb.TransactionException:
+                pass
+            except Exception:
+                try:
+                    conn.execute("COMMIT")
+                except Exception:
+                    pass
+
     @classmethod
     def bootstrap(cls, db_path: str, **pool_kwargs) -> DuckDBPool:
         cls.initialize_pool(db_path, **pool_kwargs)
@@ -591,10 +638,8 @@ class DatabaseOperations:
                 duckdb.ConstraintException, duckdb.DataError) as e:
             # Handle query-specific errors (syntax, constraint violations, table not found, etc.)
             error_str = str(e).lower()
-            if "out of memory" in error_str or "failed to offload data block" in error_str:
-                log_error(f"Out of memory error detected: {str(e)}")
-                log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
-                sys.exit(-1)
+            if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
+                _oom_hard_exit("execute_query", e)
             error_msg = f"Query execution failed: {str(e)}"
             if "timeout" in str(e).lower() or "interrupt" in str(e).lower():
                 error_msg = f"Query timed out or was interrupted: {str(e)}"
@@ -603,20 +648,16 @@ class DatabaseOperations:
         except duckdb.ConnectionException as e:
             # Handle connection-related errors
             error_str = str(e).lower()
-            if "out of memory" in error_str or "failed to offload data block" in error_str:
-                log_error(f"Out of memory error detected: {str(e)}")
-                log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
-                sys.exit(-1)
+            if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
+                _oom_hard_exit("execute_query/connection", e)
             error_msg = f"Database connection error: {str(e)}"
             log_error(error_msg)
             raise RuntimeError(error_msg) from e
         except Exception as e:
             # Check for out-of-memory errors specifically
             error_str = str(e).lower()
-            if "out of memory" in error_str or "failed to offload data block" in error_str:
-                log_error(f"Out of memory error detected: {str(e)}")
-                log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
-                sys.exit(-1)
+            if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
+                _oom_hard_exit("execute_query/other", e)
             # Handle any other unexpected errors
             error_msg = f"Unexpected database error: {str(e)}"
             log_error(error_msg)
@@ -1333,10 +1374,8 @@ class DatabaseOperations:
             except Exception as e:
                 # Check for out-of-memory errors specifically
                 error_str = str(e).lower()
-                if "out of memory" in error_str or "failed to offload data block" in error_str:
-                    log_error(f"Out of memory error detected in bulk_insert: {str(e)}")
-                    log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
-                    sys.exit(-1)
+                if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
+                    _oom_hard_exit("bulk_insert", e)
                 raise
             if commit_batches:
                 conn.commit()
@@ -1385,59 +1424,106 @@ class DatabaseOperations:
             return self._bulk_update_impl(table_name, updates, id_column, batch_size, commit, commit_batches, conn=conn)
 
     def _bulk_update_impl(self, table_name: str, updates: List[Dict[str, Any]], id_column: str = 'id', batch_size: int = 100, commit: bool = True, commit_batches: bool = False, conn= duckdb.DuckDBPyConnection) -> int:
-        """Generic bulk update method for database operations with batched processing"""
-        # Check write permission
+        """Generic bulk update — prefer UPDATE…FROM (VALUES…) for multi-row writes.
 
+        Per-row ``executemany(UPDATE … WHERE id=?)`` blows DuckDB memory on large
+        tables (Geocoding ~14M rows): ~50–100 statements hit the 7–8GB cap.
+        A single ``UPDATE … FROM (VALUES …)`` per chunk stays bounded.
+        """
         if not updates:
             return 0
 
-        # Get column names from first update dict
         columns = list(updates[0].keys())
         if id_column not in columns:
             raise ValueError(f"ID column '{id_column}' not found in update data")
 
-        # Build UPDATE statement
         set_columns = [col for col in columns if col != id_column]
-        set_clause = ", ".join([f"{col} = ?" for col in set_columns])
-        sql = f"UPDATE {table_name} SET {set_clause} WHERE {id_column} = ?"
+        if not set_columns:
+            return 0
 
-        # Prepare parameters for bulk update - list of tuples, one per row
-        params = []
-        for update in updates:
-            row_params = tuple([update[col] for col in set_columns] + [update[id_column]])
-            params.append(row_params)
+        # Chunk size for VALUES lists (bind-param / planner balance)
+        chunk = max(25, min(batch_size if batch_size and batch_size > 1 else 200, 250))
 
         try:
-            # Execute bulk update in batches of batch_size using executemany
             total_processed = 0
-            for i in range(0, len(params), batch_size):
-                batch_params = params[i:i + batch_size]
+            for i in range(0, len(updates), chunk):
+                batch = updates[i:i + chunk]
                 batch_start = time.perf_counter()
                 try:
-                    conn.executemany(sql, batch_params)  # type: ignore
+                    self._bulk_update_from_values(conn, table_name, batch, id_column, set_columns)
                 except Exception as e:
-                    # Check for out-of-memory errors specifically
                     error_str = str(e).lower()
-                    if "out of memory" in error_str or "failed to offload data block" in error_str:
-                        log_error(f"Out of memory error detected in bulk_update: {str(e)}")
-                        log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
-                        sys.exit(-1)
-                    raise
+                    if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
+                        _oom_hard_exit("bulk_update", e)
+                    # Fallback: legacy per-row path for exotic types / planner rejects
+                    log_warning(f"UPDATE FROM VALUES failed ({e}); falling back to executemany for {len(batch)} rows")
+                    set_clause = ", ".join([f"{col} = ?" for col in set_columns])
+                    sql = f"UPDATE {table_name} SET {set_clause} WHERE {id_column} = ?"
+                    params = [
+                        tuple([row[col] for col in set_columns] + [row[id_column]])
+                        for row in batch
+                    ]
+                    try:
+                        conn.executemany(sql, params)  # type: ignore
+                    except Exception as e2:
+                        error_str2 = str(e2).lower()
+                        if "out of memory" in error_str2 or "failed to offload data block" in error_str2 or "failed to pin" in error_str2:
+                            _oom_hard_exit("bulk_update", e2)
+                        raise
                 if commit_batches:
                     conn.commit()
                 batch_elapsed = time.perf_counter() - batch_start
-                rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
-                log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
-                total_processed += len(batch_params)
+                rate = len(batch) / batch_elapsed if batch_elapsed > 0 else 0
+                log_debug(
+                    f"Bulk UPDATE FROM chunk {i//chunk + 1} ({len(batch)} rows) "
+                    f"{table_name}: {batch_elapsed:.2f}s ({rate:.0f} rows/s)"
+                )
+                total_processed += len(batch)
 
-            #if commit:
-            conn.commit()
+            if commit and not commit_batches:
+                conn.commit()
+            elif commit and commit_batches:
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
 
-            # Do not commit here - let caller handle transaction
             return total_processed
         except Exception as e:
-            # Do not rollback here - let caller handle transaction
             raise RuntimeError(f"Bulk update failed for table {table_name}: {str(e)}") from e
+
+    def _bulk_update_from_values(
+        self,
+        conn,
+        table_name: str,
+        updates: List[Dict[str, Any]],
+        id_column: str,
+        set_columns: List[str],
+    ) -> None:
+        """One UPDATE…FROM (VALUES…) for a homogeneous column set."""
+        # Stable SQL identifiers for source columns
+        src_cols = [id_column] + set_columns
+        aliases = [f"s_{i}" for i in range(len(src_cols))]
+        alias_by_col = dict(zip(src_cols, aliases))
+
+        value_rows = []
+        flat_params: List[Any] = []
+        for row in updates:
+            value_rows.append("(" + ", ".join(["?"] * len(src_cols)) + ")")
+            for col in src_cols:
+                flat_params.append(row[col])
+
+        set_sql = ", ".join(
+            f"{col} = src.{alias_by_col[col]}" for col in set_columns
+        )
+        values_sql = ", ".join(value_rows)
+        alias_list = ", ".join(aliases)
+        sql = (
+            f"UPDATE {table_name} AS tgt SET {set_sql} "
+            f"FROM (VALUES {values_sql}) AS src({alias_list}) "
+            f"WHERE tgt.{id_column} = src.{alias_by_col[id_column]}"
+        )
+        conn.execute(sql, flat_params)
 
     def get_bulk_operations(self):
         """Get bulk operations handler"""
@@ -1534,23 +1620,30 @@ class DatabaseOperations:
         return StatsProcessor(self)
 
     def optimize_database(self, commit: bool = True):
-        """Run database optimization commands with macOS-compatible checkpointing"""
+        """Run database optimization commands with macOS-compatible checkpointing.
+
+        Uses conn.execute directly (not execute_query) so OOM on VACUUM ANALYZE
+        does not sys.exit the whole pipeline after a successful step.
+        """
         log_info("Starting database optimization...")
         with self.acquire_write_conn() as conn:
 
-            # Analyze tables for better query planning
+            # Prefer ANALYZE-only first (cheap); VACUUM ANALYZE can OOM on huge tables.
             tables_to_optimize = ["Charities","Grants","Addresses","Officers","Geocoding","Backfill","XmlFiles","Contributions","Contractors","PoliticalContributions"]
             for table in tables_to_optimize:
                 log_debug(f"Optimizing table: {table}")
                 try:
-                    self.execute_query(f"VACUUM ANALYZE {table}",conn=conn)
-                    log_debug(f"Successfully optimized {table}")
+                    conn.execute(f"ANALYZE {table}")
+                    log_debug(f"Successfully ANALYZE {table}")
                 except Exception as e:
-                    log_warning(f"Failed to optimize {table}: {e}")
+                    log_warning(f"Failed to ANALYZE {table}: {e}")
 
             # Ensure any pending changes are committed before checkpoint
             if commit:
-                conn.commit()
+                try:
+                    conn.commit()
+                except Exception as e:
+                    log_warning(f"Commit before checkpoint failed: {e}")
             
             # Now attempt CHECKPOINT for WAL flushing and performance benefits
             log_info("Performing database checkpoint for WAL cleanup...")
@@ -1562,7 +1655,10 @@ class DatabaseOperations:
                 # Continue anyway - the recycling itself provides some WAL cleanup
 
             if commit:
-                conn.commit()
+                try:
+                    conn.commit()
+                except Exception as e:
+                    log_warning(f"Final commit after optimize failed: {e}")
 
     # Logging methods removed - use global logging functions directly
 
@@ -1909,6 +2005,127 @@ class DatabaseOperations:
                 conn.execute(query, tuple(params))
                 conn.commit()
 
+    def _try_where_update_from_values(
+        self,
+        conn,
+        table_name: str,
+        set_clause: str,
+        where_clause: str,
+        param_sets: List[Any],
+    ) -> bool:
+        """Rewrite multi-param WHERE updates as one UPDATE…FROM (VALUES…).
+
+        Handles the census colocator pattern:
+          SET colocator = ?, latitude = COALESCE(latitude, ?), longitude = COALESCE(longitude, ?)
+          WHERE geocoding_id = ? AND (colocator IS NULL OR TRIM(colocator) = '')
+
+        Returns True if executed, False to fall back to executemany.
+        """
+        if not param_sets or len(param_sets) < 5:
+            return False
+
+        # Only support simple patterns we can rewrite safely
+        where_norm = " ".join(where_clause.split()).lower()
+        set_norm = " ".join(set_clause.split()).lower()
+
+        # Addresses colocator propagation (primary OOM source during census)
+        is_addr_colocator = (
+            table_name.lower() == "addresses"
+            and "geocoding_id = ?" in where_norm
+            and "colocator = ?" in set_norm
+        )
+        if not is_addr_colocator:
+            return False
+
+        # Infer param layout from first row: trailing param is geocoding_id
+        n = len(param_sets[0])
+        if n < 2:
+            return False
+
+        # Build VALUES rows — all params preserved in order as p0..p{n-1}
+        # Rewrite SET/WHERE to use src.p* with table-qualified COALESCE targets
+        # Map: set_clause uses ? in order; where uses remaining ?
+        # We assign: p0..p{n-2} for SET side (rewritten), p{n-1} = geocoding_id
+        try:
+            # Count ? in set vs where
+            n_set = set_clause.count("?")
+            n_where = where_clause.count("?")
+            if n_set + n_where != n:
+                return False
+
+            # For known Addresses pattern rewrite explicitly when shapes match
+            has_lat = "latitude" in set_norm
+            has_lon = "longitude" in set_norm
+            if has_lat and has_lon and n == 4:
+                # params: colocator, lat, lon, gid
+                value_rows = []
+                flat: List[Any] = []
+                for ps in param_sets:
+                    value_rows.append("(?, ?, ?, ?)")
+                    flat.extend(list(ps))
+                values_sql = ", ".join(value_rows)
+                sql = f"""
+                    UPDATE Addresses AS a
+                    SET
+                        colocator = v.colocator,
+                        latitude = COALESCE(a.latitude, v.lat),
+                        longitude = COALESCE(a.longitude, v.lon)
+                    FROM (VALUES {values_sql}) AS v(colocator, lat, lon, gid)
+                    WHERE a.geocoding_id = v.gid
+                      AND (a.colocator IS NULL OR TRIM(a.colocator) = '')
+                """
+                # Chunk large lists
+                chunk = 200
+                for i in range(0, len(param_sets), chunk):
+                    part = param_sets[i:i + chunk]
+                    flat_part: List[Any] = []
+                    rows = []
+                    for ps in part:
+                        rows.append("(?, ?, ?, ?)")
+                        flat_part.extend(list(ps))
+                    sql_part = f"""
+                        UPDATE Addresses AS a
+                        SET
+                            colocator = v.colocator,
+                            latitude = COALESCE(a.latitude, v.lat),
+                            longitude = COALESCE(a.longitude, v.lon)
+                        FROM (VALUES {', '.join(rows)}) AS v(colocator, lat, lon, gid)
+                        WHERE a.geocoding_id = v.gid
+                          AND (a.colocator IS NULL OR TRIM(a.colocator) = '')
+                    """
+                    conn.execute(sql_part, flat_part)
+                log_info(f"WHERE UPDATE FROM VALUES Addresses colocator: {len(param_sets)} gids")
+                return True
+
+            if not has_lat and not has_lon and n == 2:
+                # params: colocator, gid
+                chunk = 200
+                for i in range(0, len(param_sets), chunk):
+                    part = param_sets[i:i + chunk]
+                    flat_part = []
+                    rows = []
+                    for ps in part:
+                        rows.append("(?, ?)")
+                        flat_part.extend(list(ps))
+                    sql_part = f"""
+                        UPDATE Addresses AS a
+                        SET colocator = v.colocator
+                        FROM (VALUES {', '.join(rows)}) AS v(colocator, gid)
+                        WHERE a.geocoding_id = v.gid
+                          AND (a.colocator IS NULL OR TRIM(a.colocator) = '')
+                    """
+                    conn.execute(sql_part, flat_part)
+                log_info(f"WHERE UPDATE FROM VALUES Addresses colocator-only: {len(param_sets)} gids")
+                return True
+        except Exception as e:
+            err = str(e).lower()
+            if "out of memory" in err or "failed to offload" in err or "failed to pin" in err:
+                _oom_hard_exit("where_update_from_values", e)
+            log_warning(f"WHERE UPDATE FROM VALUES failed, will fall back: {e}")
+            return False
+
+        return False
+
     def _execute_generic_update_operation(self, operation: DatabaseOperation, conn: Optional[duckdb.DuckDBPyConnection] = None):
         if conn is None:
             with self.acquire_write_conn() as inner_conn:
@@ -1943,23 +2160,52 @@ class DatabaseOperations:
             updated_count = 0
             try:
                 if param_sets:
-                    # Batched execution with multiple parameter sets - limit to small batches for updates
-                    from constants import BULK_UPDATE_BATCH_SIZE
-                    batch_size = BULK_UPDATE_BATCH_SIZE if BULK_UPDATE_BATCH_SIZE is not None else 10
-                    if not isinstance(batch_size, int):
-                        batch_size = 10
+                    # Prefer a single UPDATE…FROM for geocoding colocator propagation
+                    # (was 430× executemany → OOM at 7.4GB). Fall back to small batches.
+                    if self._try_where_update_from_values(
+                        conn, table_name, set_clause, where_clause, param_sets
+                    ):
+                        updated_count = len(param_sets) * 5
+                        log_debug(
+                            f"Executed WHERE UPDATE FROM VALUES: {len(param_sets)} ops "
+                            f"on {table_name}"
+                        )
+                    else:
+                        from constants import BULK_UPDATE_BATCH_SIZE
+                        batch_size = BULK_UPDATE_BATCH_SIZE if BULK_UPDATE_BATCH_SIZE is not None else 10
+                        if not isinstance(batch_size, int):
+                            batch_size = 10
+                        # Smaller batches + optional mid-commit when many param sets
+                        if len(param_sets) > 50:
+                            batch_size = min(batch_size, 15)
 
-                    total_updated_count = 0
-                    for i in range(0, len(param_sets), batch_size):
-                        batch_params = param_sets[i:i + batch_size]
-                        conn.executemany(query, batch_params)
-                        # Estimate rows updated for this batch
-                        batch_updated_count = len(batch_params) * 5  # Conservative estimate of 5 rows per canonical group
-                        total_updated_count += batch_updated_count
-                        log_debug(f"Executed batched WHERE UPDATE batch {i//batch_size + 1}: {len(batch_params)} operations, ~{batch_updated_count} rows updated in {table_name}")
+                        total_updated_count = 0
+                        for i in range(0, len(param_sets), batch_size):
+                            batch_params = param_sets[i:i + batch_size]
+                            conn.executemany(query, batch_params)
+                            batch_updated_count = len(batch_params) * 5
+                            total_updated_count += batch_updated_count
+                            log_debug(
+                                f"Executed batched WHERE UPDATE batch {i//batch_size + 1}: "
+                                f"{len(batch_params)} operations, ~{batch_updated_count} rows "
+                                f"updated in {table_name}"
+                            )
+                            # Free WAL/memory mid-flight for large WHERE storms
+                            if len(param_sets) > 80 and (i // batch_size) % 5 == 4:
+                                try:
+                                    conn.commit()
+                                    conn.execute("CHECKPOINT")
+                                    conn.execute("BEGIN TRANSACTION")
+                                except Exception as mid_e:
+                                    err = str(mid_e).lower()
+                                    if "out of memory" in err or "failed to offload" in err:
+                                        _oom_hard_exit("generic_update/mid_checkpoint", mid_e)
 
-                    updated_count = total_updated_count
-                    log_debug(f"Executed total batched WHERE UPDATE: {len(param_sets)} operations, ~{updated_count} rows updated in {table_name}")
+                        updated_count = total_updated_count
+                        log_debug(
+                            f"Executed total batched WHERE UPDATE: {len(param_sets)} operations, "
+                            f"~{updated_count} rows updated in {table_name}"
+                        )
                 else:
                     # Single parameter set
                     result = conn.execute(query, tuple(params))
@@ -1968,10 +2214,8 @@ class DatabaseOperations:
             except Exception as e:
                 # Check for out-of-memory errors specifically
                 error_str = str(e).lower()
-                if "out of memory" in error_str or "failed to offload data block" in error_str:
-                    log_error(f"Out of memory error detected in generic update operation: {str(e)}")
-                    log_error("Exiting due to out-of-memory condition - run tool in loop to continue processing")
-                    sys.exit(-1)
+                if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
+                    _oom_hard_exit("generic_update", e)
                 log_error(f"Failed to execute WHERE UPDATE for table {table_name}: {e}", exc_info=True)
                 raise
         else:

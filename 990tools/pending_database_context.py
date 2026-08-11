@@ -184,6 +184,32 @@ class PendingDatabaseContext:
         """
         return {obj_type: len(objects) for obj_type, objects in self.objects.items()}
 
+    def count_geocoding_status_updates(self) -> int:
+        """Rows with a terminal/intermediate geocoding_status write (excludes canonical-only touch-ups)."""
+        n = 0
+        for operation in self.operations:
+            if operation.operation_type != DatabaseOperationType.GENERIC_UPDATE:
+                continue
+            data = operation.data or {}
+            if data.get('table') != 'Geocoding':
+                continue
+            for upd in data.get('updates') or []:
+                if 'geocoding_status' in upd:
+                    n += 1
+        return n
+
+    def count_completed_work_items(self) -> int:
+        """Pipeline rows whose admission slot should be released when this PDC is consumed."""
+        rows = self.count_geocoding_status_updates()
+        if rows > 0:
+            return rows
+        progress = 0
+        for operation in self.operations:
+            if operation.operation_type != DatabaseOperationType.PROGRESS_UPDATE:
+                continue
+            progress += int((operation.data or {}).get('count') or 0)
+        return progress or 1
+
     def getTotalObjectCount(self) -> int:
         """
         Get total count of all objects in this context.
@@ -221,14 +247,22 @@ class PendingDatabaseContext:
         ids: List[str] = []
         with db_ops.acquire_write_conn() as conn:
 
-            # Periodic mid-transaction flush — keeps WAL/memory bounded during long drains
-            FLUSH_EVERY_N_ROWS = 25_000
+            # Commit after each large bulk/WHERE op so Geocoding status is durable
+            # even if a later Addresses/owner UPDATE OOMs (was rolling back everything).
+            FLUSH_EVERY_N_ROWS = 100
+            # Always checkpoint after Geocoding bulk so max-files loops keep progress.
+            COMMIT_AFTER_TABLES = {"geocoding", "addresses"}
 
             try:
                 # Start explicit transaction
                 log_debug("###DEBUG### PDC_SAVE: Beginning transaction")
                 if PDC_DEBUG: print("###DEBUG### PDC_SAVE: Beginning transaction")
-                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute("BEGIN TRANSACTION")
+                except Exception as begin_e:
+                    # Already in a transaction (re-entrant writer) — continue
+                    if "within a transaction" not in str(begin_e).lower():
+                        raise
 
                 # Insert any real objects first (normal for XML parsing, skipped in address dedup)
                 for obj_type in ['zipfile', 'xmlfile', 'charity', 'officer', 'grant',
@@ -245,39 +279,62 @@ class PendingDatabaseContext:
                 print(f"###DEBUG### PDC_SAVE: Executing {len(self.operations)} operations")
                 for i, operation in enumerate(self.operations):
                     if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Executing operation {i+1}/{len(self.operations)}: type={operation.operation_type}, data_keys={list(operation.data.keys()) if operation.data else 'None'}")
-                    self._execute_operation(db_ops, operation)
+                    try:
+                        self._execute_operation(db_ops, operation, conn=conn)
+                    except Exception as op_e:
+                        err = str(op_e).lower()
+                        # If we already committed Geocoding, log and continue so partial
+                        # progress survives; OOM hard-exits inside bulk_update.
+                        log_error(
+                            f"PDC_SAVE: op {i+1}/{len(self.operations)} failed "
+                            f"({operation.operation_type}): {op_e}"
+                        )
+                        if "out of memory" in err or "failed to offload" in err or "failed to pin" in err:
+                            from database_operations import _oom_hard_exit
+                            _oom_hard_exit("pdc_save_op", op_e)
+                        # Non-OOM: rollback current tx segment and continue next ops
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        try:
+                            conn.execute("BEGIN TRANSACTION")
+                        except Exception:
+                            pass
+                        continue
 
                     if operation.operation_type == DatabaseOperationType.GENERIC_UPDATE:
-                        # Handle both traditional bulk updates and WHERE clause updates
+                        table = (operation.data.get('table') or operation.data.get('table_name') or "").lower()
                         if 'updates' in operation.data:
-                            # Traditional bulk update - count the number of records
                             rows_this_op = len(operation.data['updates'])
                             if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: GENERIC_UPDATE with {rows_this_op} updates to table {operation.data.get('table')}")
                         elif 'where_clause' in operation.data:
-                            # WHERE clause update - check if batched
                             param_sets = operation.data.get('param_sets')
                             if param_sets:
-                                # Batched WHERE updates - estimate based on number of operations
-                                rows_this_op = len(param_sets) * 5  # Conservative estimate of 5 rows per canonical group
+                                rows_this_op = len(param_sets)
                                 if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE batched with {len(param_sets)} param sets")
                             else:
-                                # Single WHERE clause update - estimate based on typical canonical group size
-                                # Most canonical groups have 2-10 addresses, but some have hundreds
-                                # Use conservative estimate of 5 addresses per canonical group
-                                rows_this_op = 10
+                                rows_this_op = 1
                                 if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: WHERE_UPDATE single")
                         else:
-                            # Unknown format, skip counting
                             rows_this_op = 0
                             if PDC_DEBUG: print("###DEBUG### PDC_SAVE: GENERIC_UPDATE unknown format")
 
                         PendingDatabaseContext._updated_counter += rows_this_op
 
-                        if PendingDatabaseContext._updated_counter >= FLUSH_EVERY_N_ROWS:
-                            if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Triggering intermediate commit after {PendingDatabaseContext._updated_counter} updates")
-                            PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(conn, PendingDatabaseContext._updated_counter, db_ops)
-                            # Get a fresh connection after recycling
-                            conn.execute("BEGIN TRANSACTION")
+                        force_flush = (
+                            table in COMMIT_AFTER_TABLES and rows_this_op >= 25
+                        ) or PendingDatabaseContext._updated_counter >= FLUSH_EVERY_N_ROWS
+                        if force_flush:
+                            if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Triggering intermediate commit after {PendingDatabaseContext._updated_counter} updates table={table}")
+                            PendingDatabaseContext._updated_counter = self._intermediate_commit_and_checkpoint(
+                                conn, PendingDatabaseContext._updated_counter, db_ops
+                            )
+                            try:
+                                conn.execute("BEGIN TRANSACTION")
+                            except Exception as begin_e:
+                                if "within a transaction" not in str(begin_e).lower():
+                                    log_warning(f"BEGIN after intermediate flush: {begin_e}")
                             PendingDatabaseContext._updated_counter = 0
 
                 # Final commit
@@ -301,13 +358,19 @@ class PendingDatabaseContext:
             if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Completed save_to_database, returned {len(ids)} IDs")
         return ids
 
-    def _execute_operation(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> None:
+    def _execute_operation(
+        self,
+        db_ops: DatabaseOperations,
+        operation: DatabaseOperation,
+        conn=None,
+    ) -> None:
         """
         Execute a single database operation.
 
         Args:
             db_ops: DatabaseOperations instance
             operation: The operation to execute
+            conn: Optional open write connection (keep nested bulk_update in outer tx)
         """
 
         op_type = operation.operation_type
@@ -320,7 +383,7 @@ class PendingDatabaseContext:
         elif op_type == DatabaseOperationType.OPTIMIZE_DATABASE:
             db_ops.optimize_database()
         elif op_type == DatabaseOperationType.GENERIC_UPDATE:
-            self._execute_generic_update(db_ops, operation)
+            self._execute_generic_update(db_ops, operation, conn=conn)
         elif op_type == DatabaseOperationType.PROGRESS_UPDATE:
             from logging_utils import update_progress
             update_progress(n=operation.data.get("count", 0))
@@ -377,7 +440,12 @@ class PendingDatabaseContext:
             db_ops.execute_query("UPDATE XmlFiles SET ein = ? WHERE xml_id = ?", (ein, xml_id))
 
 
-    def _execute_generic_update(self, db_ops: DatabaseOperations, operation: DatabaseOperation) -> int:
+    def _execute_generic_update(
+        self,
+        db_ops: DatabaseOperations,
+        operation: DatabaseOperation,
+        conn=None,
+    ) -> int:
         """Execute generic update operation"""
         data = operation.data
         updated_count = 0
@@ -386,7 +454,7 @@ class PendingDatabaseContext:
         where_clause = data.get('where_clause')
         if where_clause:
             # WHERE clause update - delegate to database_operations
-            db_ops._execute_generic_update_operation(operation, None)
+            db_ops._execute_generic_update_operation(operation, conn)
             # For WHERE updates, we can't easily get the row count, so return 0
             # The actual update happened in database_operations
             return 0
@@ -397,19 +465,42 @@ class PendingDatabaseContext:
             id_column = data.get("key_field") or data.get("id_column", "id")
 
             if table_name and update_data:
-                # Check if update_data is a list (bulk updates) or single dict
+                # Stay inside outer save_to_database transaction when conn is provided.
+                # commit=False + commit_batches for large lists keeps DuckDB memory down.
+                n = len(update_data) if isinstance(update_data, list) else 1
+                use_batch_commit = n >= 100 and conn is None
+                batch_size = 50 if n >= 100 else 100
                 if isinstance(update_data, list):
-                    # Bulk update - update_data is already a list of records
-                    updated_count = db_ops.bulk_update(table_name, update_data, id_column=id_column)
+                    updated_count = db_ops.bulk_update(
+                        table_name,
+                        update_data,
+                        id_column=id_column,
+                        batch_size=batch_size,
+                        commit=conn is None,
+                        commit_batches=use_batch_commit,
+                        conn=conn,
+                    )
                 else:
                     # Single update - wrap in list for bulk_update
                     key_value = data.get("key_value")
                     if key_value is not None:
                         update_record = {**update_data, id_column: key_value}
-                        updated_count = db_ops.bulk_update(table_name, [update_record], id_column=id_column)
+                        updated_count = db_ops.bulk_update(
+                            table_name,
+                            [update_record],
+                            id_column=id_column,
+                            commit=conn is None,
+                            conn=conn,
+                        )
                     else:
                         # Fallback for old format
-                        updated_count = db_ops.bulk_update(table_name, [update_data], id_column=id_column)
+                        updated_count = db_ops.bulk_update(
+                            table_name,
+                            [update_data],
+                            id_column=id_column,
+                            commit=conn is None,
+                            conn=conn,
+                        )
 
         return updated_count
 
@@ -496,28 +587,24 @@ class PendingDatabaseContext:
             return 0
 
         except Exception as e:
-            # Log connection state for debugging
             current_thread_id = threading.get_ident()
-            log_warning(f"Intermediate commit/checkpoint failed on thread {current_thread_id} (continuing anyway): {e}")
-
-            # Log recent queries from duckdb_logs
+            err = str(e).lower()
+            log_warning(
+                f"Intermediate commit/checkpoint failed on thread {current_thread_id}: {e}"
+            )
+            # OOM during COMMIT is fatal for this process — hard-exit so the
+            # outer max-files loop restarts clean (sys.exit left zombies before).
+            if (
+                "out of memory" in err
+                or "failed to offload" in err
+                or "failed to pin" in err
+                or "could not allocate" in err
+            ):
+                from database_operations import _oom_hard_exit
+                _oom_hard_exit("intermediate_commit", e)
             try:
-                logs = conn.execute("""
-                    SELECT timestamp, message, log_level, type
-                    FROM duckdb_logs()
-                    WHERE type = 'QueryLog'
-                    ORDER BY timestamp DESC
-                    LIMIT 10
-                """).fetchall()
-                log_warning("Recent queries from duckdb_logs:")
-                for log_entry in logs:
-                    log_warning(str(log_entry))
-            except Exception as log_e:
-                log_warning(f"Failed to query duckdb_logs: {log_e}")
-
-            try:
-                conn.execute("BEGIN TRANSACTION")       # at least try to restart the tx
-            except:
+                conn.execute("BEGIN TRANSACTION")
+            except Exception:
                 pass
         return 0
 
@@ -543,8 +630,8 @@ class PendingDatabaseContext:
         if not contexts:
             if PDC_DEBUG: print("###DEBUG### PDC_MERGE: No contexts to merge, returning empty")
             return cls()
-        if len(contexts) == 1:
-            return contexts[0] # already done!
+        # Always consolidate ops (even a single fat PDC from pending_api fail
+        # can hold 100+ 1-row GENERIC_UPDATEs that OOM DuckDB).
 
         # Use the first context as the base
         merged = cls(xml_id=contexts[0].xml_id, xml_content=contexts[0].xml_content)
@@ -565,12 +652,15 @@ class PendingDatabaseContext:
             # Merge updates
             merged._updates.extend(context._updates)
 
-        # Consolidate operations - group GENERIC_UPDATE operations for batching
+        # Consolidate operations - group GENERIC_UPDATE ops for real bulk writes.
+        # Without this, census/geocode merge keeps 1-row updates per match and DuckDB
+        # OOMs after ~50–100 individual UPDATEs against a large Geocoding table.
         from database_operations import DatabaseOperationType
-        generic_update_groups = {}  # Key: (table, set_clause, where_clause), Value: list of param sets
+        where_update_groups = {}  # (table, set_clause, where_clause) -> list of params
+        # (table, id_column, col_tuple) -> list of update dicts (same columns)
+        bulk_update_groups: Dict[tuple, List[Dict[str, Any]]] = {}
 
         for context in contexts:
-            # Sum estimated updates
             merged.estimated_updates += context.estimated_updates
 
             for operation in context.operations:
@@ -578,47 +668,104 @@ class PendingDatabaseContext:
                     data = operation.data
                     where_clause = data.get('where_clause')
                     if where_clause:
-                        # WHERE clause update - group by signature for batching
                         table = data.get('table')
                         set_clause = data.get('set_clause')
-                        params = data.get('params', [])
                         key = (table, set_clause, where_clause)
-                        if key not in generic_update_groups:
-                            generic_update_groups[key] = []
-                        generic_update_groups[key].append(params)
+                        if data.get('param_sets'):
+                            where_update_groups.setdefault(key, []).extend(data['param_sets'])
+                        elif 'params' in data:
+                            where_update_groups.setdefault(key, []).append(data.get('params') or [])
+                    elif 'updates' in data or 'update_data' in data:
+                        table = data.get('table') or data.get('table_name')
+                        id_column = data.get('key_field') or data.get('id_column', 'id')
+                        update_data = data.get('updates') or data.get('update_data') or []
+                        if isinstance(update_data, dict):
+                            update_data = [update_data]
+                        for row in update_data:
+                            if not isinstance(row, dict):
+                                continue
+                            # Column signature must match for one executemany SQL
+                            col_key = tuple(sorted(row.keys()))
+                            gkey = (table, id_column, col_key)
+                            bulk_update_groups.setdefault(gkey, []).append(row)
                     else:
-                        # Traditional bulk update - add as-is
                         merged.operations.append(operation)
                 else:
-                    # Non-GENERIC_UPDATE operation - add as-is
                     merged.operations.append(operation)
 
-        # Create consolidated GENERIC_UPDATE operations
-        for (table, set_clause, where_clause), param_sets in generic_update_groups.items():
+        # Geocoding bulk first (status/coords), then owner bulk, then Addresses WHERE.
+        # Status rows must land even if colocator propagation is heavy.
+        def _bulk_sort_key(item):
+            (table, _idc, _cols), _rows = item
+            t = (table or "").lower()
+            if t == "geocoding":
+                return (0, t)
+            if t == "addresses":
+                return (2, t)
+            return (1, t)
+
+        for (table, id_column, col_key), rows in sorted(
+            bulk_update_groups.items(), key=_bulk_sort_key
+        ):
+            ordered_cols = list(col_key)
+            normalized = [{c: r[c] for c in ordered_cols} for r in rows]
+            merged.operations.append(DatabaseOperation(
+                operation_type=DatabaseOperationType.GENERIC_UPDATE,
+                data={
+                    'table': table,
+                    'updates': normalized,
+                    'id_column': id_column,
+                },
+            ))
+
+        for (table, set_clause, where_clause), param_sets in where_update_groups.items():
             if len(param_sets) == 1:
-                # Single operation - create normal operation
                 merged.operations.append(DatabaseOperation(
                     operation_type=DatabaseOperationType.GENERIC_UPDATE,
                     data={
                         'table': table,
                         'set_clause': set_clause,
                         'where_clause': where_clause,
-                        'params': param_sets[0]
-                    }
+                        'params': param_sets[0],
+                    },
                 ))
             else:
-                # Multiple operations with same signature - create batched operation
                 merged.operations.append(DatabaseOperation(
                     operation_type=DatabaseOperationType.GENERIC_UPDATE,
                     data={
                         'table': table,
                         'set_clause': set_clause,
                         'where_clause': where_clause,
-                        'param_sets': param_sets  # Multiple parameter sets for executemany
-                    }
+                        'param_sets': param_sets,
+                    },
                 ))
 
-        if PDC_DEBUG: print(f"###DEBUG### PDC_MERGE: Merged context has {len(merged.operations)} operations, estimated_updates={merged.estimated_updates}")
+        # Collapse PROGRESS_UPDATE noise into one op
+        progress_total = 0
+        kept: List[DatabaseOperation] = []
+        for op in merged.operations:
+            if op.operation_type == DatabaseOperationType.PROGRESS_UPDATE:
+                progress_total += int(op.data.get("count", 0) or 0)
+            else:
+                kept.append(op)
+        if progress_total:
+            kept.append(DatabaseOperation(
+                operation_type=DatabaseOperationType.PROGRESS_UPDATE,
+                data={"count": progress_total},
+            ))
+        merged.operations = kept
+
+        if PDC_DEBUG or len(contexts) > 10:
+            n_bulk = sum(
+                len(op.data.get('updates') or [])
+                for op in merged.operations
+                if op.operation_type == DatabaseOperationType.GENERIC_UPDATE
+                and 'updates' in (op.data or {})
+            )
+            log_info(
+                f"PDC_MERGE: {len(contexts)} ctxs → {len(merged.operations)} ops "
+                f"(~{n_bulk} bulk-update rows, estimated_updates={merged.estimated_updates})"
+            )
         return merged
 
     def clear(self) -> None:
