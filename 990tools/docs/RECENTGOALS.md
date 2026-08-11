@@ -4,40 +4,27 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
-## 2026-08-11: API tail → grant_match → OFAC + grok_pending pattern prep (DONE ops; code uncommitted)
+## 2026-08-11: API tail → grant_match → OFAC + grok_pending pattern prep (DONE; pushed)
 
-**What:** After census `pending=0`, ran free/public Photon + geocode.maps.co + OpenCage on `pending_api`, then **grant_match** + OFAC reports. Followed with a **preprocess-only** pass on `grok_pending` so Grok does not re-pay for structural FA/military/vendor/partial cases.
+**What:** After census `pending=0`, free/public Photon + maps.co + OpenCage drained `pending_api`; **grant_match** + OFAC reports; preprocess-only pass on `grok_pending` before Grok.
 
-**Why:**
-- Self-hosted Photon VPS is offline; public Photon is slow but free; maps.co + OpenCage burn credits productively on residual.
-- DuckDB unique ART **FATAL** on large in-place `UPDATE` of Grants/Charities lat/lon (PK “duplicate key” on commit) blocked grant_match.
-- Nested-loop CTAS (`LIKE` join to Zips) ran multi-hour; equality-join key extraction is ART-safe *and* fast.
-- `grok_pending` rows predate current preprocess short-circuits; re-running preprocess is free before `geolocate_grok`.
+**Why:** See CHANGELOG 2026-08-11 — ART FATAL on lat/lon UPDATEs, NL-join CTAS too slow, fail-stage hangs, parked `grok_pending` never re-hit new short-circuits.
 
-**How (ops — production DB `/Volumes/Data/final/irs990.duckdb`):**
-- Launchers: `overnight_api_grant_reports_run.sh`, `overnight_resume_api_grant_reports_run.sh` (chunked API, 35m round timeout, free Photon via unset `PHOTON_*`).
-- API: `pending_api` **8,784 → 0** (Photon modest; Maps/OpenCage carried most). Fail-stage join hangs killed+resumed with chunk 400.
-- **grant_match** success **2026-08-11 05:36** after Grants/Charities ART rebuild + equality-join lat/lon; GIN floaters **765k → 0**; **145,396** grant→charity matches.
-- OFAC reports **rc=0** (~05:40): `ofac_reporting/reports/index.html` (colocator 17 / zipcode 200 clusters).
-- Pattern prep: `preprocess_grok_pending.py` — **9,624** → `Match:PatternOwners`; **`grok_pending` 48,661 → 39,037** (almost all residual = full US street for Grok).
-- Export: `/Volumes/Data/final/grok_pending_for_patterns.tsv`.
-- Docs: `docs/overnight_api_grant_reports.md`, `docs/preprocess_grok_pending.md`.
+**Ops (prod `/Volumes/Data/final/irs990.duckdb`):** `pending_api` **→ 0**; grant_match **rc=0** (~05:36); OFAC **rc=0**; preprocess **9,624** free PatternOwners; **`grok_pending` 48,661 → 39,037**.
 
-**How (code — dirty on `grokrefactor3`, not yet committed):**
-- `grant_match_processor.py`: `ensure_charities_writable` / `rebuild_charities_table`; lat/lon via zip-key table + hash join to Zips + CTAS swap (not in-place UPDATE).
-- `geocoding_api_processor.py`: highway/RR PARTIAL only when **no** street number (was vacuuming real `N E HWY` addresses).
-- `preprocess_grok_pending.py` (new): one-shot preprocess over `grok_pending`.
-- Overnight shell chains + resume with per-round timeout.
+**Hashes (`grokrefactor3` → origin):** `deef07d1` grant_match lat/lon · `aa252eb2` grok_pending preprocess · `a8af7238` overnight launchers · `e8c22f94` docs · `07f8513e` US_zips + name_rules_v19.gz (see name-rules note below).
 
-**Failures recorded (do not repeat):**
-- WAL aside after SIGABRT/FATAL when open fails with “Bad file descriptor” on replay.
-- Large PDC save OOM at 11 GiB during API; chunk + smaller consumer.
-- Pipeline **fail-stage join hang** (`unfinished_tasks=2–3`, 0% CPU, CLOSE_WAIT) — kill and resume; shell timeout helps.
-- NL-join CTAS lat fill — replace with equality joins.
+**Next:** Controlled `geolocate_grok` on ~**39k**. Deferred: owner colocator backfill / archive bookend.
 
-**Next:** Controlled `geolocate_grok` on ~**39k** residual (optional cost cap). Still deferred: colocator owner backfill / `geolocate_archive` bookend polish; full owner fan-out if reports need it.
+---
 
-**Git hashes:** pending commit units (see hygiene report). Prior census chain tip `a846c269`.
+## 2026-08-11: Name rules — ignore v19 auto-gen path (decision)
+
+**What:** Clarified which name-rules artifact production uses; marked pre-Phone-Book auto-gen as obsolete.
+
+**Why:** `address_matcher` hard-loads **`name_rules.json.gz`** (unversioned). `name_rules_v19*` came from automatic rule generation before the Phone Book / cream algorithm; not on the live match path. Tiny tracked `name_rules_v19.json.gz` (~493 rules) is not a real ruleset; uncompressed `name_rules_v19.json` (154 MB) must not enter git.
+
+**How / decision:** Prefer `name_rules.json.gz` only for matcher; treat `v19*` / `generate_name_rules_v19*` as archive. Optional later cleanup: stop refreshing v19 in git; retarget analyze-script defaults away from v19.1.
 
 ---
 

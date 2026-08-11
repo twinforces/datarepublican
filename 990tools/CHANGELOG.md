@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### WAL recovery note
 - After FATAL/abort, DuckDB sometimes cannot replay WAL (“Bad file descriptor”). **Back up then aside** `.wal`, open base file, `CHECKPOINT`. Uncommitted tail lost; committed work retained.
 
+### Name rules inventory (decision)
+- **Live matcher:** `address_matcher._load_rules` reads **`name_rules.json.gz`** (else `name_rules.json`) only — ~336k list entries on disk.
+- **`name_rules_v19*`:** legacy automatic rule generation **before Phone Book**; ignore for production. Analyze tools that default to `name_rules_v19.1.json.gz` are offline/research residue.
+- **Git:** keep compressed unversioned rules if needed; do **not** add uncompressed `name_rules_v19.json` (~154 MB, over GitHub limit). `07f8513e` refreshed `US_zips.txt.gz` + small `name_rules_v19.json.gz` — the latter is not the live ruleset.
+
+### Landed hashes (pushed `grokrefactor3`)
+- `deef07d1` fix(grant_match) ART-safe equality-join lat/lon
+- `aa252eb2` feat(geocode) preprocess_grok_pending + highway PARTIAL fix
+- `a8af7238` chore(ops) overnight API→grant→OFAC launchers
+- `e8c22f94` docs API/grant/pattern prep
+- `07f8513e` chore(data) US_zips + name_rules_v19 gzip
+
 ## [Unreleased] - 2026-08-10 (Overnight census drain + DuckDB OOM survival)
 
 ### Chunked Census overnight (production success)
