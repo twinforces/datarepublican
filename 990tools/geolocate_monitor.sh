@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PIDFILE=geolocate.pid
-LOG=geolocate_step_20260630_v9.log
+LOG=geolocate_step_20260704_census.log
 OUT=geolocate_monitor.log
 STATE=geolocate_monitor.state
 PROGRESS_STATE=geolocate_monitor.progress
@@ -133,7 +133,7 @@ parse_progress() {
     local metric_label processed remaining pct
 
     fed_line=$(echo "$recent" | /usr/bin/grep '→ .* fed' | /usr/bin/tail -1 || true)
-    stats_line=$(echo "$recent" | /usr/bin/grep -E '\[geolocate_new\] running|\[geolocate_grok\] running' | /usr/bin/tail -1 || true)
+    stats_line=$(echo "$recent" | /usr/bin/grep -E '\[geolocate_(new|census|api|grok)\] running' | /usr/bin/tail -1 || true)
     checkpoint_line=$(echo "$recent" | /usr/bin/grep 'FORCE CHECKPOINT at' | /usr/bin/tail -1 || true)
     if echo "$recent" | /usr/bin/grep -qF 'Last batch sent'; then
         drain=1
@@ -250,6 +250,7 @@ def load_metrics():
         "resolved": 0,
         "grok_queued": 0,
         "matches": 0,
+        "census_calls": 0,
     }
     if metrics_path.exists():
         for line in metrics_path.read_text().splitlines():
@@ -275,6 +276,7 @@ def save_metrics(data):
                 ("resolved", data["resolved"]),
                 ("grok_queued", data["grok_queued"]),
                 ("matches", data["matches"]),
+                ("census_calls", data["census_calls"]),
             )
         )
         + "\n"
@@ -293,23 +295,30 @@ if data["log"] != log_path.name:
         "resolved": 0,
         "grok_queued": 0,
         "matches": 0,
+        "census_calls": 0,
     }
 
 if not log_path.exists():
     save_metrics(data)
     print(
         f"{data['fed']}|{data['total']}|{data['resolved']}|"
-        f"{data['grok_queued']}|{data['matches']}|{data['last_line']}"
+        f"{data['grok_queued']}|{data['matches']}|{data['census_calls']}|{data['last_line']}"
     )
     sys.exit(0)
 
 fed_re = re.compile(r"→ ([\d,]+)/([\d,]+) fed")
 grok_re = re.compile(r"grok_pending batch=(\d+)")
+pending_api_re = re.compile(r"pending_api batch=(\d+)")
 match_re = re.compile(r"batch=(\d+) matched=(\d+)/(\d+)")
+census_call_re = re.compile(
+    r"\[geolocate_census\] census call stage=(\w+) batch=(\d+) matched=(\d+)/(\d+)"
+    r".*?rate=([\d.]+)/hr.*?fed=([\d,]+).*?committed=([\d,]+)"
+)
 running_re = re.compile(
-    r"\[(geolocate_new|geolocate_grok)\] running "
-    r"(?:census=([\d,]+) census_strip=([\d,]+) preprocess=([\d,]+) other=([\d,]+) "
-    r"grok_queued=([\d,]+)(?: committed=([\d,]+))?|"
+    r"\[(geolocate_new|geolocate_census|geolocate_api|geolocate_grok)\] running "
+    r"(?:census=([\d,]+) census_strip=([\d,]+) preprocess=([\d,]+) "
+    r"(?:pending_api=([\d,]+) |)other=([\d,]+) grok_queued=([\d,]+)(?: committed=([\d,]+))?|"
+    r"preprocess=([\d,]+) other=([\d,]+) grok_queued=([\d,]+)(?: committed=([\d,]+))?|"
     r"grok_match=([\d,]+) grok_fail=([\d,]+)(?: committed=([\d,]+))?)"
 )
 
@@ -329,23 +338,36 @@ with log_path.open("r", errors="replace") as handle:
             data["grok_queued"] += queued
             data["resolved"] += queued
 
+        pending_api_match = pending_api_re.search(line)
+        if pending_api_match:
+            queued = int(pending_api_match.group(1))
+            data["resolved"] += queued
+
         batch_match = match_re.search(line)
-        if batch_match and "grok_pending" not in line:
+        if batch_match and "grok_pending" not in line and "census call" not in line:
             matched = int(batch_match.group(2))
             if matched > 0:
                 data["matches"] += matched
                 data["resolved"] += matched
 
+        census_call_match = census_call_re.search(line)
+        if census_call_match and census_call_match.group(1) == "census":
+            data["census_calls"] += 1
+            matched = int(census_call_match.group(3))
+            data["matches"] += matched
+            data["resolved"] += matched
+            data["fed"] = max(data["fed"], ic(census_call_match.group(6)))
+            data["resolved"] = max(data["resolved"], ic(census_call_match.group(7)))
+
         running_match = running_re.search(line)
         if running_match:
             step = running_match.group(1)
             if step == "geolocate_grok":
-                resolved = ic(running_match.group(8) or "0") + ic(running_match.group(9) or "0")
+                resolved = ic(running_match.group(12) or "0") + ic(running_match.group(13) or "0")
+            elif step == "geolocate_api":
+                resolved = sum(ic(running_match.group(idx) or "0") for idx in (9, 10, 11))
             else:
-                resolved = sum(
-                    ic(running_match.group(idx) or "0")
-                    for idx in range(2, 7)
-                )
+                resolved = sum(ic(running_match.group(idx) or "0") for idx in (2, 3, 4, 5, 6, 7))
             data["resolved"] = max(data["resolved"], resolved)
 
         data["last_line"] = line_no
@@ -353,7 +375,7 @@ with log_path.open("r", errors="replace") as handle:
 save_metrics(data)
 print(
     f"{data['fed']}|{data['total']}|{data['resolved']}|"
-    f"{data['grok_queued']}|{data['matches']}|{data['last_line']}"
+    f"{data['grok_queued']}|{data['matches']}|{data['census_calls']}|{data['last_line']}"
 )
 PY
 }
@@ -397,17 +419,21 @@ snapshot() {
     etsecs=$(get_etsecs "$pid")
     now_epoch=$(date "+%s")
 
-    IFS='|' read -r fed total resolved grok_queued matches _scan_lines \
+    IFS='|' read -r fed total resolved grok_queued matches census_calls _scan_lines \
         <<< "$(scan_log_metrics)"
     fed=$(as_int "${fed:-0}")
     total=$(as_int "${total:-0}")
     resolved=$(as_int "${resolved:-0}")
     grok_queued=$(as_int "${grok_queued:-0}")
     matches=$(as_int "${matches:-0}")
+    census_calls=$(as_int "${census_calls:-0}")
 
     # Only scan recent log tail for detail lines — incremental metrics drive ETA.
     recent=$(/usr/bin/tail -c 2000000 "$LOG" 2>/dev/null || true)
-    census=$(echo "$recent" | /usr/bin/grep -E '\[geolocate_new\] running|\[geolocate_grok\] running' | /usr/bin/tail -1 || true)
+    census=$(echo "$recent" | /usr/bin/grep -F '[geolocate_census] census call ' | /usr/bin/tail -1 || true)
+    if [[ -z "$census" ]]; then
+        census=$(echo "$recent" | /usr/bin/grep -E '\[geolocate_(new|census|api|grok)\] running' | /usr/bin/tail -1 || true)
+    fi
     checkpoint=$(echo "$recent" | /usr/bin/grep 'FORCE CHECKPOINT at' | /usr/bin/tail -1 || true)
     status_counts=$(echo "$recent" | /usr/bin/grep 'GEOCODING_STATUS_COUNTS' | /usr/bin/tail -1 || true)
 
@@ -484,6 +510,9 @@ snapshot() {
     echo "[$ts]   detail: $progress" >> "$OUT"
     if [[ -n "$status_counts" ]]; then
         echo "[$ts]   geocoding: $status_counts" >> "$OUT"
+    fi
+    if [[ -n "${census_calls:-}" ]] && (( census_calls > 0 )); then
+        echo "[$ts]   census_api_calls=$census_calls" >> "$OUT"
     fi
     if [[ -n "$last_batch" ]]; then
         echo "[$ts] note: $last_batch" >> "$OUT"

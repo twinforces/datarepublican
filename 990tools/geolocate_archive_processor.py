@@ -2,8 +2,13 @@
 """
 geolocate_archive_processor.py - Export geocode results for the next rebuild.
 
-Bookend for geolocate_prev. Writes {final_dir}/geocode_archive_distinct.tsv.gz so the
-next DB rebuild can re-apply paid/free geocode results without re-hitting APIs.
+BACK bookend of the geolocate pipeline:
+  geolocate_prev → census → api → grok → geolocate_archive
+
+1. Finalize Geocoding → Addresses → owners + lat/lon + loose_colocator
+   (catches anything census/api/grok left only on Geocoding; pairs with always-on apply)
+2. Write {final_dir}/geocode_archive_distinct.tsv.gz so the next rebuild can re-apply
+   paid/free geocode results without re-hitting APIs.
 
 Archive columns (canonical_address is the join key):
   canonical_address, colocator, geocoding_status
@@ -11,8 +16,8 @@ Archive columns (canonical_address is the join key):
 - colocator: LL:lat:lon, PO:box:zip, FA:…, grok:<CODE>, etc. (on Geocoding)
 - geocoding_status: Match:Census, Match:Grok-4, grok:UNKN, …
 
-Note: loose_colocator is NOT archived here. It lives on Addresses (and owner tables)
-and is computed later in geolocate_prev from lat/lon after colocators are applied.
+Note: loose_colocator is NOT archived. It lives on Addresses (and owner tables)
+and is computed here (back) and in geolocate_prev (front, after archive load).
 
 Merges with any existing archive so prior results are preserved. Old 2-column
 archives (canonical_address + colocator only) still load; missing status is
@@ -30,13 +35,14 @@ from typing import Dict, Tuple
 from database_operations import DatabaseOperations
 from logging_utils import log_info, log_warning
 from config import global_config
+from geolocate_prev_processor import GeolocatePrevProcessor
 
 # (colocator, geocoding_status)
 ArchiveRow = Tuple[str, str]
 
 
 class GeolocateArchiveProcessor:
-    """Export distinct canonical_address → colocator + geocoding_status pairs."""
+    """Back bookend: finalize colocators, then export archive TSV."""
 
     SUCCESS_STATUSES = (
         "Match",
@@ -59,6 +65,12 @@ class GeolocateArchiveProcessor:
     def run(self, output_file: str = "geocode_archive_distinct.tsv.gz") -> int:
         output_path = os.path.join(global_config.final_dir, output_file)
         log_info(f"=== Starting geolocate_archive → {output_path} ===")
+
+        # Back bookend: Addresses/owners (+ loose) must catch Geocoding before export.
+        # grant_match uses Grants/Charities.colocator; DOT slices use Addresses.colocator.
+        GeolocatePrevProcessor(self.db_ops).finalize_colocators_from_geocoding(
+            log_prefix="geolocate_archive"
+        )
 
         rows = self._fetch_archive_pairs()
         log_info(f"Fetched {len(rows):,} distinct geocode archive rows from DB")

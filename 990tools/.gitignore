@@ -45,6 +45,10 @@ dot_reporting/*.log
 dot_reporting/*_HANDOFF.md
 dot_reporting/CHURCH_QUEUE_STATUS.md
 
+# OFAC co-location package: generated HTML (regenerate via generate_ofac_reports.py)
+ofac_reporting/reports/
+ofac_reporting/*.log
+
 # Process / supervisor pid files
 *.pid
 backfill_colocators.pid
