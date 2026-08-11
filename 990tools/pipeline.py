@@ -31,7 +31,7 @@ MIN_WORKERS = {'grok': 4, 'census': 1}
 MAX_WORKERS = {'grok': 32, 'census': 8}
 ADAPTIVE_STAGES = ['grok', 'census']
 MONITOR_UPDATE = 30
-BATCHER_TIMEOUT = 1.0  # seconds — consider making adaptive later
+BATCHER_TIMEOUT = 1.0  # default; geocoding pipelines override via GEOCODING_BATCHER_TIMEOUT
 CONSUMER_THRESHOLD = CONSUMER_BATCH_SIZE  # when to flush merged PDCs
 
 # ==============================
@@ -142,6 +142,8 @@ class PipelineStage(Generic[W]):
         next_on_failure: Optional["PipelineStage[W]"] = None,
         is_final_failure: bool = False,
         max_workers: int = 64,
+        worker_queue_maxsize: Optional[int] = None,
+        batcher_timeout: Optional[float] = None,
     ):
         self.name = name
         self.workers = workers
@@ -154,9 +156,14 @@ class PipelineStage(Generic[W]):
         self.next_on_failure = next_on_failure
         self.is_final_failure = is_final_failure
         self.max_workers = max_workers
+        self.batcher_timeout = batcher_timeout if batcher_timeout is not None else BATCHER_TIMEOUT
 
-        self.input_queue = queue.Queue()
-        self.worker_queue = queue.Queue()
+        self.input_queue = queue.Queue()  # unbounded — batcher absorbs bursts
+        self.worker_queue = (
+            queue.Queue(maxsize=worker_queue_maxsize)
+            if worker_queue_maxsize is not None
+            else queue.Queue()
+        )
         self.executor = None
         self.current_workers = AtomicCounter(0)
         self.batcher_thread = None        
@@ -170,8 +177,19 @@ class PipelineStage(Generic[W]):
             'failure': 0,
             'current_queue': 0,
             'peak_queue': 0,
+            'input_queue_size': 0,
+            'worker_queue_size': 0,
             'nThreads': 0,
         }
+
+    def _update_queue_metrics(self):
+        inp = self.input_queue.qsize()
+        wrk = self.worker_queue.qsize()
+        combined = inp + wrk
+        self.metrics['input_queue_size'] = inp
+        self.metrics['worker_queue_size'] = wrk
+        self.metrics['current_queue'] = combined
+        self.metrics['peak_queue'] = max(self.metrics['peak_queue'], combined)
 
     def set_executor(self, executor: ThreadPoolExecutor):
         self.executor = executor
@@ -184,21 +202,30 @@ class PipelineStage(Generic[W]):
             while not self.stop_event.is_set():
                 unit = None
                 try:
-                    unit = self.input_queue.get(timeout=BATCHER_TIMEOUT)
+                    unit = self.input_queue.get(timeout=self.batcher_timeout)
                     if unit: self.input_queue.task_done() # ack
                     if unit.is_sentinel():
-                        if  DEBUG_PIPELINE: print(f"[{self.name}] batcher got sentinel, unfinished_tasks now {self.input_queue.unfinished_tasks}")
-                        if self.input_queue.qsize() > 1:  # Backlog? Put it back in the FIFO
-                            if  DEBUG_PIPELINE: print(f"[{self.name}] REQUEUE sentinel — busy q={self.input_queue.qsize()}")
-                            self.input_queue.put(unit) 
-                            unit = None #prevent it getting marked done
-                            continue
                         if pending:
                             self._push_batch(pending)
                             pending = []
-                        self.worker_queue.put(unit) # pass sentinel to workers
-                        break #always break on sentinel
-                        continue
+                        # Drain stragglers / extra shutdown sentinels (never requeue — causes deadlock)
+                        while True:
+                            try:
+                                extra = self.input_queue.get_nowait()
+                                self.input_queue.task_done()
+                                if extra and not extra.is_sentinel():
+                                    if extra.is_batch():
+                                        pending.extend(extra.items)
+                                    else:
+                                        pending.append(extra)
+                            except queue.Empty:
+                                break
+                        if pending:
+                            self._push_batch(pending)
+                            pending = []
+                        for _ in range(max(1, self.workers)):
+                            self.worker_queue.put(WorkUnit.sentinel())
+                        break
 
                     if unit.is_batch():
                         pending.extend(unit.items)
@@ -238,6 +265,7 @@ class PipelineStage(Generic[W]):
             batch_obj = self.pipeline.workunit_class.batch(self.name, batch_units)
             self.workload.inc(len(batch_units))
             self.worker_queue.put(batch_obj)
+        self._update_queue_metrics()
 
     def _start_workers(self):
         for _ in range(self.workers):
@@ -262,22 +290,13 @@ class PipelineStage(Generic[W]):
                         print(f"[{self.name}] GOT → {unit!s} (pending={len(pending)})")
                     if unit.is_sentinel():
                         if pending:
-                            if DEBUG_PIPELINE: print(f"Sentinel in queue for {self.name} {len(pending)} to do")
-
                             self._process_batch(pending)
                             pending = []
-                        if self.worker_queue.qsize() > 1:  # Backlog? Put it back in the FIFO
-                            if  DEBUG_PIPELINE: print(f"[{self.name}] REQUEUE sentinel — busy q={self.input_queue.qsize()}")
-                            self.worker_queue.task_done()
-                            self.worker_queue.put(unit)  # Or input_queue
-                            unit = None #prevent it getting marked done
-                            continue
                         self.worker_queue.task_done()
-                        exited=True
+                        exited = True
                         self.current_workers.dec()
                         self.metrics['nThreads'] = self.current_workers.get()
-                        break  # Explicit break on sentinel
-                        return
+                        break
 
                     if unit.is_batch():
                         pending.extend(unit.items)
@@ -306,8 +325,7 @@ class PipelineStage(Generic[W]):
         if not batch:
             return
         self.metrics['total'] += len(batch)
-        self.metrics['current_queue'] = self.input_queue.qsize() + self.worker_queue.qsize()
-        self.metrics['peak_queue'] = max(self.metrics['peak_queue'], self.metrics['current_queue'])
+        self._update_queue_metrics()
         if DEBUG_PIPELINE:
             print(f"[{self.name}] PROCESSING BATCH of {len(batch)} units")
         try:
@@ -364,6 +382,7 @@ class PipelineStage(Generic[W]):
     def put(self, unit: W):
         self.input_queue.put(unit)
         self.metrics['total'] += 1 if unit.is_work_item() else len(unit.items) if unit.is_batch() else 0
+        self._update_queue_metrics()
 
     def adjust_workers(self, new_workers: int):
         delta = new_workers - self.current_workers.get()
@@ -394,6 +413,9 @@ class ConsumerStage(PipelineStage):
         self.db_ops = db_ops
         self.last_checkpoint = 0
         self.checkpoint_interval = checkpoint_interval
+
+    def _admission_release_count(self, ctx: PendingDatabaseContext) -> int:
+        return ctx.count_completed_work_items()
 
     def _consume_handler(self, batch: List[ResultWorkUnit]) -> List[Tuple[bool, Any]]:
         print(f"###ERROR### CONSUMER HANDLER: Processing batch of {len(batch)} units, should never be called")
@@ -435,19 +457,13 @@ class ConsumerStage(PipelineStage):
                     
                         
                     if unit.is_sentinel():
-                        self._flush_pending_contexts(pending_contexts, accumulated_updates,total_updates)
-                        if self.worker_queue.qsize() > 1:  # Backlog?
-                            print(f"[{self.name}] REQUEUE sentinel — busy q={self.worker_queue.qsize()}")
-                            self.worker_queue.task_done()
-                            self.worker_queue.put(unit)  
-                            unit=None # prevent it being marked done
-                            continue  # Process work
-                        # Else: normal flush/break
-                        exited=True
+                        self._flush_pending_contexts(pending_contexts, accumulated_updates, total_updates)
+                        exited = True
                         pending_contexts = []
                         total_updates += accumulated_updates
                         accumulated_updates = 0
-                        if  DEBUG_PIPELINE: print(f"[{self.name}] EXITING on sentinel")
+                        if DEBUG_PIPELINE:
+                            print(f"[{self.name}] EXITING on sentinel")
                         break
                     elif unit.is_result() and isinstance(unit.data, PendingDatabaseContext):
                         ctx = unit.data
@@ -461,13 +477,15 @@ class ConsumerStage(PipelineStage):
                             total_updates += accumulated_updates
                             accumulated_updates = 0
 
+                        release_count = self._admission_release_count(ctx)
                         self.metrics['success'] += 1
-                        self.pipeline._record_global_success()
+                        self.pipeline._record_global_success(release_count)
                     elif unit.is_batch():
                         contexts = [item.data for item in unit.items if item.is_result() and isinstance(item.data, PendingDatabaseContext)]
                         added = sum([ctx.estimated_updates or ctx.getTotalObjectCount() or 1 for ctx in contexts])
+                        release_count = sum(self._admission_release_count(ctx) for ctx in contexts)
                         self.metrics['success'] += len(contexts)
-                        self.pipeline._record_global_success(len(contexts))
+                        self.pipeline._record_global_success(release_count)
                         accumulated_updates += added
                         pending_contexts.extend(contexts)
                         if self._flush_check(pending_contexts, accumulated_updates, total_updates):
@@ -514,6 +532,9 @@ class ConsumerStage(PipelineStage):
                 or (totalups - self.last_checkpoint) >= self.checkpoint_interval
             )
             merged.save_to_database(self.db_ops, checkpoint=should_checkpoint)
+            rows_saved = merged.count_geocoding_status_updates()
+            if rows_saved:
+                self.pipeline._record_rows_committed(rows_saved)
             if should_checkpoint:
                 if totalups != -1:
                     self.last_checkpoint = totalups
@@ -546,6 +567,9 @@ class Pipeline(Generic[W]):
         workunit_class: type[W] = WorkUnit,
         consumer_threshold: int = CONSUMER_BATCH_SIZE,
         checkpoint_interval: int = 10_000,
+        buffered_feed: bool = False,
+        feed_buffer_batches: Optional[int] = None,
+        batcher_timeout: Optional[float] = None,
     ):
         if chain_on not in ('success', 'failure'):
             raise ValueError(f"Invalid chain_on: {chain_on}")
@@ -554,25 +578,33 @@ class Pipeline(Generic[W]):
         self.order = ['feed'] +[s.name for s in stages] + ['result']
         self.db_ops = db_ops
         self.workunit_class = workunit_class
+        self.buffered_feed = buffered_feed
+        self.feed_buffer_batches = feed_buffer_batches
+        self.batcher_timeout = batcher_timeout
 
         for stage in self.stages.values():
             stage.pipeline = self
-        self.backpressure_enabled = backpressure_enabled
+            if batcher_timeout is not None and stage.batcher_timeout == BATCHER_TIMEOUT:
+                stage.batcher_timeout = batcher_timeout
+        self.backpressure_enabled = backpressure_enabled and not buffered_feed
         self.in_flight_cap = in_flight_cap
         self._admission_queue: Optional[queue.Queue] = None
-        if backpressure_enabled:
+        if self.backpressure_enabled:
             self._admission_queue = queue.Queue(maxsize=in_flight_cap)
             for _ in range(in_flight_cap):
                 self._admission_queue.put_nowait(None)
 
         # Feed handler: pass full W, not .data
         continue_flag = False if chain_on == 'failure' else True
+        feed_wq_max = feed_buffer_batches if buffered_feed and feed_buffer_batches else None
         self.feed_stage = PipelineStage[W](
             name="feed",
             workers=1,
             batch_size=10000,
             handler=lambda batch: [(continue_flag, wu) for wu in batch],
             pipeline=self,
+            worker_queue_maxsize=feed_wq_max,
+            batcher_timeout=batcher_timeout,
         )
         self.stages["feed"] = self.feed_stage
 
@@ -593,7 +625,7 @@ class Pipeline(Generic[W]):
             setattr(self.feed_stage, chain_attr, stages[0])
 
         self.metrics = {
-            'overall': {'total': 0, 'success': 0, 'failure': 0, 'expected': 0},
+            'overall': {'total': 0, 'success': 0, 'failure': 0, 'expected': 0, 'rows_committed': 0},
             'stages': {}
         }
         for stage in stages:
@@ -624,14 +656,49 @@ class Pipeline(Generic[W]):
             for _ in range(count):
                 self._admission_queue.put(None, block=True)
 
+    def _record_rows_committed(self, count: int):
+        if count > 0:
+            self.metrics['overall']['rows_committed'] += count
+
     def feed(self, items: List[Any]):
+        if not items:
+            return
         if DEBUG_PIPELINE:
-            print(f"FEEDING BATCH of {len(items)} items")
-        for item in items:
-            if self._admission_queue is not None:
-                self._admission_queue.get(block=True)
-            wu = self.workunit_class.work_item("feed", item.data)
-            self.feed_stage.put(wu)
+            print(f"FEEDING BATCH of {len(items)} items (buffered={self.buffered_feed})")
+        if self.buffered_feed:
+            work_units: List[W] = []
+            for item in items:
+                if isinstance(item, self.workunit_class) and item.is_work_item():
+                    wu = item
+                    wu.stage = "feed"
+                    work_units.append(wu)
+                else:
+                    data = item.data if hasattr(item, "data") else item
+                    work_units.append(self.workunit_class.work_item("feed", data))
+            if len(work_units) == 1:
+                self.feed_stage.put(work_units[0])
+            else:
+                self.feed_stage.put(self.workunit_class.batch("feed", work_units))
+        else:
+            for item in items:
+                if self._admission_queue is not None:
+                    self._admission_queue.get(block=True)
+                data = item.data if hasattr(item, "data") else item
+                wu = self.workunit_class.work_item("feed", data)
+                self.feed_stage.put(wu)
+
+    def _format_queue_sizes(self) -> str:
+        parts = []
+        for name in self.order:
+            stage = self.stages.get(name)
+            if not stage:
+                continue
+            stage._update_queue_metrics()
+            parts.append(
+                f"{name}:in={stage.metrics['input_queue_size']}"
+                f"/wrk={stage.metrics['worker_queue_size']}"
+            )
+        return " ".join(parts)
 
     def run_with_provider(self, provider, max_items: Optional[int] = None):
         total = provider.get_total_work()
@@ -668,10 +735,16 @@ class Pipeline(Generic[W]):
             processed += len(batch)
             last_id = new_last_id
 
-            if processed % 1000 == 0 or processed == total:
-                committed = self.metrics['overall']['success']
-                in_flight = max(0, processed - committed)
-                print(f"→ {processed:,}/{total:,} fed", flush=True)
+            if processed % 10000 == 0 or processed == total:
+                pdcs_saved = self.metrics['overall']['success']
+                rows_saved = self.metrics['overall'].get('rows_committed', 0)
+                in_flight = max(0, processed - rows_saved)
+                q_sizes = self._format_queue_sizes()
+                print(
+                    f"→ {processed:,}/{total:,} fed | rows_saved={rows_saved:,} "
+                    f"in_flight≈{in_flight:,} pdcs={pdcs_saved:,} | queues: {q_sizes}",
+                    flush=True,
+                )
                 proc = getattr(self, '_geocode_processor', None)
                 if proc and hasattr(proc, 'run_stats'):
                     s = proc.run_stats
@@ -679,8 +752,29 @@ class Pipeline(Generic[W]):
                     if step == "geolocate_grok":
                         print(
                             f"[{step}] running grok_match={s.grok_match:,} "
-                            f"grok_fail={s.grok_fail:,} committed={committed:,} "
-                            f"in_flight≈{in_flight:,} save_err={s.save_errors:,}",
+                            f"grok_fail={s.grok_fail:,} rows_saved={rows_saved:,} "
+                            f"in_flight≈{in_flight:,} pdcs={pdcs_saved:,} save_err={s.save_errors:,}",
+                            flush=True,
+                        )
+                    elif step == "geolocate_census":
+                        snap = s.census_call_snapshot()
+                        print(
+                            f"[{step}] running census={s.census_match:,} "
+                            f"census_strip={s.census_strip_match:,} "
+                            f"preprocess={s.preprocess_match:,} "
+                            f"pending_api={s.pending_api_queued:,} rows_saved={rows_saved:,} "
+                            f"in_flight≈{in_flight:,} pdcs={pdcs_saved:,} save_err={s.save_errors:,} "
+                            f"census_calls={snap['census_calls']}+{snap['census_strip_calls']}strip "
+                            f"failures={snap['failures']} avg_s={snap['avg_s']:.1f} "
+                            f"rate={snap['rate_hr']:.1f}/hr",
+                            flush=True,
+                        )
+                    elif step == "geolocate_api":
+                        print(
+                            f"[{step}] running preprocess={s.preprocess_match:,} "
+                            f"other={s.other_match:,} grok_queued={s.grok_queued:,} "
+                            f"rows_saved={rows_saved:,} in_flight≈{in_flight:,} "
+                            f"pdcs={pdcs_saved:,} save_err={s.save_errors:,}",
                             flush=True,
                         )
                     else:
@@ -688,13 +782,13 @@ class Pipeline(Generic[W]):
                             f"[{step}] running census={s.census_match:,} "
                             f"census_strip={s.census_strip_match:,} "
                             f"preprocess={s.preprocess_match:,} other={s.other_match:,} "
-                            f"grok_queued={s.grok_queued:,} committed={committed:,} "
-                            f"in_flight≈{in_flight:,} save_err={s.save_errors:,}",
+                            f"grok_queued={s.grok_queued:,} rows_saved={rows_saved:,} "
+                            f"in_flight≈{in_flight:,} pdcs={pdcs_saved:,} save_err={s.save_errors:,}",
                             flush=True,
                         )
                 else:
                     print(
-                        f"[pipeline] committed={committed:,} in_flight≈{in_flight:,}",
+                        f"[pipeline] rows_saved={rows_saved:,} in_flight≈{in_flight:,} pdcs={pdcs_saved:,}",
                         flush=True,
                     )
 
@@ -723,8 +817,8 @@ class Pipeline(Generic[W]):
             )
         o = self.metrics['overall']
         print(
-            f"  overall: fed={o.get('total', 0):,} committed={o.get('success', 0):,} "
-            f"expected={o.get('expected', 0):,}",
+            f"  overall: fed={o.get('total', 0):,} rows_saved={o.get('rows_committed', 0):,} "
+            f"pdcs={o.get('success', 0):,} expected={o.get('expected', 0):,}",
             flush=True,
         )
 
@@ -749,13 +843,12 @@ class Pipeline(Generic[W]):
         print(f"shutdown order{self.order}")
 
         for i, stage_name in enumerate(self.order):
-            # Poison with sentinels = current_workers + extra for batcher/safety
             stage = self.stages[stage_name]
             nThreads = stage.current_workers.get()
-            for _ in range(nThreads ):
-                stage.input_queue.put(WorkUnit.sentinel())
+            # One sentinel for the batcher; it fans out per-worker sentinels on worker_queue.
+            stage.input_queue.put(WorkUnit.sentinel())
 
-            print(f"Poisoned {stage.name} with {nThreads} sentinels")
+            print(f"Poisoned {stage.name} with 1 input sentinel ({nThreads} workers)")
             if stage.name == 'result':
                  print(f"result sentinels {nThreads}") # this is here for a breakpoint
 
@@ -782,6 +875,7 @@ class Pipeline(Generic[W]):
     def get_status(self) -> dict:
         prefixed = {}
         for stage_name, stage in ({"feed": self.feed_stage, **self.stages, "result": self.result_consumer}).items():
+            stage._update_queue_metrics()
             prefix = f"{stage_name}_"
             for k, v in stage.metrics.items():
                 prefixed[f"{prefix}{k}"] = v
@@ -792,6 +886,7 @@ class Pipeline(Generic[W]):
             'overall_expected': self.metrics['overall']['expected'],
             'overall_failure': self.metrics['overall']['failure'],
             'in_flight': sum(s.metrics['current_queue'] for s in self.stages.values()),
+            'queue_sizes': self._format_queue_sizes(),
         })
 
         return {

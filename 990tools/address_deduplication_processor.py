@@ -464,6 +464,9 @@ class AddressDeduplicationProcessor(BaseProcessor):
         "CREATE INDEX IF NOT EXISTS idx_addresses_colocator ON Addresses (colocator)",
         "CREATE INDEX IF NOT EXISTS idx_addresses_canonical_covering ON Addresses(canonical_address, address_id, master_id, geocoding_id)",
     )
+    # Redundant with canonical + dedup_canon_groups; OOM-prone on 16GB hosts.
+    # Try once; on OOM skip without failing the address step.
+    _OPTIONAL_ADDRESS_INDEXES = frozenset({"idx_addresses_canonical_covering"})
 
     @staticmethod
     def _emit_progress(message: str) -> None:
@@ -613,24 +616,134 @@ class AddressDeduplicationProcessor(BaseProcessor):
                 log_error(f"Failed to setup pending_canonicals: {e}", exc_info=True)
                 raise
     
+    def _duckdb_mem_threads(self) -> tuple[str, int]:
+        """Memory/thread settings for 16GB hosts — never claim more RAM than available."""
+        import os
+        mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "10GB")
+        # Cap threads at 1 for index builds; heavy ART indexes OOM with parallel builds.
+        return mem, 1
+
+    def _existing_address_indexes(self, conn) -> set[str]:
+        rows = conn.execute(
+            """
+            SELECT index_name FROM duckdb_indexes()
+            WHERE table_name = 'Addresses'
+            """
+        ).fetchall()
+        return {r[0] for r in rows if r and r[0]}
+
+    def _rebuild_address_indexes(self) -> None:
+        """Create missing Addresses indexes one-by-one with low memory + CHECKPOINT.
+
+        Safe to re-run after OOM: IF NOT EXISTS + skip already-present names.
+        """
+        mem, threads = self._duckdb_mem_threads()
+        step_start = time.time()
+        self._emit_progress(
+            f"Step 5/6: rebuilding Addresses indexes "
+            f"(memory={mem}, threads={threads}, one at a time)..."
+        )
+        with self.db_ops.acquire_write_conn() as conn:
+            conn.execute(f"SET memory_limit='{mem}'")
+            conn.execute("SET preserve_insertion_order=false")
+            conn.execute(f"SET threads={threads}")
+            existing = self._existing_address_indexes(conn)
+            self._emit_progress(
+                f"  already present: {sorted(existing) or '(none)'}"
+            )
+            for idx, ddl in enumerate(self._ADDRESS_INDEX_DDL, start=1):
+                # CREATE INDEX IF NOT EXISTS idx_name ON ...
+                name = None
+                parts = ddl.split()
+                for i, p in enumerate(parts):
+                    if p.upper() == "EXISTS" and i + 1 < len(parts):
+                        name = parts[i + 1]
+                        break
+                if name and name in existing:
+                    self._emit_progress(
+                        f"  index {idx}/{len(self._ADDRESS_INDEX_DDL)} "
+                        f"{name} already exists — skip"
+                    )
+                    continue
+                idx_start = time.time()
+                self._emit_progress(
+                    f"  building index {idx}/{len(self._ADDRESS_INDEX_DDL)}: {name or ddl[:60]}"
+                )
+                try:
+                    conn.execute(ddl)
+                    self._commit_or_raise(
+                        conn, f"index {idx}/{len(self._ADDRESS_INDEX_DDL)}"
+                    )
+                    try:
+                        conn.execute("CHECKPOINT")
+                    except Exception as cp_exc:
+                        log_warning(f"CHECKPOINT after index {name}: {cp_exc}")
+                    existing.add(name or "")
+                    self._emit_progress(
+                        f"  index {idx}/{len(self._ADDRESS_INDEX_DDL)} "
+                        f"{name} in {time.time() - idx_start:.1f}s"
+                    )
+                except Exception as exc:
+                    err = str(exc).lower()
+                    oom = "out of memory" in err or "failed to pin" in err or "could not allocate" in err
+                    if oom and name in self._OPTIONAL_ADDRESS_INDEXES:
+                        self._emit_progress(
+                            f"  OPTIONAL index {name} OOM — skipping (covered by "
+                            f"idx_addresses_canonical / idx_dedup_canon_groups). {exc}"
+                        )
+                        log_warning(f"Skipped optional index {name} after OOM: {exc}")
+                        try:
+                            conn.execute("ROLLBACK")
+                        except Exception:
+                            pass
+                        continue
+                    if oom:
+                        log_error(
+                            f"OOM building {name}; indexes so far: {sorted(existing)}. "
+                            f"Re-run address step to resume. Error: {exc}"
+                        )
+                        raise
+                    raise
+        self._emit_progress(
+            f"Step 5/6 done in {time.time() - step_start:.1f}s — indexes rebuilt"
+        )
+
     def _sql_deduplicate_and_geocode(self) -> int:
         """SQL dedup with explicit commits so table swap survives OOM during index rebuild."""
 
         self._emit_progress("Running SQL master/child assignment + geocoding (incremental)...")
         phase_start = time.time()
+        mem, threads = self._duckdb_mem_threads()
 
         unprocessed = self._count_null_master()
         if unprocessed == 0:
-            self._emit_progress("Nothing to do — all addresses already have master_id set.")
-            return 0
+            self._emit_progress(
+                "All addresses already have master_id set — "
+                "resuming index rebuild / vacuum only if needed."
+            )
+            self._rebuild_address_indexes()
+            # Skip VACUUM on resume (memory-hungry on 94M-row table); ANALYZE only.
+            step_start = time.time()
+            self._emit_progress("Step 6/6: ANALYZE Addresses + Geocoding (no VACUUM)...")
+            with self.db_ops.acquire_write_conn() as conn:
+                conn.execute(f"SET memory_limit='{mem}'")
+                conn.execute(f"SET threads={threads}")
+                conn.execute("ANALYZE Addresses")
+                conn.execute("ANALYZE Geocoding")
+                self._commit_or_raise(conn, "step 6 analyze")
+            self._emit_progress(f"Step 6/6 done in {time.time() - step_start:.1f}s")
+            updated_count = self.db_ops.execute_query(
+                "SELECT COUNT(*) FROM Addresses WHERE master_id IS NOT NULL"
+            ).fetchone()[0]
+            return int(updated_count) if updated_count is not None else 0
 
         self._emit_progress(f"Processing {unprocessed:,} addresses with master_id NULL")
         inserted = 0
 
         with self.db_ops.acquire_write_conn() as conn:
-            conn.execute("PRAGMA memory_limit = '16GB'")
+            conn.execute(f"SET memory_limit='{mem}'")
             conn.execute("SET preserve_insertion_order=false")
-            conn.execute("SET threads=2")
+            conn.execute(f"SET threads={max(threads, 2)}")
 
             step_start = time.time()
             self._emit_progress("Step 1/6: building pending_canonicals from all addresses...")
@@ -693,6 +806,7 @@ class AddressDeduplicationProcessor(BaseProcessor):
                     FROM Geocoding existing
                     WHERE existing.canonical_address = g.canonical_address
                 )
+                AND COALESCE(g.po_box, '') = ''
             """)
             row = result.fetchone()
             inserted = int(row[0]) if row and row[0] is not None else 0
@@ -703,9 +817,9 @@ class AddressDeduplicationProcessor(BaseProcessor):
             self._commit_or_raise(conn, "step 2 geocoding")
 
         with self.db_ops.acquire_write_conn() as conn:
-            conn.execute("PRAGMA memory_limit = '16GB'")
+            conn.execute(f"SET memory_limit='{mem}'")
             conn.execute("SET preserve_insertion_order=false")
-            conn.execute("SET threads=2")
+            conn.execute(f"SET threads={max(threads, 2)}")
 
             step_start = time.time()
             self._emit_progress("Step 3/6: building address_map...")
@@ -781,29 +895,18 @@ class AddressDeduplicationProcessor(BaseProcessor):
 
         remaining_null = self._verify_dedup_applied(unprocessed, "step 4 commit")
 
-        step_start = time.time()
-        self._emit_progress("Step 5/6: rebuilding Addresses indexes (one at a time)...")
-        with self.db_ops.acquire_write_conn() as conn:
-            conn.execute("PRAGMA memory_limit = '16GB'")
-            conn.execute("SET preserve_insertion_order=false")
-            conn.execute("SET threads=2")
-            for idx, ddl in enumerate(self._ADDRESS_INDEX_DDL, start=1):
-                idx_start = time.time()
-                conn.execute(ddl)
-                self._commit_or_raise(conn, f"index {idx}/{len(self._ADDRESS_INDEX_DDL)}")
-                self._emit_progress(
-                    f"  index {idx}/{len(self._ADDRESS_INDEX_DDL)} in {time.time() - idx_start:.1f}s"
-                )
-        self._emit_progress(
-            f"Step 5/6 done in {time.time() - step_start:.1f}s — indexes rebuilt"
-        )
+        self._rebuild_address_indexes()
 
         step_start = time.time()
-        self._emit_progress("Step 6/6: VACUUM ANALYZE Addresses + Geocoding...")
+        # VACUUM on 94M rows needs more RAM than this host has; ANALYZE is enough.
+        self._emit_progress("Step 6/6: ANALYZE Addresses + Geocoding (no VACUUM)...")
         with self.db_ops.acquire_write_conn() as conn:
-            conn.execute("VACUUM ANALYZE Addresses")
-            conn.execute("VACUUM ANALYZE Geocoding")
-            self._commit_or_raise(conn, "step 6 vacuum")
+            conn.execute(f"SET memory_limit='{mem}'")
+            conn.execute("SET preserve_insertion_order=false")
+            conn.execute(f"SET threads={threads}")
+            conn.execute("ANALYZE Addresses")
+            conn.execute("ANALYZE Geocoding")
+            self._commit_or_raise(conn, "step 6 analyze")
         self._emit_progress(f"Step 6/6 done in {time.time() - step_start:.1f}s")
 
         updated_count = self.db_ops.execute_query(

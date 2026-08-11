@@ -2,8 +2,8 @@
 """
 geolocate_prev_processor.py - Fast geolocation from prior-run archive cache.
 
-Bookend for geolocate_archive. Runs first in the geolocate trilogy
-(before geolocate_new / geolocate_grok / geolocate_archive):
+FRONT bookend of the geolocate pipeline:
+  geolocate_prev → census → api → grok → geolocate_archive (BACK bookend)
 
 0. Delete empty address shells (no street/city/zip, no geocoding_id, no colocator).
    XML often emits officer/contractor Address rows with no USAddress content;
@@ -12,10 +12,13 @@ Bookend for geolocate_archive. Runs first in the geolocate trilogy
 1. Load geocode_archive_distinct.tsv.gz → Geocoding (colocator + geocoding_status)
    Columns: canonical_address, colocator, [geocoding_status]
    Older 2-column archives (canonical + colocator only) still work.
-2. Propagate colocators to owner tables via Addresses join
+2. Propagate Geocoding → Addresses → owners (so archive hits are live before census)
 3. Backfill lat/lon from colocator (PO: / LL:)
-4. Compute loose_colocator (0.5° grid) later on Addresses + owners —
+4. Compute loose_colocator (0.5° grid) on Addresses + owners —
    loose_colocator is NOT stored on Geocoding and is not part of the archive.
+
+New LL: from census/api/grok are applied live (Addresses+owners on each match)
+and finalized again at geolocate_archive (same finalize_colocators_from_geocoding).
 """
 
 from __future__ import annotations
@@ -63,7 +66,29 @@ class GeolocatePrevProcessor:
         updated = self.apply_geocode_archive_cache()
         log_info(f"Archive cache applied: {updated:,} Geocoding records touched")
 
-        self.populate_lat_lon_and_loose_colocators()
+        # DEFER Geocoding→Addresses→owners colocator/lat-lon finalize.
+        # On 16GB hosts with ~94M Addresses, those UPDATEs OOM and poison the
+        # singleton DuckDB write connection so geolocate_census never starts.
+        # Re-run finalize at geolocate_archive (or a dedicated low-memory pass)
+        # after census has cleared the pending queue.
+        import os
+        if os.environ.get("GEOLOCATE_PREV_FINALIZE", "").strip() in ("1", "true", "yes"):
+            try:
+                self.finalize_colocators_from_geocoding(log_prefix="geolocate_prev")
+            except Exception as e:
+                log_warning(
+                    f"geolocate_prev finalize colocators failed (non-fatal): {e}"
+                )
+        else:
+            log_info(
+                "Skipping colocator finalize in geolocate_prev "
+                "(set GEOLOCATE_PREV_FINALIZE=1 to force). "
+                "Will run at geolocate_archive bookend."
+            )
+            print(
+                "[geolocate_prev] Skipping colocator finalize → free RAM for census",
+                flush=True,
+            )
 
         log_info("=== geolocate_prev complete ===")
         return updated
@@ -196,9 +221,21 @@ class GeolocatePrevProcessor:
         self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_zips_zip ON Zips(zip);")
 
     def _tune_conn(self, conn):
+        import os
+        mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "8GB")
         conn.execute("SET preserve_insertion_order=false")
         conn.execute("SET threads=1")
-        conn.execute("SET memory_limit='12GB'")
+        conn.execute(f"SET memory_limit='{mem}'")
+
+    def _safe_commit(self, conn, label: str) -> None:
+        try:
+            conn.commit()
+        except Exception as ex:
+            log_warning(f"commit after {label}: {ex}")
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
 
     def _archive_already_applied_count(self, conn) -> int:
         """Rows that look like archive/API wins (idempotency skip signal)."""
@@ -264,13 +301,9 @@ class GeolocatePrevProcessor:
                             chunk, chunk_num, total_geocoding
                         )
 
-            with self.db_ops.acquire_write_conn() as conn:
-                self._tune_conn(conn)
-                self._propagate_colocators_to_owners(conn)
-                for table in ["Geocoding", "Addresses", "Charities", "Grants"]:
-                    print(f"[geolocate_prev] VACUUM ANALYZE {table}...", flush=True)
-                    conn.execute(f"VACUUM ANALYZE {table};")
-
+            # Skip VACUUM ANALYZE here — it pins multi‑GB on 16GB hosts and leaves the
+            # write connection near the memory ceiling so finalize OOMs immediately.
+            # ANALYZE can run later via optimize_database after census.
             log_info(f"Archive cache load complete: {total_geocoding:,} Geocoding records updated")
             print(f"[geolocate_prev] Archive cache complete: {total_geocoding:,} rows", flush=True)
             return total_geocoding
@@ -389,13 +422,109 @@ class GeolocatePrevProcessor:
             WHERE g.geocoding_id = m.geocoding_id
         """)
 
+        # Always fill Addresses from this chunk's geocoding wins (do not leave LL only on Geocoding).
+        conn.execute("""
+            UPDATE Addresses a
+            SET colocator = m.colocator,
+                latitude = COALESCE(a.latitude, m.parsed_lat),
+                longitude = COALESCE(a.longitude, m.parsed_lon)
+            FROM update_map m
+            WHERE a.geocoding_id = m.geocoding_id
+              AND (a.colocator IS NULL OR TRIM(a.colocator) = '')
+        """)
+
         conn.execute("DROP TABLE IF EXISTS chunk_cache; DROP TABLE IF EXISTS update_map;")
         return map_count
 
-    def _propagate_colocators_to_owners(self, conn):
-        """Owner colocator backfill via Geocoding join (skip Addresses UPDATE — DuckDB index bug)."""
-        log_info("Propagating colocators from Geocoding to owner tables...")
-        print("[geolocate_prev] Propagating colocators to owner tables (via Geocoding)...", flush=True)
+    def finalize_colocators_from_geocoding(self, log_prefix: str = "geolocate") -> None:
+        """
+        Geocoding → Addresses → owners, then lat/lon + loose_colocator.
+
+        Shared by:
+        - FRONT bookend (geolocate_prev) after archive TSV load
+        - BACK bookend (geolocate_archive) after census/api/grok, before TSV export
+
+        grant_match reads Grants/Charities.colocator (and loose), not Addresses.
+        DOT / address slices read Addresses.colocator.
+
+        Each address_type / owner bucket uses a fresh write-context so OOM on one
+        slice cannot leave the shared writer permanently at the memory ceiling.
+        """
+        log_info(f"[{log_prefix}] Finalizing colocators Geocoding → Addresses → owners + loose")
+        print(f"[{log_prefix}] Finalizing colocators from Geocoding...", flush=True)
+        self._propagate_colocators_to_owners(conn=None, log_prefix=log_prefix)
+        self.populate_lat_lon_and_loose_colocators(log_prefix=log_prefix)
+
+    def _with_fresh_write(self, label: str, fn) -> bool:
+        """Run fn(conn) on a fresh write connection; return False on OOM/error (non-fatal)."""
+        try:
+            with self.db_ops.acquire_write_conn() as conn:
+                self._tune_conn(conn)
+                fn(conn)
+                self._safe_commit(conn, label)
+            return True
+        except Exception as ex:
+            log_warning(f"{label} failed (continuing): {ex}")
+            return False
+
+    def _propagate_colocators_to_owners(self, conn=None, log_prefix: str = "geolocate_prev"):
+        """
+        Propagate colocators: Geocoding → Addresses (if still empty), then Addresses → owners.
+
+        Fresh write connection per slice so one OOM cannot poison the rest of the run.
+        Never uses DatabaseOperations.execute_query (sys.exit on OOM).
+        """
+        log_info("Propagating colocators Geocoding → Addresses → owners...")
+        print(f"[{log_prefix}] Geocoding → Addresses colocator fill (by address_type)...", flush=True)
+
+        types = [
+            "bmf", "charity", "contractor", "dot_carrier_mail", "dot_carrier_phy",
+            "fec_candidate_spending", "fec_committee", "fec_committee_transaction",
+            "fec_contributor", "fec_operating_expenditure", "grant",
+            "nppes_mailing", "nppes_practice", "ofac_sanction", "officer",
+            "politicalcontribution",
+        ]
+        # Prefer live distinct list when cheap; fall back to static list on OOM.
+        def _load_types(c):
+            return [
+                r[0]
+                for r in c.execute(
+                    """
+                    SELECT DISTINCT address_type FROM Addresses
+                    WHERE geocoding_id IS NOT NULL
+                    ORDER BY 1
+                    """
+                ).fetchall()
+                if r and r[0]
+            ]
+
+        loaded: list = []
+        self._with_fresh_write("list_address_types", lambda c: loaded.extend(_load_types(c)))
+        if loaded:
+            types = loaded
+
+        for at in types:
+            def _fill(c, address_type=at):
+                print(f"[{log_prefix}]   Addresses fill type={address_type}...", flush=True)
+                c.execute(
+                    """
+                    UPDATE Addresses a
+                    SET colocator = g.colocator,
+                        latitude = COALESCE(a.latitude, g.latitude),
+                        longitude = COALESCE(a.longitude, g.longitude)
+                    FROM Geocoding g
+                    WHERE a.geocoding_id = g.geocoding_id
+                      AND a.address_type = ?
+                      AND g.colocator IS NOT NULL AND TRIM(g.colocator) != ''
+                      AND (a.colocator IS NULL OR TRIM(a.colocator) = '')
+                    """,
+                    [address_type],
+                )
+
+            self._with_fresh_write(f"addresses_colocator_{at}", _fill)
+
+        print(f"[{log_prefix}] Propagating colocators to owner tables...", flush=True)
+        buckets = [f"{i:x}" for i in range(16)]
         for table, id_col, addr_type in [
             ("Charities", "charity_id", "charity"),
             ("Grants", "grant_id", "grant"),
@@ -403,103 +532,164 @@ class GeolocatePrevProcessor:
             ("Contractors", "contractor_id", "contractor"),
             ("PoliticalContributions", "political_id", "politicalcontribution"),
         ]:
-            try:
-                print(f"[geolocate_prev] Owner colocator → {table}...", flush=True)
-                conn.execute(f"""
-                    UPDATE {table} t
-                    SET colocator = sub.colocator
-                    FROM (
-                        SELECT a.owner_id, ANY_VALUE(g.colocator) AS colocator
-                        FROM Addresses a
-                        INNER JOIN Geocoding g ON a.geocoding_id = g.geocoding_id
-                        WHERE a.address_type = '{addr_type}'
-                          AND g.colocator IS NOT NULL
-                          AND (
-                                g.geocoding_status = 'Match:Archive'
-                             OR g.geocoding_status LIKE 'Match:%'
-                             OR g.geocoding_status LIKE 'grok:%'
-                          )
-                          AND a.owner_id IS NOT NULL
-                        GROUP BY a.owner_id
-                    ) sub
-                    WHERE t.{id_col} = sub.owner_id
-                      AND (t.colocator IS NULL OR t.colocator = '')
-                """)
-            except Exception as ex:
-                log_warning(f"Could not propagate to {table}: {ex}")
+            print(f"[{log_prefix}] Owner colocator → {table} (16 buckets)...", flush=True)
+            for b in buckets:
+                def _owner(c, t=table, ic=id_col, at=addr_type, bucket=b):
+                    c.execute(
+                        f"""
+                        UPDATE {t} t
+                        SET colocator = sub.colocator
+                        FROM (
+                            SELECT a.owner_id,
+                                   ANY_VALUE(COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)) AS colocator
+                            FROM Addresses a
+                            INNER JOIN Geocoding g ON a.geocoding_id = g.geocoding_id
+                            WHERE a.address_type = '{at}'
+                              AND a.owner_id IS NOT NULL
+                              AND LOWER(SUBSTR(CAST(a.owner_id AS VARCHAR), 1, 1)) = '{bucket}'
+                              AND (
+                                    (a.colocator IS NOT NULL AND TRIM(a.colocator) != '')
+                                 OR (g.colocator IS NOT NULL AND TRIM(g.colocator) != '')
+                              )
+                            GROUP BY a.owner_id
+                        ) sub
+                        WHERE t.{ic} = sub.owner_id
+                          AND (t.colocator IS NULL OR t.colocator = '')
+                        """
+                    )
 
-    def populate_lat_lon_and_loose_colocators(self):
+                self._with_fresh_write(f"{table}_colocator_{b}", _owner)
+
+    def populate_lat_lon_and_loose_colocators(self, log_prefix: str = "geolocate_prev"):
         """
-        After archive colocators are on Geocoding/owners:
-        backfill lat/lon, then compute loose_colocator on Addresses + owner tables.
-        Geocoding does not store loose_colocator.
+        Backfill lat/lon from colocator, then compute loose_colocator on Addresses + owners.
+        Geocoding does not store loose_colocator. Run at front (prev) and back (archive).
+
+        All bulk UPDATEs go through a tuned write connection (no execute_query OOM exit).
         """
-        log_info("Populating lat/lon (from colocator) and loose_colocator on Addresses/owners...")
+        log_info(f"[{log_prefix}] Populating lat/lon + loose_colocator on Addresses/owners...")
+        print(f"[{log_prefix}] lat/lon + loose_colocator...", flush=True)
 
-        # Ensure Addresses has loose_colocator (schema has it; older DBs may not)
-        self.db_ops.execute_query(
-            "ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS loose_colocator VARCHAR;"
-        )
-        self.db_ops.execute_query("ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS latitude DOUBLE;")
-        self.db_ops.execute_query("ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS longitude DOUBLE;")
+        with self.db_ops.acquire_write_conn() as conn:
+            self._tune_conn(conn)
+            for ddl in (
+                "ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS loose_colocator VARCHAR;",
+                "ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS latitude DOUBLE;",
+                "ALTER TABLE Addresses ADD COLUMN IF NOT EXISTS longitude DOUBLE;",
+            ):
+                try:
+                    conn.execute(ddl)
+                except Exception:
+                    pass
+            for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
+                for col_ddl in (
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS lat DOUBLE;",
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS lon DOUBLE;",
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS loose_colocator VARCHAR;",
+                ):
+                    try:
+                        conn.execute(col_ddl)
+                    except Exception:
+                        pass
+            self._safe_commit(conn, "schema_lat_lon")
 
-        for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
-            self.db_ops.execute_query(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS lat DOUBLE;")
-            self.db_ops.execute_query(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS lon DOUBLE;")
-            self.db_ops.execute_query(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS loose_colocator VARCHAR;")
+            for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
+                self._backfill_lat_lon_for_table_conn(conn, table, log_prefix)
 
-        for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
-            self._backfill_lat_lon_for_table(table)
+            # Addresses: by address_type
+            types = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT DISTINCT address_type FROM Addresses WHERE geocoding_id IS NOT NULL ORDER BY 1"
+                ).fetchall()
+                if r and r[0]
+            ] or ["charity", "grant", "officer", "contractor"]
 
-        # Addresses: copy lat/lon from Geocoding, then loose grid from lat/lon
-        self.db_ops.execute_query("""
-            UPDATE Addresses a
-            SET latitude = g.latitude,
-                longitude = g.longitude,
-                colocator = COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)
-            FROM Geocoding g
-            WHERE a.geocoding_id = g.geocoding_id
-              AND g.latitude IS NOT NULL
-              AND a.latitude IS NULL
-        """)
-        self.db_ops.execute_query("""
-            UPDATE Addresses a
-            SET latitude = TRY_CAST(split_part(g.colocator, ':', 2) AS DOUBLE),
-                longitude = TRY_CAST(split_part(g.colocator, ':', 3) AS DOUBLE),
-                colocator = COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)
-            FROM Geocoding g
-            WHERE a.geocoding_id = g.geocoding_id
-              AND a.latitude IS NULL
-              AND g.colocator LIKE 'LL:%'
-        """)
-        self.db_ops.execute_query("""
-            UPDATE Addresses
-            SET loose_colocator = 'LL:' || ROUND(latitude / 0.5) * 0.5
-                                      || ':' || ROUND(longitude / 0.5) * 0.5
-            WHERE (loose_colocator IS NULL OR TRIM(loose_colocator) = '')
-              AND latitude IS NOT NULL AND longitude IS NOT NULL
-        """)
+            for at in types:
+                try:
+                    print(f"[{log_prefix}] Addresses lat/lon from Geocoding type={at}...", flush=True)
+                    conn.execute(
+                        """
+                        UPDATE Addresses a
+                        SET latitude = g.latitude,
+                            longitude = g.longitude,
+                            colocator = COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)
+                        FROM Geocoding g
+                        WHERE a.geocoding_id = g.geocoding_id
+                          AND a.address_type = ?
+                          AND g.latitude IS NOT NULL
+                          AND a.latitude IS NULL
+                        """,
+                        [at],
+                    )
+                    conn.execute(
+                        """
+                        UPDATE Addresses a
+                        SET latitude = TRY_CAST(split_part(g.colocator, ':', 2) AS DOUBLE),
+                            longitude = TRY_CAST(split_part(g.colocator, ':', 3) AS DOUBLE),
+                            colocator = COALESCE(NULLIF(TRIM(a.colocator), ''), g.colocator)
+                        FROM Geocoding g
+                        WHERE a.geocoding_id = g.geocoding_id
+                          AND a.address_type = ?
+                          AND a.latitude IS NULL
+                          AND g.colocator LIKE 'LL:%'
+                        """,
+                        [at],
+                    )
+                    conn.execute(
+                        """
+                        UPDATE Addresses
+                        SET loose_colocator = 'LL:' || ROUND(latitude / 0.5) * 0.5
+                                                  || ':' || ROUND(longitude / 0.5) * 0.5
+                        WHERE address_type = ?
+                          AND (loose_colocator IS NULL OR TRIM(loose_colocator) = '')
+                          AND latitude IS NOT NULL AND longitude IS NOT NULL
+                        """,
+                        [at],
+                    )
+                    self._safe_commit(conn, f"addresses_latlon_{at}")
+                except Exception as ex:
+                    log_warning(f"Addresses lat/lon failed type={at}: {ex}")
+                    try:
+                        conn.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    self._tune_conn(conn)
 
-        # Owners: derive loose from their lat/lon (filled above)
-        loose_sql = """
-            UPDATE {table}
-            SET loose_colocator = 'LL:' || ROUND(lat / 0.5) * 0.5 || ':' || ROUND(lon / 0.5) * 0.5
-            WHERE (loose_colocator IS NULL OR loose_colocator = '') AND lat IS NOT NULL
-        """
-        for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
-            self.db_ops.execute_query(loose_sql.format(table=table))
+            for table in ["Grants", "Charities", "Officers", "Contractors", "PoliticalContributions"]:
+                try:
+                    conn.execute(
+                        f"""
+                        UPDATE {table}
+                        SET loose_colocator = 'LL:' || ROUND(lat / 0.5) * 0.5 || ':' || ROUND(lon / 0.5) * 0.5
+                        WHERE (loose_colocator IS NULL OR loose_colocator = '') AND lat IS NOT NULL
+                        """
+                    )
+                    self._safe_commit(conn, f"{table}_loose")
+                except Exception as ex:
+                    log_warning(f"loose_colocator on {table}: {ex}")
+                    try:
+                        conn.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    self._tune_conn(conn)
 
-        self.db_ops.execute_query(
-            "CREATE INDEX IF NOT EXISTS idx_addresses_loose_colocator ON Addresses(loose_colocator);"
-        )
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator);")
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator);")
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_grants_lat_lon ON Grants(lat, lon);")
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_lat_lon ON Charities(lat, lon);")
+            for ddl in (
+                "CREATE INDEX IF NOT EXISTS idx_addresses_loose_colocator ON Addresses(loose_colocator);",
+                "CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator);",
+                "CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator);",
+                "CREATE INDEX IF NOT EXISTS idx_grants_lat_lon ON Grants(lat, lon);",
+                "CREATE INDEX IF NOT EXISTS idx_charities_lat_lon ON Charities(lat, lon);",
+            ):
+                try:
+                    conn.execute(ddl)
+                    self._safe_commit(conn, "index")
+                except Exception as ex:
+                    log_warning(f"index create: {ex}")
 
-        log_info("lat/lon + loose_colocator population complete (Addresses + owners)")
+        log_info(f"[{log_prefix}] lat/lon + loose_colocator population complete (Addresses + owners)")
 
-    def _backfill_lat_lon_for_table(self, table: str):
+    def _backfill_lat_lon_for_table_conn(self, conn, table: str, log_prefix: str = "geolocate_prev"):
         owner_meta = {
             "Grants": ("grant_id", "grant"),
             "Charities": ("charity_id", "charity"),
@@ -508,42 +698,66 @@ class GeolocatePrevProcessor:
             "PoliticalContributions": ("political_id", "politicalcontribution"),
         }
         id_col, addr_type = owner_meta[table]
-        self.db_ops.execute_query(f"""
-            UPDATE {table} t
-            SET colocator = COALESCE(NULLIF(t.colocator, ''), sub.colocator)
-            FROM (
-                SELECT a.owner_id, ANY_VALUE(g.colocator) AS colocator
+        print(f"[{log_prefix}] lat/lon backfill {table}...", flush=True)
+        try:
+            conn.execute(
+                f"""
+                UPDATE {table} t
+                SET colocator = COALESCE(NULLIF(t.colocator, ''), sub.colocator)
+                FROM (
+                    SELECT a.owner_id, ANY_VALUE(g.colocator) AS colocator
+                    FROM Addresses a
+                    INNER JOIN Geocoding g ON a.geocoding_id = g.geocoding_id
+                    WHERE a.address_type = '{addr_type}'
+                      AND g.colocator IS NOT NULL
+                      AND a.owner_id IS NOT NULL
+                    GROUP BY a.owner_id
+                ) sub
+                WHERE t.{id_col} = sub.owner_id
+                  AND (t.colocator IS NULL OR t.colocator = '')
+                """
+            )
+            conn.execute(
+                f"""
+                UPDATE {table} t
+                SET lat = z.lat, lon = z.lon
+                FROM Zips z
+                WHERE t.colocator LIKE 'PO:%'
+                  AND z.zip = split_part(t.colocator, ':', 3)
+                  AND t.lat IS NULL
+                """
+            )
+            conn.execute(
+                f"""
+                UPDATE {table} t
+                SET lat = TRY_CAST(split_part(t.colocator, ':', 2) AS DOUBLE),
+                    lon = TRY_CAST(split_part(t.colocator, ':', 3) AS DOUBLE)
+                WHERE t.colocator LIKE 'LL:%' AND t.lat IS NULL
+                """
+            )
+            conn.execute(
+                f"""
+                UPDATE {table} t
+                SET lat = g.latitude, lon = g.longitude
                 FROM Addresses a
                 INNER JOIN Geocoding g ON a.geocoding_id = g.geocoding_id
-                WHERE a.address_type = '{addr_type}'
-                  AND g.colocator IS NOT NULL
-                  AND a.owner_id IS NOT NULL
-                GROUP BY a.owner_id
-            ) sub
-            WHERE t.{id_col} = sub.owner_id
-              AND (t.colocator IS NULL OR t.colocator = '')
-        """)
-        self.db_ops.execute_query(f"""
-            UPDATE {table} t
-            SET lat = z.lat, lon = z.lon
-            FROM Zips z
-            WHERE t.colocator LIKE 'PO:%'
-              AND z.zip = split_part(t.colocator, ':', 3)
-              AND t.lat IS NULL
-        """)
-        self.db_ops.execute_query(f"""
-            UPDATE {table} t
-            SET lat = TRY_CAST(split_part(t.colocator, ':', 2) AS DOUBLE),
-                lon = TRY_CAST(split_part(t.colocator, ':', 3) AS DOUBLE)
-            WHERE t.colocator LIKE 'LL:%' AND t.lat IS NULL
-        """)
-        self.db_ops.execute_query(f"""
-            UPDATE {table} t
-            SET lat = g.latitude, lon = g.longitude
-            FROM Addresses a
-            INNER JOIN Geocoding g ON a.geocoding_id = g.geocoding_id
-            WHERE t.{id_col} = a.owner_id
-              AND a.address_type = '{addr_type}'
-              AND t.lat IS NULL
-              AND g.latitude IS NOT NULL
-        """)
+                WHERE t.{id_col} = a.owner_id
+                  AND a.address_type = '{addr_type}'
+                  AND t.lat IS NULL
+                  AND g.latitude IS NOT NULL
+                """
+            )
+            self._safe_commit(conn, f"{table}_latlon")
+        except Exception as ex:
+            log_warning(f"lat/lon backfill {table}: {ex}")
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            self._tune_conn(conn)
+
+    def _backfill_lat_lon_for_table(self, table: str):
+        """Legacy entry — opens its own write conn (prefer _backfill_lat_lon_for_table_conn)."""
+        with self.db_ops.acquire_write_conn() as conn:
+            self._tune_conn(conn)
+            self._backfill_lat_lon_for_table_conn(conn, table)

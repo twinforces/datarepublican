@@ -170,10 +170,59 @@ def ensure_download(
         log_info(f"Up to date: {dest.name} ({dest.stat().st_size:,} bytes)")
         return False
 
+    # Stale or missing: never curl -C onto an old full file. Resume only makes
+    # sense for a partial download of the *same* remote object; splicing a new
+    # OFAC/CMS body onto a previous version produces "junk after document element".
+    use_resume = resume
+    if dest.exists():
+        local_size = dest.stat().st_size
+        remote_len = remote.content_length
+        same_object = False
+        saved = _load_sidecar(meta_path)
+        if saved and remote.etag and saved.get("etag") and saved.get("etag") == remote.etag:
+            same_object = True
+        if (
+            saved
+            and remote.last_modified
+            and saved.get("last_modified")
+            and saved.get("last_modified") == remote.last_modified.isoformat()
+        ):
+            same_object = True
+        # Partial of same object: allow resume. Otherwise wipe and full GET.
+        if same_object and remote_len and local_size < remote_len:
+            use_resume = True
+            log_info(
+                f"Resuming partial {dest.name} ({local_size:,}/{remote_len:,} bytes)"
+            )
+        else:
+            use_resume = False
+            log_info(f"Replacing stale {dest.name} with full download (no resume)")
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+            if meta_path.exists():
+                try:
+                    meta_path.unlink()
+                except OSError:
+                    pass
+
     log_info(f"Downloading {url} → {dest}")
-    curl_download(url, dest, resume=resume, timeout=timeout)
+    curl_download(url, dest, resume=use_resume, timeout=timeout)
+    final_size = dest.stat().st_size if dest.exists() else 0
+    if remote.content_length and final_size < remote.content_length:
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"Download incomplete for {dest.name}: "
+            f"{final_size} < {remote.content_length}"
+        )
+    if final_size <= 0:
+        raise RuntimeError(f"Download empty for {dest.name}")
     _save_sidecar(meta_path, url, remote, dest)
-    log_info(f"Downloaded {dest.name} ({dest.stat().st_size:,} bytes)")
+    log_info(f"Downloaded {dest.name} ({final_size:,} bytes)")
     return True
 
 

@@ -92,6 +92,113 @@ class AddressMatcher:
         print(f"[{round}] Distinct canonical names: {result[7]:,}")
 
     
+    def _chunked_address_ein_backfill(
+        self, conn, *, dry_run: bool = False, batch_size: int = 50000
+    ) -> int:
+        """Backfill recipient_ein from name+canonical_address peers, one name-prefix at a time.
+
+        The single-shot 26M ⨝ known-EIN join OOMs on 16GB hosts. Chunking by first letter of
+        the match name keeps each join within memory; APPLY is a pure SQL UPDATE … FROM
+        (no Python materialization of millions of rows).
+        """
+        log_info("Pass 1 (name+address): chunked grant_update_map by name prefix...")
+        conn.execute("DROP TABLE IF EXISTS grant_update_map;")
+        # Persistent temp-ish table so intermediate commits can survive; drop at end of step
+        conn.execute(
+            "CREATE OR REPLACE TABLE grant_update_map ("
+            "grant_id UUID PRIMARY KEY, recipient_ein VARCHAR);"
+        )
+
+        prefixes = conn.execute(
+            """
+            SELECT DISTINCT LEFT(COALESCE(grantee_name_geo, grantee_name), 1) AS p
+            FROM Grants
+            WHERE (recipient_ein IS NULL OR recipient_ein = '')
+            ORDER BY p NULLS FIRST
+            """
+        ).fetchall()
+        log_info(f"  {len(prefixes)} name-prefix buckets for unmatched grants")
+
+        total_map_rows = 0
+        for n, (prefix,) in enumerate(prefixes, start=1):
+            if prefix is None:
+                g_pref = "LEFT(COALESCE(g.grantee_name_geo, g.grantee_name), 1) IS NULL"
+                k_pref = "LEFT(COALESCE(g2.grantee_name_geo, g2.grantee_name), 1) IS NULL"
+                label = "NULL"
+            else:
+                p = str(prefix).replace("'", "''")
+                g_pref = f"LEFT(COALESCE(g.grantee_name_geo, g.grantee_name), 1) = '{p}'"
+                k_pref = f"LEFT(COALESCE(g2.grantee_name_geo, g2.grantee_name), 1) = '{p}'"
+                label = repr(prefix)
+
+            before = conn.execute("SELECT COUNT(*) FROM grant_update_map").fetchone()[0] or 0
+            conn.execute(
+                f"""
+                INSERT INTO grant_update_map (grant_id, recipient_ein)
+                SELECT
+                    g.grant_id,
+                    ANY_VALUE(known.recipient_ein)
+                FROM Grants g
+                JOIN Addresses a
+                    ON a.owner_id = g.grant_id
+                   AND a.address_type = 'grant'
+                JOIN (
+                    SELECT
+                        COALESCE(g2.grantee_name_geo, g2.grantee_name) AS match_name,
+                        a2.canonical_address,
+                        g2.recipient_ein
+                    FROM Grants g2
+                    JOIN Addresses a2
+                        ON a2.owner_id = g2.grant_id
+                       AND a2.address_type = 'grant'
+                    WHERE g2.recipient_ein IS NOT NULL
+                      AND g2.recipient_ein != ''
+                      AND {k_pref}
+                ) known
+                    ON known.match_name = COALESCE(g.grantee_name_geo, g.grantee_name)
+                   AND known.canonical_address = a.canonical_address
+                WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '')
+                  AND {g_pref}
+                  AND g.grant_id NOT IN (SELECT grant_id FROM grant_update_map)
+                GROUP BY g.grant_id
+                """
+            )
+            after = conn.execute("SELECT COUNT(*) FROM grant_update_map").fetchone()[0] or 0
+            added = int(after) - int(before)
+            total_map_rows = int(after)
+            log_info(
+                f"  prefix {label}: +{added:,} map rows "
+                f"(bucket {n}/{len(prefixes)}, map total {total_map_rows:,})"
+            )
+            if n % 3 == 0:
+                self.db_ops._intermediate_commit_and_checkpoint(conn, total_map_rows)
+
+        if dry_run:
+            log_info(f"Pass 1 dry-run: would update {total_map_rows:,} grants")
+            conn.execute("DROP TABLE IF EXISTS grant_update_map;")
+            return total_map_rows
+
+        # Apply in SQL — avoid loading millions of rows into Python
+        result = conn.execute(
+            """
+            UPDATE Grants g
+            SET recipient_ein_backfilled = m.recipient_ein
+            FROM grant_update_map m
+            WHERE g.grant_id = m.grant_id
+              AND (g.recipient_ein IS NULL OR g.recipient_ein = '')
+              AND (g.recipient_ein_backfilled IS NULL OR g.recipient_ein_backfilled = '')
+            """
+        )
+        # DuckDB returns update count as first column when available
+        try:
+            updated = int(result.fetchone()[0]) if result else total_map_rows
+        except Exception:
+            updated = total_map_rows
+        log_info(f"Pass 1 (name+address) updated: {updated:,} grants (map size {total_map_rows:,})")
+        self.db_ops._intermediate_commit_and_checkpoint(conn, updated)
+        conn.execute("DROP TABLE IF EXISTS grant_update_map;")
+        return updated
+
     def match_grants(self, dry_run: bool = False, batch_size: int = 50000) -> Dict[str, int]:
         """Full pipeline: BMF pre-backfill → geo normalization → name-based EIN consolidation."""
         self._load_rules()  # Lazy load rules only when we actually run matching
@@ -106,11 +213,12 @@ class AddressMatcher:
         with self.db_ops.acquire_write_conn() as conn:
             conn.execute("BEGIN TRANSACTION")
 
-            # Set conservative memory limit to avoid OOM on large analytical steps
-            # (adjust based on available RAM; 8-12GB is usually safe on 16GB+ machines)
-            conn.execute("PRAGMA memory_limit = '10GB';")
-            conn.execute("PRAGMA threads = 4;")
-            conn.execute("PRAGMA checkpoint_threshold = '512MB';")
+            # Conservative defaults for 16GB hosts (override via DUCKDB_MEMORY_LIMIT)
+            import os
+            mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "10GB")
+            conn.execute(f"SET memory_limit = '{mem}'")
+            conn.execute("SET threads = 2")
+            conn.execute("SET preserve_insertion_order = false")
 
             try:
                 # RULES:
@@ -154,102 +262,82 @@ class AddressMatcher:
                 # ====================== 1. GEO NORMALIZATION ======================
                 log_info("Step 1: Geo-aware name normalization...")
 
-                conn.execute("UPDATE Grants SET grantee_name_geo = UPPER(COALESCE(grantee_name_bmf, grantee_name)) WHERE grantee_name_geo IS NULL;")
-                self.dump_stats(conn, "After Case Normalization")
+                null_geo = conn.execute(
+                    "SELECT COUNT(*) FROM Grants WHERE grantee_name_geo IS NULL"
+                ).fetchone()[0]
+                if null_geo and int(null_geo) > 0:
+                    conn.execute(
+                        "UPDATE Grants SET grantee_name_geo = UPPER(COALESCE(grantee_name_bmf, grantee_name)) "
+                        "WHERE grantee_name_geo IS NULL;"
+                    )
+                    self.dump_stats(conn, "After Case Normalization")
 
-                BATCH_SIZE = 1000
-                commit_threshold = 0
+                    BATCH_SIZE = 1000
+                    commit_threshold = 0
 
-                for core, rule in self.rules.items():
-                    variants = rule.get('variants', []) if isinstance(rule, dict) else rule
-                    if not variants:
-                        continue
-                    
-                    log_info(f"Processing rule '{core}' with {len(variants):,} variants...")
+                    for core, rule in self.rules.items():
+                        variants = rule.get('variants', []) if isinstance(rule, dict) else rule
+                        if not variants:
+                            continue
 
-                    for i in range(0, len(variants), BATCH_SIZE):
-                        batch = variants[i:i + BATCH_SIZE]
-                        # Variants are already UPPER (rules generation lowercases then UPPERs)
-                        variant_list = "', '".join(v.replace("'", "''") for v in batch)
-                        
-                        # Pass 1: BMF names (fast path — grantee_name_bmf already UPPER from BMF step;
-                        # NULLs naturally excluded by IN, no COALESCE needed)
-                        conn.execute(f"""
-                            UPDATE Grants 
-                            SET grantee_name_geo = '{core.replace("'", "''").upper()}' 
-                            WHERE grantee_name_geo IS NULL 
-                              AND grantee_name_bmf IN ('{variant_list}')
-                        """)
-                        
-                        # Pass 2: Original names (grantee_name is mixed-case so UPPER() required here;
-                        # automatically skips rows already set by Pass 1)
-                        conn.execute(f"""
-                            UPDATE Grants 
-                            SET grantee_name_geo = '{core.replace("'", "''").upper()}' 
-                            WHERE grantee_name_geo IS NULL 
-                              AND UPPER(grantee_name) IN ('{variant_list}')
-                        """)
-                        
-                        commit_threshold += 1
-                        if commit_threshold % 10 == 0:  # commit every 10 batches to avoid long transactions
-                            self.db_ops._intermediate_commit_and_checkpoint(conn, 0)
-                self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+                        log_info(f"Processing rule '{core}' with {len(variants):,} variants...")
 
-                self.dump_stats(conn, "After Geo Rules Normalization")
-                # Fallback (should be no-op now)
-                conn.execute("""
-                    UPDATE Grants 
-                    SET grantee_name_geo = UPPER(grantee_name)
-                    WHERE grantee_name_geo IS NULL
-                """)
+                        for i in range(0, len(variants), BATCH_SIZE):
+                            batch = variants[i:i + BATCH_SIZE]
+                            # Variants are already UPPER (rules generation lowercases then UPPERs)
+                            variant_list = "', '".join(v.replace("'", "''") for v in batch)
 
-                # Small cleanups
-                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, ',\\s*$', '') WHERE grantee_name_geo IS NOT NULL")
-                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, 'B&GC', 'BOYS AND GIRLS CLUB', 'i') WHERE grantee_name_geo IS NOT NULL")
-                conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, '\\bBSA\\b', 'BOY SCOUTS OF AMERICA', 'i') WHERE grantee_name_geo IS NOT NULL")
-                self.dump_stats(conn, "After Geo Normalization+Case")
-                self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+                            # Pass 1: BMF names (fast path — grantee_name_bmf already UPPER from BMF step;
+                            # NULLs naturally excluded by IN, no COALESCE needed)
+                            conn.execute(f"""
+                                UPDATE Grants
+                                SET grantee_name_geo = '{core.replace("'", "''").upper()}'
+                                WHERE grantee_name_geo IS NULL
+                                  AND grantee_name_bmf IN ('{variant_list}')
+                            """)
+
+                            # Pass 2: Original names (grantee_name is mixed-case so UPPER() required here;
+                            # automatically skips rows already set by Pass 1)
+                            conn.execute(f"""
+                                UPDATE Grants
+                                SET grantee_name_geo = '{core.replace("'", "''").upper()}'
+                                WHERE grantee_name_geo IS NULL
+                                  AND UPPER(grantee_name) IN ('{variant_list}')
+                            """)
+
+                            commit_threshold += 1
+                            if commit_threshold % 10 == 0:  # commit every 10 batches to avoid long transactions
+                                self.db_ops._intermediate_commit_and_checkpoint(conn, 0)
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+
+                    self.dump_stats(conn, "After Geo Rules Normalization")
+                    # Fallback (should be no-op now)
+                    conn.execute("""
+                        UPDATE Grants
+                        SET grantee_name_geo = UPPER(grantee_name)
+                        WHERE grantee_name_geo IS NULL
+                    """)
+
+                    # Small cleanups
+                    conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, ',\\s*$', '') WHERE grantee_name_geo IS NOT NULL")
+                    conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, 'B&GC', 'BOYS AND GIRLS CLUB', 'i') WHERE grantee_name_geo IS NOT NULL")
+                    conn.execute("UPDATE Grants SET grantee_name_geo = REGEXP_REPLACE(grantee_name_geo, '\\bBSA\\b', 'BOY SCOUTS OF AMERICA', 'i') WHERE grantee_name_geo IS NOT NULL")
+                    self.dump_stats(conn, "After Geo Normalization+Case")
+                    self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
+                else:
+                    log_info("Step 1: grantee_name_geo already fully populated — skipping geo rules")
 
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_grant_geo_name ON Grants(grantee_name_geo);")
                 stats["geo_normalized"] = conn.execute("SELECT COUNT(*) FROM Grants WHERE grantee_name_geo IS NOT NULL").fetchone()[0]
                 log_info(f"Geo normalization complete: {stats['geo_normalized']:,} rows")
 
                 self.db_ops._intermediate_commit_and_checkpoint(conn, stats["geo_normalized"])
-                
-                # ====================== Address Backfill ======================
-                conn.execute("DROP TABLE IF EXISTS grant_update_map;")
-                conn.execute("CREATE TEMP TABLE grant_update_map (grant_id UUID PRIMARY KEY, recipient_ein VARCHAR);")
-                conn.execute("""
-                    INSERT INTO grant_update_map (grant_id, recipient_ein)
-                    SELECT 
-                        g.grant_id,
-                        ANY_VALUE(known.recipient_ein)
-                    FROM Grants g
-                    JOIN Addresses a 
-                        ON a.owner_id = g.grant_id 
-                    AND a.address_type = 'grant'
-                    JOIN (
-                        SELECT 
-                            COALESCE(g2.grantee_name_geo, g2.grantee_name) AS match_name,
-                            a2.canonical_address,
-                            g2.recipient_ein
-                        FROM Grants g2
-                        JOIN Addresses a2 
-                            ON a2.owner_id = g2.grant_id 
-                        AND a2.address_type = 'grant'
-                        WHERE g2.recipient_ein IS NOT NULL 
-                        AND g2.recipient_ein != ''
-                    ) known
-                    ON known.match_name = COALESCE(g.grantee_name_geo, g.grantee_name)
-                    AND known.canonical_address = a.canonical_address
-                    WHERE (g.recipient_ein IS NULL OR g.recipient_ein = '')
-                    GROUP BY g.grant_id;
-                """)
 
-                updates = conn.execute("SELECT grant_id, recipient_ein FROM grant_update_map").fetchall()
-                update_list = [{'grant_id': row[0], 'recipient_ein_backfilled': row[1]} for row in updates]
-                stats['address_match_updated'] = self.db_ops.bulk_update('Grants', update_list, id_column='grant_id', batch_size=batch_size, commit=False)
-                log_info(f"Pass 1 (name+address) {'would update' if dry_run else 'updated'}: {stats.get('address_match_updated', 0):,} grants")
+                # ====================== Address Backfill (chunked by name prefix) ======================
+                # Full 26M ⨝ known-EIN grants OOM'd on 16GB hosts; process one first-letter bucket at a time.
+                stats['address_match_updated'] = self._chunked_address_ein_backfill(
+                    conn, dry_run=dry_run, batch_size=batch_size
+                )
                 self.dump_stats(conn, "After Address Match Backfill")
 
                 # ====================== ADDRESS BACKFILL FROM BMF/CHARITY ======================
