@@ -4,22 +4,38 @@ This is the active scratchpad for current and recently completed work. Entries i
 
 ---
 
-## 2026-08-01: Report suite — admission, ranking, contractor owner_id (in flight)
+## 2026-08-10: Overnight pipeline — census drain on 16GB host (DONE)
 
-**What:** Fix contractor `Addresses.owner_id` (pipeline + prod backfill). Rework focus/DOT **admission** to domain membership only (`focus_count > 0` / phy carriers > 0) — drop default `min_multi` / `min_focus` density floors. Medicare rank = **paid/HCPCS types**; FEC rank = density + resolve committee names; state focus pages load entities. Regen v2 running for medicare/contractor/fec national + by-state (`2026-08-01` suites). Film script: `demo.md`.
+**What:** Unattended ingest/geocode night: zip/xml → address → einless/match → geolocate_prev (archive) → **chunked Census** until `pending=0`. Landed DuckDB OOM hard-exit + bulk-write fixes so the chunk loop can finish without babysitting. Production census finished **2026-08-10 14:59** (`remaining_pending=0`, `overall_rc=0`).
 
-**Why:** Film/review found empty contractor names (100% null `owner_id`), Medicare hospitals winning pure-$ sort, single-HCPCS single-address mills gated out by `min_focus=30`, and FEC mega-wires as bare committee IDs. Multi-type crossover floors were not useful.
+**Why:** Full-feed Census + per-row `bulk_update` hit DuckDB’s ~7–8GB cap; worker `sys.exit` left zombies in pipeline shutdown; post-step `ANALYZE` after every 500-row chunk was slower than the work; bare `CO` care-of lines needed the same strip path as `C/O` for census_strip recovery.
 
-**How:**
-- `models/contractor.py`: `owner_id=self.id` (same pattern as Grant/Officer)
-- `scripts/backfill_contractor_owner_id.py` — prod backfill: **984,680** joinable (was 0)
-- `generate_focus_reports.py` / `generate_address_reports.py` / `generate_state_reports.py` / `state_research.py`: admission `focus>0`, optional floors only if `--min-* > 0`; Medicare `paid_per_hcpcs_type`; FEC contributors first + committee name join
-- `domain_briefing.py` + index templates: self-document rank/admission
-- Log: `dot_reporting/regen_focus_v2_*.log` (admission=focus>0)
+**How (ops):**
+- Launcher: `overnight_census_chunked_run.sh` — `CENSUS_CHUNK=500`, `DUCKDB_MEMORY_LIMIT=12GB`, `GEOCODE_SKIP_OWNER_COLOCATORS=1`, `SKIP_POST_STEP_OPTIMIZE=1`, max-files loop, status in `overnight_geolocate_status.txt`
+- Log: `logs/overnight_census_chunked_20260810_100841.log` (~135 rounds)
+- DB: `/Volumes/Data/final/irs990.duckdb` — end state `pending=0`, `pending_api≈8.8k` exported → `/Volumes/Data/final/pending_api_failures_for_patterns.tsv.gz`
+- Docs: `docs/overnight_census_chunked.md`
 
-**Git hashes** (`grokrefactor3`): `18082440` (contractor owner_id + backfill), `a30ba6af` (admission/rank/entities); docs hygiene on branch tip after those two.
+**How (code — uncommitted on `grokrefactor3`):**
+- `database_operations.py`: `_oom_hard_exit` → `os._exit(75)`; `UPDATE…FROM (VALUES…)` bulk path; Addresses colocator WHERE→FROM VALUES
+- `pending_database_context.py`: consolidate traditional bulk updates on merge (incl. single fat PDC); intermediate commit after Geocoding/Addresses; OOM on commit hard-exits
+- `geocoding_api_processor.py`: skip owner colocator fan-out by default; CO/`C/O` word-boundary + street-cue strip; smaller census consumer batch
+- `irs990processor.py`: skip post-step optimize when `--max-files` or `SKIP_POST_STEP_OPTIMIZE=1`
+- Also touched in same working tree (same OOM/chunk theme): `geolocate_prev_processor.py`, `address_matcher.py`, `address_deduplication_processor.py`, `download_utils.py`, `pipeline.py`
 
-**In progress:** full matrix regen v2 (national then by-state); master index refresh after each suite.
+**Git hash:** not committed yet — hygiene proposes units below.
+
+**Next (not started):** `geolocate_api` / Photon (paid instance offline; public throttled); deferred colocator finalize + archive bookend; `grant_match` → backfill → export.
+
+---
+
+## 2026-08-01: Report suite — admission, ranking, contractor owner_id (landed)
+
+**What:** Contractor `Addresses.owner_id` fix + prod backfill; focus/DOT admission = membership (`focus_count > 0`); Medicare rank = paid/HCPCS types; FEC density + committee names. Later tip: by-state medicare map/ZIP fixes.
+
+**Why:** Film/review blockers (null contractor owners, density floors hiding mills, street-as-ZIP map bugs).
+
+**How / hashes:** `18082440`, `a30ba6af`, `aa6f5d94`…`4ae263c0` on `grokrefactor3` (see CHANGELOG). Suites may need regen if data moved under geocode overnight.
 
 ---
 

@@ -5,6 +5,32 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-08-10 (Overnight census drain + DuckDB OOM survival)
+
+### Chunked Census overnight (production success)
+- **Why:** 16GB host could not finish full-feed `geolocate_census`; OOM during consumer save left the process hung in pipeline queue-join with `rows_saved=0`, so a max-files shell loop never advanced.
+- **Ops result (2026-08-10):** `overnight_census_chunked_run.sh` drained **`pending` 0** over ~135×500-row rounds (`overall_rc=0`). Exported **8,784** `pending_api` rows → `/Volumes/Data/final/pending_api_failures_for_patterns.tsv.gz`. Match:Census ≈ 9.53M.
+- **Launcher defaults:** `CENSUS_CHUNK=500`, `DUCKDB_MEMORY_LIMIT=12GB`, `GEOCODE_SKIP_OWNER_COLOCATORS=1` (Geocoding + Addresses first; owner fan-out deferred), `SKIP_POST_STEP_OPTIMIZE=1` / skip optimize when `--max-files` set (full-table ANALYZE after every chunk dominated wall time).
+- **Doc:** `docs/overnight_census_chunked.md`.
+
+### DuckDB OOM: hard-exit + real bulk writes (failures + fixes)
+- **Failure:** Worker-thread `sys.exit` on OOM only raised `SystemExit` in that thread → main stuck joining drained queues with a poisoned write connection.
+- **Fix:** `database_operations._oom_hard_exit` uses **`os._exit(75)`** so outer chunk shells continue with a fresh process.
+- **Failure:** PDC merge left traditional GENERIC_UPDATE as **1-row** ops (~1.4k statements per 500-match flush) → DuckDB hit 7.4 GiB mid-transaction; COMMIT itself OOM’d and rolled back Geocoding progress.
+- **Fix:** Merge consolidates by (table, id_column, columns) and WHERE param_sets; always consolidate even a single fat PDC (pending_api fail batch). **`UPDATE … FROM (VALUES …)`** for multi-row id updates; Addresses colocator WHERE rewritten to FROM VALUES. Intermediate **commit + checkpoint after Geocoding/Addresses** so later owner/WHERE failures do not erase status.
+- **Files:** `database_operations.py`, `pending_database_context.py`, `geocoding_api_processor.py`, `irs990processor.py`, `overnight_census_chunked_run.sh`.
+
+### Care-of strip: bare `CO` + street cues (census_strip)
+- **Why:** Failures often use `CO NAME…` without a slash; gate `^c/?o` also false-started on COLUMBIA/CONNECTION. Digit/comma patterns already worked when a house # existed; name-only lines still cannot be Census-matched.
+- **Fix:** Word-boundary gate `^(c/o|co)\b`; street-cue fallback (numwords e.g. TWO INTERNATIONAL PLACE, street types e.g. Moyer Road).
+- **File:** `geocoding_api_processor.py`.
+
+### Related OOM/chunk work in same tree (not only census)
+- `geolocate_prev_processor.py` — skip heavy colocator finalize by default for overnight prev; chunked colocators.
+- `address_matcher.py` / `address_deduplication_processor.py` — chunked EIN backfill / resumable indexes.
+- `download_utils.py` — no curl resume on stale OFAC.
+- `pipeline.py` — consumer/pipeline hardening alongside geocode saves.
+
 ## [Unreleased] - 2026-08 (Focus report product + contractor owner_id)
 
 ### Report admission = membership; rank + max_clusters (2026-08-01)
