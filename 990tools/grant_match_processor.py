@@ -58,12 +58,14 @@ class GrantMatchProcessor(BaseProcessor):
 
         # Heal corrupted Grants primary ART index if UPDATEs are fatal (DuckDB ART bug).
         self.ensure_grants_writable()
+        # Same ART class of bug hits Charities on large lat/lon UPDATEs.
+        self.ensure_charities_writable()
 
         # === VERY FIRST STEP: Foreign EINs ===
         self.apply_foreign_eins()
         self.build_zips_table()
 
-        # === NEW STEP #1: lat/lon population (idempotent) ===
+        # === NEW STEP #1: lat/lon population (idempotent; CTAS-safe) ===
         self.populate_lat_lon_columns()
 
         # === Tier 1-3 initialization (only if needed) ===
@@ -187,6 +189,89 @@ class GrantMatchProcessor(BaseProcessor):
         """)
         log_info("Grants table rebuild complete — UPDATE probe OK")
         print("[grant_match] Grants rebuild complete", flush=True)
+
+    def ensure_charities_writable(self) -> None:
+        """Probe Charities UPDATE; rebuild via CTAS if PRIMARY ART is corrupt."""
+        log_info("Probing Charities writability (PRIMARY ART health)...")
+        try:
+            self.db_ops.execute_query("""
+                UPDATE Charities SET lat = lat
+                WHERE charity_id = (SELECT charity_id FROM Charities LIMIT 1)
+            """)
+            log_info("Charities UPDATE probe OK")
+            return
+        except Exception as e:
+            msg = str(e)
+            log_info(f"Charities probe result: {e}")
+            if "PRIMARY_Charit" not in msg and "Charities_" not in msg and "gated leaf" not in msg and "Corrupted unique ART" not in msg:
+                log_info("Non-ART Charities probe failure — continuing without rebuild")
+                return
+
+        log_info("Charities PRIMARY ART corrupt — rebuilding table")
+        try:
+            pool = type(self.db_ops).get_pool()
+            if pool is not None and getattr(pool, "write_conn", None) is not None:
+                try:
+                    pool.write_conn.close()
+                except Exception:
+                    pass
+                pool.write_conn = pool._new_conn(read_only=False)
+                log_info("Reconnected pool write connection after Charities ART fatal")
+        except Exception as recon_e:
+            log_info(f"Write reconnect note: {recon_e}")
+
+        self.rebuild_charities_table(reason="heal corrupted PRIMARY_Charities ART index")
+
+    def rebuild_charities_table(self, reason: str = "") -> None:
+        """Copy Charities → drop → rename; recreate PK + secondary indexes."""
+        log_info(f"Rebuilding Charities table ({reason or 'no reason'})...")
+        print(f"[grant_match] Rebuilding Charities table: {reason}", flush=True)
+
+        self.db_ops.execute_query("DROP TABLE IF EXISTS Charities_rebuild")
+        self.db_ops.execute_query("CREATE TABLE Charities_rebuild AS SELECT * FROM Charities")
+        count = self.db_ops.execute_query("SELECT COUNT(*) FROM Charities_rebuild").fetchone()[0]
+        log_info(f"Charities_rebuild has {count:,} rows — swapping")
+        print(f"[grant_match] Charities_rebuild rows={count:,}; swapping", flush=True)
+
+        self.db_ops.execute_query("DROP TABLE Charities")
+        self.db_ops.execute_query("ALTER TABLE Charities_rebuild RENAME TO Charities")
+
+        try:
+            self.db_ops.execute_query("ALTER TABLE Charities ADD PRIMARY KEY (charity_id)")
+        except Exception as e:
+            log_info(f"ADD PRIMARY KEY failed ({e}); using UNIQUE INDEX fallback")
+            self.db_ops.execute_query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS PRIMARY_Charities_0 ON Charities(charity_id)"
+            )
+
+        for ddl in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS Charities_xml_name_key ON Charities(xml_name)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_colocator ON Charities(colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_denominator ON Charities(denominator)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_ein ON Charities(ein)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_form_type ON Charities(form_type)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_lat ON Charities(lat)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_lon ON Charities(lon)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_org_type ON Charities(org_type)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_tax_year ON Charities(tax_year)",
+        ):
+            try:
+                self.db_ops.execute_query(ddl)
+            except Exception as e:
+                log_info(f"Index recreate skipped/failed: {ddl[:60]}… ({e})")
+
+        try:
+            self.db_ops.execute_query("CHECKPOINT")
+        except Exception:
+            pass
+
+        self.db_ops.execute_query("""
+            UPDATE Charities SET lat = lat
+            WHERE charity_id = (SELECT charity_id FROM Charities LIMIT 1)
+        """)
+        log_info("Charities table rebuild complete — UPDATE probe OK")
+        print("[grant_match] Charities rebuild complete", flush=True)
 
     def apply_foreign_eins(self):
         """Foreign EINs as the very first step. Updates Grants + populates Backfill."""
@@ -540,119 +625,244 @@ class GrantMatchProcessor(BaseProcessor):
         Always fills rows still missing lat (idempotent via ``lat IS NULL`` guards).
         PO zips missing from Zips are marked ``BOGUS:{zip5}`` so they exit the
         geo-match work set (same convention as geocoding_api_processor).
-        """
-        log_info("Populating lat/lon columns (fill remaining nulls)...")
 
-        # Add columns if missing
+        Implementation note: large in-place UPDATEs against DuckDB unique ART
+        indexes have repeatedly FATAL'd (PRIMARY_Grants / PRIMARY_Charities
+        duplicate-key on commit). Fill via CTAS rebuild instead — same end
+        state, no mid-index delete/reinsert thrash.
+        """
+        log_info("Populating lat/lon columns via CTAS (ART-safe)...")
+
+        # Add columns if missing (no-op once present)
         self.db_ops.execute_query("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS lat DOUBLE;")
         self.db_ops.execute_query("ALTER TABLE Grants ADD COLUMN IF NOT EXISTS lon DOUBLE;")
         self.db_ops.execute_query("ALTER TABLE Charities ADD COLUMN IF NOT EXISTS lat DOUBLE;")
         self.db_ops.execute_query("ALTER TABLE Charities ADD COLUMN IF NOT EXISTS lon DOUBLE;")
 
-        # === Grants: PO: cases (zip lookup) ===
-        self.db_ops.execute_query("""
-        UPDATE Grants g
-        SET lat = z.lat, lon = z.lon
-        FROM Zips z
-        WHERE g.colocator LIKE 'PO:%'
-          AND z.zip = split_part(g.colocator, ':', 3)
-          AND g.lat IS NULL;
-        """)
-
-        # === Grants: MULTI:{city}:{state}:{zip5} — zip is last field ===
-        self.db_ops.execute_query("""
-        UPDATE Grants g
-        SET lat = z.lat, lon = z.lon
-        FROM Zips z
-        WHERE g.colocator LIKE 'MULTI:%'
-          AND z.zip = split_part(g.colocator, ':', -1)
-          AND g.lat IS NULL;
-        """)
-
-        # === Grants: LL: cases ===
-        self.db_ops.execute_query("""
-        UPDATE Grants g
-        SET lat = split_part(g.colocator, ':', 2)::DOUBLE,
-            lon = split_part(g.colocator, ':', 3)::DOUBLE
-        WHERE g.colocator LIKE 'LL:%'
-          AND g.lat IS NULL;
-        """)
-        
-        # === Grants: weird: cases ===
-        self.db_ops.execute_query("""
-        -- Handle PRIV:, MALL:, MAJOR: and similar custom formats
-            UPDATE Grants g
-            SET 
-                lat = z.lat,
-                lon = z.lon
-            FROM Zips z
-            WHERE g.lat IS NULL
-            AND g.colocator IS NOT NULL
-            AND (
-                g.colocator LIKE 'PRIV:%' 
-            OR g.colocator LIKE 'MALL:%' 
-            OR g.colocator LIKE 'MAJOR:%'
-            )
-            AND z.zip = split_part(g.colocator, ':', -1);   -- take the LAST part after final ':'
-        """)
-
-
-        # === Charities: PO: cases ===
-        self.db_ops.execute_query("""
-        UPDATE Charities c
-        SET lat = z.lat, lon = z.lon
-        FROM Zips z
-        WHERE c.colocator LIKE 'PO:%'
-          AND z.zip = split_part(c.colocator, ':', 3)
-          AND c.lat IS NULL;
-        """)
-
-        # === Charities: LL: cases ===
-        self.db_ops.execute_query("""
-        UPDATE Charities c
-        SET lat = split_part(c.colocator, ':', 2)::DOUBLE,
-            lon = split_part(c.colocator, ':', 3)::DOUBLE
-        WHERE c.colocator LIKE 'LL:%'
-          AND c.lat IS NULL;
-        """)
-        
-        ## Loose colocators 
-        self.db_ops.execute_query("""
-            UPDATE Grants
-            SET loose_colocator = 'LL:' || ROUND(lat / 0.5) * 0.5 || ':' || ROUND(lon / 0.5) * 0.5
-            WHERE loose_colocator IS NULL AND lat IS NOT NULL;""")
+        # --- Grants: equality-join path (no LIKE nested-loop against Zips) ---
+        # 1) extract zip/LL keys for null-lat rows only
+        # 2) hash-join Zips on zip equality → lat map
+        # 3) CTAS Grants LEFT JOIN map ON grant_id (hash join)
+        log_info("Grants lat/lon equality-join fill...")
+        print("[grant_match] Grants lat/lon equality-join fill", flush=True)
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _grant_zip_keys")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _grant_lat_map")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS Grants_latfill")
 
         self.db_ops.execute_query("""
-                                  UPDATE Charities
-                            SET loose_colocator = 'LL:' || ROUND(lat / 0.5) * 0.5 || ':' || ROUND(lon / 0.5) * 0.5
-                            WHERE loose_colocator IS NULL AND lat IS NOT NULL""");
-
-        # PO / MULTI / PRIV with no gazetteer hit → mark bogus (keep original zip for audit)
-        # Only touch still-unmatched grants so we don't rewrite historical colocators.
-        self.db_ops.execute_query("""
-        UPDATE Grants
-        SET colocator = 'BOGUS:' || COALESCE(NULLIF(split_part(colocator, ':', -1), ''), '00000')
-        WHERE recipient_ein IS NULL
-          AND lat IS NULL
+        CREATE TABLE _grant_zip_keys AS
+        SELECT
+            grant_id,
+            colocator,
+            recipient_ein,
+            CASE
+                WHEN colocator LIKE 'LL:%'
+                    THEN TRY_CAST(split_part(colocator, ':', 2) AS DOUBLE)
+                ELSE NULL
+            END AS ll_lat,
+            CASE
+                WHEN colocator LIKE 'LL:%'
+                    THEN TRY_CAST(split_part(colocator, ':', 3) AS DOUBLE)
+                ELSE NULL
+            END AS ll_lon,
+            CASE
+                WHEN colocator LIKE 'PO:%' THEN split_part(colocator, ':', 3)
+                WHEN colocator LIKE 'MULTI:%' THEN split_part(colocator, ':', -1)
+                WHEN colocator LIKE 'PRIV:%'
+                  OR colocator LIKE 'MALL:%'
+                  OR colocator LIKE 'MAJOR:%' THEN split_part(colocator, ':', -1)
+                ELSE NULL
+            END AS zip5,
+            CASE
+                WHEN colocator LIKE 'PO:%'
+                  OR colocator LIKE 'MULTI:%'
+                  OR colocator LIKE 'PRIV:%' THEN true
+                ELSE false
+            END AS bogus_candidate
+        FROM Grants
+        WHERE lat IS NULL
           AND colocator IS NOT NULL
-          AND (
-                colocator LIKE 'PO:%'
-             OR colocator LIKE 'MULTI:%'
-             OR colocator LIKE 'PRIV:%'
-          )
-          AND colocator NOT LIKE 'BOGUS:%';
         """)
+        self.db_ops.execute_query(
+            "CREATE INDEX IF NOT EXISTS idx_gzk_zip ON _grant_zip_keys(zip5)"
+        )
 
-        #-- Index (already working for you)
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator);")
+        self.db_ops.execute_query("""
+        CREATE TABLE _grant_lat_map AS
+        SELECT
+            k.grant_id,
+            COALESCE(k.ll_lat, z.lat) AS lat,
+            COALESCE(k.ll_lon, z.lon) AS lon,
+            k.colocator,
+            k.recipient_ein,
+            k.bogus_candidate
+        FROM _grant_zip_keys k
+        LEFT JOIN Zips z ON z.zip = k.zip5
+        """)
+        self.db_ops.execute_query(
+            "CREATE INDEX IF NOT EXISTS idx_glm_gid ON _grant_lat_map(grant_id)"
+        )
+        mapped = self.db_ops.execute_query(
+            "SELECT COUNT(*) FILTER (WHERE lat IS NOT NULL) FROM _grant_lat_map"
+        ).fetchone()[0]
+        log_info(f"Grants lat map: {mapped:,} rows with coords")
+        print(f"[grant_match] Grants lat map coords={mapped:,}", flush=True)
 
-        # === Indexes (idempotent) ===
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_lat ON Charities(lat);")
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_charities_lon ON Charities(lon);")
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_grants_lat ON Grants(lat);")
-        self.db_ops.execute_query("CREATE INDEX IF NOT EXISTS idx_grants_lon ON Grants(lon);")
+        self.db_ops.execute_query("""
+        CREATE TABLE Grants_latfill AS
+        SELECT
+            g.* EXCLUDE (lat, lon, loose_colocator, colocator),
+            COALESCE(g.lat, m.lat) AS lat,
+            COALESCE(g.lon, m.lon) AS lon,
+            CASE
+                WHEN g.loose_colocator IS NOT NULL THEN g.loose_colocator
+                WHEN COALESCE(g.lat, m.lat) IS NOT NULL THEN
+                    'LL:' || ROUND(COALESCE(g.lat, m.lat) / 0.5) * 0.5
+                    || ':' || ROUND(COALESCE(g.lon, m.lon) / 0.5) * 0.5
+                ELSE g.loose_colocator
+            END AS loose_colocator,
+            CASE
+                WHEN m.bogus_candidate
+                 AND g.lat IS NULL
+                 AND m.lat IS NULL
+                 AND m.recipient_ein IS NULL
+                 AND g.colocator NOT LIKE 'BOGUS:%'
+                THEN 'BOGUS:' || COALESCE(NULLIF(split_part(g.colocator, ':', -1), ''), '00000')
+                ELSE g.colocator
+            END AS colocator
+        FROM Grants g
+        LEFT JOIN _grant_lat_map m ON g.grant_id = m.grant_id
+        """)
+        gcount = self.db_ops.execute_query("SELECT COUNT(*) FROM Grants_latfill").fetchone()[0]
+        log_info(f"Grants_latfill rows={gcount:,} — swapping")
+        self.db_ops.execute_query("DROP TABLE Grants")
+        self.db_ops.execute_query("ALTER TABLE Grants_latfill RENAME TO Grants")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _grant_zip_keys")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _grant_lat_map")
+        try:
+            self.db_ops.execute_query("ALTER TABLE Grants ADD PRIMARY KEY (grant_id)")
+        except Exception as e:
+            log_info(f"Grants ADD PRIMARY KEY failed ({e}); UNIQUE INDEX fallback")
+            self.db_ops.execute_query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS PRIMARY_Grants_0 ON Grants(grant_id)"
+            )
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_grants_filer_ein ON Grants(filer_ein)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_recipient_ein ON Grants(recipient_ein)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_tax_year ON Grants(tax_year)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_colocator ON Grants(colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_filer_colocator ON Grants(filer_colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_loose_colocator ON Grants(loose_colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_grant_id ON Grants(grant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_lat ON Grants(lat)",
+            "CREATE INDEX IF NOT EXISTS idx_grants_lon ON Grants(lon)",
+            "CREATE INDEX IF NOT EXISTS idx_grant_backfill_ein ON Grants(recipient_ein_backfilled)",
+            "CREATE INDEX IF NOT EXISTS idx_grant_bmf_name ON Grants(grantee_name_bmf)",
+            "CREATE INDEX IF NOT EXISTS idx_grant_geo_name ON Grants(grantee_name_geo)",
+        ):
+            try:
+                self.db_ops.execute_query(ddl)
+            except Exception as e:
+                log_info(f"Grants index recreate skipped: {ddl[:50]}… ({e})")
 
-        log_info("lat/lon columns populated + indexes created")
+        # --- Charities: same equality-join pattern ---
+        log_info("Charities lat/lon equality-join fill...")
+        print("[grant_match] Charities lat/lon equality-join fill", flush=True)
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _charity_zip_keys")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _charity_lat_map")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS Charities_latfill")
+
+        self.db_ops.execute_query("""
+        CREATE TABLE _charity_zip_keys AS
+        SELECT
+            charity_id,
+            CASE
+                WHEN colocator LIKE 'LL:%'
+                    THEN TRY_CAST(split_part(colocator, ':', 2) AS DOUBLE)
+                ELSE NULL
+            END AS ll_lat,
+            CASE
+                WHEN colocator LIKE 'LL:%'
+                    THEN TRY_CAST(split_part(colocator, ':', 3) AS DOUBLE)
+                ELSE NULL
+            END AS ll_lon,
+            CASE
+                WHEN colocator LIKE 'PO:%' THEN split_part(colocator, ':', 3)
+                ELSE NULL
+            END AS zip5
+        FROM Charities
+        WHERE lat IS NULL
+          AND colocator IS NOT NULL
+        """)
+        self.db_ops.execute_query(
+            "CREATE INDEX IF NOT EXISTS idx_czk_zip ON _charity_zip_keys(zip5)"
+        )
+        self.db_ops.execute_query("""
+        CREATE TABLE _charity_lat_map AS
+        SELECT
+            k.charity_id,
+            COALESCE(k.ll_lat, z.lat) AS lat,
+            COALESCE(k.ll_lon, z.lon) AS lon
+        FROM _charity_zip_keys k
+        LEFT JOIN Zips z ON z.zip = k.zip5
+        """)
+        self.db_ops.execute_query(
+            "CREATE INDEX IF NOT EXISTS idx_clm_cid ON _charity_lat_map(charity_id)"
+        )
+
+        self.db_ops.execute_query("""
+        CREATE TABLE Charities_latfill AS
+        SELECT
+            c.* EXCLUDE (lat, lon, loose_colocator),
+            COALESCE(c.lat, m.lat) AS lat,
+            COALESCE(c.lon, m.lon) AS lon,
+            CASE
+                WHEN c.loose_colocator IS NOT NULL THEN c.loose_colocator
+                WHEN COALESCE(c.lat, m.lat) IS NOT NULL THEN
+                    'LL:' || ROUND(COALESCE(c.lat, m.lat) / 0.5) * 0.5
+                    || ':' || ROUND(COALESCE(c.lon, m.lon) / 0.5) * 0.5
+                ELSE c.loose_colocator
+            END AS loose_colocator
+        FROM Charities c
+        LEFT JOIN _charity_lat_map m ON c.charity_id = m.charity_id
+        """)
+        ccount = self.db_ops.execute_query("SELECT COUNT(*) FROM Charities_latfill").fetchone()[0]
+        log_info(f"Charities_latfill rows={ccount:,} — swapping")
+        self.db_ops.execute_query("DROP TABLE Charities")
+        self.db_ops.execute_query("ALTER TABLE Charities_latfill RENAME TO Charities")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _charity_zip_keys")
+        self.db_ops.execute_query("DROP TABLE IF EXISTS _charity_lat_map")
+        try:
+            self.db_ops.execute_query("ALTER TABLE Charities ADD PRIMARY KEY (charity_id)")
+        except Exception as e:
+            log_info(f"Charities ADD PRIMARY KEY failed ({e}); UNIQUE INDEX fallback")
+            self.db_ops.execute_query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS PRIMARY_Charities_0 ON Charities(charity_id)"
+            )
+        for ddl in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS Charities_xml_name_key ON Charities(xml_name)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_colocator ON Charities(colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_denominator ON Charities(denominator)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_ein ON Charities(ein)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_form_type ON Charities(form_type)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_lat ON Charities(lat)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_lon ON Charities(lon)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_loose_colocator ON Charities(loose_colocator)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_org_type ON Charities(org_type)",
+            "CREATE INDEX IF NOT EXISTS idx_charities_tax_year ON Charities(tax_year)",
+        ):
+            try:
+                self.db_ops.execute_query(ddl)
+            except Exception as e:
+                log_info(f"Charities index recreate skipped: {ddl[:50]}… ({e})")
+
+        try:
+            self.db_ops.execute_query("CHECKPOINT")
+        except Exception:
+            pass
+
+        log_info("lat/lon columns populated via equality-join CTAS + indexes created")
+        print("[grant_match] lat/lon equality-join fill complete", flush=True)
     
     def _process_batch(self, batch: List[Dict[str, Any]]) -> PendingDatabaseContext:
         context = PendingDatabaseContext()
