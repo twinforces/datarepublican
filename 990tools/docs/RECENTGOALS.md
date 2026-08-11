@@ -23,7 +23,7 @@ This is the active scratchpad for current and recently completed work. Entries i
 - `irs990processor.py`: skip post-step optimize when `--max-files` or `SKIP_POST_STEP_OPTIMIZE=1`
 - Also touched in same working tree (same OOM/chunk theme): `geolocate_prev_processor.py`, `address_matcher.py`, `address_deduplication_processor.py`, `download_utils.py`, `pipeline.py`
 
-**Git hash:** not committed yet — hygiene proposes units below.
+**Git hashes** (`grokrefactor3`): `adb7b587` (duckdb OOM/bulk), `ff60daa8` (chunked census + CO), `68d55559` (prev/address/pipeline), `da71e9df` (ingest zips), `d66204e6` (grant_match ART), `45adc2cc` (archive/monitor), `b5f9f0f3` (docs), plus `dot_reporting` refinements on tip.
 
 **Next (not started):** `geolocate_api` / Photon (paid instance offline; public throttled); deferred colocator finalize + archive bookend; `grant_match` → backfill → export.
 
