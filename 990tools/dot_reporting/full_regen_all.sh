@@ -1,12 +1,13 @@
 #!/bin/bash
 # Full regeneration of national + by-state cluster reports, then master_index.
+# Stable (undated) suite paths for public deploy (grumpytechbro.com).
 set -u
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 DR="dot_reporting"
 DB="${IRS990_DB_PATH:-/Volumes/Data/final/irs990.duckdb}"
-DAY=$(date +%Y-%m-%d)
-LOG="$DR/full_regen_${DAY//-/}_$(date +%H%M%S).log"
+TS=$(date +%Y%m%d_%H%M%S)
+LOG="${MATRIX_LOG:-$DR/full_regen_${TS}.log}"
 failed=0
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
@@ -17,7 +18,7 @@ rebuild_master() {
 
 run_dot_national() {
   local slice="$1"
-  local out="$DR/reports/${slice}_clusters_${DAY}"
+  local out="$DR/reports/${slice}_clusters"
   log "---- NATIONAL dot slice=$slice → $out ----"
   if python3 -u "$DR/generate_address_reports.py" \
       --db-path "$DB" --slice-by "$slice" --output-dir "$out" >>"$LOG" 2>&1; then
@@ -31,7 +32,7 @@ run_dot_national() {
 
 run_focus_national() {
   local focus="$1" slice="$2"
-  local out="$DR/reports/${focus}_${slice}_clusters_${DAY}"
+  local out="$DR/reports/${focus}_${slice}_clusters"
   log "---- NATIONAL focus=$focus slice=$slice → $out ----"
   if python3 -u "$DR/generate_focus_reports.py" \
       --db-path "$DB" --focus "$focus" --slice-by "$slice" \
@@ -46,7 +47,7 @@ run_focus_national() {
 
 run_state_full() {
   local focus="$1" slice="$2"
-  local out="$DR/reports/${focus}_${slice}_by_state_${DAY}"
+  local out="$DR/reports/${focus}_${slice}_by_state"
   log "---- STATE-FULL focus=$focus slice=$slice → $out ----"
   if python3 -u "$DR/generate_state_reports.py" \
       --db-path "$DB" --focus "$focus" --slice-by "$slice" \
@@ -63,7 +64,7 @@ run_state_full() {
   rebuild_master
 }
 
-log "=== FULL REGEN START day=$DAY db=$DB ==="
+log "=== FULL REGEN START (stable undated paths) db=$DB ==="
 log "log=$LOG"
 if [ ! -r "$DB" ]; then
   log "FATAL: cannot read $DB"
@@ -95,5 +96,5 @@ done
 rebuild_master
 log "=== FULL REGEN DONE failed=$failed ==="
 log "Master index: $DR/reports/master_index.html"
-ls -ld "$DR/reports"/*_clusters_"$DAY" "$DR/reports"/*_by_state_"$DAY" 2>/dev/null | tee -a "$LOG" || true
+ls -ld "$DR/reports"/*_clusters "$DR/reports"/*_by_state 2>/dev/null | tee -a "$LOG" || true
 exit $failed

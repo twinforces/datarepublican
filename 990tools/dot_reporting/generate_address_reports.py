@@ -1259,11 +1259,12 @@ def main():
         raise SystemExit("--lat-long only applies with --slice-by colocator")
 
     # Resolve output prefix (may be colocator_ll_clusters when lat_long)
+    # Stable path (no date) for public deploy — pass --output-dir to override.
     prefix = resolve_slice_mode(args.slice_by, lat_long=args.lat_long)["out_dir_prefix"]
     out = (
         Path(args.output_dir)
         if args.output_dir
-        else SCRIPT_DIR / "reports" / f"{prefix}_{date.today().isoformat()}"
+        else SCRIPT_DIR / "reports" / prefix
     )
     if not os.path.exists(args.db_path):
         raise SystemExit(f"Database not found: {args.db_path}")

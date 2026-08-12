@@ -1246,12 +1246,11 @@ def main() -> int:
             args.min_focus if args.min_focus is not None else cfg["min_focus"]
         )
 
+    # Stable path (no date) for public deploy — pass --output-dir to override.
     out = (
         Path(args.output_dir)
         if args.output_dir
-        else SCRIPT_DIR
-        / "reports"
-        / f"{args.focus}_{args.slice_by}_by_state_{date.today().isoformat()}"
+        else SCRIPT_DIR / "reports" / f"{args.focus}_{args.slice_by}_by_state"
     )
 
     write_state_suite(

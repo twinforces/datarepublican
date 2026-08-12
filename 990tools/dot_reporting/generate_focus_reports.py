@@ -1686,10 +1686,11 @@ def main() -> int:
     prefix = f"{domain['out_prefix']}_{args.slice_by}_clusters"
     if args.lat_long and args.slice_by == "colocator":
         prefix = f"{domain['out_prefix']}_colocator_ll_clusters"
+    # Stable path (no date) for public deploy — pass --output-dir to override.
     out = (
         Path(args.output_dir)
         if args.output_dir
-        else SCRIPT_DIR / "reports" / f"{prefix}_{date.today().isoformat()}"
+        else SCRIPT_DIR / "reports" / prefix
     )
     if not os.path.exists(args.db_path):
         raise SystemExit(f"Database not found: {args.db_path}")

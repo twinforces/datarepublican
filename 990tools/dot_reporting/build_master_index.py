@@ -47,8 +47,53 @@ SKIP_DIR_PREFIXES = (
 def parse_suite(name: str) -> dict | None:
     if any(name.startswith(p) for p in SKIP_DIR_PREFIXES):
         return None
-    if name in ("data",) or name.startswith("."):
+    if name in ("data", "providers") or name.startswith("."):
         return None
+
+    # Stable (undated) paths preferred for public deploy — day="" sorts as live.
+    m = re.match(
+        rf"^(?P<focus>{_FOCUS_ALT})_"
+        r"(?P<slice>address|colocator|loose_colocator|zipcode|colocator_ll)"
+        r"_by_state$",
+        name,
+    )
+    if m:
+        return {
+            "name": name,
+            "geo": "by_state",
+            "focus": m.group("focus"),
+            "slice": m.group("slice"),
+            "day": "",
+        }
+
+    m = re.match(
+        rf"^(?P<focus>{_FOCUS_ALT})_"
+        r"(?P<slice>address|colocator|loose_colocator|zipcode|colocator_ll)"
+        r"_clusters$",
+        name,
+    )
+    if m:
+        return {
+            "name": name,
+            "geo": "national",
+            "focus": m.group("focus"),
+            "slice": m.group("slice"),
+            "day": "",
+        }
+
+    m = re.match(
+        r"^(?P<slice>address|colocator|loose_colocator|zipcode|colocator_ll)"
+        r"_clusters$",
+        name,
+    )
+    if m:
+        return {
+            "name": name,
+            "geo": "national",
+            "focus": "dot",
+            "slice": m.group("slice"),
+            "day": "",
+        }
 
     m = re.match(
         rf"^(?P<focus>{_FOCUS_ALT})_"
@@ -129,13 +174,23 @@ def collect_suites(reports_dir: Path) -> list[dict]:
 
 
 def pick_latest(suites: list[dict]) -> list[dict]:
-    """Prefer newest day per (geo, focus, slice); keep older only if not superseded."""
+    """Prefer undated (live) suite, else newest dated day, per (geo, focus, slice)."""
     best: dict[tuple, dict] = {}
     for s in suites:
         key = (s["geo"], s["focus"], s["slice"])
         cur = best.get(key)
-        if cur is None or s["day"] > cur["day"] or (
-            s["day"] == cur["day"] and s.get("ready") and not cur.get("ready")
+        if cur is None:
+            best[key] = s
+            continue
+        s_day = s.get("day") or ""
+        c_day = cur.get("day") or ""
+        # Undated (live deploy path) always wins over dated archives
+        if s_day == "" and c_day != "":
+            best[key] = s
+        elif c_day == "" and s_day != "":
+            continue
+        elif s_day > c_day or (
+            s_day == c_day and s.get("ready") and not cur.get("ready")
         ):
             best[key] = s
     return sorted(
@@ -164,10 +219,11 @@ def render_html(suites: list[dict], *, all_suites: list[dict], reports_dir: Path
         elif s.get("n_html"):
             extra = f'<div class="sub">{s["n_html"]} html</div>'
         mtime = s["mtime"].strftime("%Y-%m-%d %H:%M") if s.get("mtime") else ""
+        day_lbl = s["day"] if s.get("day") else "live"
         return (
             f'<td class="ok">'
             f'<a href="{s["href"]}">{SLICE_LABELS.get(slice_by, slice_by)}</a>'
-            f'{extra}<div class="sub">{s["day"]} · {mtime}</div></td>'
+            f'{extra}<div class="sub">{day_lbl} · {mtime}</div></td>'
         )
 
     sections = []
