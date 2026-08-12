@@ -42,9 +42,10 @@ Options:
 
 ## How to read the suites
 
-1. **`ofac_address_clusters/`** — exact `canonical_address` match (strongest “same building / mail drop”). City-only strings (no street number) are dropped.  
-2. **`ofac_colocator_clusters/`** — tight colocator keys only: `LL:lat:lon` or `PO:box:zip5`. Excludes `FA:` / `VENDOR:` / geocode junk, and **city-only shells** (Dubai, London, “Miami, Fl, 33102” with no street number) even when they carry an LL: from bad geocoding.  
-3. **`ofac_zipcode_clusters/`** — same valid US ZIP (`INNER JOIN Zips`). **Widen / context only**; high false-positive rate.
+1. **`ofac_colocator_clusters/`** — tight colocator keys only: `LL:lat:lon` or `PO:box:zip5`. Excludes `FA:` / `VENDOR:` / geocode junk, and **city-only shells** (Dubai, London, “Miami, Fl, 33102” with no street number) even when they carry an LL: from bad geocoding. **Start here.**  
+2. **`ofac_loose_colocator_clusters/`** — half-degree `LL:` grid (~neighborhood). Same key family as grant_match / DOT **loose_colocator**. Wider than building LL, tighter than ZIP.  
+3. **`ofac_address_clusters/`** — exact `canonical_address` match (strongest “same building / mail drop”). City-only strings (no street number) are dropped.  
+4. **`ofac_zipcode_clusters/`** — same valid US ZIP (`INNER JOIN Zips`). **Widen / context only**; high false-positive rate.
 
 **Links:** 990 filer EINs → ProPublica Nonprofit Explorer  
 `https://projects.propublica.org/nonprofits/organizations/<ein>`.  
@@ -78,6 +79,7 @@ ofac_reporting/
   reports/
     index.html                 # master
     ofac_colocator_clusters/
+    ofac_loose_colocator_clusters/
     ofac_address_clusters/
     ofac_zipcode_clusters/
     eins/                      # BMF-only EIN detail pages

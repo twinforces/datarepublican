@@ -6,9 +6,10 @@ with IRS 990 charities/grants/officers/contractors, DOT carriers, FEC money,
 or Medicare/NPPES providers.
 
 Slices
-  colocator  — tight building / PO (Addresses+Geocoding); **excludes FA: country-only**
-  address    — exact canonical_address (strongest same-building / mail-drop signal)
-  zipcode    — valid US ZIP via Zips catalog (widen only; noisier)
+  colocator       — tight building / PO (Addresses+Geocoding); **excludes FA: country-only**
+  loose_colocator — 0.5° LL grid (wider neighborhood; same key as grant_match loose)
+  address         — exact canonical_address (strongest same-building / mail-drop signal)
+  zipcode         — valid US ZIP via Zips catalog (widen only; noisier)
 
 All queries are read-only. Output is static HTML under ofac_reporting/reports/.
 
@@ -308,6 +309,39 @@ def is_quality_colocator_key(key: str | None) -> bool:
     return bool(re.match(r"^PO:[^:]+:[0-9]{5}$", k, re.I))
 
 
+def is_quality_loose_key(key: str | None) -> bool:
+    """0.5° grid key: LL:lat:lon only (half-degree cells)."""
+    k = (key or "").strip()
+    if not k.startswith("LL:"):
+        return False
+    parts = k.split(":")
+    if len(parts) < 3:
+        return False
+    try:
+        float(parts[1])
+        float(parts[2])
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def effective_loose_colocator_expr(alias_a: str = "a", alias_g: str = "g") -> str:
+    """Prefer stored loose_colocator; else derive half-degree LL: from lat/lon."""
+    return f"""COALESCE(
+        NULLIF(TRIM({alias_a}.loose_colocator), ''),
+        CASE
+            WHEN {alias_g}.latitude IS NOT NULL AND {alias_g}.longitude IS NOT NULL
+            THEN 'LL:' || CAST(ROUND({alias_g}.latitude / 0.5) * 0.5 AS VARCHAR)
+                 || ':' || CAST(ROUND({alias_g}.longitude / 0.5) * 0.5 AS VARCHAR)
+        END,
+        CASE
+            WHEN {alias_a}.latitude IS NOT NULL AND {alias_a}.longitude IS NOT NULL
+            THEN 'LL:' || CAST(ROUND({alias_a}.latitude / 0.5) * 0.5 AS VARCHAR)
+                 || ':' || CAST(ROUND({alias_a}.longitude / 0.5) * 0.5 AS VARCHAR)
+        END
+    )"""
+
+
 # SQL predicate: street-ish canonical (used for colocator quality gate)
 _STREET_QUALITY_SQL = """(
     (
@@ -522,6 +556,67 @@ def fetch_clusters(
         LIMIT ?
         """
         fetch_limit = max_clusters
+    elif slice_by == "loose_colocator":
+        # Half-degree grid (~55km) — neighborhood widen between tight LL and ZIP.
+        loose = effective_loose_colocator_expr("a", "g")
+        key_ok = f"""
+          ({loose}) IS NOT NULL
+          AND TRIM(CAST(({loose}) AS VARCHAR)) != ''
+          AND ({loose}) LIKE 'LL:%'
+        """
+        sql = f"""
+        WITH ofac_keys AS (
+            SELECT DISTINCT ({loose}) AS cluster_key
+            FROM Addresses a
+            LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id
+            WHERE a.address_type = 'ofac_sanction'
+              AND {key_ok}
+              AND {_US_FOOTPRINT_SQL_A}
+        ),
+        keyed AS (
+            SELECT
+                ({loose}) AS cluster_key,
+                a.address_type AS address_type,
+                a.owner_id AS owner_id,
+                a.canonical_address AS canonical_address
+            FROM Addresses a
+            LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id
+            INNER JOIN ofac_keys k ON k.cluster_key = ({loose})
+            WHERE {key_ok}
+        ),
+        base AS (
+            SELECT
+                cluster_key,
+                COUNT(*)::BIGINT AS total_rows,
+                COUNT(DISTINCT address_type)::BIGINT AS multi_type_count,
+                LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
+                SUM(CASE WHEN {ofac} THEN 1 ELSE 0 END)::BIGINT AS ofac_n,
+                COUNT(DISTINCT CASE WHEN {ofac} THEN owner_id END)::BIGINT AS ofac_entities,
+                SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_n,
+                SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_n,
+                SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_n,
+                SUM(CASE WHEN address_type = 'contractor' THEN 1 ELSE 0 END)::BIGINT AS contractor_n,
+                SUM(CASE WHEN address_type IN ('dot_carrier_phy','dot_carrier_mail')
+                         THEN 1 ELSE 0 END)::BIGINT AS dot_n,
+                SUM(CASE WHEN address_type LIKE 'fec%' THEN 1 ELSE 0 END)::BIGINT AS fec_n,
+                SUM(CASE WHEN address_type IN ('nppes_practice','nppes_mailing')
+                         THEN 1 ELSE 0 END)::BIGINT AS medicare_n,
+                SUM(CASE WHEN {cot} THEN 1 ELSE 0 END)::BIGINT AS cotenant_n,
+                max_by(canonical_address, length(coalesce(canonical_address, ''))) AS sample_address
+            FROM keyed
+            GROUP BY cluster_key
+            HAVING SUM(CASE WHEN {ofac} THEN 1 ELSE 0 END) >= 1
+               AND SUM(CASE WHEN {cot} THEN 1 ELSE 0 END) >= 1
+        )
+        SELECT * FROM base
+        ORDER BY
+            ofac_entities DESC,
+            cotenant_n DESC,
+            multi_type_count DESC,
+            total_rows DESC
+        LIMIT ?
+        """
+        fetch_limit = max_clusters * 5
     else:
         raise ValueError(f"Unknown slice_by={slice_by!r}")
 
@@ -549,6 +644,13 @@ def fetch_clusters(
             # Prefer US street sample; drop foreign shells (London, Phnom Penh, …)
             if not is_us_street_address(c.get("sample_address")):
                 continue
+        elif slice_by == "loose_colocator":
+            if not is_quality_loose_key(str(c["cluster_key"])):
+                continue
+            # Grid is widen — still prefer a US sample street when present
+            if c.get("sample_address") and not is_us_street_address(c.get("sample_address")):
+                # Allow if only foreign samples in cell but key is US lat/lon grid
+                pass
         elif slice_by == "address":
             # Exact string must be US street (not Monomark House London, etc.)
             if not is_us_street_address(str(c["cluster_key"])):
@@ -583,6 +685,13 @@ def _member_from(slice_by: str) -> tuple[str, str, str]:
                 f"AND ({colo}) NOT LIKE 'BOGUS:%' AND ({colo}) NOT LIKE '%{{zip}}%' "
                 f"AND ({colo}) NOT ILIKE '%UNKN%' AND ({colo}) NOT ILIKE '%VAGUE%'"
             ),
+            "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id",
+        )
+    if slice_by == "loose_colocator":
+        loose = effective_loose_colocator_expr("a", "g")
+        return (
+            loose,
+            f"({loose}) IS NOT NULL AND ({loose}) LIKE 'LL:%'",
             "LEFT JOIN Geocoding g ON g.geocoding_id = a.geocoding_id",
         )
     if slice_by == "address":
@@ -1045,6 +1154,7 @@ def banner_html() -> str:
 
 SLICE_LABELS = {
     "colocator": "Colocator (building / PO)",
+    "loose_colocator": "Loose colocator (0.5° grid)",
     "address": "Exact address",
     "zipcode": "ZIP code (widen)",
 }
@@ -1773,6 +1883,7 @@ def render_master_index(suites: list[dict], generated_at: str) -> str:
   <strong>How to read this for Treasury / enforcement triage</strong>
   <ol>
     <li><strong>Colocator</strong> — <code>LL:</code> / <code>PO:box:zip</code> (bare <code>PO:box:</code> without ZIP dropped). City shells excluded. <em>Start here.</em></li>
+    <li><strong>Loose colocator</strong> — 0.5° grid (~neighborhood). Wider than building LL, tighter than ZIP.</li>
     <li><strong>Address</strong> — exact street-quality canonical string.</li>
     <li><strong>ZIP</strong> — valid US ZIP (widen; noisier).</li>
   </ol>
@@ -1820,6 +1931,15 @@ METHODOLOGY = {
         "<code>INNER JOIN Zips</code> (valid US ZIP catalog only; no REGEXP). "
         "Widen / context view — many unrelated entities share a ZIP. Prefer address/colocator "
         "for enforcement leads."
+    ),
+    "loose_colocator": (
+        "<strong>Method:</strong> Cluster key = half-degree grid "
+        "<code>LL:round(lat/0.5)*0.5:round(lon/0.5)*0.5</code> "
+        "(same convention as grant_match / DOT loose). Prefers "
+        "<code>Addresses.loose_colocator</code>, else derives from Geocoding or Addresses lat/lon. "
+        "Wider than tight <code>LL:</code> building colocator, tighter than ZIP. "
+        "Pass: ≥1 OFAC + ≥1 co-tenant on a US-state seed. "
+        "Many co-tenants may be unrelated neighbors — see disclaimer."
     ),
 }
 
@@ -1959,11 +2079,15 @@ def main() -> int:
     p.add_argument("--db-path", default=DEFAULT_DB)
     p.add_argument(
         "--slice-by",
-        choices=["colocator", "address", "zipcode"],
+        choices=["colocator", "loose_colocator", "address", "zipcode"],
         default=None,
-        help="Single slice (default with --all-slices: all three)",
+        help="Single slice (default / --all-slices: all four)",
     )
-    p.add_argument("--all-slices", action="store_true", help="Write colocator + address + zipcode")
+    p.add_argument(
+        "--all-slices",
+        action="store_true",
+        help="Write colocator + loose_colocator + address + zipcode",
+    )
     p.add_argument("--max-clusters", type=int, default=200)
     p.add_argument("--top-n", type=int, default=50)
     p.add_argument(
@@ -1975,7 +2099,7 @@ def main() -> int:
     args = p.parse_args()
 
     slices = (
-        ["colocator", "address", "zipcode"]
+        ["colocator", "loose_colocator", "address", "zipcode"]
         if args.all_slices or args.slice_by is None
         else [args.slice_by]
     )
@@ -2003,6 +2127,7 @@ def main() -> int:
                     "n_clusters": meta["n_clusters"],
                     "notes": {
                         "colocator": "Building/PO; FA: excluded",
+                        "loose_colocator": "0.5° LL grid (neighborhood widen)",
                         "address": "Exact street string",
                         "zipcode": "Valid US ZIP only (widen)",
                     }.get(sl, ""),
