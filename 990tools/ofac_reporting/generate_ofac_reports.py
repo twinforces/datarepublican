@@ -656,15 +656,12 @@ def fetch_clusters(
             if not is_us_street_address(str(c["cluster_key"])):
                 continue
             c["sample_address"] = str(c["cluster_key"])
-        # Rank score for map/table: type diversity * ofac entities + cotenant weight
+        # Catalog score (not "severity"): more SDN entities / rows first, then co-tenants.
+        # OFAC hits are not ranked by moral weight — all list membership is equally serious.
         c["score"] = (
-            int(c["ofac_entities"] or 0) * 100
-            + int(c["charity_n"] or 0) * 5
-            + int(c["grant_n"] or 0) * 3
-            + int(c["dot_n"] or 0)
-            + int(c["fec_n"] or 0)
-            + int(c["medicare_n"] or 0)
-            + int(c["multi_type_count"] or 0) * 10
+            int(c["ofac_entities"] or 0) * 1000
+            + int(c["ofac_n"] or 0) * 10
+            + int(c["cotenant_n"] or 0)
         )
         c["slice_by"] = slice_by
         out.append(c)
@@ -1147,6 +1144,10 @@ def banner_html() -> str:
   <br><strong>Do not assume:</strong> Dahmer’s neighbors were not cannibals—just neighbors.
   My father-in-law lived in a bordello; he was not a whore—just a teenage runaway
   waiting to join the Air Force. Shared address is a lead, not guilt.
+  <br><strong>Ranking:</strong> this is a <em>catalog</em> of co-locations (by SDN entity
+  count / footprint size), not a league table of “how bad.” Prefer
+  <strong>colocator</strong> then <strong>loose colocator</strong>; exact-address match
+  is rare (suite spelling).
 </div>
 """
 # (banner intentionally has no third-party site names)
@@ -1882,11 +1883,13 @@ def render_master_index(suites: list[dict], generated_at: str) -> str:
 <div class="note">
   <strong>How to read this for Treasury / enforcement triage</strong>
   <ol>
-    <li><strong>Colocator</strong> — <code>LL:</code> / <code>PO:box:zip</code> (bare <code>PO:box:</code> without ZIP dropped). City shells excluded. <em>Start here.</em></li>
-    <li><strong>Loose colocator</strong> — 0.5° grid (~neighborhood). Wider than building LL, tighter than ZIP.</li>
-    <li><strong>Address</strong> — exact street-quality canonical string.</li>
-    <li><strong>ZIP</strong> — valid US ZIP (widen; noisier).</li>
+    <li><strong>Colocator</strong> — <code>LL:</code> / <code>PO:box:zip</code> (bare <code>PO:box:</code> without ZIP dropped). City shells excluded. <em>Start here</em> (e.g. same building as an SDN).</li>
+    <li><strong>Loose colocator</strong> — 0.5° grid (~neighborhood). Same key as DOT/grant_match loose. Wider than building LL, tighter than ZIP.</li>
+    <li><strong>Address</strong> — exact canonical string only. Often empty: suite wording rarely matches byte-for-byte. Not the primary OFAC view.</li>
+    <li><strong>ZIP</strong> — valid US ZIP (widen; noisier). Context only.</li>
   </ol>
+  <p class="meta">OFAC suites are a co-location <strong>catalog</strong>, not ranked by severity.
+    List membership is binary; table order is footprint size / entity count for browsing.</p>
   Detail pages: SDN name, UID, programs, tax IDs (linked only if in Charities → ProPublica
   or BMF → local page), co-tenants, DOT SC/MOTUS. Suite indexes use sortable smart tables.
 </div>
@@ -1920,11 +1923,13 @@ METHODOLOGY = {
         "Pass rule: ≥1 <code>ofac_sanction</code>, ≥1 co-tenant, ≥1 street-quality address."
     ),
     "address": (
-        "<strong>Method:</strong> Cluster key = <code>Addresses.canonical_address</code> "
-        "with US street quality (street # + US state + ZIP5; zip ∈ <code>Zips</code> or "
-        "2-letter US state on the row). Drops foreign exact strings "
-        "(e.g. Monomark House / Old Gloucester Street, London). "
-        "Pass: ≥1 OFAC + ≥1 co-tenant."
+        "<strong>Method:</strong> Cluster key = <em>exact</em> "
+        "<code>Addresses.canonical_address</code> string match. "
+        "This suite is often sparse or empty: OFAC and 990/NPPES almost never share "
+        "byte-identical suite wording (Suite 2185 vs Ste 2900, Street vs St). "
+        "That is intentional — use <strong>colocator</strong> (building) or "
+        "<strong>loose_colocator</strong> (0.5° grid) for real co-location. "
+        "Pass: ≥1 OFAC + ≥1 co-tenant on the exact string."
     ),
     "zipcode": (
         "<strong>Method:</strong> Cluster key = <code>Addresses.zip_code</code> with "
@@ -2088,7 +2093,12 @@ def main() -> int:
         action="store_true",
         help="Write colocator + loose_colocator + address + zipcode",
     )
-    p.add_argument("--max-clusters", type=int, default=200)
+    p.add_argument(
+        "--max-clusters",
+        type=int,
+        default=500,
+        help="Cap per suite (default 500). OFAC is a catalog — raise to surface more cells.",
+    )
     p.add_argument("--top-n", type=int, default=50)
     p.add_argument(
         "--output-root",
