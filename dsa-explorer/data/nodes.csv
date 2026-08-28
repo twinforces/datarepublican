@@ -93,7 +93,7 @@ grenyion,Kristen Grenyion,person,party,,4,,https://web.archive.org/web/202308080
 gunther,Andreas Günther,person,money,,2,,https://rosalux.nyc/about/,"Head of Office, RLS-NYC (2018–2024); former Director of International Policy, Die Linke",,,rls-germany,1
 hamby,Ryan Hamby,person,party,,4,,https://peoplesforum.org/about/staff/,"General Manager, People's Forum (per FY2024 IRS Form 990).",,,singham-spine,1
 harris,Roger D. Harris,person,veneer,,,,https://consortiumnews.com/2024/07/30/venezuela-as-us-leaders-call-fraud-us-observers-endorse-results/,Task Force on the Americas / US Peace Council; VZ 2024 election accompanier (Miranda),,US,latam-solidarity,1
-hatuey,The Hatuey Project,project,center,,,,https://www.hatueyproject.org/,"Founded Apr 2022; Cuba ""medical aid""; no independent EIN; coordinator Gloria La Riva",hatuey.png,,hatuey,1
+hatuey,The Hatuey Project,project,center,,,,https://www.hatueyproject.org/,"Founded Apr 2022; Cuba ""medical aid""; no independent EIN; coordinator Gloria La Riva || International Solidarity · Far-left (pro-Cuba) · foreign-support:YES",hatuey.png,,hatuey|afgj-interlock|afgj-projects,1
 hbs,Heinrich Boell Foundation (HBS),org,money,,,52-2168529,https://us.boell.org/en/who-we-are,Greens-affiliated; ~$1.78M FY2024; climate/democracy/gender,,Germany,rls-germany,1
 henderson,Rita Henderson,person,party,,4,,https://newlinesmag.com/reportage/the-big-business-of-uyghur-genocide-denial/,Operations Manager (2019-2021); Involved in genocide denial activities.,,,singham-spine,1
 hispantv,HispanTV,org,state,state,,,https://www.algemeiner.com/2023/10/31/hispantv-is-irans-propaganda-arm-in-latin-america-why-is-it-still-being-broadcast/,"Spanish-language IRIB outlet, OFAC-sanctioned alongside Press TV",,Iran,iran-network,1
@@ -271,7 +271,6 @@ p_red_de_solidaridad,Red de Solidaridad,project,state,,,,,International Solidari
 p_refuse_fascism,Refuse Fascism,project,party,,,,,Activism · Far-left (revolutionary communist) · antifa:YES,,,afgj-interlock|afgj-projects,2
 p_return_solidarity,Return Solidarity,project,state,,,,,International Solidarity · Pro-Palestinian · foreign-support:YES,,,afgj-projects,1
 p_reuniting_of_african_descendants_road,Reuniting of African Descendants (ROAD),project,veneer,,,,,Pan-African · Left-wing (Pan-African),,,afgj-projects,1
-p_samidoun_palestinian_prisoner_solidari,Samidoun Palestinian Prisoner Solidarity Network,project,state,,,,https://samidoun.net,Activism/Terrorism-linked · Far-left (PFLP-aligned) · foreign-support:YES,,,afgj-projects,1
 p_solidarity_ignite,Solidarity Ignite,project,veneer,,,,,Activism · Left-wing,,,afgj-projects,1
 p_south_bronx_unite,South Bronx Unite,project,veneer,,,,,Environmental Justice · Left-wing (environmental justice),,,afgj-interlock|afgj-projects,2
 p_splitseed_productions,SplitSeed Productions,project,veneer,,,,,Media/Arts · Left-wing,,,afgj-interlock|afgj-projects,2
@@ -281,7 +280,6 @@ p_sustainable_nations,Sustainable Nations,project,veneer,,,,,Environmental/Indig
 p_sustainable_orphanages_for_haitian_you,Sustainable Orphanages for Haitian Youth,project,state,,,,,Charity · Non-partisan (charity) · foreign-support:YES,,,afgj-interlock|afgj-projects,2
 p_ta_ayush,Ta’ayush,project,state,,,,,Peace/Activism · Left-wing (anti-occupation) · foreign-support:YES,,,afgj-projects,1
 p_taking_black_pride,Taking Black Pride,project,veneer,,,,,LGBTQ/Cultural · Left-wing (identity politics),,,afgj-interlock|afgj-projects,2
-p_the_hatuey_project,The Hatuey Project,project,state,,,,,International Solidarity · Far-left (pro-Cuba) · foreign-support:YES,,,afgj-interlock|afgj-projects,2
 p_the_l_i_c_project,The L.I.C. Project,project,veneer,,,,,Community/Arts · Left-wing,,,afgj-projects,1
 p_thompson_house_tucson,Thompson House Tucson,project,veneer,,,,,Community Space · Left-wing,,,afgj-interlock|afgj-projects,2
 p_trans_women_of_color_solidarity_networ,Trans Women of Color Solidarity Network,project,veneer,,,,,LGBTQ · Left-wing (identity politics),,,afgj-interlock|afgj-projects,2
@@ -482,7 +480,7 @@ rub_witness_for_peace_solidari,Witness for Peace Solidarity Collective,org,money
 rub_zimbabwe_african_people_s,Zimbabwe African People's Union,org,context,panafrican,,,https://zapu.org,"foreign_solidarity; report §I-III, VII. Cuban-trained cadres fought in Rhodesia alongside ANC.",,Zimbabwe,rubio-cuba,1
 rubio_report,Rubio Cuba Report (State Dept.),concept,context,,,,https://www.state.gov/cuba-the-capital-of-21st-century-communism,"State Dept./Rubio report on Cuban subversion; 8 sections. Anchors every node's section ref. Context entities (FTO/exile/historical) are CITED here, not funded.",,,rubio-cuba,1
 russia,Russia,concept,state,,19,,,Russia — foreign-state tie hub,,Russia,singham-spine,1
-samidoun,Samidoun Palestinian Prisoner Solidarity Network,org,terror,natlib,,,https://home.treasury.gov/news/press-releases/jy2646,OFAC-designated Oct 15 2024 as a 'sham charity' PFLP fundraising front,,,iran-network,1
+samidoun,Samidoun Palestinian Prisoner Solidarity Network,org,terror,natlib,,,https://home.treasury.gov/news/press-releases/jy2646,OFAC-designated Oct 15 2024 as a 'sham charity' PFLP fundraising front || Activism/Terrorism-linked · Far-left (PFLP-aligned) · foreign-support:YES,,,iran-network|afgj-projects,1
 santos,Lucas Tinti dos Santos,person,party,,3,,https://projects.propublica.org/nonprofits/organizations/371913339/202002309349300500/full,"Director & Secretary of United Community Fund, 2019-2023 (per Form 990 filings); UCF is a Neville Roy Singham-linked pass-through nonprofit reported to channel funds tied to pro-CCP/China media outlets, though no source names Santos personally as a foreign agent, registered or unregistered.",,,singham-spine,1
 scharenberg,Albert Scharenberg,person,money,,2,,https://keywiki.org/Albert_Scharenberg,Co-ED RLS-NYC (2013-2018); organized the Mar 2018 European delegation to the CPC Summit,,,rls-germany,1
 seal,ICAP 65th-Anniversary Seal,concept,state,,,,,"Awarded to La Riva, Jan 2026",,,hatuey,1

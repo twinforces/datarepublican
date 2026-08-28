@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1787901367">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1787901367">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1787903271">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1787903271">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -889,7 +889,9 @@ $(document).ready(function() {
 <script src="logos/emblems.embed.js"></script>
 <script src="logos/afgj_logos.embed.js"></script>
 <script>
+var _hatueyLogo = (window.LOGOS&&window.LOGOS.hatuey) || (window.AFGJ_LOGOS&&window.AFGJ_LOGOS.p_the_hatuey_project);
 window.LOGOS = Object.assign({}, window.LOGOS||{}, window.AVATARS||{}, window.EMBLEMS||{}, window.AFGJ_LOGOS||{});
+if(_hatueyLogo) window.LOGOS.hatuey = _hatueyLogo; /* canonical Hatuey keeps its real branded logo, not the generic emblem */
 </script>
 
 <style>

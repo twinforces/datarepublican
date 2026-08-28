@@ -10,7 +10,9 @@ title: DSA Explorer
 <script src="logos/emblems.embed.js"></script>
 <script src="logos/afgj_logos.embed.js"></script>
 <script>
+var _hatueyLogo = (window.LOGOS&&window.LOGOS.hatuey) || (window.AFGJ_LOGOS&&window.AFGJ_LOGOS.p_the_hatuey_project);
 window.LOGOS = Object.assign({}, window.LOGOS||{}, window.AVATARS||{}, window.EMBLEMS||{}, window.AFGJ_LOGOS||{});
+if(_hatueyLogo) window.LOGOS.hatuey = _hatueyLogo; /* canonical Hatuey keeps its real branded logo, not the generic emblem */
 </script>
 
 <style>
