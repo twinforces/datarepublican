@@ -98,6 +98,25 @@
       class="hidden p-4 md:p-0 md:visible md:flex flex-1 flex-col justify-between md:gap-1 sm:gap-2 fixed md:static right-0 w-full md:w-auto md:h-auto bg-navy z-50 transition-transform duration-300 translate-x-full md:translate-x-0"
     >
       <div class="flex-1 flex flex-col gap-px">
+        <!-- prettier-ignore -->
+        <div class="mb-1.5 px-3 py-2 rounded border-2 border-green-light/70 bg-green-light/10 text-white">
+          <strong class="block text-sm font-semibold">Site v2.0 coming soon</strong>
+          <span class="block text-[13px] opacity-75">A full redesign is in the works</span>
+        </div>
+        <!-- prettier-ignore -->{% include nav-link.html
+          title="DSA Explorer"
+          subtitle="Ideology map of the solidarity funding network"
+          url="/dsa-explorer"
+          classes=""
+          label="New"
+        %}
+        <!-- prettier-ignore -->{% include nav-link.html
+          title="TrumpBlogs (fka NoBlogs)"
+          subtitle="Map of the anarchist &amp; antifascist blog network"
+          url="/noblogs"
+          classes=""
+          label="New"
+        %}
         <div class="flex flex-col gap-0.5">
           <button
             id="charity-funding-dropdown-button"
@@ -148,38 +167,10 @@
             %}          </div>
         </div>
         <!-- prettier-ignore -->{% include nav-link.html
-          title="No Kings"
-          subtitle="Analyze protest financials"
-          url="/nokings"
-           classes="" 
-           label="New"
-            %}
-        <!-- prettier-ignore -->{% include nav-link.html
           title="NED Explorer"
           subtitle="Explore NED Journal of Democracy"
           url="/ned"
-           classes="" 
-           label="New"
-            %}
-        <!-- prettier-ignore -->{% include nav-link.html
-          title="Historical Documents"
-          subtitle="Explore Soros early years and download tax returns"
-          url="/ceu"
-           classes="" 
-           label="New"
-            %}
-
-        <!-- prettier-ignore -->{% include nav-link.html 
-           title="People relations" 
-           subtitle="Explore people connections" 
-           url="/relations" 
-          classes=""
-        %}
-        <!-- prettier-ignore -->{% include nav-link.html
-          title="DEI Search"
-          subtitle="Explore DEI Awards"
-          url="/tax_search"
-           classes="" 
+           classes=""
             %}
 
         <div class="flex flex-col gap-0.5">
@@ -212,12 +203,11 @@
               url="/officers"
               classes="" 
             %} 
-            {% include nav-link.html 
+            {% include nav-link.html
              title="Bulk NGO officer
               search" subtitle="Search and cross-reference names"
-              url="/officers/bulk" 
-              classes="" 
-              label="New"
+              url="/officers/bulk"
+              classes=""
             %}
           </div>
         </div>
@@ -225,14 +215,14 @@
         <div class="flex flex-col gap-0.5">
           <button
             id="political-funding-dropdown-button"
-            class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 {% if page.url contains '/donations2024' or page.url contains '/award_search' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
+            class="nav-dropdown-button flex flex-col text-white no-underline py-1 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 bg-transparent mr-0 {% if page.url contains '/award_search' %}is-active border-transparent{% else %}border-transparent hover:border-white/75 hover:bg-white/10{% endif %} relative group justify-start items-start"
           >
             <strong class="text-base md:text-sm w-full md:w-auto text-left"
               >Political campaign &amp; grant funding</strong
             >
             <span
               class="opacity-70 font-normal text-sm md:text-[13px] w-full md:w-auto text-left"
-              >Donations and taxpayer-funded grants</span
+              >Taxpayer-funded grants</span
             >
             <span
               class="absolute top-[calc(50%-.625rem)] right-2 size-5 opacity-50 group-hover:opacity-100 transition-transform rotate-90"
@@ -246,14 +236,8 @@
             id="political-funding-dropdown"
             class="nav-dropdown-content relative pl-2 overflow-hidden transition-all duration-300 flex flex-col gap-0.5"
           >
-            {% include nav-link.html 
-              title="Small dollar donations"
-              subtitle="ActBlue & WinRed donations" url="/donations2024"
-              classes="" 
-              label="New"
-            %} 
-            {% include nav-link.html 
-               title="Federal grant search" 
+            {% include nav-link.html
+               title="Federal grant search"
                subtitle="Map funds to connected orgs"
                url="/award_search" 
                classes="" 
@@ -313,8 +297,28 @@
       </div>
       <!-- prettier-ignore -->
       <div class="flex flex-col gap-0.5">
-        {% include nav-link.html 
-           title="Donate" 
+        <a
+          href="https://www.amazon.com/Unelected-Jennica-Pounds/dp/B0GGYQNWHJ"
+          target="_blank"
+          rel="noopener"
+          class="nav-item group flex items-center gap-3 no-underline py-2 px-3 rounded border-2 border-green-light/70 bg-green-light/10 hover:bg-green-light/20 select-none"
+        >
+          <img
+            src="/assets/images/unelected-cover.jpg"
+            alt="Unelected book cover"
+            class="w-10 h-auto rounded shadow shrink-0"
+            width="1000"
+            height="1500"
+          />
+          <span class="flex flex-col text-white">
+            <strong class="md:text-sm">Unelected
+              <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">Preorder</span>
+            </strong>
+            <span class="opacity-70 text-sm font-normal md:text-[13px]">New book &mdash; releases Oct 13</span>
+          </span>
+        </a>
+        {% include nav-link.html
+           title="Donate"
            subtitle="Help support our work"
            url="/donate" 
            classes="!border-green-light bg-green-light/20 hover:!bg-green-light hover:text-navy relative  [&_.right-icon]:text-green-light" right-icon="gift" 
