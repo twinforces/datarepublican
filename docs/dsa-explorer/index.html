@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  <link rel="stylesheet" href="/assets/css/styles.css?v=1787903271">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1787903271">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=1788150788">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1788150788">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -178,6 +178,24 @@ $(document).ready(function() {
   </strong>
   
     <span class="opacity-70 text-sm font-normal md:text-[13px]">Ideology map of the solidarity funding network</span>
+  
+  
+</a> 
+        <!-- prettier-ignore --><a 
+  href="/noblogs" 
+  class="nav-item group flex no-underline py-1.5 px-3 rounded focus:outline focus:outline-2 focus:outline-blue focus:outline-offset-2 border-2 border-transparent hover:border-white/75 hover:bg-white/10 flex-col text-white select-none "
+  
+  title="/dsa-explorer | /noblogs"
+>
+  
+  <strong class="md:text-sm">
+    TrumpBlogs (fka NoBlogs)
+    
+      <span class="bg-green px-1 py-0.5 rounded-sm font-semibold uppercase text-xs ml-1">New</span>
+    
+  </strong>
+  
+    <span class="opacity-70 text-sm font-normal md:text-[13px]">Map of the anarchist &amp; antifascist blog network</span>
   
   
 </a> 
@@ -889,7 +907,7 @@ $(document).ready(function() {
 <script src="logos/emblems.embed.js"></script>
 <script src="logos/afgj_logos.embed.js"></script>
 <script>
-var _hatueyLogo = (window.LOGOS&&window.LOGOS.hatuey) || (window.AFGJ_LOGOS&&window.AFGJ_LOGOS.p_the_hatuey_project);
+var _hatueyLogo = window.LOGOS&&window.LOGOS.hatuey;
 window.LOGOS = Object.assign({}, window.LOGOS||{}, window.AVATARS||{}, window.EMBLEMS||{}, window.AFGJ_LOGOS||{});
 if(_hatueyLogo) window.LOGOS.hatuey = _hatueyLogo; /* canonical Hatuey keeps its real branded logo, not the generic emblem */
 </script>
@@ -1048,14 +1066,13 @@ function ideoTag(d){
   return `<span class="tag" style="background:${d.col}">${txt}</span>${cc}`;
 }
 
-/* ------- country regions: group NON-US nodes only. US actors + the core spine stay
-   un-boxed (a USA box would just be a 15-node bag and add no signal). Grouping is GEOGRAPHIC —
-   where an entity operates/resides — and is deliberately NOT a funding claim: Singham is placed
-   in China because he resides there, which is not the same as attributing his money to the
-   Chinese state. Cuba wraps the actual Cuban-state entities. ------- */
+/* ------- country regions: group NON-US nodes only. US actors, the core spine, and
+   US-facing funders (Singham routes >$20M INTO the US network — his role is the conduit,
+   not a Chinese node) stay un-boxed (a USA box would just be a bag and add no signal).
+   Grouping is GEOGRAPHIC — where an entity operates/resides — and is deliberately NOT a
+   funding or affiliation claim. Cuba wraps the actual Cuban-state entities. ------- */
 const COUNTRY = {
-  icap:'Cuba', minsap:'Cuba', rhc:'Cuba', seal:'Cuba',
-  singham:'China'
+  icap:'Cuba', minsap:'Cuba', rhc:'Cuba', seal:'Cuba'
 };
 /* ------- PATRON / SPHERE (model b): a *sourced* claim that a state is this org's
    principal patron. This is the OPPOSITE of the residence disclaimer above — it IS a

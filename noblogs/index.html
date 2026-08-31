@@ -1,0 +1,681 @@
+---
+layout: default
+title: TrumpBlogs formerly known as NoBlogs
+---
+
+<style>
+  /* --- Fit this full-viewport app under the DataRepublican layout chrome --- */
+  /* Cancel the padded wrapper <main> ONLY (direct child); the app's own inner <main> keeps its padding. */
+  #main-content > main{padding:0 !important;max-width:none !important;min-height:0 !important}
+  :root{
+    --bg:#F7F7F5;--panel:#FFFFFF;--ink:#1A1A1A;--dim:#6B6F76;--line:#E2E2DD;--line2:#EDEDE8;
+    --accent:#C0392B;--hi:#C0392B;--med:#B8860B;--low:#4A6FA5;--news:#1B7F4B;--gold:#B8860B;
+    --tile:#F1F1EC;--tile2:#F7F7F3;--link:#1155CC;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.45 "Libre Franklin",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  header{position:sticky;top:0;z-index:600;background:#fff;border-bottom:1px solid var(--line);
+    padding:11px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  h1{margin:0;font-size:18px;font-weight:700;letter-spacing:.2px}
+  h1 .gold{color:var(--gold)}
+  .sub{color:var(--dim);font-size:12px}
+  .disclaimer{flex-basis:100%;margin:7px 0 0;padding:6px 10px;border:1px solid #E4C9A0;
+    background:#FBF3E4;border-radius:4px;font-size:10.5px;line-height:1.42;color:#6B5A3E}
+  .disclaimer strong{color:#8A5A1A}
+  .grow{flex:1}
+  #search{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:20px;
+    padding:8px 14px;font-size:13.5px;width:340px;max-width:48vw;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+  #search::placeholder{color:#9a9ea6}
+  #search:focus{outline:none;border-color:#c9c9c0}
+  .tabs{display:flex;gap:4px;background:#F0F0EA;border:1px solid var(--line);border-radius:10px;padding:3px}
+  .tab{padding:6px 15px;border-radius:8px;cursor:pointer;color:var(--dim);font-size:13px;font-weight:600;user-select:none}
+  .tab.on{background:var(--accent);color:#fff}
+  .layout{display:flex;align-items:flex-start}
+  aside#facets{width:232px;flex:none;position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;
+    border-right:1px solid var(--line);padding:14px 14px 40px;background:#FBFBF9}
+  .fgroup{margin-bottom:16px}
+  .fgroup h3{margin:0 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim)}
+  .fitem{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12.5px;color:#4a4e56;cursor:pointer}
+  .fitem:hover{color:var(--ink)}
+  .fitem input{accent-color:var(--accent);cursor:pointer;pointer-events:none}
+  .fitem .c{margin-left:auto;color:#9a9ea6;font-size:11px;font-variant-numeric:tabular-nums}
+  .fitem.act{color:var(--ink);font-weight:600}
+  .clearf{color:var(--low);font-size:11px;cursor:pointer;user-select:none;margin-bottom:10px;display:inline-block}
+  main{flex:1;min-width:0;padding:16px 20px 60px}
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 15px;min-width:104px;
+    box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .kpi .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .kpi .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .kpi.a .v{color:var(--gold)} .kpi.b .v{color:var(--news)} .kpi.c .v{color:var(--low)} .kpi.d .v{color:var(--med)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;
+    transition:border-color .12s,transform .12s,box-shadow .12s;display:flex;flex-direction:column;
+    box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.09)}
+  .card.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(192,57,43,.25)}
+  .thumbwrap{height:132px;background:var(--tile);border-bottom:1px solid var(--line);position:relative;overflow:hidden}
+  .thumbwrap img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
+  .thumbwrap .novis{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#a8aab0;font-size:11px}
+  .badge{position:absolute;top:7px;left:7px;font-size:10px;padding:2px 7px;border-radius:6px;background:rgba(255,255,255,.9);border:1px solid var(--line);color:var(--dim)}
+  .badge.logo{color:#8A5A1A;border-color:#E4C9A0;background:#FBF3E4}
+  .cbody{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+  .cname{font-weight:700;font-size:13.5px;line-height:1.25}
+  .chost{color:var(--dim);font-size:10.5px;word-break:break-all}
+  .cmeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+  .tag{font-size:10.5px;padding:2px 7px;border-radius:6px;background:var(--tile);border:1px solid var(--line);color:#555}
+  .tag.cat{color:#333;border-color:#D8D8CF}
+  .tag.mil-operational{color:var(--hi);border-color:rgba(192,57,43,.35);background:rgba(192,57,43,.07)}
+  .tag.mil-tactical_support{color:var(--med);border-color:rgba(184,134,11,.35);background:rgba(184,134,11,.08)}
+  .tag.mil-rhetorical{color:var(--low);border-color:rgba(74,111,165,.35);background:rgba(74,111,165,.08)}
+  .tag.dox{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:600}
+  .cloc{font-size:11.5px;color:var(--dim)} .cloc::before{content:"📍 "}
+  .csum{font-size:11.5px;color:#585c64;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+  .cfoot{display:flex;gap:9px;margin-top:auto;font-size:10.5px;color:#9a9ea6;padding-top:4px}
+  .cfoot .on{color:var(--news)}
+  .empty{color:var(--dim);padding:40px;text-align:center}
+  .ph{color:var(--dim);padding:60px 40px;text-align:center;max-width:560px;margin:0 auto}
+  .ph h2{color:var(--ink)}
+  .ph code{background:#EEE;padding:1px 5px;border-radius:4px}
+  .loadmore{display:block;margin:22px auto;padding:10px 22px;background:#fff;border:1px solid var(--line);
+    color:var(--ink);border-radius:10px;cursor:pointer;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .loadmore:hover{background:#F2F2EC}
+
+  /* ---- detail drawer (dsa-explorer style: docked sidebar, not a modal) ---- */
+  #scrim{position:fixed;inset:56px 0 0 0;background:rgba(20,20,18,.20);z-index:850;
+    opacity:0;pointer-events:none;transition:opacity .2s}
+  #scrim.on{opacity:1;pointer-events:auto}
+  #panel{position:fixed;top:56px;right:0;bottom:0;width:392px;max-width:94vw;background:var(--panel);
+    border-left:1px solid var(--line);box-shadow:-3px 0 22px rgba(0,0,0,.13);z-index:900;
+    transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);overflow-y:auto}
+  #panel.on{transform:translateX(0)}
+  .pclose{position:sticky;top:0;float:right;z-index:5;margin:0;border:none;background:transparent;
+    font-size:20px;line-height:1;color:var(--dim);cursor:pointer;padding:14px 16px}
+  .pclose:hover{color:var(--ink)}
+  #pinner .top{display:flex;gap:13px;padding:16px 16px 14px;border-bottom:1px solid var(--line)}
+  #pinner .top img{width:78px;height:78px;object-fit:cover;border-radius:10px;background:var(--tile);flex:none;border:1px solid var(--line)}
+  #pinner h2{margin:0 0 3px;font-size:17px;line-height:1.25}
+  #pinner .body{padding:16px;display:flex;flex-direction:column;gap:15px}
+  .sec h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)}
+  .q{border-left:2px solid var(--accent);padding:2px 0 2px 11px;margin-bottom:10px}
+  .q .v{font-size:13px;line-height:1.5}
+  .q .orig{margin-top:4px}
+  .q .orig>summary{font-size:11px;color:var(--dim);cursor:pointer;list-style:none;user-select:none}
+  .q .orig>summary::-webkit-details-marker{display:none}
+  .q .orig>summary::before{content:"▸ ";font-size:9px}
+  .q .orig[open]>summary::before{content:"▾ "}
+  .q .orig .fo{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.45;font-style:italic}
+  .qau{font-size:10.5px;color:var(--med);margin-top:3px} .qau::before{content:"— "}
+  .qmeta{font-size:10.5px;color:#9a9ea6;margin-top:2px}
+  /* institutional citations: scrollable, contained (#1) */
+  .iqscroll{max-height:300px;overflow:auto;padding-right:4px;margin-right:-4px}
+  .q .qhd{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#9a9ea6;margin-bottom:2px}
+  .q .qhd .qinst{color:var(--accent);font-weight:700}
+  .q .qhd .qtgt{color:#DC2626;font-weight:700}
+  .q .qhd .qcrit{color:#B45309;font-weight:600}
+  .qmeta a{color:var(--link);text-decoration:none} .qmeta a:hover{text-decoration:underline}
+  .ct{font-size:12.5px;color:#3a3e46;word-break:break-all;padding:1px 0}
+  .ct b{color:var(--dim);font-weight:600;text-transform:capitalize}
+  .ctgrp{margin-bottom:9px}
+  .ctlab{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--med);margin-bottom:3px}
+  .warn{font-size:11px;color:#8A6D2A;font-style:italic;line-height:1.4;margin-top:6px}
+  .authors{display:flex;flex-wrap:wrap;gap:7px}
+  .au{display:flex;align-items:baseline;gap:5px;background:var(--tile2);border:1px solid var(--line);
+    border-radius:8px;padding:4px 9px;font-size:12px}
+  .au .nm{color:var(--ink);font-weight:600} .au .pc{color:#9a9ea6;font-size:10.5px}
+  .au.anon .nm{color:var(--dim);font-style:italic}
+  .wh{font-size:10.5px;color:#a06a5a;font-style:italic;cursor:help;white-space:nowrap}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:inline-flex;align-items:center;gap:5px;background:var(--tile2);border:1px solid var(--line);
+    border-radius:20px;padding:4px 11px;font-size:11.5px;color:#3a3e46;cursor:pointer;transition:border-color .12s,color .12s}
+  .chip:hover{border-color:var(--accent);color:var(--ink)}
+  .chip .n{color:#9a9ea6;font-size:10px;font-variant-numeric:tabular-nums}
+  .chip.inst{cursor:pointer}
+  .chip.inst.auth{border-color:rgba(192,57,43,.4);background:rgba(192,57,43,.06);color:#7a2318}
+  .chip.inst.auth:hover{border-color:rgba(192,57,43,.6);color:#7a2318}
+  .chip .tflag{color:var(--accent);font-weight:700;margin-left:1px}
+  .xauth{font-size:12px;color:#3a3e46;margin-bottom:10px} .xauth .xnm{font-weight:700;color:var(--ink)}
+  details.news{margin:0}
+  details.news>summary{cursor:pointer;list-style:none;font-size:11px;text-transform:uppercase;
+    letter-spacing:.7px;color:var(--dim);user-select:none;display:flex;align-items:center;gap:6px}
+  details.news>summary::-webkit-details-marker{display:none}
+  details.news>summary::before{content:"▸";color:var(--news);transition:transform .12s}
+  details.news[open]>summary::before{transform:rotate(90deg)}
+  details.news>summary:hover{color:var(--ink)}
+  .nart{border-left:2px solid var(--news);padding:3px 0 3px 11px;margin-top:9px}
+  .nart a{color:var(--ink);font-size:12.5px;text-decoration:none;line-height:1.35}
+  .nart a:hover{color:var(--news)}
+  .nart .nd{font-size:10px;color:#9a9ea6;margin-top:2px;font-variant-numeric:tabular-nums}
+  .refcol{display:flex;flex-direction:column;gap:8px}
+  .refcol .lbl{font-size:10.5px;color:var(--dim)} .refcol .lbl b{color:#3a3e46}
+  a.live{color:var(--link);text-decoration:none;font-size:12px;white-space:nowrap}
+  a.live:hover{text-decoration:underline}
+  .pempty{color:#9a9ea6;font-size:13px;line-height:1.55;padding:24px 18px}
+  @media(max-width:820px){#panel{width:340px}}
+</style>
+<!-- institutional-citation quotes (byHost/byInst) — same redacted, link-gated layer the
+     graph uses; loaded here so the shared drawer can show a blog's citing quotes too (#1) -->
+<script src="graph/quotes.embed.js"></script>
+<header>
+  <div><h1>TrumpBlogs <span class="gold">formerly known as NoBlogs</span></h1><div class="sub" id="subcount">loading…</div></div>
+  <input id="search" placeholder="search name, summary, city, tags, quote text…" autocomplete="off">
+  <div class="grow"></div>
+  <div class="tabs" id="tabs">
+    <div class="tab" data-v="dash">Dashboard</div>
+    <div class="tab on" data-v="map">Map</div>
+    <div class="tab" data-v="graph">Graph</div>
+  </div>
+  <p class="disclaimer"><strong>Disclaimer:</strong> Provided for research, educational, and journalistic purposes only. Compiled from publicly available sources and offered &ldquo;as is&rdquo; without warranty of any kind; it may contain errors or omissions and is not represented as complete, current, or 100&#37; accurate. Classifications, ownership labels, and associations are automated analytical interpretations, not statements of fact, and nothing here alleges unlawful conduct by any named person or organization. Contacts shown are verified own &amp; allied-movement channels only — doxxing-target, third-party &amp; personal contacts are removed and PII-swept. Doxxing-flagged blogs carry no outbound links. Do not rely on this material without independent verification; the author disclaims all liability for any use of, or reliance on, its contents.</p>
+</header>
+
+<div class="layout" id="dashview" style="display:none">
+  <aside id="facets"></aside>
+  <main>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid" id="grid"></div>
+    <button class="loadmore" id="loadmore" style="display:none">Show more</button>
+  </main>
+</div>
+
+<div id="mapview" style="display:none"><iframe id="mapframe" title="World hyperlocal map" style="width:100%;height:calc(100vh - 56px);border:0;display:block"></iframe></div>
+
+<div id="graphview" style="display:none"><iframe id="graphframe" title="Epistemic-anchor graph" style="width:100%;height:calc(100vh - 56px);border:0;display:block"></iframe></div>
+
+<!-- detail drawer + scrim (shared by cards, map pins, and reference chips) -->
+<div id="scrim" onclick="closeModal()"></div>
+<aside id="panel">
+  <button class="pclose" onclick="closeModal()" title="Close">✕</button>
+  <div id="pinner"><div class="pempty">Click a card, a map pin, or a reference chip to see full details here — authors, verified quotes, references, and contacts.</div></div>
+</aside>
+
+<script>
+const CATLABEL={location_based_group:"local group",antifascist:"antifascist",ecological_militant:"ecological",
+  protest_mobilization:"protest mob.",labor_militant:"labor",prisoner_solidarity:"prisoner solid.",
+  anarchist:"anarchist",housing_squat:"housing/squat",radical_counterinfo_media:"counter-info media",
+  feminist_queer_militant:"feminist/queer",revolutionary_militant:"revolutionary",
+  historical_resistance_memory:"resistance memory",migrant_border_solidarity:"migrant solid.",
+  cultural_art_music:"culture/art",other:"other"};
+const COUNTRYNAME={DE:"Germany",IT:"Italy",FR:"France",ES:"Spain",US:"United States",BR:"Brazil",
+  AT:"Austria",CH:"Switzerland",GR:"Greece",GB:"UK",NL:"Netherlands",BE:"Belgium",CL:"Chile",
+  MX:"Mexico",CA:"Canada",PL:"Poland",RU:"Russia",AR:"Argentina",SE:"Sweden",FI:"Finland"};
+const THUMB=h=>`thumbs/${h}.webp`;
+let DATA=[], BYHOST={}, view="map", PAGE=0, PER=120, SEL=null;
+const F={q:"",co:new Set(),cat:new Set(),mil:new Set(),sc:new Set(),flags:new Set()};
+const AUTH_UID={};                          // uid -> [hosts]  (authors on >1 blog)
+let IDX=new Map(), IDX_KEYS=[], SEARCHSET=null;   // ned-style reverse keyword index
+
+// normalize like ned's tokenize(): lowercase, drop diacritics, non-alnum -> space
+function norm(s){return (s==null?"":String(s)).toLowerCase().normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();}
+function toks(s){const n=norm(s);return n?n.split(' '):[];}
+
+fetch('data.json').then(r=>r.json()).then(j=>{
+  DATA=j.blogs;
+  DATA.forEach((b,i)=>{b._i=i;BYHOST[b.h]=b;});
+  buildSearchIndex(); buildAuthorMap(); rankBlogs();
+  document.getElementById('subcount').textContent=`${j.n.toLocaleString()} blogs · ${DATA.filter(b=>b.nq>0).length.toLocaleString()} with verified quotes · ${DATA.filter(b=>ctCount(b.ct)).length.toLocaleString()} with contacts`;
+  readURL(); buildFacets(); render();
+});
+
+// ---- reverse keyword index (studied ned/index.html) ------------------------
+// A sorted token list + per-token postings (blog indices). Query tokens match by
+// exact + prefix (binary search) and are intersected (AND). Indexed fields:
+// name, host, summary, city/region/country, tags, category, AUTHOR NAMES and
+// QUOTE text (verbatim + English + category) — all normalized, so search is
+// case-insensitive and punctuation/diacritics-insensitive ("cafe"~"café",
+// "splc"~"SPLC", "rose-city"~"rose city").
+function buildSearchIndex(){
+  IDX=new Map();
+  DATA.forEach((b,i)=>{
+    const fields=[b.n,b.h,b.sum,b.ci,b.re,b.co,COUNTRYNAME[b.co],
+      (b.tags||[]).join(' '),CATLABEL[b.cat]||b.cat,b.mil,b.sc,
+      (b.au||[]).map(a=>a[0]).join(' '),
+      (b.q||[]).map(x=>(x.e||'')+' '+(x.v||'')+' '+(x.c||'')).join(' ')];
+    const seen=new Set();
+    for(const f of fields) for(const t of toks(f)) seen.add(t);
+    for(const t of seen){let s=IDX.get(t);if(!s){s=new Set();IDX.set(t,s);}s.add(i);}
+  });
+  IDX_KEYS=[...IDX.keys()].sort();
+}
+function idxPrefix(tok){                     // postings for exact tok + all tokens with that prefix
+  const out=new Set(); let lo=0,hi=IDX_KEYS.length;
+  while(lo<hi){const m=(lo+hi)>>1; if(IDX_KEYS[m]<tok)lo=m+1;else hi=m;}
+  for(let i=lo;i<IDX_KEYS.length&&IDX_KEYS[i].startsWith(tok);i++)
+    for(const id of IDX.get(IDX_KEYS[i])) out.add(id);
+  return out;
+}
+function setSearch(q){
+  const ts=toks(q);
+  if(!ts.length){SEARCHSET=null;return;}
+  let run=null;
+  for(const t of ts){const u=idxPrefix(t);
+    if(run===null)run=u; else{const nx=new Set();for(const id of run)if(u.has(id))nx.add(id);run=nx;}
+    if(!run.size)break;}
+  SEARCHSET=run||new Set();
+}
+function matchSearch(b){return SEARCHSET===null||SEARCHSET.has(b._i);}
+
+// ---- cross-blog authors: uid -> sorted [hosts] (only uids present on >1 host)
+function buildAuthorMap(){
+  const m={};
+  for(const b of DATA) for(const a of (b.au||[])){const uid=a[2];
+    if(!uid||uid==='0')continue; (m[uid]=m[uid]||new Set()).add(b.h);}
+  for(const [uid,set] of Object.entries(m)) if(set.size>1) AUTH_UID[uid]=[...set].sort();
+}
+
+// ---- default ordering: a blend of US-first and impact-first ----------------
+// impact = network in-degree (who links to it) *2 + verified quotes + contacts +
+// doxxing intensity *3 + outbound refs. Rank by pure impact AND by US-then-impact,
+// then sort by the SUM of the two ranks so both US and high-impact blogs rise.
+function rankBlogs(){
+  const imp=b=>{const ri=(b.ri||[]).reduce((s,x)=>s+(x[1]||1),0);
+    return ri*2+(b.nq||0)+ctCount(b.ct)+(b.dxn||0)*3+(b.ro||[]).length+((b.ne||[]).length?1:0);};
+  DATA.forEach(b=>b._imp=imp(b));
+  [...DATA].sort((a,b)=>b._imp-a._imp).forEach((b,i)=>b._rImp=i);
+  [...DATA].sort((a,b)=>{const ua=a.co==='US'?0:1,ub=b.co==='US'?0:1;
+    return ua!==ub?ua-ub:b._imp-a._imp;}).forEach((b,i)=>b._rUS=i);
+  DATA.forEach(b=>b._rank=b._rImp+b._rUS);
+}
+function passFacets(b){
+  if(F.co.size&&!F.co.has(b.co||"—"))return false;
+  if(F.cat.size&&!F.cat.has(b.cat))return false;
+  if(F.mil.size&&!F.mil.has(b.mil))return false;
+  if(F.sc.size&&!F.sc.has(b.sc))return false;
+  if(F.flags.has("logo")&&b.vt!=="logo")return false;
+  if(F.flags.has("contact")&&!Object.keys(b.ct).length)return false;
+  if(F.flags.has("quotes")&&!(b.nq>0))return false;
+  if(F.flags.has("geo")&&b.lat==null)return false;
+  if(F.flags.has("dox")&&!b.dox)return false;
+  return true;
+}
+function filtered(){return DATA.filter(b=>matchSearch(b)&&passFacets(b)).sort((a,b)=>a._rank-b._rank);}
+
+function counts(field){
+  const m={}; for(const b of DATA){if(!matchSearch(b))continue;
+    const v=field(b); if(v==null)continue; m[v]=(m[v]||0)+1;} return m;
+}
+function buildFacets(){
+  const el=document.getElementById('facets');
+  const co=counts(b=>b.co||"—"), cat=counts(b=>b.cat), mil=counts(b=>b.mil), sc=counts(b=>b.sc);
+  const topco=Object.entries(co).sort((a,b)=>b[1]-a[1]).slice(0,14);
+  const order=(o)=>Object.entries(o).sort((a,b)=>b[1]-a[1]);
+  let h=`<span class="clearf" onclick="clearAll()">✕ clear all filters</span>`;
+  h+=grp("Scope","sc",order(sc));
+  h+=grpFlags();
+  h+=grp("Country","co",topco,COUNTRYNAME);
+  h+=grp("Category","cat",order(cat),CATLABEL);
+  h+=grp("Militancy","mil",order(mil));
+  el.innerHTML=h;
+  el.querySelectorAll('.fitem[data-f]').forEach(it=>it.onclick=()=>{
+    const f=it.dataset.f,v=it.dataset.v; const S=F[f]; S.has(v)?S.delete(v):S.add(v);
+    PAGE=0; syncURL(); buildFacets(); render();
+  });
+  el.querySelectorAll('.fitem[data-flag]').forEach(it=>it.onclick=()=>{
+    const v=it.dataset.flag; F.flags.has(v)?F.flags.delete(v):F.flags.add(v);
+    PAGE=0; syncURL(); buildFacets(); render();
+  });
+}
+function grp(title,f,entries,labelmap){
+  let h=`<div class="fgroup"><h3>${title}</h3>`;
+  for(const [v,c] of entries){
+    const on=F[f].has(v); const lab=labelmap&&labelmap[v]?labelmap[v]:(v==="—"?"(none)":v);
+    // a <div> (not <label>): a <label> forwards clicks on its text to the inner
+    // checkbox, which then double-fires the toggle and cancels out — so only a
+    // pixel-perfect click on the tiny checkbox worked. A div fires exactly once.
+    h+=`<div class="fitem ${on?'act':''}" data-f="${f}" data-v="${v}">
+      <input type="checkbox" ${on?'checked':''}><span>${lab}</span><span class="c">${c.toLocaleString()}</span></div>`;
+  }
+  return h+`</div>`;
+}
+function grpFlags(){
+  const opts=[["logo","has logo"],["contact","has contact"],["quotes","has quotes"],["geo","mappable"],["dox","doxxing activity"]];
+  const scope=DATA.filter(b=>matchSearch(b));
+  const cnt={logo:b=>b.vt==="logo",contact:b=>Object.keys(b.ct).length,
+    quotes:b=>b.nq>0,geo:b=>b.lat!=null,dox:b=>b.dox};
+  let h=`<div class="fgroup"><h3>Filters</h3>`;
+  for(const [v,lab] of opts){const on=F.flags.has(v);const c=scope.filter(cnt[v]).length;
+    h+=`<div class="fitem ${on?'act':''}" data-flag="${v}"><input type="checkbox" ${on?'checked':''}><span>${lab}</span><span class="c">${c.toLocaleString()}</span></div>`;}
+  return h+`</div>`;
+}
+function clearAll(){F.q="";setSearch("");document.getElementById('search').value="";
+  F.co.clear();F.cat.clear();F.mil.clear();F.sc.clear();F.flags.clear();PAGE=0;syncURL();buildFacets();render();}
+
+function render(){
+  const fl=filtered();
+  renderKPIs(fl);
+  const grid=document.getElementById('grid');
+  const slice=fl.slice(0,(PAGE+1)*PER);
+  if(!slice.length){grid.innerHTML=`<div class="empty">No blogs match these filters.</div>`;}
+  else grid.innerHTML=slice.map(card).join("");
+  grid.querySelectorAll('.card').forEach(c=>c.onclick=()=>openModal(c.dataset.h));
+  const lm=document.getElementById('loadmore');
+  lm.style.display=fl.length>slice.length?"block":"none";
+  lm.textContent=`Show more (${(fl.length-slice.length).toLocaleString()} more)`;
+  document.getElementById('subcount').textContent=`${fl.length.toLocaleString()} of ${DATA.length.toLocaleString()} blogs match`;
+  if(view==="map")postFilter(); if(view==="graph")postFilterGraph();
+}
+function renderKPIs(fl){
+  const logo=fl.filter(b=>b.vt==="logo").length, ct=fl.filter(b=>Object.keys(b.ct).length).length;
+  const q=fl.filter(b=>b.nq>0).length, geo=fl.filter(b=>b.lat!=null).length;
+  const op=fl.filter(b=>b.mil==="operational").length;
+  const K=[["a",fl.length,"blogs"],["b",geo,"mappable"],["a",logo,"logos"],
+    ["c",ct,"w/ contact"],["d",q,"w/ quotes"],["",op,"operational"]];
+  document.getElementById('kpis').innerHTML=K.map(([cl,v,k])=>
+    `<div class="kpi ${cl}"><div class="v">${v.toLocaleString()}</div><div class="k">${k}</div></div>`).join("");
+}
+// total distinct channels across own/allied groups (ct = {own:{ch:..},allied:{ch:..}})
+function ctCount(ct){let s=new Set();for(const g of Object.values(ct||{}))for(const ch of Object.keys(g))s.add(ch);return s.size;}
+function card(b){
+  const has=b.vt&&(b.vt==="logo"||b.vt==="screenshot");
+  const loc=[b.ci,b.co&&(COUNTRYNAME[b.co]||b.co)].filter(Boolean).join(", ");
+  const nc=ctCount(b.ct);
+  return `<div class="card${SEL===b.h?' sel':''}" data-h="${b.h}">
+    <div class="thumbwrap">
+      ${has?`<img loading="lazy" src="${THUMB(b.h)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="novis" style="display:none">no image</div>`
+       :`<div class="novis">no image</div>`}
+      ${b.vt==="logo"?`<span class="badge logo">logo</span>`:``}
+    </div>
+    <div class="cbody">
+      <div><div class="cname">${esc(b.n)}</div><div class="chost">${b.h}</div></div>
+      ${loc?`<div class="cloc">${esc(loc)}</div>`:``}
+      <div class="cmeta">
+        <span class="tag cat">${CATLABEL[b.cat]||b.cat||"?"}</span>
+        ${b.mil&&b.mil!=="none"?`<span class="tag mil-${b.mil}">${b.mil.replace('_',' ')}</span>`:``}
+        ${b.dox?`<span class="tag dox">⚠ doxxing</span>`:``}
+      </div>
+      <div class="csum">${esc(b.sum||"")}</div>
+      <div class="cfoot">
+        ${b.nq>0?`<span class="on">❝ ${b.nq}</span>`:``}
+        ${nc?`<span class="on">✉ ${nc}</span>`:``}
+        <span>${b.sc||""}</span>
+      </div>
+    </div>
+  </div>`;
+}
+function slugName(h){return (h||"").split('.')[0];}
+// A quote is "redacted" if its text carries a redaction token ([NAME…], [HOME ADDRESS…],
+// [ADDRESS], [POSTAL], [PHONE], [IBAN], [REDACTED], …) — bracket + 2+ uppercase letters.
+// Over-suppression is the safe failure mode, so the matcher is deliberately broad.
+function isRedacted(s){return /\[[A-Z]{2,}/.test(s||"");}
+
+// Render the shared detail drawer for a host (opened from cards, map pins, chips, URL).
+function openModal(h){
+  const b=BYHOST[h]; if(!b)return;
+  SEL=h;
+  history.replaceState(null,'',urlFor(h));
+  const has=b.vt&&(b.vt==="logo"||b.vt==="screenshot");
+  const loc=[b.ci,b.re,b.co&&(COUNTRYNAME[b.co]||b.co)].filter(Boolean).join(" · ");
+
+  // authors ------------------------------------------------------------------
+  const au=b.au||[]; const uid2name={};
+  au.forEach(([nm,pc,uid])=>{uid2name[uid]=nm;});
+  let authors="";
+  if(au.length){
+    authors=`<div class="sec"><h4>Author${au.length>1?`s (${au.length})`:''}</h4><div class="authors">
+      ${au.map(([nm,pc,uid])=>{const anon=nm.toLowerCase().replace(/[^a-z0-9]/g,'')===slugName(b.h).replace(/[^a-z0-9]/g,'');
+        return `<span class="au ${anon?'anon':''}"><span class="nm">${esc(nm)}</span>${pc?`<span class="pc">${pc} posts</span>`:''}</span>`;}).join("")}
+    </div>${au.length===1&&au[0][0].toLowerCase().replace(/[^a-z0-9]/g,'')===slugName(b.h).replace(/[^a-z0-9]/g,'')
+      ?`<div class="warn">publishes under the collective handle (anonymous by design)</div>`:''}</div>`;
+  }
+
+  // cross-blog authorship: an author (by uid) who also publishes on other corpus
+  // blogs — clickable chips that re-open the drawer on each shared blog.
+  let xauthor="";
+  const xitems=au.map(([nm,pc,uid])=>{const others=(AUTH_UID[uid]||[]).filter(h=>h!==b.h);
+    return others.length?{nm,others}:null;}).filter(Boolean);
+  if(xitems.length){
+    xauthor=`<div class="sec"><h4>Same author on other blogs</h4>
+      ${xitems.map(it=>`<div class="xauth"><span class="xnm">${esc(it.nm)}</span> also authors ${it.others.length} other blog${it.others.length>1?'s':''}:
+        <div class="chips" style="margin-top:5px">${it.others.map(h=>{const t=BYHOST[h];
+          return `<span class="chip" data-goto="${h}">${esc(t?t.n:h)}</span>`;}).join('')}</div></div>`).join('')}
+    </div>`;
+  }
+
+  // quotes (redacted) — show per-quote author when the blog is multi-author ---
+  let qs="";
+  if((b.q||[]).length){
+    qs=`<div class="sec"><h4>Verified quotes (${b.nq})</h4>
+    ${b.q.map(x=>{
+      const qa=(b.na>1 && x.a && uid2name[x.a])?`<div class="qau">${esc(uid2name[x.a])}</div>`:'';
+      const meta=[x.c&&x.c.replace(/_/g,' '),x.d].filter(Boolean).join(' · ');
+      // No source hyperlink for redacted quotes, nor for any quote on a doxxing blog —
+      // the live post can still carry the un-redacted name/address we stripped. The link
+      // is already gone from the payload (build_index); x.w flags that it was withheld.
+      const redacted=isRedacted(x.v)||isRedacted(x.e);
+      const withheld=x.w||b.dox||redacted;
+      const src=(x.l&&!withheld)
+        ?`<a href="${x.l}" target="_blank">source ↗</a>`
+        :(withheld?`<span class="wh" title="Source link withheld — ${b.dox?'doxxing blog':'redacted quote'}">source withheld</span>`:'');
+      // English translation leads; the foreign-language source is collapsed underneath.
+      const en=x.e||x.v, fo=(x.e && x.v && x.e!==x.v)?x.v:'';
+      return `<div class="q"><div class="v">${esc(en)}</div>
+      ${fo?`<details class="orig"><summary>show original</summary><div class="fo">${esc(fo)}</div></details>`:``}
+      ${qa}
+      <div class="qmeta">${meta?esc(meta)+' · ':''}${src}</div>
+      </div>`;}).join("")}</div>`;
+  }
+
+  // news articles: 2 most-recent shown inline, the rest under a collapsible -----
+  let news="";
+  if((b.ne||[]).length){
+    const nart=([t,l,d])=>`<div class="nart">${b.dox?`<span>${esc(t)}</span>`:`<a href="${l}" target="_blank">${esc(t)}</a>`}
+        ${d?`<div class="nd">${esc(d)}${b.dox?'':' · source ↗'}</div>`:''}</div>`;
+    const head=b.ne.slice(0,2), rest=b.ne.slice(2);
+    news=`<div class="sec"><h4>News articles${b.ne.length>2?` (${b.ne.length})`:''}</h4>
+      ${head.map(nart).join("")}
+      ${rest.length?`<details class="news"><summary>${rest.length} more article${rest.length>1?'s':''}</summary>
+        ${rest.map(nart).join("")}</details>`:''}
+    </div>`;
+  }
+
+  // intra-corpus references (clickable chips → re-open drawer on target) ------
+  const chip=(host,n)=>{const t=BYHOST[host];const nm=t?t.n:host;
+    return `<span class="chip" data-goto="${host}" title="${esc(host)}">${esc(nm)}${n>1?`<span class="n">×${n}</span>`:''}</span>`;};
+  let refs="";
+  if((b.ro&&b.ro.length)||(b.ri&&b.ri.length)){
+    refs=`<div class="sec"><h4>References within the corpus</h4><div class="refcol">
+      ${b.ro&&b.ro.length?`<div><div class="lbl"><b>Links out</b> to ${b.ro.length} noblog${b.ro.length>1?'s':''}</div>
+        <div class="chips">${b.ro.map(([hh,n])=>chip(hh,n)).join("")}</div></div>`:''}
+      ${b.ri&&b.ri.length?`<div><div class="lbl"><b>Linked from</b> ${b.ri.length} noblog${b.ri.length>1?'s':''}</div>
+        <div class="chips">${b.ri.map(([hh,n])=>chip(hh,n)).join("")}</div></div>`:''}
+    </div></div>`;
+  }
+
+  // institutions consulted: the naming-authorities / movement-infra this blog
+  // cites (from the certified institutional-quote layer — same source as the graph).
+  // Informational chips only, NO outbound links (safe for doxxing blogs by design).
+  let inst="";
+  if((b.inst||[]).length){
+    const isAuth=cl=>cl==='authority_legal'||cl==='watchdog_research';
+    inst=`<div class="sec"><h4>Institutions consulted (${b.inst.length})</h4>
+      <div class="chips">${b.inst.map(([dom,nm,cl,n,tg])=>
+        `<span class="chip inst${isAuth(cl)?' auth':''}" data-inst="${esc(dom)}" title="${esc(dom)}${cl?' · '+cl.replace(/_/g,' '):''} — click to open in the Graph">${esc(nm)}<span class="n">×${n}</span>${tg?`<span class="tflag" title="${tg} citation(s) back a target designation">⚠${tg>1?tg:''}</span>`:''}</span>`).join("")}</div>
+      <div class="warn">Naming-authorities &amp; movement infrastructure this blog cites — the shared-epistemology layer. ⚠ = citation used to back a target designation. Click a chip to open that institution (with all its citing quotes) in the Graph.</div></div>`;
+  }
+
+  // institutional citations: the actual verbatim quotes this blog makes TO the
+  // naming-authorities/watchdogs — scrollable & contained (#1). Same redacted,
+  // link-gated layer the graph uses (window.__IQUOTES__.byHost). Consistent across
+  // dashboard/map/graph since the drawer is the one shared detail surface.
+  let iqhtml="";
+  const IQH=(window.__IQUOTES__&&window.__IQUOTES__.byHost)||{};
+  const iqs=(IQH[b.h]||[]).slice().sort((a,z)=>
+    (z.tgt-a.tgt)||(((z.val==='critical')-(a.val==='critical')))||((z.depth||0)-(a.depth||0))||String(z.date||'').localeCompare(String(a.date||'')));
+  if(iqs.length){
+    const instName={}; (b.inst||[]).forEach(([dom,nm])=>{instName[dom]=nm;});
+    const iqCard=q=>{
+      const en=q.en||q.fo, fo=(q.fo&&q.en&&q.fo!==q.en)?q.fo:'';
+      const withheld=b.dox||isRedacted(q.en)||isRedacted(q.fo)||!q.link;
+      const src=(q.link&&!withheld)?`<a href="${q.link}" target="_blank">source ↗</a>`
+        :`<span class="wh" title="Source link withheld — ${b.dox?'doxxing blog':'redacted quote'}">source withheld</span>`;
+      const meta=[q.inv&&q.inv.replace(/_/g,' '),q.depth&&('depth '+q.depth),q.date].filter(Boolean).join(' · ');
+      const hd=[`<span class="qinst">${esc(instName[q.inst]||q.inst)}</span>`];
+      if(q.tgt)hd.push('<span class="qtgt">⚠ target designation</span>');
+      if(q.val==='critical')hd.push('<span class="qcrit">critical</span>');
+      return `<div class="q"><div class="qhd">${hd.join(' · ')}</div>
+        <div class="v">${esc(en)}</div>
+        ${fo?`<details class="orig"><summary>show original${q.lang?' · '+esc(q.lang):''}</summary><div class="fo">${esc(fo)}</div></details>`:``}
+        <div class="qmeta">${meta?esc(meta)+' · ':''}${src}</div></div>`;};
+    iqhtml=`<div class="sec"><h4>Institutional citations (${iqs.length})</h4>
+      <div class="iqscroll">${iqs.map(iqCard).join("")}</div>
+      <div class="warn">Verbatim citations this blog makes to naming-authorities &amp; watchdogs — the shared-epistemology layer. English leads; source language under “show original”. ⚠ = the citation backs a target designation.</div></div>`;
+  }
+
+  // contacts -----------------------------------------------------------------
+  let ct="";
+  const grp=(g)=>Object.entries((b.ct&&b.ct[g])||{});
+  const grpHtml=(g,lab)=>{const e=grp(g);return e.length?`<div class="ctgrp"><div class="ctlab">${lab}</div>
+    ${e.map(([k,v])=>`<div class="ct"><b>${k}:</b> ${esc(v)}</div>`).join("")}</div>`:``;}
+  if(ctCount(b.ct)){ct=`<div class="sec"><h4>Contacts</h4>
+    ${grpHtml("own","Own channels")}
+    ${grpHtml("allied","Allied / movement channels")}
+    <div class="warn">Verified own &amp; allied-movement channels only — doxxing-target, third-party &amp; personal contacts removed; PII-swept. Ownership is automatically classified (own = the blog's own account; allied = another movement collective it links to).</div></div>`;}
+
+  document.getElementById('pinner').innerHTML=`
+    <div class="top">
+      ${has?`<img src="${THUMB(b.h)}" onerror="this.style.visibility='hidden'">`:``}
+      <div><h2>${esc(b.n)}</h2>
+        <div class="chost">${b.h} · ${b.dox?`<span class="wh" title="Live-link withheld — doxxing blog">link withheld</span>`:`<a class="live" href="https://${b.h}" target="_blank">visit ↗</a>`}</div>
+        <div class="cmeta" style="margin-top:8px">
+          <span class="tag cat">${CATLABEL[b.cat]||b.cat}</span>
+          ${b.mil&&b.mil!=="none"?`<span class="tag mil-${b.mil}">${b.mil.replace('_',' ')}</span>`:``}
+          <span class="tag">${b.sc||""}</span>
+          ${b.dox?`<span class="tag dox" title="Doxxing signal: ${b.dxn>0?b.dxn+' quarantined adversary-target contact(s)':'movement-tag'}">⚠ doxxing${b.dxn>0?` ·${b.dxn}`:``}</span>`:``}
+        </div>
+        ${loc?`<div class="cloc" style="margin-top:8px">${esc(loc)}</div>`:``}
+      </div>
+    </div>
+    <div class="body">
+      <div class="sec"><h4>Summary</h4><div>${esc(b.sum||"—")}</div></div>
+      ${authors}${xauthor}
+      ${b.tags&&b.tags.length?`<div class="sec"><h4>Movement tags</h4>
+        <div class="cmeta">${b.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div></div>`:``}
+      ${qs}${news}${refs}${inst}${iqhtml}${ct}
+    </div>`;
+  document.getElementById('pinner').querySelectorAll('.chip[data-goto]').forEach(c=>
+    c.onclick=()=>openModal(c.dataset.goto));
+  // institution chip -> open that institution's node (with all citing quotes) in the Graph
+  document.getElementById('pinner').querySelectorAll('.chip[data-inst]').forEach(c=>
+    c.onclick=()=>gotoInstitution(c.dataset.inst));
+  document.getElementById('panel').classList.add('on');
+  document.getElementById('scrim').classList.add('on');
+  document.getElementById('pinner').scrollTop=0;
+  document.getElementById('panel').scrollTop=0;
+  // reflect selection on the card grid
+  document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.h===h));
+}
+function closeModal(){
+  SEL=null;
+  document.getElementById('panel').classList.remove('on');
+  document.getElementById('scrim').classList.remove('on');
+  document.querySelectorAll('.card.sel').forEach(c=>c.classList.remove('sel'));
+  syncURL();
+}
+function urlFor(h){const p=new URLSearchParams(location.search);p.set('host',h);return '?'+p.toString();}
+
+// ---- map (single canonical map: ../world_hyperlocal_map.html, embedded) ----
+// The rich Leaflet map lives in ONE file/builder; the explorer embeds it and
+// drives it with the live dashboard filter via postMessage (exact host set),
+// and the map posts back pin clicks to open the shared detail drawer.
+// pendingFocus: a node to fly to (a blog host, or an institution domain) once the
+// target frame is ready — set when the user switches tabs with a blog selected, or
+// clicks an "institutions consulted" chip. instDoms() lets the graph fall back to a
+// consulted institution when the exact blog isn't a graph node.
+let pendingFocus=null;
+function instDoms(h){const b=BYHOST[h];return b&&b.inst?b.inst.map(x=>x[0]):[];}
+function tryFocusMap(){if(mapReady&&pendingFocus){const f=document.getElementById('mapframe');
+  f.contentWindow&&f.contentWindow.postMessage({type:'focus',host:pendingFocus},'*');pendingFocus=null;}}
+// Robust focus delivery: a single postMessage is lost when the graph iframe is still
+// building its layout (slow devices) — the graph would land on the default view (#2).
+// Retry every 150ms until the graph ACKs {type:'focusDone'}, capped at ~6s.
+let focusTimer=null;
+function tryFocusGraph(){
+  if(!pendingFocus)return;
+  const dom=pendingFocus, f=document.getElementById('graphframe');
+  clearInterval(focusTimer); let tries=0;
+  focusTimer=setInterval(()=>{
+    if(pendingFocus!==dom){clearInterval(focusTimer);return;}   // superseded or acked
+    const w=f&&f.contentWindow;
+    if(w){try{w.postMessage({type:'focus',host:dom,insts:instDoms(dom)},'*');}catch(e){}}
+    if(++tries>40)clearInterval(focusTimer);
+  },150);
+}
+// institution chip -> switch to Graph and focus that institution node. Set pendingFocus
+// FIRST so showGraph()'s onload/else path already sees the target (no ordering race).
+function gotoInstitution(dom){pendingFocus=dom; closeModal();
+  document.querySelector('.tab[data-v="graph"]').click(); tryFocusGraph();}
+
+let mapLoaded=false, mapReady=false;
+function showMap(){
+  const f=document.getElementById('mapframe');
+  if(!mapLoaded){mapLoaded=true;f.onload=()=>{mapReady=true;postFilter();tryFocusMap();};
+    f.src='world_hyperlocal_map.html';}
+  else {postFilter();tryFocusMap();}
+}
+function postFilter(){
+  if(!mapReady)return;
+  const f=document.getElementById('mapframe');
+  if(f&&f.contentWindow)
+    f.contentWindow.postMessage({type:'filter',hosts:filtered().map(b=>b.h)},'*');
+}
+window.addEventListener('message',ev=>{
+  const m=ev.data||{};
+  if(m.type==='openHost'&&m.host)openModal(m.host);
+  // graph confirmed it focused the requested node -> stop the retry loop (#2)
+  if(m.type==='focusDone'){pendingFocus=null;clearInterval(focusTimer);}
+});
+
+// ---- graph (single canonical graph: ../graph/index.html, embedded) ----------
+// Same pattern as the map: embed the Cytoscape graph, cross-filter it with the
+// live facet host-set via postMessage, and let blog-node clicks post back to open
+// the SAME detail drawer (consistent detail surface across dashboard/map/graph).
+let graphLoaded=false, graphReady=false;
+function showGraph(){
+  const f=document.getElementById('graphframe');
+  if(!graphLoaded){graphLoaded=true;f.onload=()=>{graphReady=true;postFilterGraph();tryFocusGraph();};
+    f.src='graph/index.html';}
+  else {postFilterGraph();tryFocusGraph();}
+}
+function postFilterGraph(){
+  if(!graphReady)return;
+  const f=document.getElementById('graphframe');
+  if(f&&f.contentWindow)
+    f.contentWindow.postMessage({type:'filter',hosts:filtered().map(b=>b.h)},'*');
+}
+
+// ---- tabs / url ----
+document.getElementById('tabs').onclick=e=>{const t=e.target.closest('.tab');if(!t)return;
+  view=t.dataset.v; document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+  document.getElementById('dashview').style.display=view==='dash'?'flex':'none';
+  document.getElementById('mapview').style.display=view==='map'?'block':'none';
+  document.getElementById('graphview').style.display=view==='graph'?'block':'none';
+  // switching to Map/Graph with a blog open -> fly to that pin/node (#7)
+  if(SEL&&(view==='map'||view==='graph'))pendingFocus=SEL;
+  syncURL(); if(view==='map')showMap(); if(view==='graph')showGraph();};
+document.getElementById('search').oninput=e=>{F.q=e.target.value;setSearch(F.q);PAGE=0;syncURL();buildFacets();render();};
+document.getElementById('loadmore').onclick=()=>{PAGE++;render();};
+document.onkeydown=e=>{if(e.key==='Escape')closeModal();};
+
+function syncURL(){const p=new URLSearchParams();
+  p.set('view',view); if(F.q)p.set('q',F.q);
+  if(F.co.size)p.set('co',[...F.co].join(',')); if(F.cat.size)p.set('cat',[...F.cat].join(','));
+  if(F.mil.size)p.set('mil',[...F.mil].join(',')); if(F.sc.size)p.set('sc',[...F.sc].join(','));
+  if(F.flags.size)p.set('f',[...F.flags].join(','));
+  if(SEL)p.set('host',SEL);
+  history.replaceState(null,'','?'+p.toString());}
+function readURL(){const p=new URLSearchParams(location.search);
+  F.q=p.get('q')||""; setSearch(F.q); document.getElementById('search').value=F.q;
+  (p.get('co')||"").split(',').filter(Boolean).forEach(x=>F.co.add(x));
+  (p.get('cat')||"").split(',').filter(Boolean).forEach(x=>F.cat.add(x));
+  (p.get('mil')||"").split(',').filter(Boolean).forEach(x=>F.mil.add(x));
+  (p.get('sc')||"").split(',').filter(Boolean).forEach(x=>F.sc.add(x));
+  (p.get('f')||"").split(',').filter(Boolean).forEach(x=>F.flags.add(x));
+  // default landing view is the Map at cross-continental zoom (#3); dashboard/graph
+  // states carry an explicit ?view= so deep-links and the back button still work.
+  const v=p.get('view')||'map'; document.querySelector(`.tab[data-v="${v}"]`)?.click();
+  const host=p.get('host'); if(host)setTimeout(()=>{openModal(host);
+    if(p.get('opennews'))document.querySelector('#pinner details.news')?.setAttribute('open','');},0);}
+function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+</script>
