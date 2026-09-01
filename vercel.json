@@ -1,0 +1,5 @@
+{
+  "installCommand": "echo skip-install",
+  "buildCommand": "echo skip-jekyll-using-prebuilt-docs",
+  "outputDirectory": "docs"
+}
