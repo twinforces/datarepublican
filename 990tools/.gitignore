@@ -32,6 +32,7 @@ __pycache__/
 *.tsv
 *.tsv.gz
 *.jsonl
+gin_phonebook_100m_review/
 !approved_*.json
 !category_buckets/*.json
 

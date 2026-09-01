@@ -4,13 +4,25 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-01: $100M ghost→EIN thumbs (done)
+
+**What:** 663 pairs ≥ $100M judged yes/no. Result: **449 yes ($187B) / 214 no ($65B)**. Table: `gin_phonebook_100m_votes.json`. Gates 2024 `BILL & MELINDA GATES FOUNDATION` → `562618866` is yes.
+
+**Why:** Default-collapse only the expensive ghosts we trust. Phonebook still suggests junk EINs (JHU duplicate, Fidelity INC copycat, Harvard/MIT EINs not in BMF).
+
+**How:** Rule exact-name; AI on 263 remainder; 11 parent overrides for name collisions. Docs: `docs/gin_phonebook_100m_ai.md`. Did **not** write votes into DuckDB.
+
+**Next:** PR1 $10M DuckDB → browse TSV (`PINS.md`).
+
+---
+
 ## 2026-09-01: Browse export / Sankey rebuild (pinned)
 
 **What:** $10M default band, focus-default Sankey, inferred-grant flag, leftover stubs. Instructions: `docs/PINS.md`.
 
 **Why:** Full-NGO download is ~3 min; spiderweb is unreadable; 990-PF “98% match” was mostly GINs in `recipient_ein`.
 
-**Later (not PR1):** Charity name-history GIN → phonebook (`PINS.md` § Later). Would catch Gates 2024 rename.
+**Done before PR1:** Charity name-history GIN phonebook (`7620b956`) then $100M thumbs (this file).
 
 ---
 
