@@ -4,6 +4,18 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-01: Repair phonebook before $10M export
+
+**What:** Cream/DAF no longer first-writer-wins or default-DAF. Legal suffixes stay in the key. Digit-repair only for EINs missing from BMF. Script `repair_phonebook_backfill.py` fixes existing GIN backfill (does not touch `recipient_ein`).
+
+**Why:** $100M thumbs showed the phonebook, not the graph, was the bad data.
+
+**How:** `test_phonebook_guards.py`; dry-run then `--apply`. Docs: `docs/repair_phonebook_backfill.md`, `docs/gin_phonebook_100m_ai.md`.
+
+**Next:** Apply repair, then PR1 $10M export.
+
+---
+
 ## 2026-09-01: $100M ghost→EIN thumbs (done)
 
 **What:** 663 pairs ≥ $100M judged yes/no. Result: **449 yes ($187B) / 214 no ($65B)**. Table: `gin_phonebook_100m_votes.json`. Gates 2024 `BILL & MELINDA GATES FOUNDATION` → `562618866` is yes.

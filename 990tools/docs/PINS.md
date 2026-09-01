@@ -84,7 +84,7 @@ Current full browse payload ~39MB zip / ~910k orgs; $10M should be ~10× fewer o
 
 ## PR order
 
-0. **Charity name-history GIN phonebook** (`charity_name_gin_backfill.py`) — applied. Then **$100M AI thumbs** — `gin_phonebook_100m_votes.json` (449 yes / 214 no).
+0. **Charity name-history GIN phonebook** (`charity_name_gin_backfill.py`) — applied. **$100M AI thumbs** — `gin_phonebook_100m_votes.json`. **Cream/DAF repair** (`repair_phonebook_backfill.py`) — GIN backfill re-resolved; junk EINs cleared. Then export.
 1. DuckDB → browse TSV at **$10M**: Charities, BMF-only endpoints, **ghosts (GIN + name)**, grants (from, to_key, inferred, suggested_ein), per-org leftover stub. Measure zip size / load time. GINs only as ghost ids.
 2. Browse: load that band; **focus default**; keep add as a switch; render ghosts as a distinct node type.
 3. “Load $1M” with explicit wait; IDB merge.

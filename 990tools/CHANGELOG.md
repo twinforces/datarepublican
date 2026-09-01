@@ -5,6 +5,15 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-09-01 (phonebook repair)
+
+### Cream / DAF phonebook (before $10M export)
+- **Why:** $100M ghost→EIN thumbs showed junk backfill (MIT/Harvard digit typos, Fidelity D&D, DAF dump `474744275`, JHU BMF clones).
+- **Change:** Legal suffixes stay in the exact-core key; namesake dominance + unique Charity filer wins clones; DAF allowlist (no BMF CHARITABLE scan, no `474744275`); 1-edit EIN repair only if the current EIN is missing from BMF.
+- **Ops:** `repair_phonebook_backfill.py --apply` on GIN rows (`recipient_ein` untouched). Tests: `test_phonebook_guards.py`.
+
+---
+
 ## [Unreleased] - 2026-08-19 (DOT live + HF script + /fun/ publish)
 
 ### DOT rank: records · types (success)

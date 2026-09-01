@@ -24,11 +24,12 @@ from typing import Dict, List, Optional, Tuple
 
 from bmf_fuzzy_candidate_matcher import (
     build_exact_core_phonebook,
-    find_perfect_core_ein,
     is_big_pharmaish,
+    is_generic_grantee,
     is_plausible_org_name,
     load_bmf,
     resolve_donor_advised_fund_ein,
+    resolve_phonebook_name,
     clean_name_for_matching,
 )
 from database_operations import DatabaseOperations
@@ -93,7 +94,7 @@ class EinlessProcessor:
                 log_info(
                     f"  {i:,}/{len(names):,} names scanned, {len(resolutions):,} resolved so far"
                 )
-            ein, source = self._resolve_name(name, sig_to_ein, bmf)
+            ein, source = self._resolve_name(name, sig_to_ein)
             if source == "daf":
                 daf_count += 1
             elif source == "phonebook":
@@ -202,7 +203,8 @@ class EinlessProcessor:
                         b.ein AS EIN,
                         b.name AS NAME,
                         COALESCE(addr.city, '') AS CITY,
-                        COALESCE(addr.state, '') AS STATE
+                        COALESCE(addr.state, '') AS STATE,
+                        b.asset_cd AS ASSET_CD
                     FROM IrsBmf b
                     LEFT JOIN (
                         SELECT
@@ -283,9 +285,9 @@ class EinlessProcessor:
             if count_row and count_row[0] > 0:
                 log_info(f"Loading BMF names from IrsBmf table ({count_row[0]:,} rows)...")
                 rows = self.db_ops.execute_query(
-                    "SELECT ein, name FROM IrsBmf WHERE ein IS NOT NULL AND name IS NOT NULL AND name != ''"
+                    "SELECT ein, name, asset_cd FROM IrsBmf WHERE ein IS NOT NULL AND name IS NOT NULL AND name != ''"
                 ).fetchall()
-                return [{"ein": r[0], "name": r[1]} for r in rows]
+                return [{"ein": r[0], "name": r[1], "asset_cd": r[2]} for r in rows]
         except Exception as exc:
             log_warning(f"IrsBmf table unavailable ({exc})")
 
@@ -330,15 +332,11 @@ class EinlessProcessor:
         return [r[0] for r in rows]
 
     def _resolve_name(
-        self, name: str, sig_to_ein: Dict[tuple, str], bmf: List[Dict]
+        self, name: str, sig_to_ein: Dict[tuple, str]
     ) -> Tuple[Optional[str], str]:
+        if is_generic_grantee(name):
+            return None, "skip_implausible"
         cleaned = clean_name_for_matching(name)
-
-        daf_ein = resolve_donor_advised_fund_ein(name, bmf) or resolve_donor_advised_fund_ein(
-            cleaned, bmf
-        )
-        if daf_ein:
-            return daf_ein, "daf"
 
         if is_big_pharmaish(cleaned):
             return None, "skip_big_pharma"
@@ -346,7 +344,11 @@ class EinlessProcessor:
         if not is_plausible_org_name(cleaned or name):
             return None, "skip_implausible"
 
-        ein = find_perfect_core_ein(name, sig_to_ein)
+        daf_ein = resolve_donor_advised_fund_ein(name) or resolve_donor_advised_fund_ein(cleaned)
+        if daf_ein:
+            return daf_ein, "daf"
+
+        ein = resolve_phonebook_name(name, sig_to_ein)
         if ein:
             return ein, "phonebook"
 
