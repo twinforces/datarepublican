@@ -2,7 +2,6 @@
   "installCommand": "echo skip-install",
   "buildCommand": "echo skip-jekyll-using-prebuilt-docs",
   "outputDirectory": "docs",
-  "trailingSlash": true,
   "rewrites": [
     {
       "source": "/favicon.ico",
