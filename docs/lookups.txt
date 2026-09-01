@@ -1,0 +1,1883 @@
+
+=== Row 0: 019ab7c7-2f1e-7373-6f4a-61120efff6c8 (affects 6061 addresses) ===
+Canonical: 10 S Dearborn Il1-0111, Chicago, Il, 60603
+Normalized: {"id": 0, "street": "10 S DEARBORN IL1-0111", "city": "CHICAGO", "state": "IL", "zip": "60603"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.8814766, -87.6301311
+    Address: 10 S Dearborn St, Chicago, IL 60603, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.881887, -87.629473
+    Address: S Dearborn St, Chicago, IL, United States of America
+
+=== Row 1: 019ab858-34c4-7826-7d8b-bafca98b9768 (affects 5598 addresses) ===
+Canonical: 500 First Ave P7-Pfsc-03-Z, Pittsburgh, Pa, 15219
+Normalized: {"id": 0, "street": "500 FIRST AVE P7-PFSC-03-Z", "city": "PITTSBURGH", "state": "PA", "zip": "15219"}
+
+Census API:
+  ✓ Match: 40.43646285918, -79.998656528175 (Non_Exact)
+    Address: 500 FIRST AVE P7-PFSC-03-Z, PITTSBURGH, PA, 15219, ,
+
+Google Maps:
+  ✓ Match: 40.4356724, -79.9978987
+    Address: 500 First Ave p7, Pittsburgh, PA 15219, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.436543, -79.99868
+    Address: 1st Ave, Pittsburgh, PA, United States of America
+
+=== Row 2: 019ab7ca-aabd-7267-956e-f8c55a8bbc5c (affects 1963 addresses) ===
+Canonical: 4900 Tiedeman Road Oh-01-49-0381, Brooklyn, Oh, 44144
+Normalized: {"id": 0, "street": "4900 TIEDEMAN ROAD OH-01-49-0381", "city": "BROOKLYN", "state": "OH", "zip": "44144"}
+
+Census API:
+  ✓ Match: 41.425109963271, -81.760934562296 (Non_Exact)
+    Address: 4900 TIEDEMAN ROAD OH-01-49-0381, BROOKLYN, OH, 44144, ,
+
+Google Maps:
+  ✓ Match: 41.4241399, -81.7662975
+    Address: 4900 Tiedeman Rd #0381, Brooklyn, OH 44144, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.425187, -81.760885
+    Address: Tiedeman Rd, Cleveland, OH, United States of America
+
+=== Row 3: 019ab3e0-364b-7e1c-91dd-6a3450d26d80 (affects 1618 addresses) ===
+Canonical: 5001 Angel Canyon Road, Kanab, Ut, 84741
+Normalized: {"id": 0, "street": "5001 ANGEL CANYON ROAD", "city": "KANAB", "state": "UT", "zip": "84741"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 37.1258243, -112.5439256
+    Address: 5001 Angel Canyon Rd, Kanab, UT 84741, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 37.1233429, -112.5461197
+    Address: West Angel Canyon Road, Kane County, UT, United States of America
+
+=== Row 4: 019ab3e0-b7c6-7d09-a6b4-e1eacadc027c (affects 1532 addresses) ===
+Canonical: 31 Evans Terminal, Hillside, Nj, 07205
+Normalized: {"id": 0, "street": "31 EVANS TERMINAL", "city": "HILLSIDE", "state": "NJ", "zip": "07205"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.697259, -74.21223499999999
+    Address: 31 Evans Terminal Rd, Hillside, NJ 07205, USA
+
+Nominatim:
+  ✓ Match: 40.69759, -74.212422
+    Address: Community FoodBank of New Jersey, 31, Evans Terminal, Hillside, Union County, New Jersey, 07205, United States
+
+OpenCage:
+  ✓ Match: 40.69759, -74.212422
+    Address: Community FoodBank of New Jersey, 31 Evans Terminal, Hillside, NJ 07205, United States of America
+
+=== Row 5: 019ab3e7-ff00-7158-edc9-2180aed371dc (affects 1318 addresses) ===
+Canonical: 5001 Angel Canyon Rd, Kanab, Ut, 84741
+Normalized: {"id": 0, "street": "5001 ANGEL CANYON RD", "city": "KANAB", "state": "UT", "zip": "84741"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 37.1258243, -112.5439256
+    Address: 5001 Angel Canyon Rd, Kanab, UT 84741, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 37.1233429, -112.5461197
+    Address: West Angel Canyon Road, Kane County, UT, United States of America
+
+=== Row 6: 019ab40f-1d55-7a9c-02e5-01ed548f8ec0 (affects 1249 addresses) ===
+Canonical: 3677 Mapleshade Lane, Plano, Tx, 75075
+Normalized: {"id": 0, "street": "3677 MAPLESHADE LANE", "city": "PLANO", "state": "TX", "zip": "75075"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 33.0040102, -96.75928449999999
+    Address: 3677 Mapleshade Ln, Plano, TX 75075, USA
+
+Nominatim:
+  ✓ Match: 33.0040041, -96.7593008
+    Address: North Texas Food Bank, 3677, Mapleshade Lane, Plano, Collin County, Texas, 75075, United States
+
+OpenCage:
+  ✓ Match: 33.0040041, -96.7593008
+    Address: North Texas Food Bank, 3677 Mapleshade Lane, Plano, TX 75075, United States of America
+
+=== Row 7: 019ab7c7-315f-7081-4b1a-e75e6273eae4 (affects 980 addresses) ===
+Canonical: 1 Billy Graham Parkway, Charlotte, Nc, 28201
+Normalized: {"id": 0, "street": "1 BILLY GRAHAM PARKWAY", "city": "CHARLOTTE", "state": "NC", "zip": "28201"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 35.1921801, -80.9106633
+    Address: 1 Billy Graham Pkwy, Charlotte, NC 28217, USA
+
+Nominatim:
+  ✓ Match: 35.1874755, -80.9054289
+    Address: Billy Graham Parkway, Charlotte, Mecklenburg County, North Carolina, 28217, United States
+
+OpenCage:
+  ✓ Match: 35.2099026, -80.9235416
+    Address: Billy Graham Parkway, Charlotte, NC 28208, United States of America
+
+=== Row 8: 019ab3ea-8840-782e-44b4-e8270c5e5bfc (affects 906 addresses) ===
+Canonical: 36 Battery Place, New York, Ny, 10280
+Normalized: {"id": 0, "street": "36 BATTERY PLACE", "city": "NEW YORK", "state": "NY", "zip": "10280"}
+
+Census API:
+  ✓ Match: 40.706135684898, -74.018024101022 (Non_Exact)
+    Address: 36 BATTERY PLACE, NEW YORK, NY, 10280, ,
+
+Google Maps:
+  ✓ Match: 40.7062529, -74.018778
+    Address: 36 Battery Pl, New York, NY 10280, USA
+
+Nominatim:
+  ✓ Match: 40.7061186, -74.0182811
+    Address: 36, Battery Place, Manhattan, New York County, City of New York, New York, 10280, United States
+
+OpenCage:
+  ✓ Match: 40.7061186, -74.0182811
+    Address: 36 Battery Place, New York, NY 10280, United States of America
+
+=== Row 9: 019ab3ed-f415-7818-acd7-bc6f363166ec (affects 906 addresses) ===
+Canonical: 1619 D Street, Virginia Beach, Va, 23459
+Normalized: {"id": 0, "street": "1619 D STREET", "city": "VIRGINIA BEACH", "state": "VA", "zip": "23459"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 36.918651, -76.14624479999999
+    Address: 1619 D St, Virginia Beach, VA 23460, USA
+
+Nominatim:
+  ✓ Match: 36.9187409, -76.1457531
+    Address: D Street, Bayside, Virginia Beach, Virginia, 23521, United States
+
+OpenCage:
+  ✓ Match: 36.9187409, -76.1457531
+    Address: D Street, Virginia Beach, VA 23521, United States of America
+
+=== Row 10: 019ab7c7-30d3-7095-4b93-fb5104f6ef40 (affects 860 addresses) ===
+Canonical: 5905 Wilshire Blvd, Los Angeles, Ca, 90036
+Normalized: {"id": 0, "street": "5905 WILSHIRE BLVD", "city": "LOS ANGELES", "state": "CA", "zip": "90036"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 34.0632415, -118.359899
+    Address: 5905 Wilshire Blvd, Los Angeles, CA 90036, USA
+
+Nominatim:
+  ✓ Match: 34.0644724, -118.3599459
+    Address: Levitated Mass, 5905, Wilshire Boulevard, Mid-Wilshire, Los Angeles, Los Angeles County, California, 90036, United States
+
+OpenCage:
+  ✓ Match: 34.0624531, -118.35805
+    Address: 5905 Wilshire Boulevard, Los Angeles, CA 90036, United States of America
+
+=== Row 11: 019ab3ec-f7ee-7296-4365-2d67ed9e4370 (affects 844 addresses) ===
+Canonical: 1280 Peachtree St Ne, Atlanta, Ga, 30309
+Normalized: {"id": 0, "street": "1280 PEACHTREE ST NE", "city": "ATLANTA", "state": "GA", "zip": "30309"}
+
+Census API:
+  ✓ Match: 33.789408988617, -84.38446100818 (Non_Exact)
+    Address: 1280 PEACHTREE ST NE, ATLANTA, GA, 30309, ,
+
+Google Maps:
+  ✓ Match: 33.7898561, -84.38614910000001
+    Address: 1280 Peachtree St NE, Atlanta, GA 30309, USA
+
+Nominatim:
+  ✓ Match: 33.7895458, -84.3862715
+    Address: High Museum of Art, 1280, Peachtree Street Northeast, Ansley Park, Atlanta, Fulton County, Georgia, 30309, United States
+
+OpenCage:
+  ✓ Match: 33.7895458, -84.3862715
+    Address: High Museum of Art, 1280 Peachtree Street Northeast, Atlanta, GA 30309, United States of America
+
+=== Row 12: 019ab787-9fe4-718f-8edd-a7567cea3000 (affects 824 addresses) ===
+Canonical: 3630 Peachtree Road Suite 320, Atlanta, Ga, 30326
+Normalized: {"id": 0, "street": "3630 PEACHTREE ROAD SUITE 320", "city": "ATLANTA", "state": "GA", "zip": "30326"}
+
+Census API:
+  ✓ Match: 33.898157774288, -84.293879979045 (Non_Exact)
+    Address: 3630 PEACHTREE ROAD SUITE 320, ATLANTA, GA, 30326, ,
+
+Google Maps:
+  ✓ Match: 33.8544882, -84.3584581
+    Address: 2828 Peachtree, 3630 Peachtree Rd NE #320, Atlanta, GA 30326, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 33.854524, -84.3584495
+    Address: 3630 Peachtree Road, 330 Peachtree Road Northeast, Atlanta, GA 30326, United States of America
+
+=== Row 13: 019ab76f-eda2-7a54-d8e6-b0855c8a1ee4 (affects 818 addresses) ===
+Canonical: C/O Tull Charitable Foundation 191, Atlanta, Ga, 30303
+Normalized: {"id": 0, "street": "C/O TULL CHARITABLE FOUNDATION 191", "city": "ATLANTA", "state": "GA", "zip": "30303"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 33.7589643, -84.3867157
+    Address: Peachtree Tower, 191 Peachtree St Suite 3950, Atlanta, GA 30303, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 33.831103, -84.332167
+    Address: Tullie Rd NE, Atlanta, GA, United States of America
+
+=== Row 14: 019ab3e0-20bc-71e0-1492-af8f86299d70 (affects 808 addresses) ===
+Canonical: 1000 Fifth Ave, New York, Ny, 10028
+Normalized: {"id": 0, "street": "1000 FIFTH AVE", "city": "NEW YORK", "state": "NY", "zip": "10028"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.7790613, -73.9627407
+    Address: 1000 5th Ave, New York, NY 10028, USA
+
+Nominatim:
+  ✓ Match: 40.8021613, -73.9453686
+    Address: 5th Avenue, Manhattan Community Board 11, Manhattan, New York County, City of New York, New York, 10035, United States
+
+OpenCage:
+  ✓ Match: 40.8021613, -73.9453686
+    Address: 5th Avenue, New York, NY 10035, United States of America
+
+=== Row 15: 019ab3e0-e739-77a2-3b4f-b1d81eb93430 (affects 800 addresses) ===
+Canonical: 475 Riverside Drive, New York, Ny, 10115
+Normalized: {"id": 0, "street": "475 RIVERSIDE DRIVE", "city": "NEW YORK", "state": "NY", "zip": "10115"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.8107884, -73.9635495
+    Address: 475 Riverside Dr, New York, NY 10115, USA
+
+Nominatim:
+  ✓ Match: 40.8107933, -73.9637438
+    Address: Interchurch Center, 475, Riverside Drive, Morningside Heights, Manhattan Community Board 9, Manhattan, New York County, City of New York, New York, 10115, United States
+
+OpenCage:
+  ✓ Match: 40.8107933, -73.9637438
+    Address: Interchurch Center, 475 Riverside Drive, New York, NY 10115, United States of America
+
+=== Row 16: 019ab7c7-30d3-7ea0-b9d8-d1a9e292a2e0 (affects 794 addresses) ===
+Canonical: 1275 Peachtree Street Ne, Atlanta, Ga, 30309
+Normalized: {"id": 0, "street": "1275 PEACHTREE STREET NE", "city": "ATLANTA", "state": "GA", "zip": "30309"}
+
+Census API:
+  ✓ Match: 33.789573311381, -84.384278384344 (Non_Exact)
+    Address: 1275 PEACHTREE STREET NE, ATLANTA, GA, 30309, ,
+
+Google Maps:
+  ✓ Match: 33.7894714, -84.383808
+    Address: 1275 Peachtree St NE, Atlanta, GA 30309, USA
+
+Nominatim:
+  ✓ Match: 33.7895295, -84.383956
+    Address: Boys & Girls Clubs of America - National Headquarters, 1275, Peachtree Street Northeast, Ansley Park, Atlanta, Fulton County, Georgia, 30309, United States
+
+OpenCage:
+  ✓ Match: 33.7895295, -84.383956
+    Address: Boys & Girls Clubs of America - National Headquarters, 1275 Peachtree Street Northeast, Atlanta, GA 30309, United States of America
+
+=== Row 17: 019ab3ec-9a86-7053-8752-f48703f98348 (affects 789 addresses) ===
+Canonical: 114 Camp K9 Road, Ponte Vedra, Fl, 32081
+Normalized: {"id": 0, "street": "114 CAMP K9 ROAD", "city": "PONTE VEDRA", "state": "FL", "zip": "32081"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 30.1042273, -81.4368847
+    Address: 114 Camp K9 Rd, Ponte Vedra Beach, FL 32081, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 30.081959, -81.913929
+    Address: Kay Rd, Middleburg, FL, United States of America
+
+=== Row 18: 019ab3e3-4483-70b6-f30c-d9769d23ce5c (affects 783 addresses) ===
+Canonical: Massachusetts Hall, Cambridge, Ma, 02138
+Normalized: {"id": 0, "street": "MASSACHUSETTS HALL", "city": "CAMBRIDGE", "state": "MA", "zip": "02138"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3744368, -71.118281
+    Address: Massachusetts Hall, Cambridge, MA 02138, USA
+
+Nominatim:
+  ✓ Match: 42.3744495, -71.1182876
+    Address: Massachusetts Hall, 11, Harvard Yard, Cambridge, Middlesex County, Massachusetts, 02138, United States
+
+OpenCage:
+  ✓ Match: 42.3744495, -71.1182875
+    Address: Massachusetts Hall, 11, Cambridge, MA 02138, United States of America
+
+=== Row 19: 019ab3e1-246e-7bea-7df6-b021b6a60768 (affects 778 addresses) ===
+Canonical: 9500 Gilman Drive, La Jolla, Ca, 92093
+Normalized: {"id": 0, "street": "9500 GILMAN DRIVE", "city": "LA JOLLA", "state": "CA", "zip": "92093"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 32.8805291, -117.2394335
+    Address: 9500 Gilman Dr, La Jolla, CA 92037, USA
+
+Nominatim:
+  ✓ Match: 32.8792438, -117.2311247
+    Address: University of California, San Diego, 9500, Gilman Drive, San Diego, San Diego County, California, 92093, United States
+
+OpenCage:
+  ✓ Match: 32.8792438, -117.2311247
+    Address: University of California, San Diego, 9500 Gilman Drive, San Diego, CA 92093, United States of America
+
+=== Row 20: 019ab3fc-17a9-7832-a719-0dba5e93f0a4 (affects 772 addresses) ===
+Canonical: 8014 Marine Way, Irvine, Ca, 92618
+Normalized: {"id": 0, "street": "8014 MARINE WAY", "city": "IRVINE", "state": "CA", "zip": "92618"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 33.6618999, -117.7382536
+    Address: 8014 Marine Way, Irvine, CA 92618, USA
+
+Nominatim:
+  ✓ Match: 33.6618737, -117.7382475
+    Address: Building 319, 8014, Marine Way, Great Park, Orange County Great Park, Irvine, Orange County, California, 92618, United States
+
+OpenCage:
+  ✓ Match: 33.6618737, -117.7382475
+    Address: Building 319, 8014 Marine Way, Irvine, CA 92618, United States of America
+
+=== Row 21: 019ab77a-ef06-7530-7df9-2074e83bab60 (affects 770 addresses) ===
+Canonical: N/A, Na, La, 78000
+Normalized: {"id": 0, "street": "N/A", "city": "NA", "state": "LA", "zip": "78000"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 48.8051741, 2.1219587
+    Address: 78000 Versailles, France
+
+Nominatim:
+  ✓ Match: -29.4729307, -66.0354305
+    Address: N/A, Departamento Capital, La Rioja, F5300, Argentina
+
+OpenCage:
+  ✓ Match: 22.494, -100.909
+    Address: 78000, Mexico
+
+=== Row 22: 019ab419-3209-71eb-0ee0-895b4a19d5a8 (affects 764 addresses) ===
+Canonical: Rodney Street, Brooklyn, Ny, 11211
+Normalized: {"id": 0, "street": "Rodney Street", "city": "Brooklyn", "state": "NY", "zip": "11211"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.709443, -73.9558291
+    Address: Rodney St, Brooklyn, NY 11211, USA
+
+Nominatim:
+  ✓ Match: 40.7047713, -73.9603579
+    Address: Rodney Street, Brooklyn, Kings County, City of New York, New York, 11211, United States
+
+OpenCage:
+  ✓ Match: 40.7047713, -73.9603579
+    Address: Rodney Street, New York, NY 11211, United States of America
+
+=== Row 23: 019ab7c7-3b34-757e-14e7-6aad54035e04 (affects 750 addresses) ===
+Canonical: 201 Old Main, University Park, Pa, 16802
+Normalized: {"id": 0, "street": "201 OLD MAIN", "city": "UNIVERSITY PARK", "state": "PA", "zip": "16802"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.7964667, -77.86283039999999
+    Address: Pollock Rd, University Park, PA 16802, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.101147, -78.203315
+    Address: Old Rd, Frenchville, PA, United States of America
+
+=== Row 24: 019ab3df-a061-7f02-6a69-65d6701020c8 (affects 728 addresses) ===
+Canonical: 301 Massachusetts Avenue, Boston, Ma, 02115
+Normalized: {"id": 0, "street": "301 MASSACHUSETTS AVENUE", "city": "BOSTON", "state": "MA", "zip": "02115"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3428303, -71.085711
+    Address: 301 Massachusetts Ave, Boston, MA 02115, USA
+
+Nominatim:
+  ✓ Match: 42.3428434, -71.085682
+    Address: Symphony Hall, 301, Massachusetts Avenue, Fenway, Boston, Suffolk County, Massachusetts, 02115, United States
+
+OpenCage:
+  ✓ Match: 42.3428434, -71.085682
+    Address: Symphony Hall, 301 Massachusetts Avenue, Boston, MA 02115, United States of America
+
+=== Row 25: 019ab3e5-4ef0-74dc-7ff6-997dc67575d0 (affects 728 addresses) ===
+Canonical: 10 Brookline Place West 6Th Floor, Brookline, Ma, 02445
+Normalized: {"id": 0, "street": "10 BROOKLINE PLACE WEST 6TH FLOOR", "city": "BROOKLINE", "state": "MA", "zip": "02445"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3321475, -71.11715769999999
+    Address: 10 Brookline Pl 6th floor, Brookline, MA 02445, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 42.335505, -71.110894
+    Address: Brookline Ave, Brookline, MA, United States of America
+
+=== Row 26: 019ab7c2-7fc0-7345-7b4d-7c2c69a21f94 (affects 712 addresses) ===
+Canonical: C/O Longwood Foundation 100 W 10Th, Wilmington, De, 19801
+Normalized: {"id": 0, "street": "C/O LONGWOOD FOUNDATION 100 W 10TH", "city": "WILMINGTON", "state": "DE", "zip": "19801"}
+
+Census API:
+  ✓ Match: 39.745761526743, -75.548457739456 (Non_Exact)
+    Address: C/O LONGWOOD FOUNDATION 100 W 10TH, WILMINGTON, DE, 19801, ,
+
+Google Maps:
+  ✓ Match: 39.7457276, -75.5488347
+    Address: 100 W 10th St #1109, Wilmington, DE 19801, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 39.745553, -75.547797
+    Address: W 10th St, Wilmington, DE, United States of America
+
+=== Row 27: 019ab3df-f443-703c-1f74-4731b6a0bbb0 (affects 706 addresses) ===
+Canonical: 25701 Science Park Drive, Cleveland, Oh, 44122
+Normalized: {"id": 0, "street": "25701 SCIENCE PARK DRIVE", "city": "CLEVELAND", "state": "OH", "zip": "44122"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.47122359999999, -81.4962237
+    Address: 25701 Science Park Dr, Beachwood, OH 44122, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.470242, -81.4969081
+    Address: Science Park Drive, Beachwood, OH 44122, United States of America
+
+=== Row 28: 019ab3ef-06ea-745b-fd3a-965c619d7394 (affects 703 addresses) ===
+Canonical: 300 College Park, Dayton, Oh, 45469
+Normalized: {"id": 0, "street": "300 COLLEGE PARK", "city": "DAYTON", "state": "OH", "zip": "45469"}
+
+Census API:
+  ✓ Match: 39.740613660538, -84.180248389237 (Non_Exact)
+    Address: 300 COLLEGE PARK, DAYTON, OH, 45469, ,
+
+Google Maps:
+  ✓ Match: 39.740182, -84.1790032
+    Address: 300 College Park, Dayton, OH 45469, USA
+
+Nominatim:
+  ✓ Match: 39.740615, -84.180208
+    Address: 300, College Park Avenue, Dayton, Montgomery County, Ohio, 45469, United States
+
+OpenCage:
+  ✓ Match: 39.740615, -84.180208
+    Address: 300 College Park Avenue, Dayton, OH 45469, United States of America
+
+=== Row 29: 019ab3e8-fe87-7a99-05f6-c1e357d40b18 (affects 694 addresses) ===
+Canonical: 371 East Jericho Turnpike, Smithtown, Ny, 11787
+Normalized: {"id": 0, "street": "371 EAST JERICHO TURNPIKE", "city": "SMITHTOWN", "state": "NY", "zip": "11787"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.8311558, -73.3959975
+    Address: 371 E Jericho Tpke, Huntington Station, NY 11746, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.8308823, -73.3959616
+    Address: 371 East Jericho Turnpike, South Huntington, NY 11746, United States of America
+
+=== Row 30: 019ab7d6-a97e-7fd6-8348-b0061b8c7ef4 (affects 682 addresses) ===
+Canonical: C/O Foundation 3 Park Avenue 24Th, New York, Ny, 10016
+Normalized: {"id": 0, "street": "C/O FOUNDATION 3 PARK AVENUE 24TH", "city": "NEW YORK", "state": "NY", "zip": "10016"}
+
+Census API:
+  ✓ Match: 40.746446533231, -73.981733169076 (Non_Exact)
+    Address: C/O FOUNDATION 3 PARK AVENUE 24TH, NEW YORK, NY, 10016, ,
+
+Google Maps:
+  ✓ Match: 40.7466617, -73.98124659999999
+    Address: 3 Park Ave 24th Fl, New York, NY 10016, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.745527, -73.978449
+    Address: New York, New York, United States of America
+
+=== Row 31: 019ab785-0364-775e-8306-9a84b6e04a84 (affects 674 addresses) ===
+Canonical: Available At The Office, Beaumont, Tx, 77706
+Normalized: {"id": 0, "street": "AVAILABLE AT THE OFFICE", "city": "BEAUMONT", "state": "TX", "zip": "77706"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 30.0988666, -94.16673399999999
+    Address: Beaumont, TX 77706, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 30.136546, -94.155546
+    Address: Beaumont, Texas, United States of America
+
+=== Row 32: 019ab3eb-1896-7b82-1606-22de2ffe0c44 (affects 670 addresses) ===
+Canonical: 301 Massachusetts Ave, Boston, Ma, 02115
+Normalized: {"id": 0, "street": "301 MASSACHUSETTS AVE", "city": "BOSTON", "state": "MA", "zip": "02115"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3428303, -71.085711
+    Address: 301 Massachusetts Ave, Boston, MA 02115, USA
+
+Nominatim:
+  ✓ Match: 42.3428434, -71.085682
+    Address: Symphony Hall, 301, Massachusetts Avenue, Fenway, Boston, Suffolk County, Massachusetts, 02115, United States
+
+OpenCage:
+  ✓ Match: 42.3428434, -71.085682
+    Address: Symphony Hall, 301 Massachusetts Avenue, Boston, MA 02115, United States of America
+
+=== Row 33: 019ab745-39ae-740c-7913-f8495fac1414 (affects 652 addresses) ===
+Canonical: One Security Benefit Place, Topeka, Ks, 66636
+Normalized: {"id": 0, "street": "ONE SECURITY BENEFIT PLACE", "city": "TOPEKA", "state": "KS", "zip": "66636"}
+
+Census API:
+  ✓ Match: 39.057012470302, -95.75809320727 (Non_Exact)
+    Address: ONE SECURITY BENEFIT PLACE, TOPEKA, KS, 66636, ,
+
+Google Maps:
+  ✓ Match: 39.0570084, -95.75825209999999
+    Address: 6th @ 1st Security Benefit Place, Topeka, KS 66606, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 39.042939, -95.769657
+    Address: Topeka, Kansas, United States of America
+
+=== Row 34: 019ab3e5-4713-7025-f76a-ace62f5b4fc4 (affects 650 addresses) ===
+Canonical: 121 Habitat Street, Americus, Ga, 31709
+Normalized: {"id": 0, "street": "121 HABITAT STREET", "city": "AMERICUS", "state": "GA", "zip": "31709"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 32.0709023, -84.239335
+    Address: 121 Habitat St, Americus, GA 31709, USA
+
+Nominatim:
+  ✓ Match: 32.0704114, -84.2409786
+    Address: Global Village Discovery Center, 121, Habitat Street, Americus, Sumter County, Georgia, 31709, United States
+
+OpenCage:
+  ✓ Match: 32.0704114, -84.2409786
+    Address: Global Village Discovery Center, 121 Habitat Street, Americus, GA 31709, United States of America
+
+=== Row 35: 019ab3ff-5017-7504-3d33-d700a206cbe8 (affects 646 addresses) ===
+Canonical: 5500 Caruth Haven Lane, Dallas, Tx, 75225
+Normalized: {"id": 0, "street": "5500 CARUTH HAVEN LANE", "city": "DALLAS", "state": "TX", "zip": "75225"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 32.8600533, -96.7714002
+    Address: 5500 Caruth Haven Ln, Dallas, TX 75225, USA
+
+Nominatim:
+  ✓ Match: 32.8600534, -96.7710184
+    Address: 5500, Caruth Haven Lane, Dallas, Dallas County, Texas, 75231, United States
+
+OpenCage:
+  ✓ Match: 32.8600534, -96.7710184
+    Address: 5500 Caruth Haven Lane, Dallas, TX 75231, United States of America
+
+=== Row 36: 019ab733-7ec5-7132-b12b-53ec0b44d90c (affects 624 addresses) ===
+Canonical: Main Street, Cleveland, Oh, 00000
+Normalized: {"id": 0, "street": "MAIN STREET", "city": "CLEVELAND", "state": "OH", "zip": "00000"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.3790488, -81.9007342
+    Address: Main St, Olmsted Falls, OH 44138, USA
+
+Nominatim:
+  ✓ Match: 41.4833732, -81.7075251
+    Address: St. Ignatius Main Building, West 30th Street, Hingetown, Ohio City, Cleveland, Cuyahoga County, Ohio, 44199, United States
+
+OpenCage:
+  ✓ Match: 41.4833732, -81.7075251
+    Address: St. Ignatius Main Building, West 30th Street, Cleveland, OH 44199, United States of America
+
+=== Row 37: 019ab3e0-7e19-79ab-8951-4f59005b3f78 (affects 621 addresses) ===
+Canonical: 10 S Dearborn St Mc Il1-0111, Chicago, Il, 60603
+Normalized: {"id": 0, "street": "10 S DEARBORN ST MC IL1-0111", "city": "CHICAGO", "state": "IL", "zip": "60603"}
+
+Census API:
+  ✓ Match: 41.88189289189, -87.6294765459 (Non_Exact)
+    Address: 10 S DEARBORN ST MC IL1-0111, CHICAGO, IL, 60603, ,
+
+Google Maps:
+  ✓ Match: 41.8814766, -87.6301311
+    Address: 10 S Dearborn St, Chicago, IL 60603, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.881887, -87.629473
+    Address: S Dearborn St, Chicago, IL, United States of America
+
+=== Row 38: 019ab3e7-82ea-743b-aabc-755a81cf5670 (affects 612 addresses) ===
+Canonical: 159 Sapsucker Woods Rd, Ithaca, Ny, 14850
+Normalized: {"id": 0, "street": "159 SAPSUCKER WOODS RD", "city": "ITHACA", "state": "NY", "zip": "14850"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.4799278, -76.45106009999999
+    Address: Imogene Powers Johnson Center for Birds and Biodiversity, 159 Sapsucker Woods Rd, Ithaca, NY 14850, USA
+
+Nominatim:
+  ✓ Match: 42.4783587, -76.4504422
+    Address: 159, Sapsucker Woods Road, Town of Dryden, Tompkins County, New York, 14850, United States
+
+OpenCage:
+  ✓ Match: 42.4799646, -76.4510675
+    Address: Imogene Powers Johnson Center for Birds and Biodiversity, 159 Sapsucker Woods Road, City of Ithaca, NY 14850, United States of America
+
+=== Row 39: 019ab3ec-da9d-7050-4035-4d6c571c4710 (affects 610 addresses) ===
+Canonical: 3677 Mapleshade Ln, Plano, Tx, 75075
+Normalized: {"id": 0, "street": "3677 MAPLESHADE LN", "city": "PLANO", "state": "TX", "zip": "75075"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 33.0040102, -96.75928449999999
+    Address: 3677 Mapleshade Ln, Plano, TX 75075, USA
+
+Nominatim:
+  ✓ Match: 33.0040041, -96.7593008
+    Address: North Texas Food Bank, 3677, Mapleshade Lane, Plano, Collin County, Texas, 75075, United States
+
+OpenCage:
+  ✓ Match: 33.0040041, -96.7593008
+    Address: North Texas Food Bank, 3677 Mapleshade Lane, Plano, TX 75075, United States of America
+
+=== Row 40: 019ab7c7-32dc-7a21-5713-ff72f1529e2c (affects 608 addresses) ===
+Canonical: 1 Eunice Kennedy Shriver Way, Lawrenceville, Nj, 08648
+Normalized: {"id": 0, "street": "1 EUNICE KENNEDY SHRIVER WAY", "city": "LAWRENCEVILLE", "state": "NJ", "zip": "08648"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.2827911, -74.71212489999999
+    Address: 1 Eunice Kennedy Shriver Way, Lawrenceville, NJ 08648, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.245883, -74.751964
+    Address: Kent Ct, Trenton, NJ, United States of America
+
+=== Row 41: 019ab3e8-e784-7a54-1a9e-ec2dbc52b5a4 (affects 608 addresses) ===
+Canonical: 1971 University Blvd, Lynchburg, Va, 24515
+Normalized: {"id": 0, "street": "1971 UNIVERSITY BLVD", "city": "LYNCHBURG", "state": "VA", "zip": "24515"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 37.3502282, -79.1795288
+    Address: 1971 University Blvd, Lynchburg, VA 24515, USA
+
+Nominatim:
+  ✓ Match: 37.353783, -79.1757529
+    Address: Williams Stadium, 1971, University Boulevard, Lynchburg, Virginia, 24515, United States
+
+OpenCage:
+  ✓ Match: 37.3539467, -79.1531533
+    Address: Liberty University, 1971 University Boulevard, Lynchburg, VA 24515, United States of America
+
+=== Row 42: 019ab3e2-9d6f-7e78-6cb5-d0c3caf0870c (affects 598 addresses) ===
+Canonical: 1275 Peachtree St Ne, Atlanta, Ga, 30309
+Normalized: {"id": 0, "street": "1275 PEACHTREE ST NE", "city": "ATLANTA", "state": "GA", "zip": "30309"}
+
+Census API:
+  ✓ Match: 33.789573311381, -84.384278384344 (Non_Exact)
+    Address: 1275 PEACHTREE ST NE, ATLANTA, GA, 30309, ,
+
+Google Maps:
+  ✓ Match: 33.7894714, -84.383808
+    Address: 1275 Peachtree St NE, Atlanta, GA 30309, USA
+
+Nominatim:
+  ✓ Match: 33.7895295, -84.383956
+    Address: Boys & Girls Clubs of America - National Headquarters, 1275, Peachtree Street Northeast, Ansley Park, Atlanta, Fulton County, Georgia, 30309, United States
+
+OpenCage:
+  ✓ Match: 33.7895295, -84.383956
+    Address: Boys & Girls Clubs of America - National Headquarters, 1275 Peachtree Street Northeast, Atlanta, GA 30309, United States of America
+
+=== Row 43: 019ab3e9-7a9c-74c1-fcad-20e8e45fd3b4 (affects 596 addresses) ===
+Canonical: 415 South Street, Waltham, Ma, 02453
+Normalized: {"id": 0, "street": "415 SOUTH STREET", "city": "WALTHAM", "state": "MA", "zip": "02453"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3655856, -71.2592909
+    Address: 415 South St, Waltham, MA 02453, USA
+
+Nominatim:
+  ✓ Match: 42.3660813, -71.2551629
+    Address: Golding Health Center, 415, South Street, Waltham, Middlesex County, Massachusetts, 02453, United States
+
+OpenCage:
+  ✓ Match: 42.3665095, -71.2580196
+    Address: Brandeis University, 415 South Street, Waltham, MA 02453, United States of America
+
+=== Row 44: 019ab714-3a93-7a01-5030-aa7ae6c5b958 (affects 590 addresses) ===
+Canonical: C/O Betty And Davis Fitzgerald, Atlanta, Ga, 30355
+Normalized: {"id": 0, "street": "C/O BETTY AND DAVIS FITZGERALD", "city": "ATLANTA", "state": "GA", "zip": "30355"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 33.8369282, -84.36907950000001
+    Address: Atlanta, GA 30355, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 33.658901, -84.629832
+    Address: Atlanta, Georgia, United States of America
+
+=== Row 45: 019ab401-953b-70f2-7f72-fa9508a34948 (affects 589 addresses) ===
+Canonical: 3700 Grand Avenue, Des Moines, Ia, 50312
+Normalized: {"id": 0, "street": "3700 GRAND AVENUE", "city": "DES MOINES", "state": "IA", "zip": "50312"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.58381259999999, -93.6669527
+    Address: 3700 Grand Ave, Des Moines, IA 50312, USA
+
+Nominatim:
+  ✓ Match: 41.5838317, -93.6675502
+    Address: P.E.O. Sisterhood Headquarters, 3700, Grand Avenue, Grand Stratford Apartments, Des Moines, Polk County, Iowa, 50312, United States
+
+OpenCage:
+  ✓ Match: 41.5838317, -93.6675502
+    Address: P.E.O. Sisterhood Headquarters, 3700 Grand Avenue, Des Moines, IA 50312, United States of America
+
+=== Row 46: 019ab77a-f87e-79a9-54f1-fe4ce1b1c3b0 (affects 580 addresses) ===
+Canonical: C/O The Organization, Branchport, Ny, 14418
+Normalized: {"id": 0, "street": "C/O THE ORGANIZATION", "city": "BRANCHPORT", "state": "NY", "zip": "14418"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.5986805, -77.1538624
+    Address: Branchport, NY 14418, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 42.622634, -77.227187
+    Address: Branchport, New York, United States of America
+
+=== Row 47: 019ab3ef-7c3e-7fd3-ac79-237a10c1d730 (affects 568 addresses) ===
+Canonical: 100 Purpose Road, Pippa Passes, Ky, 41844
+Normalized: {"id": 0, "street": "100 PURPOSE ROAD", "city": "PIPPA PASSES", "state": "KY", "zip": "41844"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 37.3356739, -82.8741572
+    Address: 100 Purpose Rd, Pippa Passes, KY 41844, USA
+
+Nominatim:
+  ✓ Match: 37.3350235, -82.8745289
+    Address: Purpose Road, Pippa Passes, Knott County, Kentucky, 41844, United States
+
+OpenCage:
+  ✓ Match: 37.3350235, -82.8745289
+    Address: Purpose Road, Pippa Passes, Knott County, KY 41844, United States of America
+
+=== Row 48: 019ab3f2-f85e-7341-93b8-277aa00f263c (affects 566 addresses) ===
+Canonical: 105 Sikes Hall, Clemson, Sc, 29634
+Normalized: {"id": 0, "street": "105 SIKES HALL", "city": "CLEMSON", "state": "SC", "zip": "29634"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 34.679339, -82.83513599999999
+    Address: 101 Calhoun Dr, Clemson, SC 29634, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 34.676518, -82.83595
+    Address: Clemson, South Carolina, United States of America
+
+=== Row 49: 019ab3e5-93fa-7701-71b0-d8b810e6fb20 (affects 560 addresses) ===
+Canonical: 10 Brookline Place West, Brookline, Ma, 02445
+Normalized: {"id": 0, "street": "10 BROOKLINE PLACE WEST", "city": "BROOKLINE", "state": "MA", "zip": "02445"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3321874, -71.1174468
+    Address: Brookline Village - 10 Brookline Place West, Brookline, MA 02445, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 42.3321627, -71.1169548
+    Address: 10 Brookline Place, Brookline, MA 02120, United States of America
+
+=== Row 50: 019ab3e8-c312-799b-2d97-d2d2cbe7363c (affects 557 addresses) ===
+Canonical: One Union Station, Providence, Ri, 02903
+Normalized: {"id": 0, "street": "ONE UNION STATION", "city": "Providence", "state": "RI", "zip": "02903"}
+
+Census API:
+  ✓ Match: 41.824296509157, -71.414991140866 (Non_Exact)
+    Address: ONE UNION STATION, Providence, RI, 02903, ,
+
+Google Maps:
+  ✓ Match: 41.8257971, -71.4132766
+    Address: 40 Exchange Ter, Providence, RI 02903, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.824375, -71.414986
+    Address: Union St, Providence, RI, United States of America
+
+=== Row 51: 019ab3e8-d1af-7fa9-3153-6632cbb40ec0 (affects 556 addresses) ===
+Canonical: 200 Eastern Parkway, Brooklyn, Ny, 11238
+Normalized: {"id": 0, "street": "200 Eastern Parkway", "city": "Brooklyn", "state": "NY", "zip": "11238"}
+
+Census API:
+  ✓ Match: 40.67109192659, -73.961357166795 (Non_Exact)
+    Address: 200 Eastern Parkway, Brooklyn, NY, 11238, ,
+
+Google Maps:
+  ✓ Match: 40.6712911, -73.9637529
+    Address: 200 Eastern Pkwy, Brooklyn, NY 11238, USA
+
+Nominatim:
+  ✓ Match: 40.6709546, -73.9632948
+    Address: Brooklyn Museum, 200, Eastern Parkway, Brooklyn, Kings County, City of New York, New York, 11238, United States
+
+OpenCage:
+  ✓ Match: 40.6709546, -73.9632948
+    Address: Brooklyn Museum, 200 Eastern Parkway, New York, NY 11238, United States of America
+
+=== Row 52: 019ab72c-ec3e-74ec-8337-6b6c153f3434 (affects 550 addresses) ===
+Canonical: C/O The Rs Family Foundation 1372, Brooklyn, Ny, 11230
+Normalized: {"id": 0, "street": "C/O THE RS FAMILY FOUNDATION 1372", "city": "BROOKLYN", "state": "NY", "zip": "11230"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.669058, -73.950338
+    Address: 807 Nostrand Ave, Brooklyn, NY 11225, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.644303, -73.907578
+    Address: Rose St, Brooklyn, NY, United States of America
+
+=== Row 53: 019ab3ed-de85-73ba-9d47-279e12057c5c (affects 543 addresses) ===
+Canonical: 800 E Lancaster Ave, Villanova, Pa, 19085
+Normalized: {"id": 0, "street": "800 E LANCASTER AVE", "city": "VILLANOVA", "state": "PA", "zip": "19085"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.0367956, -75.3441316
+    Address: 800 E Lancaster Ave, Villanova, PA 19085, USA
+
+Nominatim:
+  ✓ Match: 40.0359804, -75.343307
+    Address: St. Thomas of Villanova Church, 800, East Lancaster Avenue, Villanova, Radnor, Radnor Township, Delaware County, Pennsylvania, 19085, United States
+
+OpenCage:
+  ✓ Match: 40.0359804, -75.343307
+    Address: St. Thomas of Villanova Church, 800 East Lancaster Avenue, Villanova, Radnor Township, PA 19085, United States of America
+
+=== Row 54: 019ab3e2-2576-7569-3d70-a5593789f884 (affects 542 addresses) ===
+Canonical: Street, Brooklyn, Ny, 11211
+Normalized: {"id": 0, "street": "Street", "city": "Brooklyn", "state": "NY", "zip": "11211"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.7118103, -73.9422344
+    Address: Grand St, Brooklyn, NY 11211, USA
+
+Nominatim:
+  ✓ Match: 40.6941, -73.991777
+    Address: Court Street, Montague Street, Brooklyn, Kings County, City of New York, New York, 11201, United States
+
+OpenCage:
+  ✓ Match: 40.6941, -73.991777
+    Address: Court Street, Montague Street, New York, NY 11201, United States of America
+
+=== Row 55: 019ab3fa-d7fb-7084-c050-ac7697aeb768 (affects 536 addresses) ===
+Canonical: 2501 Sw 32 Terrace, Pembroke Park, Fl, 33023
+Normalized: {"id": 0, "street": "2501 SW 32 TERRACE", "city": "PEMBROKE PARK", "state": "FL", "zip": "33023"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 25.987854, -80.1733821
+    Address: 2501 SW 32nd Terrace, Pembroke Park, FL 33023, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 25.97725, -80.183655
+    Address: SW 32nd Dr, Hollywood, FL, United States of America
+
+=== Row 56: 019ab40d-a3ef-7c0f-a576-16715299a7e8 (affects 536 addresses) ===
+Canonical: 1 N Linden St, Duquesne, Pa, 15110
+Normalized: {"id": 0, "street": "1 N LINDEN ST", "city": "DUQUESNE", "state": "PA", "zip": "15110"}
+
+Census API:
+  ✓ Match: 40.370508930554, -79.840792676977 (Non_Exact)
+    Address: 1 N LINDEN ST, DUQUESNE, PA, 15110, ,
+
+Google Maps:
+  ✓ Match: 40.3758317, -79.84234769999999
+    Address: Food bank, 1 N Linden St, Duquesne, PA 15110, USA
+
+Nominatim:
+  ✓ Match: 40.3754611, -79.8419104
+    Address: Greater Pittsburgh Community Food Bank, 1, North Linden Street, RIDC of Duquesne, Duquesne, Allegheny County, Pennsylvania, 15110, United States
+
+OpenCage:
+  ✓ Match: 40.3754611, -79.8419104
+    Address: 1 North Linden Street, Duquesne, Allegheny County, PA 15110, United States of America
+
+=== Row 57: 019ab7c7-324a-7c7f-fbdc-724d52be18cc (affects 535 addresses) ===
+Canonical: 1280 Peachtree Street Ne, Atlanta, Ga, 30309
+Normalized: {"id": 0, "street": "1280 PEACHTREE STREET NE", "city": "ATLANTA", "state": "GA", "zip": "30309"}
+
+Census API:
+  ✓ Match: 33.789408988617, -84.38446100818 (Non_Exact)
+    Address: 1280 PEACHTREE STREET NE, ATLANTA, GA, 30309, ,
+
+Google Maps:
+  ✓ Match: 33.7898561, -84.38614910000001
+    Address: 1280 Peachtree St NE, Atlanta, GA 30309, USA
+
+Nominatim:
+  ✓ Match: 33.7895458, -84.3862715
+    Address: High Museum of Art, 1280, Peachtree Street Northeast, Ansley Park, Atlanta, Fulton County, Georgia, 30309, United States
+
+OpenCage:
+  ✓ Match: 33.7895458, -84.3862715
+    Address: High Museum of Art, 1280 Peachtree Street Northeast, Atlanta, GA 30309, United States of America
+
+=== Row 58: 019ab3e1-d53a-758b-a8b1-84bf9e8dc598 (affects 533 addresses) ===
+Canonical: 800 Lancaster Avenue, Villanova, Pa, 19085
+Normalized: {"id": 0, "street": "800 LANCASTER AVENUE", "city": "VILLANOVA", "state": "PA", "zip": "19085"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.0348919, -75.3453653
+    Address: 800 Lancaster Ave, Villanova, PA 19085, USA
+
+Nominatim:
+  ✓ Match: 40.0359804, -75.343307
+    Address: St. Thomas of Villanova Church, 800, East Lancaster Avenue, Villanova, Radnor, Radnor Township, Delaware County, Pennsylvania, 19085, United States
+
+OpenCage:
+  ✓ Match: 40.046329, -75.445004
+    Address: 800 Lancaster Avenue, Berwyn, Easttown Township, PA 19312, United States of America
+
+=== Row 59: 019ab3e1-1023-72e4-29d8-ed98515d815c (affects 530 addresses) ===
+Canonical: Soldiers Field, Boston, Ma, 02163
+Normalized: {"id": 0, "street": "SOLDIERS FIELD", "city": "BOSTON", "state": "MA", "zip": "02163"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3677572, -71.120486
+    Address: Soldiers Fld Rd, Boston, MA 02163, USA
+
+Nominatim:
+  ✓ Match: 42.3667385, -71.1300208
+    Address: Soldiers Field, Soldiers Field Road, Allston, Boston, Suffolk County, Massachusetts, 02163, United States
+
+OpenCage:
+  ✓ Match: 42.3667385, -71.1300208
+    Address: Soldiers Field, Soldiers Field Road, Boston, MA 02163, United States of America
+
+=== Row 60: 019ab3f8-9fce-7a41-06bb-727bdd9278cc (affects 526 addresses) ===
+Canonical: 4100 College Station, Brunswick, Me, 04011
+Normalized: {"id": 0, "street": "4100 COLLEGE STATION", "city": "BRUNSWICK", "state": "ME", "zip": "04011"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 43.906776, -69.96198
+    Address: College St, Brunswick, ME 04011, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 43.907443, -69.958773
+    Address: College St, Brunswick, ME, United States of America
+
+=== Row 61: 019ab5e1-17d6-7c12-b0ca-1b9ae2810314 (affects 519 addresses) ===
+Canonical: 860 Dolwick Drive, Erlanger, Ky, 41018
+Normalized: {"id": 0, "street": "860 Dolwick Drive", "city": "Erlanger", "state": "KY", "zip": "41018"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 39.0388624, -84.5987027
+    Address: 860 Dolwick Dr, Erlanger, KY 41018, USA
+
+Nominatim:
+  ✓ Match: 39.047095, -84.61692
+    Address: 860, Dolwick Drive, CirclePort, Erlanger, Kenton County, Kentucky, 41018, United States
+
+OpenCage:
+  ✓ Match: 39.0383407, -84.5931468
+    Address: Dolwick Drive, Erlanger, KY 41018, United States of America
+
+=== Row 62: 019ab419-2fd4-7349-2a98-81084f306d34 (affects 518 addresses) ===
+Canonical: 12400 Wilshire Blvd Ste 1500, Los Angeles, Ca, 90025
+Normalized: {"id": 0, "street": "12400 WILSHIRE BLVD STE 1500", "city": "LOS ANGELES", "state": "CA", "zip": "90025"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 34.0417439, -118.4698235
+    Address: 12400 Wilshire Blvd # 1500, Los Angeles, CA 90025, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 34.0419752, -118.469719
+    Address: Consulate General of Poland, 12400 Wilshire Boulevard, Los Angeles, CA 90025, United States of America
+
+=== Row 63: 019ab717-86a2-7952-5899-7246baabb720 (affects 518 addresses) ===
+Canonical: C/O Org 370 Lexington Ave Suite, New York, Ny, 10017
+Normalized: {"id": 0, "street": "C/O ORG 370 LEXINGTON AVE SUITE", "city": "NEW YORK", "state": "NY", "zip": "10017"}
+
+Census API:
+  ✓ Match: 40.750437411354, -73.976868383141 (Non_Exact)
+    Address: C/O ORG 370 LEXINGTON AVE SUITE, NEW YORK, NY, 10017, ,
+
+Google Maps:
+  ✓ Match: 40.7507644, -73.9767968
+    Address: 370 Lexington Ave, New York, NY 10017, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.752955, -73.973196
+    Address: New York, New York, United States of America
+
+=== Row 64: 019ab3e2-b96a-7268-2e4f-677a86976c54 (affects 513 addresses) ===
+Canonical: 3400 Vine Street, Cincinnati, Oh, 45220
+Normalized: {"id": 0, "street": "3400 VINE STREET", "city": "CINCINNATI", "state": "OH", "zip": "45220"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 39.1441565, -84.5084546
+    Address: 3400 Vine St, Cincinnati, OH 45220, USA
+
+Nominatim:
+  ✓ Match: 39.142884, -84.5099328
+    Address: 3400, Short Vine Street, Corryville, Cincinnati, Hamilton County, Ohio, 45220, United States
+
+OpenCage:
+  ✓ Match: 39.142884, -84.5099328
+    Address: 3400 Short Vine Street, Cincinnati, OH 45220, United States of America
+
+=== Row 65: 019ab3e6-48dd-7301-aeff-672b4b966548 (affects 507 addresses) ===
+Canonical: 18001 Old Cutler Road Suite 625, Palmetto Bay, Fl, 33157
+Normalized: {"id": 0, "street": "18001 OLD CUTLER ROAD SUITE 625", "city": "PALMETTO BAY", "state": "FL", "zip": "33157"}
+
+Census API:
+  ✓ Match: 25.606580589024, -80.31175553896 (Non_Exact)
+    Address: 18001 OLD CUTLER ROAD SUITE 625, PALMETTO BAY, FL, 33157, ,
+
+Google Maps:
+  ✓ Match: 25.6039221, -80.3109647
+    Address: 18001 Old Cutler Rd #625, Palmetto Bay, FL 33157, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 25.6039637, -80.3135673
+    Address: WBC Fleet, 18001 Old Cutler Road, Cutler, Miami, FL 33157, United States of America
+
+=== Row 66: 019ab5e0-eb70-7a3a-5875-be7b96489378 (affects 507 addresses) ===
+Canonical: 5 Commerce Park North-Wealth, Bedford, Nh, 03110
+Normalized: {"id": 0, "street": "5 COMMERCE PARK NORTH-WEALTH", "city": "BEDFORD", "state": "NH", "zip": "03110"}
+
+Census API:
+  ✓ Match: 42.931868382417, -71.462271335735 (Non_Exact)
+    Address: 5 COMMERCE PARK NORTH-WEALTH, BEDFORD, NH, 03110, ,
+
+Google Maps:
+  ✓ Match: 42.9316877, -71.46079639999999
+    Address: 5 Commerce Park N, Bedford, NH 03110, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 42.931822, -71.462379
+    Address: Commerce Park N, Bedford, NH, United States of America
+
+=== Row 67: 019ab707-1096-77f1-251b-c7388f7734d4 (affects 504 addresses) ===
+Canonical: 3380 Chastain Meadows Pkwy Nw Suite, Kennesaw, Ga, 30144
+Normalized: {"id": 0, "street": "3380 CHASTAIN MEADOWS PKWY NW SUITE", "city": "KENNESAW", "state": "GA", "zip": "30144"}
+
+Census API:
+  ✓ Match: 34.031328155342, -84.555799538504 (Non_Exact)
+    Address: 3380 CHASTAIN MEADOWS PKWY NW SUITE, KENNESAW, GA, 30144, ,
+
+Google Maps:
+  ✓ Match: 34.0331869, -84.5549108
+    Address: 3380 Chastain Meadows Pkwy NW, Kennesaw, GA 30144, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 34.031278, -84.555876
+    Address: Chastain Meadows Pkwy NW, Kennesaw, GA, United States of America
+
+=== Row 68: 019ab401-5b33-7483-db1c-1e44a2b66660 (affects 503 addresses) ===
+Canonical: 100 Timberdell Road, Norman, Ok, 73019
+Normalized: {"id": 0, "street": "100 TIMBERDELL ROAD", "city": "NORMAN", "state": "OK", "zip": "73019"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 35.1958668, -97.444827
+    Address: University of Oklahoma Foundation Bldg, 100 W Timberdell Rd, Norman, OK 73019, USA
+
+Nominatim:
+  ✓ Match: 35.196642, -97.441449
+    Address: 100, West Timberdell Road, Norman, Cleveland County, Oklahoma, 73072, United States
+
+OpenCage:
+  ✓ Match: 35.196642, -97.441449
+    Address: 100 West Timberdell Road, Norman, OK 73072, United States of America
+
+=== Row 69: 019ab82b-ebb7-7c71-f2f9-41fca3408874 (affects 498 addresses) ===
+Canonical: C/O Huntington National Bank, Columbus, Oh, 43216
+Normalized: {"id": 0, "street": "C/O HUNTINGTON NATIONAL BANK", "city": "COLUMBUS", "state": "OH", "zip": "43216"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 39.9686956, -83.02696449999999
+    Address: Columbus, OH 43216, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.113907, -83.007379
+    Address: Huntington Park Dr, Columbus, OH, United States of America
+
+=== Row 70: 019ab5e0-f195-7f9b-952a-42e7fadbeb60 (affects 497 addresses) ===
+Canonical: 450 Jane Stanford Way, Stanford, Ca, 94305
+Normalized: {"id": 0, "street": "450 JANE STANFORD WAY", "city": "STANFORD", "state": "CA", "zip": "94305"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 37.4281388, -122.1700815
+    Address: 450 Jane Stanford Way, Stanford, CA 94305, USA
+
+Nominatim:
+  ✓ Match: 37.4313138, -122.1693654
+    Address: Stanford University, 450, Jane Stanford Way, Rains Houses, Stanford, Santa Clara County, California, 94305, United States
+
+OpenCage:
+  ✓ Match: 37.42825, -122.14882
+    Address: Stanford Ave, Palo Alto, CA, United States of America
+
+=== Row 71: 019ab7c7-3659-7911-761b-6dffc7264500 (affects 496 addresses) ===
+Canonical: 2121 Santa Monica Blvd, Santa Monica, Ca, 90404
+Normalized: {"id": 0, "street": "2121 SANTA MONICA BLVD", "city": "SANTA MONICA", "state": "CA", "zip": "90404"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 34.0307739, -118.4796445
+    Address: 2121 Santa Monica Blvd, Santa Monica, CA 90404, USA
+
+Nominatim:
+  ✓ Match: 34.0305995, -118.4794585
+    Address: Providence Saint John's Health Center, 2121, Santa Monica Boulevard, Santa Monica, Los Angeles County, California, 90404, United States
+
+OpenCage:
+  ✓ Match: 34.0305994, -118.4794585
+    Address: Providence Saint John's Health Center, 2121 Santa Monica Boulevard, Santa Monica, CA 90404, United States of America
+
+=== Row 72: 019ab3ea-2afb-79cf-b6e1-7c419d298180 (affects 496 addresses) ===
+Canonical: 31 Evans Terminal Road, Hillside, Nj, 07205
+Normalized: {"id": 0, "street": "31 EVANS TERMINAL ROAD", "city": "HILLSIDE", "state": "NJ", "zip": "07205"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.697259, -74.21223499999999
+    Address: 31 Evans Terminal Rd, Hillside, NJ 07205, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.696345, -74.213135
+    Address: Evans Terminal, Hillside, NJ, United States of America
+
+=== Row 73: 019ab3e4-206e-7adf-8d9b-d2f3662c4e50 (affects 493 addresses) ===
+Canonical: 1 Mead Way, Bronxville, Ny, 10708
+Normalized: {"id": 0, "street": "1 MEAD WAY", "city": "BRONXVILLE", "state": "NY", "zip": "10708"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.9345901, -73.845582
+    Address: 1 Mead Way, Bronxville, NY 10708, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.9358903, -73.8423391
+    Address: Mead Way, City of Yonkers, NY 10708, United States of America
+
+=== Row 74: 019ab3ee-f75a-7df3-4198-5caa0db3483c (affects 486 addresses) ===
+Canonical: 371 E Jericho Turnpike, Smithtown, Ny, 11787
+Normalized: {"id": 0, "street": "371 E JERICHO TURNPIKE", "city": "SMITHTOWN", "state": "NY", "zip": "11787"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.8311558, -73.3959975
+    Address: 371 E Jericho Tpke, Huntington Station, NY 11746, USA
+
+Nominatim:
+  ✓ Match: 40.8477669, -73.2328922
+    Address: Jericho Turnpike, Hauppauge, Town of Smithtown, Suffolk County, New York, 11787, United States
+
+OpenCage:
+  ✓ Match: 40.8308823, -73.3959616
+    Address: 371 East Jericho Turnpike, South Huntington, NY 11746, United States of America
+
+=== Row 75: 019ab409-5d82-707a-ba44-81a35a445e68 (affects 486 addresses) ===
+Canonical: 200 1St St Sw, Rochester, Mn, 55905
+Normalized: {"id": 0, "street": "200 1ST ST SW", "city": "ROCHESTER", "state": "MN", "zip": "55905"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 44.0226729, -92.4667508
+    Address: Gonda Building, 200 1st St SW, Rochester, MN 55905, USA
+
+Nominatim:
+  ✓ Match: 44.0229173, -92.4668397
+    Address: Gonda Building, 200, 1st Street Southwest, Rochester, Olmsted County, Minnesota, 55902, United States
+
+OpenCage:
+  ✓ Match: 44.0229173, -92.4668397
+    Address: Gonda Building, 200 1st Street Southwest, Rochester, MN 55902, United States of America
+
+=== Row 76: 019ab419-2614-719a-010e-59076b012c34 (affects 482 addresses) ===
+Canonical: 1 North Linden Street, Duquesne, Pa, 15110
+Normalized: {"id": 0, "street": "1 NORTH LINDEN STREET", "city": "DUQUESNE", "state": "PA", "zip": "15110"}
+
+Census API:
+  ✓ Match: 40.370508930554, -79.840792676977 (Non_Exact)
+    Address: 1 NORTH LINDEN STREET, DUQUESNE, PA, 15110, ,
+
+Google Maps:
+  ✓ Match: 40.3758317, -79.84234769999999
+    Address: Food bank, 1 N Linden St, Duquesne, PA 15110, USA
+
+Nominatim:
+  ✓ Match: 40.3754611, -79.8419104
+    Address: Greater Pittsburgh Community Food Bank, 1, North Linden Street, RIDC of Duquesne, Duquesne, Allegheny County, Pennsylvania, 15110, United States
+
+OpenCage:
+  ✓ Match: 40.3754611, -79.8419104
+    Address: 1 North Linden Street, Duquesne, Allegheny County, PA 15110, United States of America
+
+=== Row 77: 019ab401-7f00-7cba-f2a3-297b409e5590 (affects 474 addresses) ===
+Canonical: 1500 Rosecrans Avenue Suite 200, Manhattan Beach, Ca, 90266
+Normalized: {"id": 0, "street": "1500 ROSECRANS AVENUE SUITE 200", "city": "MANHATTAN BEACH", "state": "CA", "zip": "90266"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 33.9014046, -118.387606
+    Address: 1500 Rosecrans Ave #200, Manhattan Beach, CA 90266, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 33.9013277, -118.3872244
+    Address: 1500 Rosecrans Avenue, Manhattan Beach, CA 90266, United States of America
+
+=== Row 78: 019ab3e7-3fea-7fc7-71e6-f291fa1a8c34 (affects 472 addresses) ===
+Canonical: 2505 University Blvd, Ames, Ia, 50010
+Normalized: {"id": 0, "street": "2505 UNIVERSITY BLVD", "city": "AMES", "state": "IA", "zip": "50010"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.9989672, -93.6433868
+    Address: 2505 University Blvd, Ames, IA 50010, USA
+
+Nominatim:
+  ✓ Match: 41.9999934, -93.6392617
+    Address: 2505, University Boulevard, Ames, Story County, Iowa, 50010, United States
+
+OpenCage:
+  ✓ Match: 42.0104409, -93.6368513
+    Address: University Boulevard, Ames, IA 50010, United States of America
+
+=== Row 79: 019ab403-6786-7af7-0094-71a5d5184d20 (affects 470 addresses) ===
+Canonical: 2301 Vanderbilt Place, Nashville, Tn, 37240
+Normalized: {"id": 0, "street": "2301 VANDERBILT PLACE", "city": "NASHVILLE", "state": "TN", "zip": "37240"}
+
+Census API:
+  ✓ Match: 36.145453757916, -86.805461260412 (Non_Exact)
+    Address: 2301 VANDERBILT PLACE, NASHVILLE, TN, 37240, ,
+
+Google Maps:
+  ✓ Match: 36.146538, -86.80337750000001
+    Address: 2301 Vanderbilt Pl, Nashville, TN 37235, USA
+
+Nominatim:
+  ✓ Match: 36.144892, -86.8033582
+    Address: Featheringill / Jacobs Hall, 2301, Vanderbilt Place, Nashville, Davidson County, Middle Tennessee, Tennessee, 37235, United States
+
+OpenCage:
+  ✓ Match: 36.144892, -86.8033582
+    Address: Featheringill / Jacobs Hall, 2301 Vanderbilt Place, Nashville, TN 37235, United States of America
+
+=== Row 80: 019ab3e2-a377-7a93-c0c7-d86ee8640870 (affects 468 addresses) ===
+Canonical: 2020 Peachtree Rd Nw, Atlanta, Ga, 30309
+Normalized: {"id": 0, "street": "2020 PEACHTREE RD NW", "city": "ATLANTA", "state": "GA", "zip": "30309"}
+
+Census API:
+  ✓ Match: 33.80958878037, -84.393172545083 (Non_Exact)
+    Address: 2020 PEACHTREE RD NW, ATLANTA, GA, 30309, ,
+
+Google Maps:
+  ✓ Match: 33.8100836, -84.39411899999999
+    Address: 2020 Peachtree Rd NW, Atlanta, GA 30309, USA
+
+Nominatim:
+  ✓ Match: 33.8302174, -84.3867636
+    Address: Peachtree Road Northwest, Buckhead, Atlanta, Fulton County, Georgia, 30305, United States
+
+OpenCage:
+  ✓ Match: 33.8302174, -84.3867636
+    Address: Peachtree Road Northwest, Atlanta, GA 30305, United States of America
+
+=== Row 81: 019ab3df-b2d3-7e4c-2101-7ec27fbe9aa4 (affects 456 addresses) ===
+Canonical: 26345 Network Place, Chicago, Il, 60673
+Normalized: {"id": 0, "street": "26345 NETWORK PLACE", "city": "CHICAGO", "state": "IL", "zip": "60673"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.88, -87.64
+    Address: Chicago, IL 60673, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.811929, -87.68732
+    Address: Chicago, Illinois, United States of America
+
+=== Row 82: 019ab3e0-03f2-7a0b-6cdb-cd9727afc2d0 (affects 456 addresses) ===
+Canonical: 4200 Fifth Avenue, Pittsburgh, Pa, 15260
+Normalized: {"id": 0, "street": "4200 FIFTH AVENUE", "city": "PITTSBURGH", "state": "PA", "zip": "15260"}
+
+Census API:
+  ✓ Match: 40.445007984077, -79.953833798604 (Non_Exact)
+    Address: 4200 FIFTH AVENUE, PITTSBURGH, PA, 15260, ,
+
+Google Maps:
+  ✓ Match: 40.4442519, -79.9533419
+    Address: 4200 Fifth Ave, Pittsburgh, PA 15213, USA
+
+Nominatim:
+  ✓ Match: 40.443698, -79.9548422
+    Address: Conney M. Kimbo Art Gallery, 4200, Fifth Avenue, North Oakland, Pittsburgh, Allegheny County, Pennsylvania, 15260, United States
+
+OpenCage:
+  ✓ Match: 40.444153, -79.962461
+    Address: University of Pittsburgh, 4200 Fifth Avenue, Pittsburgh, PA 15260, United States of America
+
+=== Row 83: 019ab720-3548-7b53-3ca0-ff68fe828e50 (affects 453 addresses) ===
+Canonical: 9450 Sw Gemini Dr Pmb 16009, Beaverton, Or, 97008
+Normalized: {"id": 0, "street": "9450 SW GEMINI DR PMB 16009", "city": "Beaverton", "state": "OR", "zip": "97008"}
+
+Census API:
+  ✓ Match: 45.452041698856, -122.792402727403 (Non_Exact)
+    Address: 9450 SW GEMINI DR PMB 16009, Beaverton, OR, 97008, ,
+
+Google Maps:
+  ✓ Match: 45.4522196, -122.7919612
+    Address: 9450 SW Gemini Dr, Beaverton, OR 97008, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 45.452041, -122.792449
+    Address: SW Gemini Dr, Beaverton, OR, United States of America
+
+=== Row 84: 019ab3eb-1171-7d39-f04c-83754c3e1490 (affects 444 addresses) ===
+Canonical: 4200 Fifth Ave, Pittsburgh, Pa, 15260
+Normalized: {"id": 0, "street": "4200 FIFTH AVE", "city": "PITTSBURGH", "state": "PA", "zip": "15260"}
+
+Census API:
+  ✓ Match: 40.445007984077, -79.953833798604 (Non_Exact)
+    Address: 4200 FIFTH AVE, PITTSBURGH, PA, 15260, ,
+
+Google Maps:
+  ✓ Match: 40.4442519, -79.9533419
+    Address: 4200 Fifth Ave, Pittsburgh, PA 15213, USA
+
+Nominatim:
+  ✓ Match: 40.4441886, -79.9548591
+    Address: Fifth Ave at Bigelow Blvd (Pitt), 4200, Fifth Avenue, North Oakland, Pittsburgh, Allegheny County, Pennsylvania, 15260, United States
+
+OpenCage:
+  ✓ Match: 40.444153, -79.962461
+    Address: University of Pittsburgh, 4200 Fifth Avenue, Pittsburgh, PA 15260, United States of America
+
+=== Row 85: 019ab3ec-57ba-7a06-553d-927a92a4961c (affects 443 addresses) ===
+Canonical: 1725 Eye Street Nw Suite 900, Washington, Dc, 20006
+Normalized: {"id": 0, "street": "1725 EYE STREET NW SUITE 900", "city": "WASHINGTON", "state": "DC", "zip": "20006"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 38.9012681, -77.04095830000001
+    Address: Eye Street, Washington, DC 20006, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 38.9016826, -77.040359
+    Address: EagleBank, 1725 I Street Northwest, Washington, DC 20006, United States of America
+
+=== Row 86: 019ab406-43fe-75d0-2920-cb46b24d5d04 (affects 442 addresses) ===
+Canonical: 300 Arnold Palmer Blvd, Norton, Ma, 02766
+Normalized: {"id": 0, "street": "300 ARNOLD PALMER BLVD", "city": "NORTON", "state": "MA", "zip": "02766"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.9834574, -71.22018709999999
+    Address: William F. Connell Golf House, 300 Arnold Palmer Blvd, Norton, MA 02766, USA
+
+Nominatim:
+  ✓ Match: 41.9834709, -71.2201497
+    Address: 300, Arnold Palmer Boulevard, Norton, Bristol County, Massachusetts, 02048, United States
+
+OpenCage:
+  ✓ Match: 41.9834709, -71.2201497
+    Address: 300 Arnold Palmer Boulevard, Norton, MA 02048, United States of America
+
+=== Row 87: 019ab3e3-68b3-7ce2-4045-535220bd76bc (affects 438 addresses) ===
+Canonical: 6140 Station Street, Pittsburgh, Pa, 15206
+Normalized: {"id": 0, "street": "6140 STATION STREET", "city": "Pittsburgh", "state": "PA", "zip": "15206"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.4627465, -79.9219368
+    Address: EECM Community House, 6140 Station St, Pittsburgh, PA 15206, USA
+
+Nominatim:
+  ✓ Match: 40.4629825, -79.9221383
+    Address: East End Cooperative Ministry, 6140, Station Street, East Liberty, Pittsburgh, Allegheny County, Pennsylvania, 15206, United States
+
+OpenCage:
+  ✓ Match: 40.4629825, -79.9221383
+    Address: East End Cooperative Ministry, 6140 Station Street, Pittsburgh, PA 15206, United States of America
+
+=== Row 88: 019ab3e3-2160-7622-f593-64bbb40e4014 (affects 432 addresses) ===
+Canonical: Department 13, Tulsa, Ok, 74182
+Normalized: {"id": 0, "street": "DEPARTMENT 13", "city": "TULSA", "state": "OK", "zip": "74182"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 36.15, -96.00000000000001
+    Address: Tulsa, OK 74182, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 36.143797, -95.815415
+    Address: E 13th St S, Tulsa, OK, United States of America
+
+=== Row 89: 019ab3e3-0178-779b-1e8e-d79ad0f98e7c (affects 428 addresses) ===
+Canonical: 1200 E California Blvd, Pasadena, Ca, 91125
+Normalized: {"id": 0, "street": "1200 E CALIFORNIA BLVD", "city": "PASADENA", "state": "CA", "zip": "91125"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 34.1383634, -118.1248137
+    Address: Keck Laboratories, 1200 E California Blvd, Pasadena, CA 91125, USA
+
+Nominatim:
+  ✓ Match: 34.1359026, -118.1242283
+    Address: East California Boulevard, Pasadena Council District 7, Pasadena, Los Angeles County, California, 91125, United States
+
+OpenCage:
+  ✓ Match: 34.1359073, -118.1259817
+    Address: East California Boulevard, Pasadena, CA 91125, United States of America
+
+=== Row 90: 019ab3f0-fee1-7036-9bfa-6d6c497711f4 (affects 427 addresses) ===
+Canonical: 95 Prospect Park West, Brooklyn, Ny, 11215
+Normalized: {"id": 0, "street": "95 PROSPECT PARK WEST", "city": "BROOKLYN", "state": "NY", "zip": "11215"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.6669598, -73.9737483
+    Address: 95 Prospect Park W, Brooklyn, NY 11215, USA
+
+Nominatim:
+  ✓ Match: 40.6668931, -73.9737731
+    Address: Litchfield Villa, 95, Prospect Park West, Brooklyn, Kings County, City of New York, New York, 11215, United States
+
+OpenCage:
+  ✓ Match: 40.6668931, -73.9737731
+    Address: Litchfield Villa, 95 Prospect Park West, New York, NY 11215, United States of America
+
+=== Row 91: 019ab3f5-3681-75f8-e01e-1472b48a9e94 (affects 418 addresses) ===
+Canonical: 159 Sapsucker Woods Road, Ithaca, Ny, 14850
+Normalized: {"id": 0, "street": "159 SAPSUCKER WOODS ROAD", "city": "ITHACA", "state": "NY", "zip": "14850"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.4799278, -76.45106009999999
+    Address: Imogene Powers Johnson Center for Birds and Biodiversity, 159 Sapsucker Woods Rd, Ithaca, NY 14850, USA
+
+Nominatim:
+  ✓ Match: 42.4783587, -76.4504422
+    Address: 159, Sapsucker Woods Road, Town of Dryden, Tompkins County, New York, 14850, United States
+
+OpenCage:
+  ✓ Match: 42.4799646, -76.4510675
+    Address: Imogene Powers Johnson Center for Birds and Biodiversity, 159 Sapsucker Woods Road, City of Ithaca, NY 14850, United States of America
+
+=== Row 92: 019ab3fa-5ff9-73e8-f41a-479ae63ee874 (affects 416 addresses) ===
+Canonical: 12400 Wilshire Blvd Suite 1500, Los Angeles, Ca, 90025
+Normalized: {"id": 0, "street": "12400 WILSHIRE BLVD SUITE 1500", "city": "LOS ANGELES", "state": "CA", "zip": "90025"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 34.0417439, -118.4698235
+    Address: 12400 Wilshire Blvd # 1500, Los Angeles, CA 90025, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 34.0419752, -118.469719
+    Address: Consulate General of Poland, 12400 Wilshire Boulevard, Los Angeles, CA 90025, United States of America
+
+=== Row 93: 019ab701-d5c0-716b-796f-8b6648105e40 (affects 415 addresses) ===
+Canonical: 5155 Paysphere Circle, Chicago, Il, 60674
+Normalized: {"id": 0, "street": "5155 PAYSPHERE CIRCLE", "city": "CHICAGO", "state": "IL", "zip": "60674"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.88, -87.63
+    Address: Chicago, IL 60674, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 41.811929, -87.68732
+    Address: Chicago, Illinois, United States of America
+
+=== Row 94: 019ab3ec-40fa-71ef-e0df-616bb548e6bc (affects 414 addresses) ===
+Canonical: 103 Vision Way, Bloomfield, Ct, 06002
+Normalized: {"id": 0, "street": "103 VISION WAY", "city": "BLOOMFIELD", "state": "CT", "zip": "06002"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 41.8629445, -72.7078688
+    Address: 103 Vision Way, Bloomfield, CT 06002, USA
+
+Nominatim:
+  ✓ Match: 41.8603232, -72.7046479
+    Address: Vision Way, Bloomfield, Capitol Planning Region, Connecticut, 06002, United States
+
+OpenCage:
+  ✓ Match: 41.8603232, -72.7046479
+    Address: Vision Way, Bloomfield, CT 06002, United States of America
+
+=== Row 95: 019ab3e2-2971-7d8a-3d55-50545122c910 (affects 414 addresses) ===
+Canonical: Street, Brooklyn, Ny, 11219
+Normalized: {"id": 0, "street": "Street", "city": "Brooklyn", "state": "NY", "zip": "11219"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.6310753, -73.9976946
+    Address: Brooklyn, NY 11219, USA
+
+Nominatim:
+  ✓ Match: 40.6941, -73.991777
+    Address: Court Street, Montague Street, Brooklyn, Kings County, City of New York, New York, 11201, United States
+
+OpenCage:
+  ✓ Match: 40.6941, -73.991777
+    Address: Court Street, Montague Street, New York, NY 11201, United States of America
+
+=== Row 96: 019ab3e3-125f-7edc-9144-a47494b4c194 (affects 410 addresses) ===
+Canonical: 11207 Blue Heron Blvd N, St Petersburg, Fl, 33716
+Normalized: {"id": 0, "street": "11207 BLUE HERON BLVD N", "city": "ST PETERSBURG", "state": "FL", "zip": "33716"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 27.8731865, -82.65332029999999
+    Address: 11207 Blue Heron Blvd, St. Petersburg, FL 33716, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 27.753591, -82.731685
+    Address: Blue Heron Dr S, Saint Petersburg, FL, United States of America
+
+=== Row 97: 019ab7c7-32dd-708f-eb18-b9ea0b164740 (affects 408 addresses) ===
+Canonical: 1 Haven For Hope Way, San Antonio, Tx, 78207
+Normalized: {"id": 0, "street": "1 HAVEN FOR HOPE WAY", "city": "SAN ANTONIO", "state": "TX", "zip": "78207"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 29.4320045, -98.5059404
+    Address: 1 Haven for Hope Way, San Antonio, TX 78207, USA
+
+Nominatim:
+  ✓ Match: 29.432919, -98.5061902
+    Address: Haven For Hope, 1, Haven for Hope Way, Cattleman's Square, San Antonio, Bexar County, Texas, 78207, United States
+
+OpenCage:
+  ✓ Match: 29.432919, -98.5061902
+    Address: Haven For Hope, 1 Haven for Hope Way, San Antonio, TX 78207, United States of America
+
+=== Row 98: 019ab3ff-0fc5-78bc-8ba7-fddacf482984 (affects 408 addresses) ===
+Canonical: 134 Hicks Way, Amherst, Ma, 01003
+Normalized: {"id": 0, "street": "134 HICKS WAY", "city": "AMHERST", "state": "MA", "zip": "01003"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 42.3883837, -72.52757679999999
+    Address: Memorial Hall, 134 Hicks Way, Amherst, MA 01003, USA
+
+Nominatim:
+  ✓ Match: 42.3884228, -72.5275739
+    Address: Memorial Hall, 134, Hicks Way, Amherst, Hampshire County, Massachusetts, 01003, United States
+
+OpenCage:
+  ✓ Match: 42.3884228, -72.5275739
+    Address: Memorial Hall, 134 Hicks Way, Amherst, MA 01003, United States of America
+
+=== Row 99: 019ab5e0-e40c-7b07-9614-d01ce8e96844 (affects 404 addresses) ===
+Canonical: C/O Pnc Bank Na, Pittsburgh, Pa, 15212
+Normalized: {"id": 0, "street": "C/O PNC BANK NA", "city": "PITTSBURGH", "state": "PA", "zip": "15212"}
+
+Census API:
+  ✗ No match
+
+Google Maps:
+  ✓ Match: 40.4828051, -80.0367259
+    Address: Pittsburgh, PA 15212, USA
+
+Nominatim:
+  ✗ No match
+
+OpenCage:
+  ✓ Match: 40.50197, -79.919055
+    Address: Bank St, Pittsburgh, PA, United States of America

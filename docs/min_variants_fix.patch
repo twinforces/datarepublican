@@ -1,0 +1,18 @@
+diff --git a/990tools/generate_name_rules_v19.1.py b/990tools/generate_name_rules_v19.1.py
+--- a/990tools/generate_name_rules_v19.1.py
++++ b/990tools/generate_name_rules_v19.1.py
+@@ -XXX,7 +XXX,7 @@ class Canonical:
+         if not self.variants:
+             self.variants.add(self.original)
+             self.source_count = 1
+
+-        self.min_variants = 1 if len(self.words) == 1 else 2
++        self.min_variants = 2   # default; only SIMPLES / PRIORITY get the 1-variant exception
+
+     def add_variant(self, variant: str, is_source: bool = True, priority: int = 0):
+@@ -YYY,6 +YYY,7 @@ for simple in SIMPLES:
+             if cleaned not in canonicals:
+                 canonicals[cleaned] = Canonical(
+                     original=simple, cleaned=cleaned, ein=ein, source_priority=2
+                 )
++            canonicals[cleaned].min_variants = 1   # explicit exception only for SIMPLES
