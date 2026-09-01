@@ -1891,7 +1891,7 @@ function renderFocusedSankey(
   );
 
   const post = encodeURIComponent(
-    `Hey, @GrumpTechBro @datarepublican, Check this out because:`,
+    `Hey, @GrumpyTechBro @datarepublican, Check this out because:`,
   );
   const url = encodeURIComponent(window.location.href);
   const hashtags = encodeURIComponent("DRBadNGOs");
