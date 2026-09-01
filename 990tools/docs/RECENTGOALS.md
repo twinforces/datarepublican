@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-01: Browse export / Sankey rebuild (pinned)
+
+**What:** $10M default band, focus-default Sankey, inferred-grant flag, leftover stubs. Instructions: `docs/PINS.md`.
+
+**Why:** Full-NGO download is ~3 min; spiderweb is unreadable; 990-PF “98% match” was mostly GINs in `recipient_ein`.
+
+**Later (not PR1):** Charity name-history GIN → phonebook (`PINS.md` § Later). Would catch Gates 2024 rename.
+
+---
+
 ## 2026-08-19: DOT records·types live on grumpytechbro.com
 
 **What:** DOT suites rank physical carrier count, then address types. Active PUs stay a column.
