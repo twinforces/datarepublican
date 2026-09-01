@@ -5,6 +5,29 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-08-19 (DOT live + HF script + /fun/ publish)
+
+### DOT rank: records · types (success)
+- **Why:** Active PUs ranked FedEx-scale fleets, not identity farms.
+- **Change:** National + by-state `ORDER BY dot_carrier_count, multi_type_count`. TanStack default matches. Active PUs stay a column.
+- **Ops:** National 4 slices 8/17. By-state 4 slices 8/17–8/18 (`failed=0`, colocator ~23h). Live 8/19 `deploy.sh --with-fun` (~7 min, 571 MB sent, 16 GB already on DreamHost).
+
+### Publish path (failures, then fix)
+- **Failure:** `build_site.py` `copytree` skipped any `fun/` dir that already existed → by-state regen never landed locally.
+- **Failure:** `rsync --update` skipped national HTML: injected nav made dest *newer* than 990tools source (JSON metadata updated, indexes still said “active power units”).
+- **Fix (grumpytechbro.com):** rsync `-a --delete`; skip HTML only when a suite stamp matches source `index.html` mtime. `--force-copy` ignores the stamp. Local publish ≠ DreamHost deploy (two rsyncs).
+
+### fec_committee + USG $ maps (code, shipped in /fun/)
+- **fec_committee:** seed ~7k committee line-1 streets; admit only co-tenants in charity/contractor/DOT/NPPES; rank other-type families. Bulk FEC stays off the site.
+- **USG by-state:** two heatmaps — total filer `govt_amt` by HQ state, and $ per distinct EIN. Not USASpending / Census per-capita. Sortable state table.
+
+## [Unreleased] - 2026-08-17 (HuggingFace export)
+
+### upload_to_hf.py
+- **Why:** May 2026 Hub dump (`piercewetter3/irs-990-parsed`) stopped at 990 + FEC. Live DB added Medicare, DOT, OFAC, BMF streets, grant-match name tables.
+- **Change:** Discover `main` tables; skip ops/scratch/raw (`medicare_raw_spending`, `Zips_raw`, `fec_raw_committees`, pipeline scratch); default DB `/Volumes/Data/final/irs990.duckdb`; shard ≥2M-row tables; per-table upload + release local copy.
+- **Doc:** `docs/upload_to_hf.md`. Full Hub refresh not run from this change.
+
 ## [Unreleased] - 2026-08-11 (Grok closeout: pattern pack + smart prompt + UNKN re-run)
 
 ### geolocate_grok pass 1 (full residual after API)
@@ -24,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - name_rules live path = **`name_rules.json.gz` only**.
 
 ### Next ops
-- **grant_match** to propagate new Grok lat/lon into Grants/Charities (equality-join path).
+- **grant_match (done 8/11 afternoon):** post-Grok re-run filled lat/lon via CTAS; GIN floaters 0; parallel feeder 0. Empty work is success (`c133142f`). Not an open drain.
 
 ## [Unreleased] - 2026-08-11 (API tail, grant_match ART-safe lat/lon, OFAC, grok_pending preprocess)
 

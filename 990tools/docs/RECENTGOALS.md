@@ -4,36 +4,49 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
-## 2026-08-11: Grok pipeline closeout + grant_match (in flight)
+## 2026-08-19: DOT records·types live on grumpytechbro.com
 
-**What:** Census/API/Grok geocode path closed for this cycle; pattern free-wins + smarter Grok prompt; **grant_match** re-run to fan new lat/lon into grants.
+**What:** DOT suites rank physical carrier count, then address types. Active PUs stay a column.
 
-**Ops (prod `/Volumes/Data/final/irs990.duckdb`):**
-1. API tail → `pending_api=0`; grant_match + OFAC once already (morning).
-2. Pattern preprocess + pack: free PatternOwners before/after Grok.
-3. `geolocate_grok` first pass ~39k @ **81.6%** match.
-4. Prompt fix (no tool-refusal UNKN) → re-run **33,705** prior UNKN → **93.0%** match (**31,356**); residual UNKN **2,229** (mostly foreign).
-5. **Next now:** `grant_match` to pick up new `Match:Grok-4` coords.
+**Why:** PU rank was fleet size (FedEx yards), not identity farms.
 
-**Hashes (`grokrefactor3`):**  
-`deef07d1` grant_match lat/lon · `aa252eb2` preprocess · `a8af7238` overnight · `e8c22f94` docs · `07f8513e` zips · `c5a72fd7` hygiene · `869a428d` pattern pack · `d85388cd` hash note · **`587f82ea` Grok prompt** · (this hygiene commit).
+**How:** National 8/17; by-state 8/18 `failed=0`; local `fun/` then `deploy.sh --with-fun` 8/19 (~7 min, 571 MB / 16 GB already on box). Live `/fun/address_clusters/` shows Signal Hill `699 · 2 types`.
 
-**Decisions:**
-- `GEOCODING_GROK_MIN_ADDRESS_COUNT` default **10** = cost filter; full residual set **`=0`**.
-- Complete US streets: Grok must geocode or VAGUE/AMBIG — never UNKN for missing tools.
-- Live name rules = **`name_rules.json.gz` only** (ignore v19).
-
-**Deferred:** owner colocator backfill / `geolocate_archive` bookend polish; optional OFAC regen after grant_match.
+**Failure:** `build_site.py` `copytree` skipped existing dirs; then `rsync --update` skipped national HTML because injected nav made dest newer than source. Fix in site repo: suite stamp vs source `index.html` mtime.
 
 ---
 
-## 2026-08-10: Overnight census drain (DONE)
+## 2026-08-17: HuggingFace dump script (Hub refresh unverified)
 
-**What:** Chunked Census → `pending=0` on 16GB host.  
-**Hashes:** `adb7b587`…`a846c269`. Doc: `docs/overnight_census_chunked.md`.
+**What:** `upload_to_hf.py` discovers live DuckDB tables (was hard-coded 18 + `.address` DB).
+
+**Why:** May dump is 990+FEC only; live has Medicare, DOT, OFAC, BMF streets, name maps.
+
+**How:** Skip ops/raw; UUID→VARCHAR; shard ≥2M-row tables. **Doc:** `docs/upload_to_hf.md`. Did not confirm Hub contents this pass.
 
 ---
 
-## 2026-08-01: Report suite (landed)
+## 2026-08-16: Public /fun/ matrix (landed)
 
-**What:** Focus admission, Medicare/FEC ranking, contractor `owner_id`. See CHANGELOG.
+**What:** Undated DOT / Medicare / contractor / grants / grants_out / USG × 4 slices. Bulk FEC off. Extra: `fec_committee_colocator_clusters`.
+
+**Out:** Employer / intra-committee FEC still a different product.
+
+---
+
+## 2026-08-28: No dead links on /fun/
+
+**What:** Every Medicare table NPI has a dossier; Widen never 404s (address → colocator → loose → ZIP, index fallback).
+
+**Why:** By-state lists linked ~90k NPIs; only ~17k pages existed. Contractor/grants Widen pointed at missing top-N colocator files.
+
+**How:** Fast provider backfill (skip 230M spend grain). `widen_links.py --reports-dir reports` then `build_site.py` → `grumpytechbro.com/fun/`. Deploy when ready, not urgent.
+
+---
+
+## Parked
+
+- HF full parquet refresh with `HF_TOKEN` (script updated; Hub contents not checked).
+- Owner colocator backfill / `geolocate_archive` polish.
+
+**Not parked:** `grant_match`. Morning 8/11 already matched **145,396**. Post-Grok re-run 13:09: GIN floaters **0**, parallel feeder **0** (`recipient_ein IS NULL AND loose_colocator IS NOT NULL`). Empty work was rc=1 until `c133142f` (`process_parallel` returns 0). Further grant_match is a no-op on the hail-mary tier.

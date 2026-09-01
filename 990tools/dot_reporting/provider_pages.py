@@ -192,8 +192,18 @@ def grok_search_url(*parts: Any) -> str:
     return f"https://grok.com/?q={quote_plus(q)}"
 
 
-def fetch_provider_dossier(conn: duckdb.DuckDBPyConnection, npi: str) -> dict[str, Any] | None:
-    """Load full provider dossier from main DB (+ rollup/hcpcs if available)."""
+def fetch_provider_dossier(
+    conn: duckdb.DuckDBPyConnection,
+    npi: str,
+    *,
+    line_grain: bool = False,
+) -> dict[str, Any] | None:
+    """Load provider dossier from main DB (+ rollup/hcpcs if available).
+
+    ``line_grain`` hits ``medicare_provider_spending`` (~230M rows) for
+    billing/servicing roles. Skip it for bulk page generation — rollup +
+    HCPCS tables are enough for a complete dossier without 404s.
+    """
     npi = normalize_npi(npi)
     if not npi:
         return None
@@ -292,66 +302,68 @@ def fetch_provider_dossier(conn: duckdb.DuckDBPyConnection, npi: str) -> dict[st
         except Exception:
             pass
 
-    # Billing vs servicing role (can be empty if no spend table rows)
+    # Billing vs servicing role — optional; line grain is ~230M rows.
     roles: list[dict[str, Any]] = []
     as_servicing: list[dict[str, Any]] = []
-    try:
-        roles = [
-            {
-                "role": row[0],
-                "rows": int(row[1] or 0),
-                "claims": int(row[2] or 0),
-                "paid": float(row[3] or 0),
-                "paid_fmt": fmt_money(row[3]),
-                "first_month": row[4],
-                "last_month": row[5],
-            }
-            for row in conn.execute(
-                """
-                SELECT
-                  CASE WHEN billing_provider_npi = ? THEN 'billing' ELSE 'servicing' END AS npi_role,
-                  count(*)::BIGINT,
-                  coalesce(sum(total_claims), 0)::BIGINT,
-                  coalesce(sum(total_paid), 0)::DOUBLE,
-                  min(claim_from_month),
-                  max(claim_from_month)
-                FROM medicare_provider_spending
-                WHERE billing_provider_npi = ? OR servicing_provider_npi = ?
-                GROUP BY 1
-                ORDER BY 1
-                """,
-                [npi, npi, npi],
-            ).fetchall()
-        ]
-        as_servicing = [
-            {
-                "billing_npi": bn,
-                "billing_name": bname,
-                "hcpcs_code": code,
-                "hcpcs_label": format_hcpcs_label(code, hcpcs_labels),
-                "claims": int(claims or 0),
-                "paid": float(paid or 0),
-                "paid_fmt": fmt_money(paid),
-                "first_month": fm,
-                "last_month": lm,
-            }
-            for bn, bname, code, claims, paid, fm, lm in conn.execute(
-                """
-                SELECT billing_provider_npi, billing_provider_name, hcpcs_code,
-                       sum(total_claims)::BIGINT, sum(total_paid)::DOUBLE,
-                       min(claim_from_month), max(claim_from_month)
-                FROM medicare_provider_spending
-                WHERE servicing_provider_npi = ?
-                  AND (billing_provider_npi IS NULL OR billing_provider_npi != ?)
-                GROUP BY 1, 2, 3
-                ORDER BY sum(total_paid) DESC NULLS LAST
-                LIMIT 25
-                """,
-                [npi, npi],
-            ).fetchall()
-        ]
-    except Exception:
-        pass
+    if line_grain:
+        try:
+            roles = [
+                {
+                    "role": row[0],
+                    "rows": int(row[1] or 0),
+                    "claims": int(row[2] or 0),
+                    "paid": float(row[3] or 0),
+                    "paid_fmt": fmt_money(row[3]),
+                    "first_month": row[4],
+                    "last_month": row[5],
+                }
+                for row in conn.execute(
+                    """
+                    SELECT
+                      CASE WHEN billing_provider_npi = ? THEN 'billing'
+                           ELSE 'servicing' END AS npi_role,
+                      count(*)::BIGINT,
+                      coalesce(sum(total_claims), 0)::BIGINT,
+                      coalesce(sum(total_paid), 0)::DOUBLE,
+                      min(claim_from_month),
+                      max(claim_from_month)
+                    FROM medicare_provider_spending
+                    WHERE billing_provider_npi = ? OR servicing_provider_npi = ?
+                    GROUP BY 1
+                    ORDER BY 1
+                    """,
+                    [npi, npi, npi],
+                ).fetchall()
+            ]
+            as_servicing = [
+                {
+                    "billing_npi": bn,
+                    "billing_name": bname,
+                    "hcpcs_code": code,
+                    "hcpcs_label": format_hcpcs_label(code, hcpcs_labels),
+                    "claims": int(claims or 0),
+                    "paid": float(paid or 0),
+                    "paid_fmt": fmt_money(paid),
+                    "first_month": fm,
+                    "last_month": lm,
+                }
+                for bn, bname, code, claims, paid, fm, lm in conn.execute(
+                    """
+                    SELECT billing_provider_npi, billing_provider_name, hcpcs_code,
+                           sum(total_claims)::BIGINT, sum(total_paid)::DOUBLE,
+                           min(claim_from_month), max(claim_from_month)
+                    FROM medicare_provider_spending
+                    WHERE servicing_provider_npi = ?
+                      AND (billing_provider_npi IS NULL OR billing_provider_npi != ?)
+                    GROUP BY 1, 2, 3
+                    ORDER BY sum(total_paid) DESC NULLS LAST
+                    LIMIT 25
+                    """,
+                    [npi, npi],
+                ).fetchall()
+            ]
+        except Exception:
+            pass
 
     addresses: list[dict[str, Any]] = []
     try:
@@ -620,9 +632,10 @@ def write_provider_page(
     *,
     generated_at: str | None = None,
     write_json: bool = True,
+    line_grain: bool = False,
 ) -> Path | None:
     """Fetch dossier and write HTML (+ optional JSON). Returns path or None."""
-    dossier = fetch_provider_dossier(conn, npi)
+    dossier = fetch_provider_dossier(conn, npi, line_grain=line_grain)
     if not dossier:
         return None
     providers_dir = Path(providers_dir)
@@ -682,6 +695,7 @@ def main() -> int:
     p.add_argument("--min-paid", type=float, default=None, help="Generate top NPIs with rollup paid ≥ this")
     p.add_argument("--limit", type=int, default=2000, help="Max NPIs when using --min-paid")
     p.add_argument("--no-json", action="store_true")
+    p.add_argument("--no-index", action="store_true", help="Do not rewrite providers/index.html")
     args = p.parse_args()
 
     npis: list[str] = []
@@ -734,16 +748,19 @@ def main() -> int:
                 args.output_dir,
                 generated_at=generated_at,
                 write_json=not args.no_json,
+                line_grain=False,
             )
             if path:
                 ok += 1
-                d = fetch_provider_dossier(conn, npi)
-                if d:
-                    dossiers.append(d)
+                if not args.no_index:
+                    d = fetch_provider_dossier(conn, npi, line_grain=False)
+                    if d:
+                        dossiers.append(d)
             if i == 1 or i % 100 == 0 or i == len(ordered):
                 print(f"  {i}/{len(ordered)} (ok={ok})", flush=True)
-        write_provider_index(args.output_dir, dossiers, generated_at=generated_at)
-        print(f"Done. {ok} pages + index → {args.output_dir}", flush=True)
+        if not args.no_index:
+            write_provider_index(args.output_dir, dossiers, generated_at=generated_at)
+        print(f"Done. {ok} pages → {args.output_dir}", flush=True)
         return 0 if ok else 2
     finally:
         conn.close()

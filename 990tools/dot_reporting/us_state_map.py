@@ -22,12 +22,29 @@ def _color(value: float, vmax: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _fmt_heat(value: float, *, money: bool) -> str:
+    if money:
+        av = abs(value)
+        if av >= 1_000_000_000:
+            return f"${value / 1_000_000_000:,.2f}B"
+        if av >= 1_000_000:
+            return f"${value / 1_000_000:,.2f}M"
+        if av >= 1_000:
+            return f"${value:,.0f}"
+        return f"${value:,.2f}"
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
 def render_heatmap_svg(
     states: list[dict[str, Any]],
     *,
     value_key: str = "pass_clusters",
     href_template: str = "states/{state}/index.html",
     title: str = "Clusters by state",
+    value_label: str = "pass clusters",
+    money: bool = False,
 ) -> str:
     """Render a clickable US heatmap with real state outlines.
 
@@ -49,7 +66,7 @@ def render_heatmap_svg(
         f'display:block;margin:0.5rem 0 1rem">',
         f'<text x="8" y="22" font-size="16" font-weight="600" fill="#111">{title}</text>',
         f'<text x="8" y="38" font-size="11" fill="#666">'
-        f"Click a state · heat = {value_key} · max {int(vmax):,}</text>",
+        f"Click a state · heat = {value_label} · max {_fmt_heat(vmax, money=money)}</text>",
         f'<g transform="translate(0,{title_h})">',
     ]
 
@@ -64,9 +81,9 @@ def render_heatmap_svg(
         val = float(s.get(value_key) or 0)
         show = int(s.get("show_n") or 0)
         fill = _color(val, vmax)
-        tip = f"{st}: {int(val):,} pass clusters"
+        tip = f"{st}: {_fmt_heat(val, money=money)} {value_label}"
         if show:
-            tip += f" → show {show}"
+            tip += f" · {show} pages"
         if val > 0 and show > 0:
             href = href_template.format(state=st)
             parts.append(
@@ -99,7 +116,7 @@ def render_heatmap_svg(
     parts.append(
         f'<text x="{lx}" y="{ly + 24}" font-size="10" fill="#666">0</text>'
         f'<text x="{lx + lw}" y="{ly + 24}" font-size="10" fill="#666" '
-        f'text-anchor="end">{int(vmax):,}</text>'
+        f'text-anchor="end">{_fmt_heat(vmax, money=money)}</text>'
     )
     parts.append("</svg>")
     return "\n".join(parts)

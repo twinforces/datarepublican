@@ -370,8 +370,8 @@ FROM base b
 LEFT JOIN charity_signals cs ON cs.cluster_key = b.cluster_key
 LEFT JOIN dot_active da ON da.cluster_key = b.cluster_key
 WHERE
-    -- Phy carriers only; rank (active PUs) + LIMIT select the suite.
-    -- Optional legacy floors (0 = off).
+    -- Phy carriers only; rank (DOT records, then address types) + LIMIT select the suite.
+    -- Optional legacy floors (0 = off). Active PUs stay a display column.
     b.dot_carrier_count > 0
     AND (? <= 0 OR b.multi_type_count >= ?)
     AND (? <= 0 OR b.dot_carrier_count >= ?)
@@ -380,7 +380,7 @@ WHERE
         OR COALESCE(cs.max_grift_ratio, 0) > 5
         OR COALESCE(cs.misrep_count, 0) > 0
     )
-ORDER BY COALESCE(da.active_power_units, 0) DESC, b.dot_carrier_count DESC
+ORDER BY b.dot_carrier_count DESC, b.multi_type_count DESC, b.total_rows DESC
 LIMIT ?
 """
 
@@ -416,6 +416,8 @@ def street_view_url(address: str, heading: int) -> str:
 def fmt_money(value: float | None) -> str:
     if value is None:
         return "—"
+    if abs(value) >= 1_000_000_000:
+        return f"${value / 1_000_000_000:,.2f}B"
     if abs(value) >= 1_000_000:
         return f"${value / 1_000_000:,.2f}M"
     if abs(value) >= 1_000:
@@ -777,7 +779,8 @@ def fetch_address_subgroups(
             COALESCE(ds.inactive_power_units, 0)
         FROM base b
         LEFT JOIN dot_stats ds ON ds.canonical_address = b.canonical_address
-        ORDER BY b.dot_carrier_count DESC, b.total_rows DESC, b.canonical_address
+        ORDER BY b.dot_carrier_count DESC, b.multi_type_count DESC,
+                 b.total_rows DESC, b.canonical_address
         LIMIT ?
         """,
         [cluster_key, max_addresses],
@@ -935,6 +938,11 @@ def write_report(
             c["inactive_pct"] = round(c["ia_ratio"] * 100, 1)
             c["phy_is_po_box"] = phy_is_po_box
             c["suspicion_score"] = suspicion_score(c)
+            # Suite rank: physical DOT records, then distinct address types.
+            types_n = int(c.get("multi_type_count") or 0)
+            dots_n = int(c.get("dot_carrier_count") or 0)
+            c["rank_metric_value"] = dots_n * 100 + types_n
+            c["rank_metric_fmt"] = f"{dots_n:,} · {types_n} types"
             c["reason_codes"] = reason_codes(c, min_multi_type, min_dot_carriers)
             c["maps_url"] = google_maps_url(sample, zoom=17)
             c["detail_file"] = detail_file
@@ -1139,6 +1147,7 @@ def write_report(
             map_points=map_points,
             breadcrumbs=crumbs_national_index(focus="dot", slice_by=slice_by),
             methodology=methodology,
+            rank_label="DOT records · types",
         )
         if map_points:
             (data_dir / "map_points.json").write_text(

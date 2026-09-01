@@ -84,10 +84,12 @@ FOCUS_BRIEFINGS: dict[str, dict[str, Any]] = {
             "Maps / Street View: yard, shop, or home — not a UPS Store / virtual office",
         ],
         "rank": (
-            "Default rank: active power units, then physical carrier count. "
+            "Default rank: physical DOT records, then distinct address types "
+            "(charity / contractor / NPPES / … at the same key). Active power "
+            "units stay a column — they measure fleet size, not stack density. "
             "Mailing addresses (`dot_carrier_mail`) are ignored for matching and "
-            "counts — paperwork only. Sort by DOT carriers or open the phone "
-            "breakout on a detail page for dispatcher shells."
+            "counts — paperwork only. Open the phone breakout on a detail page "
+            "for dispatcher shells."
         ),
         "thresholds": (
             "Selection: multi-type ≥ N OR physical DOT carriers ≥ M. "
@@ -279,6 +281,33 @@ FOCUS_BRIEFINGS: dict[str, dict[str, Any]] = {
             "non-HQ geography for odd donor mills."
         ),
         "caveats": "Shared commercial mail and consultant suites are common false positives.",
+        "cutpoint_keys": [],
+        "chip_rules": [],
+    },
+    "fec_committee": {
+        "title": "What this view is for",
+        "question": (
+            "Which FEC *committee* streets (real line 1, not 29M contributor "
+            "city/ZIP blobs) sit on the same colocator as a 990 charity, "
+            "contractor, DOT carrier, or NPPES provider?"
+        ),
+        "signals": [
+            "fec_committee row with a non-empty address_line1",
+            "Same tight colocator as charity / contractor / DOT phy / NPPES",
+            "How many of those four families share the street",
+        ],
+        "rank": (
+            "Default rank: count of other-type families (0–4), then other-type "
+            "row count, then committee rows. Bulk FEC types are not a focus."
+        ),
+        "thresholds": (
+            "Admission requires at least one other family. Party HQs and "
+            "K Street / Capitol Hill office buildings will still dominate."
+        ),
+        "caveats": (
+            "Colocator is street/building, not suite. Shared mail drops and "
+            "law-firm floors are expected false-ish positives."
+        ),
         "cutpoint_keys": [],
         "chip_rules": [],
     },

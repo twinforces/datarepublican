@@ -5,16 +5,18 @@ generate_focus_reports.py — Cluster reports like trucking, for other entity st
 Same slice modes (address / colocator / zipcode / loose_colocator), different
 primary entity focus and ranking:
 
-  medicare    — NPPES practice/mailing + optional Medicare spending
-  fec         — FEC contributors / committees / transactions / expenditures
-  contractor  — 990 Schedule C contractors
-  grants      — NGO grants (incoming) — grantee / grant addresses
-  grants_out  — NGO grants (outgoing) — charity filer addresses × grants_to_others
-  usg         — USG NGO funding — charity addresses × govt_amt
+  medicare       — NPPES practice/mailing + optional Medicare spending
+  fec            — FEC contributors / committees / transactions / expenditures
+  fec_committee  — committee street (line 1) ∩ charity / contractor / DOT / NPPES
+  contractor     — 990 Schedule C contractors
+  grants         — NGO grants (incoming) — grantee / grant addresses
+  grants_out     — NGO grants (outgoing) — charity filer addresses × grants_to_others
+  usg            — USG NGO funding — charity addresses × govt_amt
 
 Usage:
   python generate_focus_reports.py --focus medicare --slice-by colocator
   python generate_focus_reports.py --focus fec --slice-by zipcode --max-clusters 100
+  python generate_focus_reports.py --focus fec_committee --slice-by colocator --max-clusters 500
   python generate_focus_reports.py --focus contractor --slice-by address
   python generate_focus_reports.py --focus grants --slice-by loose_colocator
   python generate_focus_reports.py --focus grants_out --slice-by address
@@ -133,6 +135,19 @@ FOCUS_DOMAINS: dict[str, dict[str, Any]] = {
         # Donor / entity density first — not committee mega-wires.
         "rank_metric": "focus_count",
         "rank_label": "FEC entity rows",
+    },
+    "fec_committee": {
+        "label": "FEC committee streets × other types",
+        "out_prefix": "fec_committee",
+        "address_types": ("fec_committee",),
+        "min_focus_default": 0,
+        "min_multi_default": 0,
+        "entity_title": "FEC committees",
+        "amount_label": "—",
+        "review_tag": "fec_committee",
+        # Intersection first: how many of {charity, contractor, DOT, NPPES}.
+        "rank_metric": "other_families",
+        "rank_label": "Other-type families",
     },
     "contractor": {
         "label": "990 contractors",
@@ -361,6 +376,14 @@ money AS (
     GROUP BY k.cluster_key
 )
 """
+    elif focus == "fec_committee":
+        # Seeded from ~7k committee rows; dollars live on other FEC types.
+        money_cte = """
+money AS (
+    SELECT CAST(NULL AS VARCHAR) AS cluster_key, 0::DOUBLE AS focus_amount
+    WHERE FALSE
+)
+"""
     elif focus in ("grants_out", "usg"):
         # Charity filer addresses × Charities.grants_to_others or govt_amt.
         amt_col = domain.get("charity_amount_col") or (
@@ -426,6 +449,25 @@ money AS (
             "0::DOUBLE AS paid_per_hcpcs_type, "
             "0::BIGINT AS distinct_contributors"
         )
+    elif rank_metric == "other_families":
+        order_by = (
+            "("
+            "(CASE WHEN b.charity_count > 0 THEN 1 ELSE 0 END) + "
+            "(CASE WHEN b.contractor_count > 0 THEN 1 ELSE 0 END) + "
+            "(CASE WHEN b.dot_carrier_count > 0 THEN 1 ELSE 0 END) + "
+            "(CASE WHEN b.medicare_count > 0 THEN 1 ELSE 0 END)"
+            ") DESC, "
+            "(b.charity_count + b.contractor_count + b.dot_carrier_count "
+            "+ b.medicare_count) DESC, "
+            "b.focus_count DESC, b.total_rows DESC"
+        )
+        money_select_extra = (
+            ", 0::BIGINT AS hcpcs_type_count_sum, "
+            "0::BIGINT AS total_claims_sum, "
+            "0::BIGINT AS npi_with_spend, "
+            "0::DOUBLE AS paid_per_hcpcs_type, "
+            "0::BIGINT AS distinct_contributors"
+        )
     elif rank_metric == "distinct_addresses":
         order_by = (
             "b.distinct_focus_addresses DESC, b.focus_count DESC, "
@@ -449,6 +491,146 @@ money AS (
             "0::DOUBLE AS paid_per_hcpcs_type, "
             "0::BIGINT AS distinct_contributors"
         )
+
+    # FEC committee × other types: seed ~7k committee line-1 streets, then expand
+    # co-tenants only at those keys. Never scan 29M contributor blobs.
+    if focus == "fec_committee":
+        line1 = "a.address_line1" if mode_uses_alias(mode) else "address_line1"
+        return f"""
+WITH committee_keyed AS (
+    SELECT
+        ({key}) AS cluster_key,
+        {canon} AS canonical_address,
+        {atype} AS address_type,
+        {owner} AS owner_id,
+        {aid} AS address_id,
+        {zipc} AS zip_code,
+        {lat} AS latitude,
+        {lon} AS longitude,
+        {colo} AS colocator
+    {from_sql}
+    WHERE {where}
+      AND {atype} = 'fec_committee'
+      AND {line1} IS NOT NULL
+      AND TRIM({line1}) != ''
+      AND ({key}) IS NOT NULL
+      AND TRIM(CAST(({key}) AS VARCHAR)) != ''
+),
+candidates AS (
+    SELECT
+        cluster_key,
+        COUNT(*)::BIGINT AS focus_count,
+        COUNT(DISTINCT COALESCE(NULLIF(TRIM(canonical_address), ''),
+            CAST(address_id AS VARCHAR)))::BIGINT AS distinct_focus_addresses,
+        ANY_VALUE(CASE
+            WHEN canonical_address IS NOT NULL AND TRIM(canonical_address) != ''
+            THEN canonical_address END) AS sample_address,
+        ANY_VALUE(NULLIF(TRIM(zip_code), '')) AS zip_code,
+        ANY_VALUE(latitude) AS latitude,
+        ANY_VALUE(longitude) AS longitude,
+        ANY_VALUE(NULLIF(TRIM(colocator), '')) AS colocator
+    FROM committee_keyed
+    GROUP BY cluster_key
+),
+keyed AS (
+    SELECT
+        ({key}) AS cluster_key,
+        {canon} AS canonical_address,
+        {atype} AS address_type,
+        {owner} AS owner_id,
+        {aid} AS address_id,
+        {zipc} AS zip_code,
+        {lat} AS latitude,
+        {lon} AS longitude,
+        {colo} AS colocator
+    {from_sql}
+    WHERE {where}
+      AND ({key}) IN (SELECT cluster_key FROM candidates)
+),
+base AS (
+    SELECT
+        cluster_key,
+        COUNT(*)::BIGINT AS total_rows,
+        COUNT(DISTINCT address_type)::BIGINT AS multi_type_count,
+        LIST(DISTINCT address_type ORDER BY address_type) AS address_types,
+        SUM(CASE WHEN address_type = 'dot_carrier_phy'
+                 THEN 1 ELSE 0 END)::BIGINT AS dot_carrier_count,
+        SUM(CASE WHEN address_type = 'charity' THEN 1 ELSE 0 END)::BIGINT AS charity_count,
+        SUM(CASE WHEN address_type = 'grant' THEN 1 ELSE 0 END)::BIGINT AS grant_count,
+        SUM(CASE WHEN address_type = 'officer' THEN 1 ELSE 0 END)::BIGINT AS officer_count,
+        SUM(CASE WHEN address_type = 'contractor' THEN 1 ELSE 0 END)::BIGINT AS contractor_count,
+        SUM(CASE WHEN address_type LIKE 'fec%' THEN 1 ELSE 0 END)::BIGINT AS fec_count,
+        SUM(CASE WHEN address_type IN ('nppes_practice', 'nppes_mailing')
+                 THEN 1 ELSE 0 END)::BIGINT AS medicare_count
+    FROM keyed
+    GROUP BY cluster_key
+),
+charity_signals AS (
+    SELECT
+        k.cluster_key,
+        MAX(c.grift_ratio) AS max_grift_ratio,
+        SUM(CASE
+            WHEN UPPER(CAST(c.domestic_misrep_flag AS VARCHAR))
+                 IN ('TRUE', '1', 'Y', 'YES', 'T')
+            THEN 1 ELSE 0
+        END)::BIGINT AS misrep_count
+    FROM keyed k
+    INNER JOIN Charities c ON c.charity_id = k.owner_id AND k.address_type = 'charity'
+    GROUP BY k.cluster_key
+)
+SELECT
+    c.cluster_key,
+    c.sample_address,
+    COALESCE(b.total_rows, c.focus_count) AS total_rows,
+    COALESCE(b.multi_type_count, 1) AS multi_type_count,
+    COALESCE(b.address_types, CAST(['fec_committee'] AS VARCHAR[])) AS address_types,
+    c.focus_count,
+    c.distinct_focus_addresses,
+    COALESCE(b.dot_carrier_count, 0) AS dot_carrier_count,
+    COALESCE(b.charity_count, 0) AS charity_count,
+    COALESCE(b.grant_count, 0) AS grant_count,
+    COALESCE(b.officer_count, 0) AS officer_count,
+    COALESCE(b.contractor_count, 0) AS contractor_count,
+    COALESCE(b.fec_count, c.focus_count) AS fec_count,
+    COALESCE(b.medicare_count, 0) AS medicare_count,
+    cs.max_grift_ratio,
+    COALESCE(cs.misrep_count, 0) AS misrep_count,
+    0::DOUBLE AS focus_amount
+    {money_select_extra},
+    c.zip_code,
+    c.latitude,
+    c.longitude,
+    c.colocator
+FROM candidates c
+LEFT JOIN base b ON b.cluster_key = c.cluster_key
+LEFT JOIN charity_signals cs ON cs.cluster_key = c.cluster_key
+WHERE c.focus_count > 0
+  AND (
+      COALESCE(b.charity_count, 0) > 0
+      OR COALESCE(b.contractor_count, 0) > 0
+      OR COALESCE(b.dot_carrier_count, 0) > 0
+      OR COALESCE(b.medicare_count, 0) > 0
+  )
+  AND (? <= 0 OR TRUE)
+  AND (? <= 0 OR TRUE)
+  AND (? <= 0 OR c.focus_count >= ?)
+  AND (
+      ? = 0
+      OR COALESCE(cs.max_grift_ratio, 0) > 5
+      OR COALESCE(cs.misrep_count, 0) > 0
+  )
+ORDER BY
+    (
+        (CASE WHEN COALESCE(b.charity_count, 0) > 0 THEN 1 ELSE 0 END) +
+        (CASE WHEN COALESCE(b.contractor_count, 0) > 0 THEN 1 ELSE 0 END) +
+        (CASE WHEN COALESCE(b.dot_carrier_count, 0) > 0 THEN 1 ELSE 0 END) +
+        (CASE WHEN COALESCE(b.medicare_count, 0) > 0 THEN 1 ELSE 0 END)
+    ) DESC,
+    (COALESCE(b.charity_count, 0) + COALESCE(b.contractor_count, 0)
+     + COALESCE(b.dot_carrier_count, 0) + COALESCE(b.medicare_count, 0)) DESC,
+    c.focus_count DESC
+LIMIT ?
+"""
 
     # Charity $ focuses (grants_out / usg): rank from charity rows only (~3M), then
     # expand multi-type / co-tenant counts for the short candidate list. Full-table
@@ -697,6 +879,18 @@ def suspicion_score_focus(cluster: dict, focus: str) -> int:
         score += 150
     if focus == "fec" and fc >= 100:
         score += 100
+    if focus == "fec_committee":
+        families = sum(
+            1
+            for k in (
+                "charity_count",
+                "contractor_count",
+                "dot_carrier_count",
+                "medicare_count",
+            )
+            if int(cluster.get(k) or 0) > 0
+        )
+        score += families * 80
     return int(score)
 
 
@@ -714,6 +908,15 @@ def reason_codes_focus(cluster: dict, min_multi: int, min_focus: int, focus: str
         codes.append("phy_po_box")
     if float(cluster.get("focus_amount") or 0) >= 1_000_000:
         codes.append("high_dollar")
+    if focus == "fec_committee":
+        if int(cluster.get("charity_count") or 0) > 0:
+            codes.append("cross_charity")
+        if int(cluster.get("contractor_count") or 0) > 0:
+            codes.append("cross_contractor")
+        if int(cluster.get("dot_carrier_count") or 0) > 0:
+            codes.append("cross_dot")
+        if int(cluster.get("medicare_count") or 0) > 0:
+            codes.append("cross_nppes")
     return codes or ["threshold"]
 
 
@@ -800,6 +1003,20 @@ def fetch_clusters_focus(
         elif rank_metric == "focus_amount":
             c["rank_metric_value"] = float(c.get("focus_amount") or 0)
             c["rank_metric_fmt"] = c["focus_amount_fmt"]
+        elif rank_metric == "other_families":
+            families = sum(
+                1
+                for k in (
+                    "charity_count",
+                    "contractor_count",
+                    "dot_carrier_count",
+                    "medicare_count",
+                )
+                if int(c.get(k) or 0) > 0
+            )
+            c["other_families"] = families
+            c["rank_metric_value"] = families
+            c["rank_metric_fmt"] = str(families)
         else:
             c["rank_metric_value"] = int(c.get("focus_count") or 0)
             c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
@@ -965,6 +1182,44 @@ def fetch_focus_entities(
                 }
             )
         return out
+
+    if focus == "fec_committee":
+        line1 = "a.address_line1"
+        rows = conn.execute(
+            f"""
+            SELECT
+                COALESCE(NULLIF(TRIM(c.name), ''), c.fec_cmte_id) AS name,
+                c.fec_cmte_id,
+                NULLIF(TRIM(c.treasurer_name), '') AS treasurer,
+                a.canonical_address
+            FROM Addresses a
+            {gjoin}
+            JOIN fec_committees c ON c.id = a.owner_id
+            WHERE ({key_expr}) = ?
+              AND ({where})
+              AND a.address_type = 'fec_committee'
+              AND {line1} IS NOT NULL
+              AND TRIM({line1}) != ''
+            ORDER BY name
+            LIMIT ?
+            """,
+            [cluster_key, top_n],
+        ).fetchall()
+        return [
+            {
+                "id": cmte or "",
+                "name": name or "(unnamed)",
+                "detail": (
+                    f"{cmte or '—'}"
+                    + (f" · treas {tres}" if tres else "")
+                ),
+                "amount": None,
+                "amount_fmt": "—",
+                "address_type": "fec_committee",
+                "canonical_address": (canon or "").strip() or "(no street)",
+            }
+            for name, cmte, tres, canon in rows
+        ]
 
     if focus == "fec":
         # Prefer contributor density on the page: contributors first by $ within
@@ -1625,8 +1880,8 @@ DB: {db_path}
 def main() -> int:
     p = argparse.ArgumentParser(
         description=(
-            "Focus cluster reports (medicare / fec / contractor / grants / "
-            "grants_out / usg)"
+            "Focus cluster reports (medicare / fec / fec_committee / contractor / "
+            "grants / grants_out / usg)"
         )
     )
     p.add_argument("--db-path", default=os.environ.get("IRS990_DB_PATH", DEFAULT_DB))

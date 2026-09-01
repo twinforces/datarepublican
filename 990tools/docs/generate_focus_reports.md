@@ -11,10 +11,12 @@ Investigators need **domain-specific** ranking at a place key — not one generi
 | Focus | Question | Rank (default) |
 |---|---|---|
 | Medicare | Mill-shaped billing (narrow codes × high $)? | `paid / HCPCS types` |
-| FEC | Many contribution/spend rows at one key? | focus row count |
+| FEC | Many contribution/spend rows at one key? | focus row count (bulk FEC not on `/fun/`) |
+| `fec_committee` | Committee street ∩ other types? | other-type families |
 | Contractor | Shell / multi-street or payee stack? | distinct streets |
-| Grants | Where does grant $ land? | grant $ |
-| DOT | Physical carrier farm? | active power units (`dot_carrier_phy` only) |
+| Grants in / out | Where does grant $ land / leave? | grant $ |
+| USG | Where do 990 filers report `govt_amt`? | government $ (HQ state) |
+| DOT | Physical carrier farm? | DOT records, then address types (`dot_carrier_phy` only) |
 
 ## Admission (2026-08)
 

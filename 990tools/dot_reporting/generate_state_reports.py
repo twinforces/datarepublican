@@ -194,6 +194,70 @@ def research_states(
     return out
 
 
+def research_usg_state_dollars(
+    con: duckdb.DuckDBPyConnection,
+) -> dict[str, dict[str, float | int]]:
+    """Form 990 govt_amt by filer Addresses.state (one row per charity_id).
+
+    This is what nonprofits report as government grants/contributions — not
+    USASpending awards to state governments.
+    """
+    rows = con.execute(
+        """
+        WITH filer AS (
+            SELECT
+                c.charity_id,
+                ANY_VALUE(c.ein) AS ein,
+                ANY_VALUE(c.govt_amt)::DOUBLE AS govt_amt,
+                ANY_VALUE(UPPER(TRIM(a.state))) AS st
+            FROM Charities c
+            INNER JOIN Addresses a
+                ON a.owner_id = c.charity_id AND a.address_type = 'charity'
+            WHERE COALESCE(c.govt_amt, 0) > 0
+              AND a.state IS NOT NULL
+              AND LENGTH(TRIM(a.state)) = 2
+            GROUP BY c.charity_id
+        )
+        SELECT
+            st,
+            COALESCE(SUM(govt_amt), 0)::DOUBLE AS focus_amount,
+            COUNT(*)::BIGINT AS filer_years,
+            COUNT(DISTINCT ein)::BIGINT AS distinct_eins
+        FROM filer
+        GROUP BY st
+        """
+    ).fetchall()
+    out: dict[str, dict[str, float | int]] = {}
+    for st, amt, years, eins in rows:
+        st = (st or "").upper()
+        if not st:
+            continue
+        eins_i = int(eins or 0)
+        amt_f = float(amt or 0)
+        out[st] = {
+            "focus_amount": amt_f,
+            "filer_years": int(years or 0),
+            "distinct_eins": eins_i,
+            "amount_per_ein": (amt_f / eins_i) if eins_i else 0.0,
+        }
+    return out
+
+
+def attach_usg_dollars(
+    state_stats: list[dict[str, Any]],
+    dollars: dict[str, dict[str, float | int]],
+) -> list[dict[str, Any]]:
+    for s in state_stats:
+        d = dollars.get(s["state"]) or {}
+        s["focus_amount"] = float(d.get("focus_amount") or 0)
+        s["filer_years"] = int(d.get("filer_years") or 0)
+        s["distinct_eins"] = int(d.get("distinct_eins") or 0)
+        s["amount_per_ein"] = float(d.get("amount_per_ein") or 0)
+        s["focus_amount_fmt"] = fmt_money(s["focus_amount"])
+        s["amount_per_ein_fmt"] = fmt_money(s["amount_per_ein"])
+    return state_stats
+
+
 def fetch_state_clusters(
     con: duckdb.DuckDBPyConnection,
     focus: str,
@@ -213,7 +277,7 @@ def fetch_state_clusters(
     use_fec_fast_path = False
 
     if focus == "dot":
-        rank_expr = "COALESCE(da.active_power_units, 0) DESC, b.focus_n DESC"
+        rank_expr = "b.focus_n DESC, b.multi_type_count DESC, b.total_rows DESC"
         metric_join = """
         LEFT JOIN (
             SELECT k.cluster_key,
@@ -622,8 +686,10 @@ def fetch_state_clusters(
         c["canonical_address"] = str(c["cluster_key"])
         c["focus_amount_fmt"] = fmt_money(c.get("focus_amount"))
         if focus == "dot":
-            c["rank_metric_value"] = int(c.get("active_power_units") or 0)
-            c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
+            dots_n = int(c.get("dot_carrier_count") or c.get("focus_n") or 0)
+            types_n = int(c.get("multi_type_count") or 0)
+            c["rank_metric_value"] = dots_n * 100 + types_n
+            c["rank_metric_fmt"] = f"{dots_n:,} · {types_n} types"
         elif focus == "contractor":
             c["rank_metric_value"] = int(c.get("distinct_focus_addresses") or 0)
             c["rank_metric_fmt"] = f"{c['rank_metric_value']:,}"
@@ -666,6 +732,7 @@ def write_state_suite(
     *,
     max_states: int | None = None,
     research_only: bool = False,
+    refresh_heatmap: bool = False,
 ) -> dict[str, Any]:
     con = open_db(db_path)
     try:
@@ -682,14 +749,34 @@ def write_state_suite(
             focus if focus != "dot" else "dot", pop_cutpoints
         )
 
-        print(
-            f"Researching states focus={focus} slice={slice_by} "
-            f"(using Addresses.state column)...",
-            flush=True,
-        )
-        t0 = time.time()
-        state_stats = research_states(con, focus, slice_by, min_multi, min_focus)
-        print(f"  research done in {time.time()-t0:.1f}s", flush=True)
+        stats_path = output_dir / "data" / "state_stats.json"
+        if refresh_heatmap and stats_path.exists():
+            print(
+                f"Refreshing heatmap from {stats_path} (no cluster re-count)...",
+                flush=True,
+            )
+            prior = json.loads(stats_path.read_text(encoding="utf-8"))
+            state_stats = list(prior.get("states") or [])
+            if not state_stats:
+                raise SystemExit(f"no states in {stats_path}")
+        else:
+            print(
+                f"Researching states focus={focus} slice={slice_by} "
+                f"(using Addresses.state column)...",
+                flush=True,
+            )
+            t0 = time.time()
+            state_stats = research_states(con, focus, slice_by, min_multi, min_focus)
+            print(f"  research done in {time.time()-t0:.1f}s", flush=True)
+
+        if focus == "usg":
+            print("  attaching Form 990 govt_amt by filer state...", flush=True)
+            t1 = time.time()
+            attach_usg_dollars(state_stats, research_usg_state_dollars(con))
+            print(f"  dollars attached in {time.time()-t1:.1f}s", flush=True)
+            state_stats.sort(
+                key=lambda s: (-float(s.get("focus_amount") or 0), s["state"])
+            )
 
         total_pages = sum(s["show_n"] for s in state_stats)
         total_pass = sum(s["pass_clusters"] for s in state_stats)
@@ -729,12 +816,31 @@ def write_state_suite(
 
         # National heatmap index
         label = FOCUSES.get(focus, {}).get("label", focus)
-        heatmap = render_heatmap_svg(
-            state_stats,
-            value_key="pass_clusters",
-            href_template="states/{state}/index.html",
-            title=f"{label} · {slice_by} · clusters by Addresses.state",
-        )
+        if focus == "usg":
+            heatmap = render_heatmap_svg(
+                state_stats,
+                value_key="focus_amount",
+                href_template="states/{state}/index.html",
+                title=f"{label} · Form 990 govt $ by filer state",
+                value_label="govt $",
+                money=True,
+            )
+            heatmap_per = render_heatmap_svg(
+                state_stats,
+                value_key="amount_per_ein",
+                href_template="states/{state}/index.html",
+                title=f"{label} · govt $ per distinct EIN",
+                value_label="$ / EIN",
+                money=True,
+            )
+        else:
+            heatmap = render_heatmap_svg(
+                state_stats,
+                value_key="pass_clusters",
+                href_template="states/{state}/index.html",
+                title=f"{label} · {slice_by} · clusters by Addresses.state",
+            )
+            heatmap_per = ""
         from breadcrumbs import crumbs_by_state_us  # noqa: WPS433
 
         bc = crumbs_by_state_us(focus=focus, slice_by=slice_by)
@@ -760,6 +866,16 @@ def write_state_suite(
         methodology_html = _lookup.get_template(
             "partials/domain_methodology.mako"
         ).render(methodology=methodology)
+        from cluster_table_payload import (  # noqa: WPS433
+            build_state_heatmap_table,
+            dumps_table_json,
+        )
+
+        table_payload = build_state_heatmap_table(state_stats, focus=focus)
+        table_json = dumps_table_json(table_payload)
+        ts_assets = _lookup.get_template(
+            "partials/tanstack_table_assets.mako"
+        ).render()
 
         index_html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -777,10 +893,30 @@ table.state-table {{ font-size: 0.85rem; }}
 </header>
 {methodology_html}
 <section>{heatmap}</section>
+{('<section>' + heatmap_per + '</section>') if heatmap_per else ''}
+{'''<div class="meta" style="max-width:52rem;line-height:1.5">
+<p>Both maps use Form 990 <code>govt_amt</code> at the <strong>filer HQ state</strong>
+(multi-year sum). That is what nonprofits report as government grants — not
+USASpending awards to state governments, and not Census federal-funds-per-capita.</p>
+<p><strong>Top map (total $):</strong> add up every filing’s government-grant line
+for charities whose address is in that state. California will almost always win
+because it has more hospitals, universities, and big nonprofits — more
+organizations, more people. A hotter state here usually means “more of these
+filers,” not “Washington prefers this state.”</p>
+<p><strong>Bottom map ($ per EIN):</strong> same pile of money, divided by how
+many distinct organizations (EINs) reported any government grant. That asks:
+when a charity <em>in this state</em> reports government money, how large is
+that stack on average? A small state can outrank a big one if its typical
+filer (often one hospital system) is huge. Still not per-resident federal
+spending.</p>
+</div>''' if focus == 'usg' else ''}
 <section>
   <h2>All states</h2>
-  <table class="state-table">
-    <thead><tr><th>State</th><th>Pass clusters</th><th>Show</th><th>Focus rows</th><th></th></tr></thead>
+  <p class="meta">Click a column header to sort. Search filters the list.</p>
+  <div id="ts-table-root"></div>
+  <noscript>
+  <table class="state-table" id="clusters-table">
+    <thead><tr><th>State</th>{'<th>Govt $</th><th>EINs</th><th>$ / EIN</th>' if focus == 'usg' else ''}<th>Pass clusters</th><th>Show</th><th>Focus rows</th><th></th></tr></thead>
     <tbody>
 """
         for s in state_stats:
@@ -788,11 +924,23 @@ table.state-table {{ font-size: 0.85rem; }}
                 link = f'<a href="states/{s["state"]}/index.html">Open →</a>'
             else:
                 link = "—"
+            extra = ""
+            if focus == "usg":
+                extra = (
+                    f"<td>{s.get('focus_amount_fmt') or '—'}</td>"
+                    f"<td>{int(s.get('distinct_eins') or 0):,}</td>"
+                    f"<td>{s.get('amount_per_ein_fmt') or '—'}</td>"
+                )
             index_html += (
-                f"<tr><td>{s['state']}</td><td>{s['pass_clusters']:,}</td>"
+                f"<tr><td>{s['state']}</td>{extra}"
+                f"<td>{s['pass_clusters']:,}</td>"
                 f"<td>{s['show_n']}</td><td>{s['focus_rows']:,}</td><td>{link}</td></tr>\n"
             )
-        index_html += """</tbody></table></section>
+        index_html += f"""</tbody></table>
+  </noscript>
+  <script>window.__CLUSTER_TABLE__ = {table_json};</script>
+  {ts_assets}
+</section>
 <footer><p>Stats: <code>data/state_stats.json</code></p></footer>
 </body></html>"""
         (output_dir / "index.html").write_text(index_html, encoding="utf-8")
@@ -810,8 +958,9 @@ Detail pages: {total_pages:,}
             encoding="utf-8",
         )
 
-        if research_only:
-            print(f"Research-only: wrote heatmap + stats to {output_dir}", flush=True)
+        if research_only or refresh_heatmap:
+            kind = "refresh-heatmap" if refresh_heatmap else "research-only"
+            print(f"{kind}: wrote heatmap + stats to {output_dir}", flush=True)
             return {"total_pages": total_pages, "total_pass": total_pass}
 
         notes = load_physical_notes(physical_notes_path)
@@ -1016,16 +1165,22 @@ Detail pages: {total_pages:,}
                     if focus == "medicare":
                         from provider_pages import (  # noqa: WPS433
                             provider_detail_href,
+                            write_provider_page,
                         )
 
                         # Detail pages live at suite/states/ST/*.html; shared
                         # NPI dossiers are at reports/providers/ → three levels up.
+                        providers_dir = SCRIPT_DIR / "reports" / "providers"
                         for ent in entities:
                             npi = str(ent.get("id") or "").strip()
-                            if npi:
-                                ent["detail_href"] = provider_detail_href(
-                                    npi, relative="../../../providers"
-                                )
+                            if not npi:
+                                continue
+                            ent["detail_href"] = provider_detail_href(
+                                npi, relative="../../../providers"
+                            )
+                            dest = providers_dir / f"{npi}.html"
+                            if not dest.exists():
+                                write_provider_page(con, npi, providers_dir)
                     from cluster_table_payload import (  # noqa: WPS433
                         build_detail_tables,
                         dumps_table_json,
@@ -1124,7 +1279,7 @@ Detail pages: {total_pages:,}
                 table_payload = build_dot_cluster_table(
                     clusters_out, min_dot_carriers=min_focus
                 )
-                rank_label = "Active PUs"
+                rank_label = "DOT records · types"
             else:
                 rank_map = {
                     "medicare": ("paid_per_hcpcs_type", "Paid / HCPCS types"),
@@ -1230,6 +1385,11 @@ def main() -> int:
         action="store_true",
         help="Only write heatmap + state_stats.json (no detail pages)",
     )
+    p.add_argument(
+        "--refresh-heatmap",
+        action="store_true",
+        help="Rewrite index heatmap from existing state_stats.json (no detail pages)",
+    )
     args = p.parse_args()
 
     if args.focus == "dot":
@@ -1264,6 +1424,7 @@ def main() -> int:
         physical_notes_path=Path(args.physical_notes),
         max_states=args.max_states,
         research_only=args.research_only,
+        refresh_heatmap=args.refresh_heatmap,
     )
     return 0
 

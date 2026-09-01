@@ -15,6 +15,7 @@ def focus_label(focus: str | None) -> str:
         "dot": "DOT / trucking",
         "medicare": "Medicare / NPPES",
         "fec": "FEC",
+        "fec_committee": "FEC committee × other",
         "contractor": "Contractors",
         "grants": "NGO Grants (in)",
         "grants_out": "NGO Grants (out)",

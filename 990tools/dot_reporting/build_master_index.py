@@ -20,6 +20,7 @@ FOCUS_LABELS = {
     "dot": "DOT / trucking",
     "medicare": "Medicare / NPPES",
     "fec": "FEC political money",
+    "fec_committee": "FEC committee × other types",
     "contractor": "990 contractors",
     "grants": "NGO Grants (incoming)",
     "grants_out": "NGO Grants (outgoing)",
@@ -27,7 +28,7 @@ FOCUS_LABELS = {
 }
 
 # Longer focus tokens first so grants_out is not parsed as grants + "out".
-_FOCUS_ALT = "grants_out|dot|medicare|fec|contractor|grants|usg"
+_FOCUS_ALT = "fec_committee|grants_out|dot|medicare|fec|contractor|grants|usg"
 
 SLICE_LABELS = {
     "address": "Address",

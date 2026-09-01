@@ -12,7 +12,7 @@
   <header>
     <h1>Cluster Report${' — ' + slice_label if slice_label else ''}</h1>
     <p class="meta">Generated ${generated_at} · DB: ${db_path} · ${cluster_count} clusters</p>
-    <p class="meta">Slice: ${slice_by if slice_by else 'address'} · Admission: phy carriers &gt; 0 · suite cap after rank (active PUs)
+    <p class="meta">Slice: ${slice_by if slice_by else 'address'} · Admission: phy carriers &gt; 0 · suite cap after rank (DOT records, then types)
 % if min_multi_type or min_dot_carriers:
  · Optional floors: multi≥${min_multi_type} carriers≥${min_dot_carriers}
 % endif
@@ -44,7 +44,10 @@
 <%
   _table_json = cluster_table_json if (cluster_table_json is not UNDEFINED and cluster_table_json) else '{"rows":[],"columns":[]}'
 %>
-  <p class="meta">Rank metric: <strong>active power units</strong> (then <strong>physical</strong> DOT carrier count — mailing excluded). Table supports multi-column sort, search, pagination (TanStack Table).</p>
+<%
+  _rank_label = rank_label if (rank_label is not UNDEFINED and rank_label) else 'DOT records · types'
+%>
+  <p class="meta">Rank metric: <strong>${_rank_label}</strong> (physical DOT identities, then distinct address types — mailing excluded). Active PUs stay a sortable column. Table supports multi-column sort, search, pagination (TanStack Table).</p>
 % if map_points is not UNDEFINED and map_points:
   <%include file="partials/leaflet_map_embed.mako" args="map_points=map_points, map_root_id='leaflet-map', map_height=400"/>
 % endif

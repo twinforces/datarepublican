@@ -58,10 +58,14 @@ def rank_dot_html(
 
 
 def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> dict[str, Any]:
-    metrics = [
-        float(c.get("active_power_units") or c.get("dot_active_power_units") or 0)
-        for c in clusters
-    ]
+    # Composite matches SQL: records dominate, types break ties (types ≪ 100).
+    def _rank_tuple(c: dict) -> tuple[int, int]:
+        return (
+            int(c.get("dot_carrier_count") or 0),
+            int(c.get("multi_type_count") or 0),
+        )
+
+    metrics = [float(d * 100 + t) for d, t in (_rank_tuple(c) for c in clusters)]
     scale = MetricScale.from_values(metrics)
     vmax = scale.vmax
     rows = []
@@ -74,6 +78,8 @@ def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> d
         grift = c.get("max_grift_ratio")
         grift_s = f"{grift:.1f}" if grift is not None else "—"
         active_pu = int(c.get("active_power_units") or c.get("dot_active_power_units") or 0)
+        dots_n, types_n = _rank_tuple(c)
+        rank_val = dots_n * 100 + types_n
         key = str(c.get("cluster_key") or "")
         kind = "po_zip" if key.upper().startswith("PO:") else None
         # Zip-only keys: primary label is the ZIP search link; else maps link with
@@ -93,21 +99,21 @@ def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> d
                 f'<a href="{_esc(maps)}" target="_blank" rel="noopener">'
                 f"{linkify_zip_codes(addr)}</a>"
             )
-        pct = scale.percentile(active_pu)
+        pct = scale.percentile(rank_val)
         rows.append(
             {
                 "slug": slug,
-                "rank": active_pu,
+                "rank": rank_val,
                 "rank_html": rank_dot_html(
-                    active_pu, vmax, kind=kind, scale=scale, label="active PU"
+                    rank_val, vmax, kind=kind, scale=scale, label="DOT records · types"
                 )
-                + _esc(f"{active_pu:,}"),
+                + _esc(f"{dots_n:,} · {types_n} types"),
                 "percentile": pct,
                 "score": int(c.get("suspicion_score") or 0),
                 "address": addr,
                 "address_html": addr_html,
-                "types": int(c.get("multi_type_count") or 0),
-                "dot": int(c.get("dot_carrier_count") or 0),
+                "types": types_n,
+                "dot": dots_n,
                 "active_pus": active_pu,
                 "rows": int(c.get("total_rows") or 0),
                 "max_grift": grift_s,
@@ -128,7 +134,7 @@ def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> d
             }
         )
     columns = [
-        {"id": "rank", "header": "● Metric"},
+        {"id": "rank", "header": "● DOT rec · types"},
         {"id": "score", "header": "Score"},
         {"id": "address", "header": "Address"},
         {"id": "types", "header": "Types"},
@@ -144,9 +150,10 @@ def build_dot_cluster_table(clusters: list[dict], *, min_dot_carriers: int) -> d
     return {
         "rows": rows,
         "columns": columns,
-        "initialSort": [{"id": "active_pus", "desc": True}],
+        "initialSort": [{"id": "rank", "desc": True}, {"id": "types", "desc": True}],
         "pageSize": 50,
-        "rank_metric": "active_power_units",
+        "rank_metric": "dot_records_types",
+        "rank_label": "DOT records · types",
     }
 
 
@@ -284,6 +291,72 @@ def build_focus_cluster_table(
     }
 
 
+def build_state_heatmap_table(
+    states: list[dict[str, Any]],
+    *,
+    focus: str,
+) -> dict[str, Any]:
+    """TanStack payload for the national by-state heatmap index."""
+    usg = focus == "usg"
+    rows: list[dict[str, Any]] = []
+    for s in states:
+        st = str(s.get("state") or "")
+        show = int(s.get("show_n") or 0)
+        href = f"states/{st}/index.html" if show > 0 and st else ""
+        row: dict[str, Any] = {
+            "state": st,
+            "state_html": (
+                f'<a href="{_esc(href)}">{_esc(st)}</a>' if href else _esc(st)
+            ),
+            "pass_clusters": int(s.get("pass_clusters") or 0),
+            "show_n": show,
+            "focus_rows": int(s.get("focus_rows") or 0),
+            "detail_html": (
+                f'<a href="{_esc(href)}">Open →</a>' if href else "—"
+            ),
+        }
+        if usg or s.get("focus_amount") is not None:
+            amt = float(s.get("focus_amount") or 0)
+            per = float(s.get("amount_per_ein") or 0)
+            row["focus_amount"] = amt
+            row["focus_amount_html"] = _esc(s.get("focus_amount_fmt") or "—")
+            row["distinct_eins"] = int(s.get("distinct_eins") or 0)
+            row["amount_per_ein"] = per
+            row["amount_per_ein_html"] = _esc(s.get("amount_per_ein_fmt") or "—")
+        rows.append(row)
+
+    columns: list[dict[str, Any]] = [{"id": "state", "header": "State"}]
+    if usg or any("focus_amount" in r for r in rows):
+        columns.extend(
+            [
+                {"id": "focus_amount", "header": "Govt $"},
+                {"id": "distinct_eins", "header": "EINs"},
+                {"id": "amount_per_ein", "header": "$ / EIN"},
+            ]
+        )
+    columns.extend(
+        [
+            {"id": "pass_clusters", "header": "Pass clusters"},
+            {"id": "show_n", "header": "Show"},
+            {"id": "focus_rows", "header": "Focus rows"},
+            {"id": "detail_html", "header": "", "sortable": False},
+        ]
+    )
+    return {
+        "rows": rows,
+        "columns": columns,
+        "initialSort": [
+            {
+                "id": "focus_amount" if usg else "pass_clusters",
+                "desc": True,
+            }
+        ],
+        "pageSize": 100,
+        "pageSizeOptions": [25, 50, 100, 200],
+        "focus": focus,
+    }
+
+
 def dumps_table_json(payload: Any) -> str:
     """JSON for embedding in <script> (safe for </script> via unicode escape)."""
     return json.dumps(payload, ensure_ascii=False, default=str).replace("</", "<\\/")
@@ -354,7 +427,7 @@ def build_detail_tables(
             {
                 "rootId": "ts-address-subgroups",
                 "pageSize": 25,
-                "initialSort": [{"id": "dot", "desc": True}],
+                "initialSort": [{"id": "dot", "desc": True}, {"id": "types", "desc": True}],
                 "columns": [
                     {"id": "address", "header": "Street address"},
                     {"id": "rows", "header": "Rows"},

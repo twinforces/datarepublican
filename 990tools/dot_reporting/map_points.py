@@ -293,11 +293,11 @@ def clusters_to_map_points(
         metric = c.get("rank_metric_value")
         if metric is None:
             metric = (
-                c.get("active_power_units")
-                or c.get("dot_active_power_units")
-                or c.get("focus_amount")
+                c.get("dot_carrier_count")
                 or c.get("focus_count")
-                or c.get("dot_carrier_count")
+                or c.get("focus_amount")
+                or c.get("active_power_units")
+                or c.get("dot_active_power_units")
                 or 0
             )
         from html_format import linkify_zip_codes, zip_link_html  # local
