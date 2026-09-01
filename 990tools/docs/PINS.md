@@ -94,6 +94,24 @@ Stretch stays stretch until PR1 works.
 
 ---
 
+## Later: AI thumbs on expensive ghost→EIN pairs (not PR1)
+
+No backend, so no user votes. Optional: Grok thumbs-up/down “does this ghost name plausibly map to this EIN?” **scoped by dollars**, not all 1.36M GIN→backfill pairs.
+
+Live snapshot (GIN in `recipient_ein` + 9-digit backfill, summed `grant_amt`):
+
+| Pair $ | Distinct GIN→EIN pairs | $ in those pairs |
+|---|---:|---:|
+| all | 1.36M | $662B |
+| ≥ $1M | 63k | — |
+| ≥ $10M | **8,791** | **$430B** |
+| ≥ $100M | **642** | — |
+| ≥ $1B | 23 | — |
+
+Affordable slice is **$100M (642)** or **$10M (8.8k)**. Write results as a small approved/rejected table; UI can treat approved as default-collapse, rejected as ghost-only. Does not replace the Trust-the-phone-book toggle.
+
+---
+
 ## Later: name-change phonebook (not PR1)
 
 Orgs do rename (~11% of EINs have 2+ cleaned `filer_name`s across years; 98.5% of those cleaned strings map to exactly one EIN).
