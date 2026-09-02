@@ -4,6 +4,18 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-02: $10M browse export (PR1)
+
+**What:** DuckDB → `/browse` chunks at $10M. 74,151 Charities + 477 BMF-only + 1,402 ghosts + 28,390 leftover stubs; 555k edges. Zip **12.6 MB** (was ~39 MB full). Gates Trust → GIN `$42.6B` inferred, suggested `562618866`.
+
+**Why:** Default load must be the $10M band; GINs are ghosts not fake EINs.
+
+**How:** `export_browse_band.py`. Loader accepts GIN / `etc`+EIN keys and extra grant columns. `docs/export_browse_band.md`. Zip 12.6 MB in `browse/tsv_chunks` + `docs/browse/tsv_chunks`.
+
+**Next:** PR2 focus-default Sankey + distinct ghost rendering.
+
+---
+
 ## 2026-09-01: Repair phonebook before $10M export
 
 **What:** Cream/DAF no longer first-writer-wins or default-DAF. Legal suffixes stay in the key. Digit-repair only for EINs missing from BMF. Script `repair_phonebook_backfill.py` fixes existing GIN backfill (does not touch `recipient_ein`).

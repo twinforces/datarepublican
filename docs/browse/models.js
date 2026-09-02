@@ -21,7 +21,7 @@ const DB_VERSION = 1;
 const CHARITY_STORE = "charities";
 const GRANT_STORE = "grants";
 const METADATA_STORE = "metadata";
-const DATA_VERSION = "2025-06-25";
+const DATA_VERSION = "2026-09-02";
 const BALANCELIMIT = 20;
 const PER_COL = 3;
 const PER_ROW = 3;
@@ -75,6 +75,16 @@ export function formatNumber(num) {
  * As they say in Highlander, there can be only one
  */
 let viewModel = null;
+/** 9-digit EIN, GIN (70+sha), or leftover stub etcXXXXXXXXX */
+export function isGraphKey(id) {
+  if (!id) return false;
+  if (/^[0-9]{3,9}$/.test(id)) return true;
+  if (/^70[0-9a-fA-F]{64}$/.test(id)) return true;
+  if (/^70[0-9a-fA-F]{128}$/.test(id)) return true;
+  if (/^etc[0-9]{9}$/.test(id)) return true;
+  return false;
+}
+
 function hashEIN(ein) {
   let hash = 2862953042; // so 001 is greenish
   const paddedEin = ein.length === 3 ? ein.padEnd(9, "0") : ein; // Pad 3-digit EINs
@@ -106,18 +116,24 @@ const brightnessBands = [
 
 const bandOffset = 1; // Tuned: lastDigit=1 +1 %4=2 -> dark for node
 
+function colorBandIndex(ein) {
+  const lastDigit = parseInt(ein.slice(-1), 10);
+  const n = Number.isFinite(lastDigit)
+    ? lastDigit
+    : ein.charCodeAt(ein.length - 1);
+  return (n + bandOffset) % 4;
+}
+
 export function getColorForEIN(ein) {
   let t = hashEIN(ein);
-  const lastDigit = parseInt(ein.slice(-1), 10);
-  let bandIndex = (lastDigit + bandOffset) % 4;
+  let bandIndex = colorBandIndex(ein);
   const brightBand = brightnessBands[bandIndex];
   return interpolateBand(t, brightBand.base, brightBand.mod);
 }
 
 export function getTextColorForEIN(ein) {
   let t = hashEIN(ein);
-  const lastDigit = parseInt(ein.slice(-1), 10);
-  let bandIndex = ((lastDigit + bandOffset) % 4) + 1; // One darker
+  let bandIndex = colorBandIndex(ein) + 1; // One darker
   bandIndex = Math.min(3, bandIndex); // Cap at extra dark (no wrap to light for contrast)
   const brightBand = brightnessBands[bandIndex];
   return interpolateBand(t, brightBand.base, brightBand.mod);
@@ -435,7 +451,7 @@ async function fetchAndStoreTSV(db, files) {
               "form_type",
               "denominator",
             ]
-          : ["filer_ein", "grant_ein", "grant_amt"];
+          : ["filer_ein", "grant_ein", "grant_amt"]; // inferred, suggested_ein optional extra
       const columnMap = {};
       headers.forEach((header, i) => {
         columnMap[header] = i;
@@ -465,12 +481,12 @@ async function fetchAndStoreTSV(db, files) {
             const values = lines[index]
               .split("\t")
               .map((value) => (value ? value.trim() : ""));
-            if (values.length != expectedColumns.length) {
+            if (values.length < expectedColumns.length) {
               rowsSkipped++;
               continue;
             }
             row = {};
-            expectedColumns.forEach((header) => {
+            headers.forEach((header) => {
               row[header] =
                 columnMap[header] < values.length
                   ? values[columnMap[header]]
@@ -496,17 +512,16 @@ async function fetchAndStoreTSV(db, files) {
                   ? parseFloat(row.denominator)
                   : null,
               };
-              if (
-                !charity.filer_ein ||
-                !/^[0-9]{3,9}$/.test(charity.filer_ein)
-              ) {
+              if (!charity.filer_ein || !isGraphKey(charity.filer_ein)) {
                 rowsSkipped++;
                 continue;
               }
               if (
                 charity.xml_name &&
                 charity.org_type !== "backfill" &&
-                !/.*\.xml$|^backfill$/.test(charity.xml_name)
+                charity.org_type !== "ghost" &&
+                charity.org_type !== "leftover" &&
+                !/.*\.xml$|^backfill$|^ghost$|^leftover$/.test(charity.xml_name)
               ) {
                 rowsSkipped++;
                 continue;
@@ -535,7 +550,7 @@ async function fetchAndStoreTSV(db, files) {
                 grant.filer_ein &&
                 grant.grant_ein &&
                 grant.filer_ein !== grant.grant_ein &&
-                /^[0-9]{3,9}$/.test(grant.grant_ein)
+                isGraphKey(grant.grant_ein)
               ) {
                 records.push(grant);
                 Grant.loadGrantRow(grant, grantType);
@@ -3211,7 +3226,7 @@ export class Grant {
       !grant_ein ||
       filer_ein === grant_ein ||
       grant_ein === "Unknown" ||
-      !/^[0-9]{3,9}$/.test(grant_ein)
+      !isGraphKey(grant_ein)
     ) {
       console.warn(`Invalid EINs for grant row:`, {
         filer_ein,
