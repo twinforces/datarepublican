@@ -2,6 +2,8 @@
 .node { fill: #999; }
 .node.expand { cursor: grab; }
 .node.no-grants { cursor: zoom-out; }
+.node-ghost path, .node-leftover path { stroke-dasharray: 4 3; }
+.nodeLabel-ghost, .nodeLabel-leftover { font-style: italic; }
 .link { stroke-opacity: 0.5; }
 .hat-up, .hat-down { cursor: pointer; }
 .nodeLabel:hover{fill:#000}

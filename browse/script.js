@@ -7,6 +7,8 @@ import {
   getColorForEIN,
   getTextColorForEIN,
   interpolateBandIndex,
+  compareCharities,
+  compareLinks,
 } from "./models.js";
 
 import {
@@ -87,7 +89,7 @@ function renderPopup() {
         <div class="toggle-row">
           <div class="button-group-column">
             <div class="ngopreset-mode-switch">
-              <span class="toggle-label toggle-label-add">Preset will add</span>
+              <span class="toggle-label toggle-label-add" title="Keep current nodes and seed these too">Preset will add</span>
               <div class="toggle-switch">
                 <input type="checkbox" id="preset-mode" value="add">
                 <label for="preset-mode"></label>
@@ -556,20 +558,7 @@ function downloadSVG() {
 }
 
 function updateQueryParams() {
-  const params = viewModel.computeURLParams();
-  const newUrl = window.location.pathname + "?" + params.toString();
-  window.history.replaceState({}, "", newUrl);
-}
-
-function compareCharities(a, b) {
-  return (
-    b.grantsInTotal + b.grantsTotal - (a.grantsInTotal + a.grantsTotal) ||
-    a.name.localeCompare(b.name)
-  );
-}
-
-function compareLinks(a, b) {
-  return b.value - a.value;
+  viewModel.computeAndSaveURLParams();
 }
 
 function generateUniqueId(prefix = "gradient", link) {
@@ -757,7 +746,7 @@ function bindEvents(g) {
       d.hide();
       Charity.addToHideList(d.ein);
       refresh();
-    } else if (event.metaKey) {
+    } else if (event.altKey) {
       showControlPanel("node", d, this);
     } else {
       viewModel.clickNode(event, d, refresh);
@@ -771,7 +760,7 @@ function bindEvents(g) {
         d.hide();
         Charity.addToHideList(d.ein);
         refresh();
-      } else if (event.metaKey) {
+      } else if (event.altKey) {
         showControlPanel("node", d, this);
       } else {
         viewModel.clickNode(event, d, refresh);
@@ -1624,7 +1613,12 @@ function renderFocusedSankey(
   const nodeEnter = nodeElements
     .enter()
     .append("g")
-    .attr("class", (d) => (d.isTerminal ? "node no-grants" : "node expand"))
+    .attr(
+      "class",
+      (d) =>
+        (d.isTerminal ? "node no-grants" : "node expand") +
+        (d.kind ? ` node-${d.kind}` : ""),
+    )
     .attr("data-id", (d) => d.id)
     .style("opacity", 0);
 
@@ -1635,7 +1629,7 @@ function renderFocusedSankey(
       .attr("stroke", "#000")
       .attr(
         "d",
-        d.isTerminal
+        d.isTerminal || d.kind === "ghost" || d.kind === "leftover"
           ? generateOctagonPath({
               ...d,
               x0: d.previousX0 || d.x0,
@@ -1652,6 +1646,11 @@ function renderFocusedSankey(
             }),
       )
       .attr("fill", getColorForEIN(d.id))
+      .attr(
+        "stroke-dasharray",
+        d.kind === "ghost" || d.kind === "leftover" ? "4 3" : null,
+      )
+      .attr("stroke-width", d.kind === "bmf" ? 2.5 : 1)
       .style("cursor", d.isTerminal ? "zoom-in" : "grab")
       .append("title")
       .text((d) => d.toolTipText());
@@ -1672,7 +1671,9 @@ function renderFocusedSankey(
     .transition()
     .duration(ANIM_NODE)
     .attr("d", (d) =>
-      d.isTerminal ? generateOctagonPath(d) : generateTrapezoidPath(d),
+      d.isTerminal || d.kind === "ghost" || d.kind === "leftover"
+        ? generateOctagonPath(d)
+        : generateTrapezoidPath(d),
     );
 
   // Hat and text rendering (unchanged for brevity, but ensure transitions are safe)
@@ -1847,8 +1848,11 @@ function renderFocusedSankey(
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
     )
     .style("cursor", "crosshair")
-    .attr("class", "nodeLabel")
+    .attr("class", (d) => "nodeLabel" + (d.kind ? ` nodeLabel-${d.kind}` : ""))
     .attr("fill", (d) => getTextColorForEIN(d.ein))
+    .style("font-style", (d) =>
+      d.kind === "ghost" || d.kind === "leftover" ? "italic" : "normal",
+    )
     .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`);
 
   try {
@@ -1862,8 +1866,11 @@ function renderFocusedSankey(
         d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
       )
       .style("cursor", "crosshair")
-      .attr("class", "nodeLabel")
+      .attr("class", (d) => "nodeLabel" + (d.kind ? ` nodeLabel-${d.kind}` : ""))
       .attr("fill", (d) => getTextColorForEIN(d.ein))
+      .style("font-style", (d) =>
+        d.kind === "ghost" || d.kind === "leftover" ? "italic" : "normal",
+      )
       .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
       .text((d) => d.name);
   } catch (e) {
@@ -1876,8 +1883,11 @@ function renderFocusedSankey(
         d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
       )
       .style("cursor", "crosshair")
-      .attr("class", "nodeLabel")
+      .attr("class", (d) => "nodeLabel" + (d.kind ? ` nodeLabel-${d.kind}` : ""))
       .attr("fill", (d) => getTextColorForEIN(d.ein))
+      .style("font-style", (d) =>
+        d.kind === "ghost" || d.kind === "leftover" ? "italic" : "normal",
+      )
       .style("font-size", (d) => `${fontSizeFromHeight(d.y1 - d.y0)}px`)
       .text((d) => d.name);
   }
@@ -2130,7 +2140,8 @@ function showControlPanel(type, data, element) {
       if (node.govDepth == Infinity) pork = stop; // no path to USG
       const { grift, griftMap } = node.usgIndirectGrift();
 
-      links = `
+      if (node.has990Card) {
+        links = `
         <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
         <p>Find indirect USG sources:  <i>$${formatNumber(grift)}</i>
            <a onClick="porkClick('${
@@ -2147,12 +2158,27 @@ function showControlPanel(type, data, element) {
         <p>${node.guideStarLink("Guide Star")}</p>
         <p>${node.charityNavigatorLink("Charity Navigator")}</p>
       `;
+      } else if (node.isGhost) {
+        const sug = node.suggestedEin
+          ? `<p>Phone book suggests EIN ${node.suggestedEin.slice(0, 2)}-${node.suggestedEin.slice(2)} (not from the 990). Trust-the-phone-book is a later toggle.</p>`
+          : `<p>No IRS EIN on the form. This is a name+address ghost.</p>`;
+        links = `<p>${node.orgShort}</p>${sug}<p>${node.googleLink("Google the name")}</p>`;
+      } else if (node.isBmfOnly) {
+        links = `<p>${node.orgShort}</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google")}</p>`;
+      } else if (node.isLeftover) {
+        links = `<p>${node.orgShort}</p><p>Grants from this org to counterparties omitted by the $10M cut.</p>`;
+      } else {
+        links = `<p>${node.orgShort}</p>`;
+      }
     }
 
+    const idLine = node.has990Card || node.isBmfOnly
+      ? `<p>EIN: ${node.longEIN}</p>`
+      : `<p>${node.orgShort}</p>`;
     return `
       <div class="bg-blue-500 text-white flex-col p-4 text-center">
         <h3>${node.name} <a onClick="flashNode('${node.ein}')" title="Flash" style="cursor:pointer"><span>&#128294;</span></a></h3>
-        <p>EIN: ${node.longEIN}</p>
+        ${idLine}
       </div>
       <div class="flex flex-row gap-4">
         <div class="flex-1 bg-gray-200 p-4">

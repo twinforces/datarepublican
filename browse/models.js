@@ -33,12 +33,27 @@ import { iso3166_alpha2 } from "./countryCodes.js";
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
 import presetsData from "./presets.js";
+import {
+  compareCharities,
+  compareLinks,
+  formatNumber,
+  isGraphKey,
+  kindFrom,
+} from "./graphIdentity.js";
+
+export { compareCharities, compareLinks, formatNumber, isGraphKey, kindFrom };
 let DEBUGLOG = false;
 let DEBUGSTOP = false;
 
 let GOV_NODE = null; // I use this when debugging.
 let colorOffest = 0;
-const d3Array = window.d3;
+const d3Array =
+  (typeof window !== "undefined" && window.d3) || {
+    max: (arr, acc) => {
+      const vals = acc ? arr.map(acc) : arr;
+      return Math.max(...vals.filter((x) => x != null && Number.isFinite(x)));
+    },
+  };
 
 /**
  * Tried logarithmic scaling, but it was too drastic 1M vs. 1B was 3. 
@@ -59,31 +74,9 @@ export function scaleValue(amt) {
 }
 
 /**
- * Aka what ls et all call human scaling.
- * @param {*} num
- * @returns
- */
-export function formatNumber(num) {
-  if (num >= 1e12) return (num / 1e12).toFixed(1) + "T";
-  if (num >= 1e9) return (num / 1e9).toFixed(1) + "B";
-  if (num >= 1e6) return (num / 1e6).toFixed(1) + "M";
-  if (num >= 1e3) return (num / 1e3).toFixed(1) + "K";
-  return num == null ? "N/A" : num.toString();
-}
-
-/**
  * As they say in Highlander, there can be only one
  */
 let viewModel = null;
-/** 9-digit EIN, GIN (70+sha), or leftover stub etcXXXXXXXXX */
-export function isGraphKey(id) {
-  if (!id) return false;
-  if (/^[0-9]{3,9}$/.test(id)) return true;
-  if (/^70[0-9a-fA-F]{64}$/.test(id)) return true;
-  if (/^70[0-9a-fA-F]{128}$/.test(id)) return true;
-  if (/^etc[0-9]{9}$/.test(id)) return true;
-  return false;
-}
 
 function hashEIN(ein) {
   let hash = 2862953042; // so 001 is greenish
@@ -545,6 +538,8 @@ async function fetchAndStoreTSV(db, files) {
                 grant_ein,
                 amt: parseInt(row.grant_amt || row.amt || "0", 10) || 0,
                 grantType,
+                inferred: row.inferred === "1" || row.inferred === "true",
+                suggested_ein: row.suggested_ein || "",
               };
               if (
                 grant.filer_ein &&
@@ -702,7 +697,11 @@ async function fetchAndStoreTSV(db, files) {
 export class BrowseViewModel {
   #_presetsData = presetsData; // Private field initialized with imported presets
 
-  constructor({ POWER_LAW = POWER_LAW_RESET, GOV_EIN = "001" } = {}) {
+  constructor({
+    POWER_LAW = POWER_LAW_RESET,
+    GOV_EIN = "001",
+    urlAdapter = null,
+  } = {}) {
     this.POWER_LAW = POWER_LAW; /** Users can change the scaling on the fly */
     this.GOV_EIN =
       GOV_EIN; /** Had to pick something, it was this or 0000000001  */
@@ -729,17 +728,22 @@ export class BrowseViewModel {
     /** Essentially globals */
     this.renderData = null;
     this.dataReady = false;
+    this.urlAdapter = urlAdapter;
     viewModel = this;
     this.resetAll();
   }
+
+  static compareCharities = compareCharities;
+  static compareLinks = compareLinks;
 
   exportDB() {
     exportDB();
   }
 
   clearAll() {
-    for (const c of Charity.visibleCharities) c.clearVisibility();
-    Grant.desiredGrants.forEach((g) => g.clearAll());
+    for (const c of [...Charity.desiredCharities]) c.clearVisibility();
+    for (const c of [...Charity.visibleCharities]) c.clearVisibility();
+    for (const g of [...Grant.desiredGrants]) g.clearVisibility();
   }
 
   presets() {
@@ -1232,8 +1236,15 @@ export class BrowseViewModel {
 
   computeAndSaveURLParams() {
     const params = this.computeURLParams();
-    const newUrl = window.location.pathname + "?" + params.toString();
-    window.history.replaceState({}, "", newUrl);
+    if (this.urlAdapter && typeof this.urlAdapter.replace === "function") {
+      this.urlAdapter.replace(params);
+      return params;
+    }
+    if (typeof window !== "undefined" && window.history && window.location) {
+      const newUrl = window.location.pathname + "?" + params.toString();
+      window.history.replaceState({}, "", newUrl);
+    }
+    return params;
   }
 
   parseParamsWithOldNew(params, oldName, newName) {
@@ -1480,13 +1491,9 @@ export class BrowseViewModel {
    * as it will step 1 node farther down the graph.
    */
   clickNode(event, charity, refreshCallback) {
-    if (DEBUGLOG) console.log(`Clicked node ${charity.id} ${charity.name}`);
-    //charity.desiredVisible = !charity.desiredVisible; // Toggle user-driven input
-    charity.expandOutflows(NEXT_REVEAL);
-    charity.expandInflows(NEXT_REVEAL);
-    this.computeImpliedVisibility(charity, true, true); // Compute connected visibility
-    this.buildSankeyData(); // Update the graph data
-    if (refreshCallback) refreshCallback(); // Always refresh
+    if (DEBUGLOG) console.log(`Focus node ${charity.id} ${charity.name}`);
+    charity.tunnelNode();
+    if (refreshCallback) refreshCallback();
   }
 
   /**
@@ -2182,6 +2189,17 @@ export class BrowseViewModel {
 /**
  * Class to hold an NGO.
  */
+export function resetGraph() {
+  Charity.charityLookup = {};
+  Charity._desiredCharities = new Set();
+  Charity._visibleCharities = new Set();
+  Charity._organizedCharities = new Set();
+  Charity.usgDirect = new Set();
+  Grant.grantLookup = {};
+  Grant.missingValues = {};
+  Grant._desiredGrants = new Set();
+}
+
 export class Charity {
   /** charities are stored in an object by EIN for quick lookup */
   static charityLookup = {};
@@ -2282,6 +2300,26 @@ export class Charity {
     });
   }
 
+  static kindFrom(row, ein) {
+    return kindFrom(row, ein);
+  }
+
+  get isGhost() {
+    return this.kind === "ghost";
+  }
+
+  get isLeftover() {
+    return this.kind === "leftover";
+  }
+
+  get isBmfOnly() {
+    return this.kind === "bmf";
+  }
+
+  get has990Card() {
+    return this.kind === "charity" && !this.isGov;
+  }
+
   static TSV_MANUAL_COLUMNS = [
     "tax_year",
     "org_type",
@@ -2337,6 +2375,8 @@ export class Charity {
     this.targetLinks = [];
     this.govDepth = Infinity;
     this.isGov = this.ein == GOV_EIN;
+    this.kind = Charity.kindFrom(row, ein);
+    this.suggestedEin = (row && (row.suggested_ein || row.suggestedEin)) || null;
     if (this.govt_amt > 0) {
       Charity.usgDirect.add(this);
       this.govDepth = 0;
@@ -2370,7 +2410,11 @@ export class Charity {
             "grift",
           ].includes(mkey)
         ) {
-          if (raw_row.org_type == "backfill") {
+          if (
+            raw_row.org_type == "backfill" ||
+            raw_row.org_type == "ghost" ||
+            raw_row.org_type == "leftover"
+          ) {
             obj[mkey] = -1;
           } else {
             const value = parseFloat(raw_row[mkey]);
@@ -2554,6 +2598,8 @@ export class Charity {
    * Canonically EIN form
    */
   get longEIN() {
+    if (this.isGhost || this.isLeftover) return "";
+    if (!this.ein || this.ein.length !== 9) return this.ein || "";
     return `${this.ein.slice(0, 2)}-${this.ein.slice(2)}`;
   }
 
@@ -3012,6 +3058,9 @@ export class Charity {
   }
 
   get orgShort() {
+    if (this.isGhost) return "Ghost (name on a 990-PF, no EIN on the form)";
+    if (this.isLeftover) return "Below the $10M cut";
+    if (this.isBmfOnly) return "BMF only (no 990 in this set)";
     if (!this.org_type) return "n/a";
     if (this.ein === "001") return "US Government";
     if (this.ein.length == 3) return "Country";
@@ -3058,9 +3107,12 @@ export class Charity {
       if (grift > 0) gov += `\nInd. USG ${formatNumber(grift)}`;
     }
 
-    return `${this.name} (${this.tax_year || "N/A"})\n${this.orgShort}\n${
-      this.longEIN
-    }${gov}${inFlows}${outFlows}\n${pork}`;
+    const idLine = this.longEIN
+      ? this.longEIN
+      : this.isGhost
+        ? "not an IRS EIN"
+        : "";
+    return `${this.name} (${this.tax_year || "N/A"})\n${this.orgShort}\n${idLine}${gov}${inFlows}${outFlows}\n${pork}`;
   }
 
   get griftRating() {
@@ -3105,7 +3157,8 @@ export class Charity {
   }
   googleLink(message) {
     const params = new URLSearchParams();
-    params.set("q", `${this.longEIN} ${this.name}`);
+    const q = this.longEIN ? `${this.longEIN} ${this.name}` : this.name;
+    params.set("q", q);
     return `<a href="https://google.com/search?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap"}>${message}</a>`;
   }
 
@@ -3257,6 +3310,8 @@ export class Grant {
         grant_ein,
         amt,
         grantType,
+        inferred: !!row.inferred,
+        suggested_ein: row.suggested_ein || "",
       });
     }
   }
@@ -3269,13 +3324,20 @@ export class Grant {
     isCircular = false,
     desiredVisible = false,
     grantType = "regular",
+    inferred = false,
+    suggested_ein = "",
   }) {
     this.registered = false;
     this.amt = amt;
     this.filer_ein = filer_ein;
     this.grant_ein = grant_ein;
+    this.inferred = inferred;
+    this.suggested_ein = suggested_ein || "";
     this.filer = Charity.getCharity(filer_ein);
     this.grantee = Charity.getCharity(grant_ein);
+    if (this.grantee && this.suggested_ein && this.grantee.isGhost) {
+      this.grantee.suggestedEin = this.suggested_ein;
+    }
     this._desiredVisible = desiredVisible;
     this._impliedVisible = false;
     this._isCircular = isCircular;
