@@ -10,7 +10,7 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **Why:** Default load must be the $10M band; GINs are ghosts not fake EINs.
 
-**How:** `export_browse_band.py`. Loader accepts GIN / `etc`+EIN keys and extra grant columns. `docs/export_browse_band.md`. Zip 12.6 MB in `browse/tsv_chunks` + `docs/browse/tsv_chunks`.
+**How:** `export_browse_band.py`. Loader accepts GIN / `etc`+EIN keys and extra grant columns. `docs/export_browse_band.md`. Zip 12.6 MB in `browse/tsv_chunks` + `docs/browse/tsv_chunks`. Hash `ab4feeca`.
 
 **Next:** PR2 focus-default Sankey + distinct ghost rendering.
 

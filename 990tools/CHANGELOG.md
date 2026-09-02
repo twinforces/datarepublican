@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### export_browse_band.py
 - **Why:** Full browse zip ~39 MB / 910k orgs; GINs were shipping as if they were EINs.
 - **Change:** $10M band TSV chunks (latest-year nodes, all-year edges, BMF-only, GIN ghosts, per-org leftover stubs, inferred + suggested_ein). Zip 12.6 MB. Loader accepts GIN/`etc` keys.
-- **Doc:** `docs/export_browse_band.md`.
+- **Doc:** `docs/export_browse_band.md`. Hash `ab4feeca`.
 
 ---
 
