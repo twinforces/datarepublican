@@ -5,6 +5,22 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-09-02 (browse M/VM tests)
+
+### Vitest for Charity / Grant / ViewModel
+- **Why:** Could not import `models.js` in Node (CDN IDB/JSZip, `window.d3`). Click-to-focus and GIN identity had no regression net.
+- **Change:** `browse/graphIdentity.js`; stubs; `resetGraph`; injectable `urlAdapter`; `clearAll` clears desired charities (tunnel bug). `npm run test:browse`.
+
+---
+
+## [Unreleased] - 2026-09-02 (focus default + ghosts)
+
+### Browse PR2
+- **Why:** Click-to-expand made a spiderweb; GIN nodes looked like filers.
+- **Change:** Default click focuses (`tunnelNode`). Ghosts/leftovers are dashed octagons; panel does not present a GIN as an IRS EIN.
+
+---
+
 ## [Unreleased] - 2026-09-02 ($10M browse export)
 
 ### export_browse_band.py

@@ -35,6 +35,8 @@ exclude:
   - tailwind.config.js
   - 990tools
   - vendor
+  - browse/test
+  - vitest.config.js
 
 plugins:
   - jekyll-seo-tag

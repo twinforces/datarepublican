@@ -4,6 +4,18 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-02: Browse M/VM unit tests
+
+**What:** Vitest on identity, Charity/Grant, ViewModel (tunnel, presets, URL). `graphIdentity.js` is pure. `resetGraph()` + Gates mini-fixture. `clearAll` now clears desired seeds so focus actually drops other orgs. `compareCharities`/`compareLinks` live with identity; URL save goes through `urlAdapter`.
+
+**Why:** Sankey tweaks kept breaking focus/ghosts; Playwright is too late.
+
+**How:** `npm run test:browse` (25 tests). Plan: `docs/browse_mvvm_test_plan.md`.
+
+**Next:** PR3 $1M load; PR4 trust toggle. Playwright smoke optional.
+
+---
+
 ## 2026-09-02: $10M browse export (PR1)
 
 **What:** DuckDB → `/browse` chunks at $10M. 74,151 Charities + 477 BMF-only + 1,402 ghosts + 28,390 leftover stubs; 555k edges. Zip **12.6 MB** (was ~39 MB full). Gates Trust → GIN `$42.6B` inferred, suggested `562618866`.
@@ -12,7 +24,17 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **How:** `export_browse_band.py`. Loader accepts GIN / `etc`+EIN keys and extra grant columns. `docs/export_browse_band.md`. Zip 12.6 MB in `browse/tsv_chunks` + `docs/browse/tsv_chunks`. Hash `ab4feeca`.
 
-**Next:** PR2 focus-default Sankey + distinct ghost rendering.
+**Next:** PR3 $1M opt-in load; PR4 Trust-the-phone-book; PR5 inspector/maps.
+
+---
+
+## 2026-09-02: Focus default + ghost nodes (PR2)
+
+**What:** Click / cmd-click / Only This = `tunnelNode()` (this org + up/down). Hats and double-click still expand. Ghosts = dashed octagons + italic; leftover stubs same; BMF-only labeled, no fake 990 links. Preset **add** remains the multi-seed switch.
+
+**Why:** Spiderweb on click was unreadable; GINs must not look like Charity EINs.
+
+**How:** `browse/models.js`, `script.js`, `index.html`, `browsestyles.css` (copied to `docs/browse/`).
 
 ---
 
