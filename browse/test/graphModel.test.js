@@ -43,6 +43,17 @@ describe("Charity / Grant model (Gates mini-graph)", () => {
     expect(g.nodes.mit.orgShort).toMatch(/Name-only/i);
   });
 
+  it("maps link uses BMF address when present", () => {
+    g.nodes.trust.street = "500 5th Ave N";
+    g.nodes.trust.city = "Seattle";
+    g.nodes.trust.state = "WA";
+    g.nodes.trust.zip = "98109";
+    const href = g.nodes.trust.mapsLink("Google Maps");
+    expect(href).toMatch(/google\.com\/maps\/search/);
+    expect(href).toMatch(/Seattle/);
+    expect(href).not.toMatch(/guidestar|charitynavigator/i);
+  });
+
   it("grant tooltip uses filer and grantee names", () => {
     const tip = g.edges.toGhost.toolTipText();
     expect(tip).toMatch(/Gates/);

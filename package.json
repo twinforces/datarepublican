@@ -4,7 +4,8 @@
     "watch:css": "postcss assets/css/main.css -o assets/css/styles.css --watch",
     "start": "run-p watch:css jekyll:serve",
     "jekyll:serve": "bundle exec jekyll serve --incremental --livereload",
-    "test:browse": "vitest run"
+    "test:browse": "vitest run",
+    "demo:browse": "npx playwright test tests/browse_sankey.spec.js --project=demo"
   },
   "dependencies": {
     "@cucumber/cucumber": "^11.3.0",

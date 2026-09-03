@@ -41,6 +41,10 @@ CHARITY_HEADER = [
     "total_assets",
     "form_type",
     "denominator",
+    "street",
+    "city",
+    "state",
+    "zip",
 ]
 GRANT_HEADER = ["filer_ein", "grant_ein", "grant_amt", "inferred", "suggested_ein"]
 
@@ -177,6 +181,10 @@ SELECT
   COALESCE(l.total_assets, 0) AS total_assets,
   COALESCE(l.form_type, '') AS form_type,
   COALESCE(l.denominator, 0) AS denominator,
+  COALESCE(NULLIF(TRIM(b.STREET), ''), '') AS street,
+  COALESCE(NULLIF(TRIM(b.CITY), ''), '') AS city,
+  COALESCE(NULLIF(TRIM(b.STATE), ''), '') AS state,
+  COALESCE(NULLIF(TRIM(b.ZIP), ''), '') AS zip,
   'charity' AS kind
 FROM latest_charity l
 LEFT JOIN BMF b ON b.EIN = l.ein
@@ -201,6 +209,10 @@ SELECT
   0, 0, 0, NULL,
   'backfill' AS org_type,
   0, '', 0,
+  COALESCE(NULLIF(TRIM(b.STREET), ''), ''),
+  COALESCE(NULLIF(TRIM(b.CITY), ''), ''),
+  COALESCE(NULLIF(TRIM(b.STATE), ''), ''),
+  COALESCE(NULLIF(TRIM(b.ZIP), ''), ''),
   'bmf' AS kind
 FROM inset_ein i
 LEFT JOIN latest_charity l ON l.ein = i.ein
@@ -222,6 +234,7 @@ SELECT
   0, 0, 0, NULL,
   'ghost' AS org_type,
   0, '', 0,
+  '', '', '', '',
   'ghost' AS kind
 FROM inset_gin ig
 JOIN Grants g ON g.recipient_ein = ig.gin
@@ -236,6 +249,7 @@ SELECT
   0, 0, 0, NULL,
   'leftover' AS org_type,
   0, '', 0,
+  '', '', '', '',
   'leftover' AS kind
 FROM leftovers lo;
 """
@@ -322,7 +336,9 @@ def insert_sink_node(con, sink: str) -> None:
         INSERT INTO band_nodes
         SELECT
           '{sink}', '{SINK_NAME}', 'leftover',
-          0, 0, 0, NULL, 'leftover', 0, '', 0, 'leftover'
+          0, 0, 0, NULL, 'leftover', 0, '', 0,
+          '', '', '', '',
+          'leftover'
         WHERE EXISTS (SELECT 1 FROM subsidy_edges)
           AND NOT EXISTS (SELECT 1 FROM band_nodes WHERE filer_ein = '{sink}')
         """
@@ -534,7 +550,8 @@ def main() -> int:
         con,
         """
         SELECT filer_ein, filer_name, xml_name, receipt_amt, govt_amt, contrib_amt,
-               tax_year, org_type, total_assets, form_type, denominator
+               tax_year, org_type, total_assets, form_type, denominator,
+               street, city, state, zip
         FROM band_nodes
         ORDER BY kind, filer_ein
         """,

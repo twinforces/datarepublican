@@ -656,14 +656,17 @@ L21.96,11.51"
       </div>
       <div class="flex flex-col justify-center gap-2">
         <div id="clickMode" class="click-mode" role="radiogroup" aria-label="Click mode">
-          <button type="button" data-mode="focus" class="is-on" title="Focus: click isolates this org">
+          <button type="button" data-mode="focus" class="is-on" title="Focus: click isolates this org; click it again to expand both sides">
             <i class="fas fa-hand-pointer" data-fa-svg></i>
           </button>
-          <button type="button" data-mode="add" title="Add: click keeps the graph and seeds this org">
+          <button type="button" data-mode="add" title="Add: keep the graph and seed this org">
             <i class="fas fa-plus" data-fa-svg></i>
           </button>
-          <button type="button" data-mode="inspect" title="Inspect: click opens the card">
+          <button type="button" data-mode="inspect" title="Inspect: open the card">
             <i class="fas fa-magnifying-glass" data-fa-svg></i>
+          </button>
+          <button type="button" data-mode="subtract" title="Remove this org from the graph (Shift)">
+            <i class="fas fa-xmark" data-fa-svg></i>
           </button>
         </div>
         <div class="circular-toggle ngopreset-mode-switch" title="Looping grant flows">

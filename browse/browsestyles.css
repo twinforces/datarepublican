@@ -270,6 +270,12 @@
 #graph-container.click-inspect .circular-link {
   cursor: zoom-in;
 }
+#graph-container.click-subtract .node path,
+#graph-container.click-subtract .nodeLabel,
+#graph-container.click-subtract .link,
+#graph-container.click-subtract .circular-link {
+  cursor: not-allowed;
+}
 .graph-tip {
   position: fixed;
   z-index: 50;

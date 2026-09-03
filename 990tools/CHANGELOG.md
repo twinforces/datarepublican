@@ -5,6 +5,16 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-09-03 (inspector / subtract / skip PR4)
+
+### Browse click modes + Maps
+- **Why:** Shift-hide had no button; Focus re-click tunneled instead of expanding; Guide Star / Navigator were noise; Maps needed a mailing string.
+- **Change:** Subtract mode (X). Focus on a desired node expands both sides (`NEXT_REVEAL`). OS-aware modifier tooltips. Maps search from BMF STREET/CITY/STATE/ZIP (mailing, ~20% PO Box). Export writes those columns.
+- **Skip:** Trust-the-phone-book toggle. Ghosts are honest dead-ends. $100M review was 449 yes / 214 no; a global merge would reroute WHO→World Organization, JHU duplicate EIN, Schwab→Elmont-Schwabe.
+- **Failure:** Playwright demo is not a camera. Empty `/browse/` has no nodes until a preset; Gates test cleared the graph so one WebM is white. Shoot demos by hand.
+
+---
+
 ## [Unreleased] - 2026-09-02 (Patient Subsidies at export)
 
 ### Biggest Pharma graph

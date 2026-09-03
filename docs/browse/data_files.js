@@ -17,7 +17,7 @@ const FILES_10M = [
 ];
 
 export const DATA_FILES = {
-  dbVersion: "2026-09-03T05:52:46Z",
+  dbVersion: "2026-09-03T17:26:39Z",
   defaultBand: "10M",
   bands: [
     {

@@ -4,7 +4,7 @@
 
 **Why:** Full 910k-org zip is slow; spiderweb is unreadable; GINs must not ship as fake EINs. PR1 in `docs/PINS.md`.
 
-**How:** Org is in-band if max-across-years receipts/govt/contribs/assets/grants-to-others **or one grant** ≥ T. Edges only between in-band keys. Ghost `to_key` is the GIN; phonebook sits in `suggested_ein`. Leftover stub id `etc`+filer EIN. Subsidy-pattern names (any amount, non-EIN keys) fold into `etc997777777` so they never sit in leftover See More. Does not write `recipient_ein`.
+**How:** Org is in-band if max-across-years receipts/govt/contribs/assets/grants-to-others **or one grant** ≥ T. Edges only between in-band keys. Ghost `to_key` is the GIN; phonebook sits in `suggested_ein`. Leftover stub id `etc`+filer EIN. Subsidy-pattern names (any amount, non-EIN keys) fold into `etc997777777` so they never sit in leftover See More. Charity/BMF rows carry BMF `street`/`city`/`state`/`zip` for the inspector Maps link. Does not write `recipient_ein`.
 
 ```bash
 cd 990tools

@@ -12,7 +12,19 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **How:** `export_browse_band.py` + `grant_suppress.is_suppressed_sql`; 9-digit EINs not remapped. `browse/big_pharma_subsidy.js` for identity tests. `python3 test_export_browse_band.py`; `npm run test:browse` (36). Doc: `docs/export_browse_band.md`. Hash `f9e5336e`.
 
-**Next:** Re-export `$1M` / All with the same rollup if those notches should match. Refresh still restores URL seeds — use Replace + Biggest Pharma. Trust-the-phone-book later.
+**Next:** Re-export `$1M` / All with the same rollup if those notches should match. Refresh still restores URL seeds — use Replace + Biggest Pharma.
+
+---
+
+## 2026-09-03: Inspector, subtract mode, skip phonebook toggle
+
+**What:** Inspector drops Guide Star / Charity Navigator; adds Google Maps (BMF mailing street). New **Subtract** mode (X / Shift). Focus on an already-desired node expands 3 up / 3 down instead of tunneling again. Modifiers in mode tooltips (⌘/Ctrl add, ⌥/Alt inspect, Shift subtract). Playwright `tests/browse_sankey.spec.js` (`--project=demo`) is a regression walk, not a demo camera — too fast / Gates clip starts by clearing the graph (white). **PR4 Trust-the-phone-book skipped:** ghosts stay dead-ends; a global collapse would merge the ~1/3 bad $100M guesses.
+
+**Why:** Mode buttons should match the modifier set. Maps is mailing-of-record, not a physical site. Collapse without votes is dishonest.
+
+**How:** BMF `street/city/state/zip` on $10M export (`dbVersion` `2026-09-03T17:26:39Z`). `npm run test:browse` (40). `npx playwright test tests/browse_sankey.spec.js --project=demo`.
+
+**Next:** $1M/All subsidy re-export. Octopus/Leaflet later. Manual demo on the live graph.
 
 ---
 

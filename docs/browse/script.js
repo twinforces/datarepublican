@@ -220,6 +220,38 @@ window.loadPreset = function (value, mode) {
   zoomToFit();
 };
 
+window.__clickNodeByName = function (src, event) {
+  const re = new RegExp(src, "i");
+  const c = Object.values(Charity.charityLookup || {}).find(
+    (x) => re.test(x.name || "") && x.isVisible,
+  );
+  if (!c) return { ok: false, reason: "not-visible" };
+  const action = viewModel.clickNode(event || {}, c, () => {
+    if (typeof refresh === "function") refresh();
+  });
+  if (
+    (action === "inspect" || action === "leftover") &&
+    typeof showControlPanel === "function"
+  ) {
+    const el = document.querySelector(`#graph .node[data-id="${c.ein}"]`);
+    showControlPanel("node", c, el);
+  }
+  return { ok: true, action, ein: c.ein, name: c.name };
+};
+
+window.__browseStats = function () {
+  return {
+    ready: !!(viewModel && viewModel.dataReady),
+    charities: Object.keys(Charity.charityLookup || {}).length,
+    grants: Object.keys(Grant.grantLookup || {}).length,
+    search: String(window.location.search || ""),
+    show: viewModel ? viewModel.getShowList() : [],
+    ned: Charity.getCharity("521344831")
+      ? Charity.getCharity("521344831").name
+      : null,
+  };
+};
+
 function escapeCrumb(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")
@@ -949,18 +981,48 @@ function nodeCursor() {
       return "cell";
     case "inspect":
       return "zoom-in";
+    case "subtract":
+      return "not-allowed";
     default:
       return "pointer";
   }
 }
 
+function isMacPlatform() {
+  return (
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "")
+  );
+}
+
+function applyModeTooltips() {
+  const addMod = isMacPlatform() ? "⌘" : "Ctrl";
+  const inspectMod = isMacPlatform() ? "⌥" : "Alt";
+  const tips = {
+    focus:
+      "Focus: click isolates this org; click it again to expand both sides",
+    add: `Add: keep the graph and seed this org (${addMod})`,
+    inspect: `Inspect: open the card (${inspectMod})`,
+    subtract: "Remove this org from the graph (Shift)",
+  };
+  Object.entries(tips).forEach(([mode, title]) => {
+    $(`#clickMode button[data-mode="${mode}"]`).attr("title", title);
+  });
+}
+
 function applyClickMode(mode) {
   viewModel.setClickMode(mode);
+  applyModeTooltips();
   $("#clickMode button").removeClass("is-on");
   $(`#clickMode button[data-mode="${viewModel.clickMode}"]`).addClass("is-on");
   const host = document.getElementById("graph-container");
   if (host) {
-    host.classList.remove("click-focus", "click-add", "click-inspect");
+    host.classList.remove(
+      "click-focus",
+      "click-add",
+      "click-inspect",
+      "click-subtract",
+    );
     host.classList.add(`click-${viewModel.clickMode}`);
   }
   const cur = nodeCursor();
@@ -1024,12 +1086,6 @@ function handleGraphNodeHover(event, d) {
 
 function handleGraphNodeClick(event, d, el) {
   event.stopPropagation();
-  if (event.shiftKey) {
-    d.hide();
-    Charity.addToHideList(d.ein);
-    refresh();
-    return;
-  }
   const action = viewModel.clickNode(event, d, refresh);
   if (action === "leftover" || action === "inspect") {
     showControlPanel("node", d, el);
@@ -1066,7 +1122,6 @@ function bindEvents(g) {
       event.stopPropagation();
       if (d.isTerminal && !event.shiftKey) {
         d.hideUp();
-        Charity.addToHideList(d.ein);
         refresh();
       } else {
         viewModel.doubleClickNode(event, d, refresh);
@@ -2443,22 +2498,21 @@ function showControlPanel(type, data, element) {
         <p>${node.grantSearchLink("Show me the Grants")}</p>
         <p>${node.propublicaLink("Take me to Propublica")}</p>
         <p>${node.googleLink("Google")}</p>
+        <p>${node.mapsLink("Google Maps")}</p>
         <p>${node.grokLink("Grumpy Take")}</p>
-        <p>${node.guideStarLink("Guide Star")}</p>
-        <p>${node.charityNavigatorLink("Charity Navigator")}</p>
       `;
       } else if (node.isGhost) {
         const sug = node.suggestedEin
           ? `<p>Phone book suggests EIN ${node.suggestedEin.slice(0, 2)}-${node.suggestedEin.slice(2)} (not from the 990).</p>`
           : `<p>Name-only: no EIN on the 990.</p>`;
-        links = `<p>${node.orgShort}</p>${sug}<p>${node.googleLink("Google the name")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
+        links = `<p>${node.orgShort}</p>${sug}<p>${node.googleLink("Google the name")}</p><p>${node.mapsLink("Google Maps")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
       } else if (node.isBmfOnly) {
         const nameless =
           !node.name ||
           node.name.replace(/\D/g, "") === String(node.ein).replace(/\D/g, "");
         links = nameless
-          ? `<p>Name-only: no 990 in this set, and we don't have a name for this EIN — often a university or hospital.</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google this EIN")}</p>`
-          : `<p>${node.orgShort}</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
+          ? `<p>Name-only: no 990 in this set, and we don't have a name for this EIN — often a university or hospital.</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google this EIN")}</p><p>${node.mapsLink("Google Maps")}</p>`
+          : `<p>${node.orgShort}</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google")}</p><p>${node.mapsLink("Google Maps")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
       } else if (node.ein === PATIENT_SUBSIDY_ID) {
         links = `<p>${node.orgShort}</p>
           <p>Rolled-up copay / drug subsidies. The 990 lists HIPAA-redacted patients, “see statement,” and similar — not named NGOs. Hats on a manufacturer’s foundation still expand any real named grants.</p>`;

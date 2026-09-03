@@ -22,6 +22,32 @@ describe("BrowseViewModel", () => {
     expect(show).toEqual(expect.arrayContaining([IDS.trust, IDS.foundation]));
   });
 
+  it("click mode subtract hides leftover see-more stubs", () => {
+    g.nodes.trust.place(0, 3);
+    g.vm.setClickMode("subtract");
+    expect(g.vm.clickNode({}, g.nodes.leftover, null)).toBe("subtract");
+    expect(g.vm.getHideList()).toContain(IDS.leftover);
+    expect(g.nodes.leftover.desiredVisible).toBe(false);
+  });
+
+  it("focus click on an already-desired node expands both sides", () => {
+    g.nodes.trust.place(0, 1);
+    const beforeOut = g.nodes.trust.visibleGrants.length;
+    g.vm.setClickMode("focus");
+    expect(g.vm.clickNode({}, g.nodes.trust, null)).toBe("expand");
+    expect(g.nodes.trust.visibleGrants.length).toBeGreaterThan(beforeOut);
+  });
+
+  it("⌘/Ctrl click adds without depending on the mode button", () => {
+    g.nodes.trust.place(1, 1);
+    g.vm.setClickMode("focus");
+    expect(
+      g.vm.clickNode({ metaKey: true }, g.nodes.foundation, null),
+    ).toBe("add");
+    const show = g.vm.getShowList().map((s) => s.split(/[:~]/)[0]);
+    expect(show).toEqual(expect.arrayContaining([IDS.trust, IDS.foundation]));
+  });
+
   it("click mode inspect does not tunnel", () => {
     g.nodes.trust.place(1, 1);
     g.vm.setClickMode("inspect");
@@ -52,7 +78,7 @@ describe("BrowseViewModel", () => {
     g.vm.loadPreset({ title: "Uniparty", eins: [IDS.trust, IDS.foundation] }, "replace");
     g.nodes.trust.place(1, 1);
     g.nodes.foundation.place(1, 1);
-    expect(g.vm.clickNode({}, g.nodes.trust, null)).toBe("focus");
+    expect(g.vm.clickNode({}, g.nodes.mit, null)).toBe("focus");
     expect(g.vm.getShowList()).toHaveLength(1);
     expect(g.vm.getBreadCrumbs().length).toBeGreaterThanOrEqual(1);
     expect(g.vm.getBreadCrumbs()[0].title).toMatch(/Uniparty/i);
@@ -63,7 +89,6 @@ describe("BrowseViewModel", () => {
 
   it("focus clears keywords so the graph actually focuses", () => {
     g.vm.setKeywordList(["gates"]);
-    g.nodes.trust.place(1, 1);
     expect(g.vm.clickNode({}, g.nodes.trust, null)).toBe("focus");
     expect(g.vm.getKeywordList()).toEqual([]);
     expect(g.vm.getShowList().some((e) => e.startsWith(IDS.trust))).toBe(true);

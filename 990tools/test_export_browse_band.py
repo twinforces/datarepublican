@@ -28,7 +28,10 @@ def _schema(con: duckdb.DuckDBPyConnection) -> None:
           filer_ein VARCHAR, recipient_ein VARCHAR, grant_amt BIGINT,
           tax_year INTEGER, grantee_name VARCHAR, recipient_ein_backfilled VARCHAR
         );
-        CREATE TABLE BMF (EIN VARCHAR, NAME VARCHAR);
+        CREATE TABLE BMF (
+          EIN VARCHAR, NAME VARCHAR,
+          STREET VARCHAR, CITY VARCHAR, STATE VARCHAR, ZIP VARCHAR
+        );
         """
     )
     con.execute(

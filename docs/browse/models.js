@@ -573,6 +573,10 @@ async function fetchAndStoreTSV(db, files) {
                 denominator: row.denominator
                   ? parseFloat(row.denominator)
                   : null,
+                street: row.street || "",
+                city: row.city || "",
+                state: row.state || "",
+                zip: row.zip || "",
               };
               if (!charity.filer_ein || !isGraphKey(charity.filer_ein)) {
                 rowsSkipped++;
@@ -1628,7 +1632,12 @@ export class BrowseViewModel {
    * as it will step 1 node farther down the graph.
    */
   setClickMode(mode) {
-    if (mode === "add" || mode === "inspect" || mode === "focus") {
+    if (
+      mode === "add" ||
+      mode === "inspect" ||
+      mode === "focus" ||
+      mode === "subtract"
+    ) {
       this.clickMode = mode;
     } else {
       this.clickMode = "focus";
@@ -1636,7 +1645,21 @@ export class BrowseViewModel {
     return this.clickMode;
   }
 
+  /** Shift = remove, Alt/Option = inspect, ⌘/Ctrl = add. Plain click uses the mode button. */
+  modeFromEvent(event) {
+    if (event && event.shiftKey) return "subtract";
+    if (event && event.altKey) return "inspect";
+    if (event && (event.metaKey || event.ctrlKey)) return "add";
+    return this.clickMode || "focus";
+  }
+
   clickNode(event, charity, refreshCallback) {
+    const mode = this.modeFromEvent(event);
+    if (mode === "subtract") {
+      charity.hide();
+      if (refreshCallback) refreshCallback();
+      return "subtract";
+    }
     if (charity.isLeftover) {
       if (DEBUGLOG)
         console.log(
@@ -1644,8 +1667,6 @@ export class BrowseViewModel {
         );
       return "leftover";
     }
-    const mode =
-      event && event.altKey ? "inspect" : this.clickMode || "focus";
     if (mode === "inspect") {
       return "inspect";
     }
@@ -1655,6 +1676,14 @@ export class BrowseViewModel {
       );
       if (refreshCallback) refreshCallback();
       return "add";
+    }
+    if (charity.desiredVisible) {
+      charity.expandOutflows(NEXT_REVEAL);
+      charity.expandInflows(NEXT_REVEAL);
+      this.computeImpliedVisibility(charity, true, true);
+      this.computeAndSaveURLParams();
+      if (refreshCallback) refreshCallback();
+      return "expand";
     }
     if (DEBUGLOG) console.log(`Focus node ${charity.id} ${charity.name}`);
     charity.tunnelNode();
@@ -2559,6 +2588,10 @@ export class Charity {
     "total_assets",
     "form_type",
     "denominator",
+    "street",
+    "city",
+    "state",
+    "zip",
     /*"foreign_office",
     "foreign_expenses",
     "grift",*/
@@ -3390,7 +3423,19 @@ export class Charity {
     const params = new URLSearchParams();
     const q = this.longEIN ? `${this.longEIN} ${this.name}` : this.name;
     params.set("q", q);
-    return `<a href="https://google.com/search?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap"}>${message}</a>`;
+    return `<a href="https://google.com/search?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+  }
+
+  mapsLink(message) {
+    const addr = [this.street, this.city, this.state, this.zip]
+      .map((p) => (p && String(p).trim()) || "")
+      .filter(Boolean)
+      .join(", ");
+    const q = addr || this.name || this.ein;
+    const params = new URLSearchParams();
+    params.set("api", "1");
+    params.set("query", q);
+    return `<a href="https://www.google.com/maps/search/?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
 
   grokLink(message) {
@@ -3403,14 +3448,6 @@ export class Charity {
       `I want a Grumpy Take on: ${who}\n\nRead and apply fully: https://gist.github.com/twinforces/534d9b662de4a010c1c4ebad934cd99a`
     );
     return `<a href="https://grok.com/?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
-  }
-
-  charityNavigatorLink(message) {
-    return `<a href="https://www.charitynavigator.org/ein/${this.ein}" target="_blank">${message}</a>`;
-  }
-
-  guideStarLink(message) {
-    return `<a href="https://www.guidestar.org/profile/${this.longEIN}" target="_blank">${message}</a>`;
   }
 
   grantSearchLink(message) {
