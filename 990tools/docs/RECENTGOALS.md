@@ -22,7 +22,7 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **Why:** Mode buttons should match the modifier set. Maps is mailing-of-record, not a physical site. Collapse without votes is dishonest.
 
-**How:** BMF `street/city/state/zip` on $10M export (`dbVersion` `2026-09-03T17:26:39Z`). `npm run test:browse` (40). `npx playwright test tests/browse_sankey.spec.js --project=demo`.
+**How:** BMF `street/city/state/zip` on $10M export (`dbVersion` `2026-09-03T17:26:39Z`). `npm run test:browse` (40). `npx playwright test tests/browse_sankey.spec.js --project=demo`. Hash `d1301a4c`.
 
 **Next:** $1M/All subsidy re-export. Octopus/Leaflet later. Manual demo on the live graph.
 
