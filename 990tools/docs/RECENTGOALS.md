@@ -4,6 +4,18 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-02: Biggest Pharma + Patient Subsidies sink
+
+**What:** HIPAA / see-attach / patient-rollup grantee names fold into one **Patient Subsidies** node (`etc997777777`) at **export**, not in the browser. Preset **Biggest Pharma** is seven PAPs (Genentech, J&J, Sanofi, Boehringer, GSK, Pfizer, Otsuka) placing `~0~1` onto that shared edge. $10M chunks rebuilt (`dbVersion` `2026-09-03T05:52:46Z`): 4,777 filers, $194B into the sink. Client-side retarget was a miss (refresh restored the old URL seeds; JSON module import was fragile).
+
+**Why:** Per-GIN “Individual Patient Programs” / leftover See More made a $95B graph with no sharing. Mapping belongs with `big_pharma_subsidy.json`, same as Python reports.
+
+**How:** `export_browse_band.py` + `grant_suppress.is_suppressed_sql`; 9-digit EINs not remapped. `browse/big_pharma_subsidy.js` for identity tests. `python3 test_export_browse_band.py`; `npm run test:browse` (36). Doc: `docs/export_browse_band.md`.
+
+**Next:** Re-export `$1M` / All with the same rollup if those notches should match. Refresh still restores URL seeds — use Replace + Biggest Pharma. Trust-the-phone-book later.
+
+---
+
 ## 2026-09-02: Browse M/VM unit tests
 
 **What:** Vitest on identity, Charity/Grant, ViewModel (tunnel, presets, URL). `graphIdentity.js` is pure. `resetGraph()` + Gates mini-fixture. `clearAll` now clears desired seeds so focus actually drops other orgs. `compareCharities`/`compareLinks` live with identity; URL save goes through `urlAdapter`.

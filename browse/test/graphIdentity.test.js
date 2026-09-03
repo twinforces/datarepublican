@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   compareCharities,
+  fitScaleWithReadableLabels,
   formatNumber,
   isGraphKey,
+  isPatientAssistanceFiler,
+  isPatientSubsidyName,
+  isPatientSubsidyTarget,
   kindFrom,
+  PATIENT_SUBSIDY_ID,
 } from "../graphIdentity.js";
 
 const GATES_GHOST_GIN = "70" + "ab".repeat(32);
@@ -21,6 +26,31 @@ describe("isGraphKey", () => {
   });
   it("accepts leftover stubs", () => {
     expect(isGraphKey("etc911663695")).toBe(true);
+    expect(isGraphKey(PATIENT_SUBSIDY_ID)).toBe(true);
+  });
+  it("flags HIPAA / patient-assistance strings from big_pharma_subsidy.json", () => {
+    expect(PATIENT_SUBSIDY_ID).toBe("etc997777777");
+    expect(isPatientSubsidyName("HIPAA REGULATIONS PREVENT THE LISTING")).toBe(
+      true
+    );
+    expect(isPatientSubsidyName("Individual Patient Programs")).toBe(true);
+    expect(isPatientSubsidyName("Eligible Patients (see Schedule #2)")).toBe(
+      true
+    );
+    expect(isPatientSubsidyName("Atch 4")).toBe(true);
+    expect(isPatientSubsidyName("DETAILS AVAILABLE UPON REQUEST")).toBe(true);
+    expect(isPatientSubsidyName("AMALGAMATED CHARITABLE")).toBe(true);
+    expect(isPatientSubsidyName("United Way of Central Indiana")).toBe(false);
+    expect(isPatientSubsidyName("Welvista")).toBe(false);
+    expect(isPatientSubsidyName("See More")).toBe(false);
+    expect(isPatientSubsidyTarget(PATIENT_SUBSIDY_ID, "x", "261437283")).toBe(
+      true
+    );
+    expect(isPatientAssistanceFiler("Pfizer Patient Assistance Foundation Inc")).toBe(
+      true
+    );
+    expect(isPatientAssistanceFiler("Sanofi Cares North America")).toBe(true);
+    expect(isPatientAssistanceFiler("Gates Trust")).toBe(false);
   });
   it("rejects junk", () => {
     expect(isGraphKey("SEE")).toBe(false);
@@ -58,5 +88,12 @@ describe("compareCharities", () => {
     const a = { grantsInTotal: 1, grantsTotal: 1, name: "B" };
     const b = { grantsInTotal: 10, grantsTotal: 0, name: "A" };
     expect(compareCharities(b, a)).toBeLessThan(0);
+  });
+});
+
+describe("fitScaleWithReadableLabels", () => {
+  it("does not zoom out past a 13px screen font", () => {
+    expect(fitScaleWithReadableLabels(0.1, 48, 13)).toBeCloseTo(13 / 48);
+    expect(fitScaleWithReadableLabels(0.5, 48, 13)).toBe(0.5);
   });
 });

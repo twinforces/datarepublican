@@ -1,11 +1,40 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Charity } from "../models.js";
+import {
+  Charity,
+  bandById,
+  bandHasFiles,
+  canUpgradeBand,
+  defaultBandId,
+} from "../models.js";
 import { IDS, buildGatesGraph } from "./gatesGraph.js";
 
 describe("BrowseViewModel", () => {
   let g;
   beforeEach(() => {
     g = buildGatesGraph();
+  });
+
+  it("click mode add seeds without dropping other orgs", () => {
+    g.nodes.trust.place(1, 1);
+    g.vm.setClickMode("add");
+    expect(g.vm.clickNode({}, g.nodes.foundation, null)).toBe("add");
+    const show = g.vm.getShowList().map((s) => s.split(/[:~]/)[0]);
+    expect(show).toEqual(expect.arrayContaining([IDS.trust, IDS.foundation]));
+  });
+
+  it("click mode inspect does not tunnel", () => {
+    g.nodes.trust.place(1, 1);
+    g.vm.setClickMode("inspect");
+    const before = g.vm.getShowList().slice();
+    expect(g.vm.clickNode({}, g.nodes.foundation, null)).toBe("inspect");
+    expect(g.vm.getShowList()).toEqual(before);
+  });
+
+  it("clicking a leftover stub does not tunnel or load more", () => {
+    g.nodes.trust.place(1, 1);
+    const before = g.vm.getShowList().slice();
+    expect(g.vm.clickNode({}, g.nodes.leftover, null)).toBe("leftover");
+    expect(g.vm.getShowList()).toEqual(before);
   });
 
   it("tunnelNode leaves only that org on the show list", () => {
@@ -17,6 +46,27 @@ describe("BrowseViewModel", () => {
     expect(show[0].startsWith(IDS.trust)).toBe(true);
     expect(g.nodes.trust.desiredVisible).toBe(true);
     expect(g.nodes.foundation.desiredVisible).toBe(false);
+  });
+
+  it("focus breadcrumbs let you return to a preset", () => {
+    g.vm.loadPreset({ title: "Uniparty", eins: [IDS.trust, IDS.foundation] }, "replace");
+    g.nodes.trust.place(1, 1);
+    g.nodes.foundation.place(1, 1);
+    expect(g.vm.clickNode({}, g.nodes.trust, null)).toBe("focus");
+    expect(g.vm.getShowList()).toHaveLength(1);
+    expect(g.vm.getBreadCrumbs().length).toBeGreaterThanOrEqual(1);
+    expect(g.vm.getBreadCrumbs()[0].title).toMatch(/Uniparty/i);
+    g.vm.restoreCrumb(0);
+    const restored = g.vm.getShowList().map((s) => s.split(/[:~]/)[0]);
+    expect(restored).toEqual(expect.arrayContaining([IDS.trust, IDS.foundation]));
+  });
+
+  it("focus clears keywords so the graph actually focuses", () => {
+    g.vm.setKeywordList(["gates"]);
+    g.nodes.trust.place(1, 1);
+    expect(g.vm.clickNode({}, g.nodes.trust, null)).toBe("focus");
+    expect(g.vm.getKeywordList()).toEqual([]);
+    expect(g.vm.getShowList().some((e) => e.startsWith(IDS.trust))).toBe(true);
   });
 
   it("loadPreset add unions, replace replaces", () => {
@@ -71,6 +121,26 @@ describe("BrowseViewModel", () => {
     expect(g.nodes.leftover.kind).toBe("leftover");
   });
 
+  it("default band is $10M; $1M and All are upgrades", () => {
+    expect(defaultBandId()).toBe("10M");
+    expect(g.vm.loadedBand).toBe("10M");
+    expect(canUpgradeBand("10M", "1M")).toBe(true);
+    expect(canUpgradeBand("10M", "all")).toBe(true);
+    expect(canUpgradeBand("1M", "10M")).toBe(false);
+    expect(canUpgradeBand("10M", "10M")).toBe(false);
+    expect(bandHasFiles(bandById("10M"))).toBe(true);
+    expect(bandHasFiles(bandById("1M"))).toBe(true);
+    expect(bandHasFiles(bandById("all"))).toBe(true);
+  });
+
+  it("requestBand same band is a no-op", async () => {
+    await expect(g.vm.requestBand("10M")).resolves.toEqual({
+      status: "current",
+      band: "10M",
+    });
+    expect(g.vm.loadedBand).toBe("10M");
+  });
+
   it("buildSankeyData node ids are graph keys; longEIN empty on ghosts", () => {
     g.nodes.trust.place(1, 3);
     g.vm.computeImpliedVisibility();
@@ -82,4 +152,5 @@ describe("BrowseViewModel", () => {
       }
     }
   });
+
 });

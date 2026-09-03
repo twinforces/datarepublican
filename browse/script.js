@@ -9,6 +9,14 @@ import {
   interpolateBandIndex,
   compareCharities,
   compareLinks,
+  fitScaleWithReadableLabels,
+  browseBands,
+  bandById,
+  bandHasFiles,
+  bandCutLabel,
+  canUpgradeBand,
+  defaultBandId,
+  PATIENT_SUBSIDY_ID,
 } from "./models.js";
 
 import {
@@ -56,28 +64,200 @@ function updateStatus(message, color = "black") {
 
 function dataLoaded(state = true) {
   if (state) {
+    if (viewModel.bandPrompt) return;
     $("#statusSpinner").addClass("hidden");
     $("#loading").addClass("hidden");
-    $("#downloadPanel").removeClass("hidden");
+    $("#downloadPanel").removeClass("hidden").css("display", "flex");
     document.documentElement.style.setProperty("--web-load", "none");
     document.documentElement.style.setProperty("--db-load", "none");
+    renderBandControl();
   } else {
     $("#statusSpinner").removeClass("hidden");
     $("#loading").removeClass("hidden");
-    $("#downloadPanel").addClass("hidden");
+    $("#downloadPanel").addClass("hidden").css("display", "none");
   }
 }
 
 window.exportDB = function () {
-  viewModel.exportDB();
+  window.open("https://www.grumpytechbro.com/irs990.html", "_blank", "noopener");
+};
+
+function bandCopy(bandId, { missing = false, fromStore = false } = {}) {
+  const band = bandById(bandId) || bandById(defaultBandId());
+  const nodes = formatNumber(band?.nodes);
+  const grants = formatNumber(band?.grants || band?.edges);
+  const label = band?.label || "$10M";
+  const current = bandCutLabel(viewModel.loadedBand || defaultBandId());
+  if (missing) {
+    return {
+      title: `No ${label} data yet.`,
+      body: `Stay on ${current}.`,
+      local: "",
+    };
+  }
+  const extra =
+    nodes && grants
+      ? ` About ${nodes} organizations and ${grants} grants.`
+      : "";
+  return {
+    title: `This is the <b>${label} band</b>.${extra} Each deeper notch is a full new load (not an add-on). Dashed octagons are <b>name-only</b> — no EIN on the 990, or grants below this cut.`,
+    body: fromStore
+      ? `Welcome back — loading ${label} from your local store.`
+      : `This downloads into this browser. Reloads of the same band should be faster. Click a node to focus it. Shift-drag box-zooms; shift-click hides a node.`,
+    local: `Welcome back — loading the ${label} band from your local store.`,
+  };
+}
+
+window.applyLoadingCopy = function (bandId, opts = {}) {
+  const copy = bandCopy(bandId, opts);
+  $("#loadingBandTitle").html(copy.title);
+  $("#loadingBandBody").html(copy.body);
+  $("#loadingBandLocal").html(copy.local);
+};
+
+function showBandLoader(bandId, { missing = false } = {}) {
+  if (typeof hidePresets === "function") hidePresets();
+  window.applyLoadingCopy(bandId, { missing });
+  $("#loading").removeClass("hidden");
+  $("#nonodes").addClass("hidden");
+  $("#control-panel").addClass("hidden").hide();
+  $("#downloadPanel").addClass("hidden").css("display", "none");
+  if (missing) {
+    viewModel.bandPrompt = true;
+    $("#statusSpinner").addClass("hidden");
+    document.documentElement.style.setProperty("--web-load", "none");
+    document.documentElement.style.setProperty("--db-load", "none");
+    $("#loadingBandMissing").removeClass("hidden");
+    $("#loadingBandDismiss").removeClass("hidden");
+    updateStatus(`No ${bandCutLabel(bandId)} data yet`, "black", false);
+  } else {
+    viewModel.bandPrompt = false;
+    $("#loadingBandMissing").addClass("hidden");
+    $("#loadingBandDismiss").addClass("hidden");
+  }
+}
+
+function renderBandControl() {
+  const el = document.getElementById("bandControl");
+  if (!el) return;
+  const loaded = viewModel.loadedBand || defaultBandId();
+  const nextId = nextBandId(loaded);
+  el.innerHTML = browseBands()
+    .map((band) => {
+      const isCurrent = band.id === loaded;
+      const isNext = band.id === nextId;
+      const classes = [
+        "band-notch",
+        isCurrent ? "is-current" : "",
+        isNext ? "is-next" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const nodes = band.nodes != null ? formatNumber(band.nodes) : "—";
+      const grants =
+        band.grants != null
+          ? formatNumber(band.grants)
+          : band.edges != null
+            ? formatNumber(band.edges)
+            : "—";
+      const dollars =
+        band.dollars != null ? `$${formatNumber(band.dollars)}` : "—";
+      const title = isCurrent
+        ? `${band.label} loaded — ${nodes} nodes, ${grants} grants, ${dollars}`
+        : bandHasFiles(band)
+          ? `Download ${band.label} (${nodes} nodes, ${grants} grants, ${dollars}) — another wait`
+          : `${band.label} (${nodes} nodes) — no data yet`;
+      return `<button type="button" class="${classes}" data-band="${band.id}" title="${title}" role="radio" aria-checked="${isCurrent}">
+        <span class="dot"></span>
+        <span class="label">${band.label}</span>
+        <span class="stats">
+          <span class="stat-nodes">${nodes}</span>
+          <span class="stat-grants">${grants}</span>
+        </span>
+      </button>`;
+    })
+    .join("");
+}
+
+function nextBandId(loaded) {
+  const order = ["10M", "1M", "all"];
+  const i = order.indexOf(loaded);
+  return i >= 0 && i < order.length - 1 ? order[i + 1] : null;
+}
+
+window.requestBand = async function (id) {
+  if (!canUpgradeBand(viewModel.loadedBand, id)) return;
+  const band = bandById(id);
+  const missing = !bandHasFiles(band);
+  dataLoaded(false);
+  showBandLoader(id, { missing });
+  if (missing) {
+    renderBandControl();
+    return;
+  }
+  try {
+    const result = await viewModel.requestBand(id);
+    if (result.status === "loaded") {
+      dataLoaded(true);
+      generateGraph();
+      if (typeof zoomToFit === "function") zoomToFit();
+    } else if (result.status === "unavailable") {
+      showBandLoader(id, { missing: true });
+    }
+  } catch (err) {
+    console.error(err);
+    updateStatus("Failed to load band.", "red");
+  }
+  renderBandControl();
 };
 
 window.loadPreset = function (value, mode) {
   viewModel.loadPreset(value, mode);
   hidePresets(); // our work here is done.
+  renderBreadCrumbs();
   refresh();
   viewModel.defaultSize();
   zoomToFit();
+};
+
+function escapeCrumb(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderBreadCrumbs() {
+  const el = document.getElementById("focusCrumbs");
+  if (!el) return;
+  const crumbs = viewModel.getBreadCrumbs() || [];
+  const tip = viewModel.focusTip;
+  if (!crumbs.length && !tip) {
+    el.innerHTML = "";
+    el.classList.add("hidden");
+    return;
+  }
+  el.classList.remove("hidden");
+  const parts = crumbs.map(
+    (c, i) =>
+      `<a href="#" data-crumb="${i}" class="text-blue-700 hover:underline">${escapeCrumb(
+        c.title
+      )}</a><span class="text-gray-400 px-1">→</span>`
+  );
+  if (tip) {
+    parts.push(
+      `<span class="font-semibold">${escapeCrumb(tip.title)}</span>`
+    );
+  }
+  el.innerHTML = parts.join("");
+}
+
+window.restoreCrumb = function (index) {
+  if (viewModel.restoreCrumb(index)) {
+    renderBreadCrumbs();
+    refresh();
+    requestAnimationFrame(() => zoomToFit());
+  }
 };
 
 function renderPopup() {
@@ -199,10 +379,18 @@ function renderPopup() {
       const mode = document.getElementById("preset-mode").checked
         ? "replace"
         : "add";
+      const listed = [];
+      for (const p of viewModel.presets()) {
+        if (p.eins) listed.push(p);
+        if (p.subcategories) {
+          for (const s of p.subcategories) if (s.eins) listed.push(s);
+        }
+      }
+      const preset = listed.find((p) => p.title === title) || { eins, title };
       console.log(
         `${mode === "add" ? "Adding" : "Replacing"} ${title}: ${eins}`,
       );
-      loadPreset({ eins, title }, mode);
+      loadPreset(preset, mode);
     });
   });
 
@@ -215,14 +403,17 @@ function renderPopup() {
   if (hideCtlBtn) {
     hideCtlBtn.addEventListener("click", hideControls);
   }
-  const showCircularBtn = document.getElementById("showCircularBtn");
-  const hideCircularBtn = document.getElementById("hideCircularBtn");
-  if (showCircularBtn) {
-    showCircularBtn.addEventListener("click", showCircular);
+  const circularToggle = document.getElementById("circularToggle");
+  if (circularToggle) {
+    circularToggle.addEventListener("change", () => {
+      if (circularToggle.checked) hideCircular();
+      else showCircular();
+    });
   }
-  if (hideCircularBtn) {
-    hideCircularBtn.addEventListener("click", hideCircular);
-  }
+  $("#clickMode").on("click", "button[data-mode]", function () {
+    applyClickMode(this.getAttribute("data-mode"));
+  });
+  applyClickMode(viewModel.clickMode || "focus");
 
   // Wire up the toggle buttons
   const showBtn = document.getElementById("showPresetsBtn");
@@ -268,8 +459,8 @@ window.hideControls = function () {
 
 // Show Presets and Hide Presets implementations
 window.showCircular = function () {
-  $("#showCircularBtn").addClass("hidden");
-  $("#hideCircularBtn").removeClass("hidden");
+  const el = document.getElementById("circularToggle");
+  if (el) el.checked = false;
   $("#circular-links").removeClass("hidden");
   viewModel.setHideCircularLinks(false);
   viewModel.computeAndSaveURLParams();
@@ -277,8 +468,8 @@ window.showCircular = function () {
 };
 
 window.hideCircular = function () {
-  $("#showCircularBtn").removeClass("hidden");
-  $("#hideCircularBtn").addClass("hidden");
+  const el = document.getElementById("circularToggle");
+  if (el) el.checked = true;
   $("#circular-links").addClass("hidden");
   viewModel.setHideCircularLinks(true);
   viewModel.computeAndSaveURLParams();
@@ -368,6 +559,20 @@ $(document).ready(function () {
   });
 
   $("#downloadBtn").on("click", downloadSVG);
+  $("#bandControl").on("click", "button[data-band]", function () {
+    window.requestBand(this.getAttribute("data-band"));
+  });
+  $("#focusCrumbs").on("click", "a[data-crumb]", function (e) {
+    e.preventDefault();
+    window.restoreCrumb(parseInt(this.getAttribute("data-crumb"), 10));
+  });
+  $("#loadingBandDismiss").on("click", function () {
+    viewModel.bandPrompt = false;
+    $("#loadingBandMissing").addClass("hidden");
+    $("#loadingBandDismiss").addClass("hidden");
+    updateStatus("", "black", false);
+    dataLoaded(true);
+  });
 
   $("#howItWorksBtn").on("click", function () {
     const $list = $("#howItWorksList");
@@ -738,34 +943,124 @@ function savePreviousState(data) {
   });
 }
 
+function nodeCursor() {
+  switch (viewModel.clickMode) {
+    case "add":
+      return "cell";
+    case "inspect":
+      return "zoom-in";
+    default:
+      return "pointer";
+  }
+}
+
+function applyClickMode(mode) {
+  viewModel.setClickMode(mode);
+  $("#clickMode button").removeClass("is-on");
+  $(`#clickMode button[data-mode="${viewModel.clickMode}"]`).addClass("is-on");
+  const host = document.getElementById("graph-container");
+  if (host) {
+    host.classList.remove("click-focus", "click-add", "click-inspect");
+    host.classList.add(`click-${viewModel.clickMode}`);
+  }
+  const cur = nodeCursor();
+  d3.selectAll(
+    "#graph .node path, #graph text.nodeLabel, #graph .link, #graph .circular-link",
+  ).style("cursor", cur);
+  d3.selectAll("#graph .link title, #graph .circular-link title").remove();
+  if (viewModel.clickMode !== "inspect") hideGraphTip();
+}
+
+function positionGraphTip(event) {
+  const el = document.getElementById("graphTip");
+  if (!el) return;
+  el.style.left = `${event.clientX + 12}px`;
+  el.style.top = `${event.clientY + 12}px`;
+}
+
+function partyName(end, fallback) {
+  if (end && typeof end === "object" && end.name) return end.name;
+  const id =
+    (end && typeof end === "object" && (end.ein || end.id)) ||
+    (typeof end === "string" ? end : null) ||
+    fallback;
+  if (!id) return "?";
+  const c = Charity.getCharity(id);
+  return (c && c.name) || id;
+}
+
+function grantTipText(d) {
+  if (!d) return "";
+  const from = (d.filer && d.filer.name) || partyName(d.source, d.filer_ein);
+  const to = (d.grantee && d.grantee.name) || partyName(d.target, d.grant_ein);
+  const amt = d.amt != null ? d.amt : 0;
+  return `${from} → ${to}\n$${formatNumber(amt)}${
+    d.circular ? " (circular)" : ""
+  }`;
+}
+
+function showGraphTip(event, d) {
+  const el = document.getElementById("graphTip");
+  if (!el || !d) return;
+  const text =
+    typeof d.toolTipText === "function" ? d.toolTipText() : grantTipText(d);
+  if (!text) return;
+  el.textContent = text;
+  el.classList.remove("hidden");
+  positionGraphTip(event);
+}
+
+function hideGraphTip() {
+  document.getElementById("graphTip")?.classList.add("hidden");
+}
+
+function handleGraphNodeHover(event, d) {
+  if (viewModel.clickMode !== "inspect") {
+    hideGraphTip();
+    return;
+  }
+  showGraphTip(event, d);
+}
+
+function handleGraphNodeClick(event, d, el) {
+  event.stopPropagation();
+  if (event.shiftKey) {
+    d.hide();
+    Charity.addToHideList(d.ein);
+    refresh();
+    return;
+  }
+  const action = viewModel.clickNode(event, d, refresh);
+  if (action === "leftover" || action === "inspect") {
+    showControlPanel("node", d, el);
+  }
+  if (action === "focus") requestAnimationFrame(() => zoomToFit());
+}
+
 function bindEvents(g) {
-  g.selectAll(".nodeLabel").on("click", (event, d) => {
-    console.log("Text clicked:", d.id);
-    event.stopPropagation();
-    if (event.shiftKey) {
-      d.hide();
-      Charity.addToHideList(d.ein);
-      refresh();
-    } else if (event.altKey) {
-      showControlPanel("node", d, this);
-    } else {
-      viewModel.clickNode(event, d, refresh);
-    }
-  });
-  g.selectAll(".node")
-    .on("click", (event, d) => {
-      console.log("Node clicked:", d.id);
-      event.stopPropagation();
-      if (event.shiftKey) {
-        d.hide();
-        Charity.addToHideList(d.ein);
-        refresh();
-      } else if (event.altKey) {
-        showControlPanel("node", d, this);
-      } else {
-        viewModel.clickNode(event, d, refresh);
-      }
+  applyClickMode(viewModel.clickMode || "focus");
+  g.selectAll(".nodeLabel")
+    .on("click", function (event, d) {
+      handleGraphNodeClick(event, d, this);
     })
+    .on("mouseenter", function (event, d) {
+      handleGraphNodeHover(event, d);
+    })
+    .on("mousemove", function (event, d) {
+      if (viewModel.clickMode === "inspect") positionGraphTip(event);
+    })
+    .on("mouseleave", hideGraphTip);
+  g.selectAll(".node")
+    .on("click", function (event, d) {
+      handleGraphNodeClick(event, d, this);
+    })
+    .on("mouseenter", function (event, d) {
+      handleGraphNodeHover(event, d);
+    })
+    .on("mousemove", function (event, d) {
+      if (viewModel.clickMode === "inspect") positionGraphTip(event);
+    })
+    .on("mouseleave", hideGraphTip)
     .on("dblclick", (event, d) => {
       console.log("Node double-clicked:", d.id);
       event.stopPropagation();
@@ -786,29 +1081,22 @@ function bindEvents(g) {
       d3.select(this).on("touchend", () => clearTimeout(timer)); // Cancel on touch end
     })*/
 
-  g.selectAll(".link")
-    .on("click", (event, d) => {
-      console.log("Link clicked:", d.id);
+  g.selectAll(".link, .circular-link")
+    .on("click", function (event, d) {
       event.stopPropagation();
       showControlPanel("link", d, this);
     })
     .on("dblclick", (event, d) => {
-      console.log("Link double-clicked:", d.id);
       event.stopPropagation();
       viewModel.doubleClickGrant(event, d, refresh);
-    });
-
-  g.selectAll(".circular-link")
-    .on("click", (event, d) => {
-      console.log("Circular Link clicked:", d.id);
-      event.stopPropagation();
-      showControlPanel("link", d, this);
     })
-    .on("dblclick", (event, d) => {
-      console.log("Link double-clicked:", d.id);
-      event.stopPropagation();
-      viewModel.doubleClickGrant(event, d, refresh);
-    });
+    .on("mouseenter", function (event, d) {
+      handleGraphNodeHover(event, d);
+    })
+    .on("mousemove", function (event) {
+      if (viewModel.clickMode === "inspect") positionGraphTip(event);
+    })
+    .on("mouseleave", hideGraphTip);
   /*.on("touchstart", function (event) {
       event.preventDefault(); // Prevent default right-click behavior
       const timer = setTimeout(() => {
@@ -856,7 +1144,13 @@ function zoomToFit() {
   const height = container.offsetHeight || window.innerHeight * 0.9;
   const dx = bounds.x;
   const dy = bounds.y;
-  const scale = 0.95 / Math.max(bounds.width / width, bounds.height / height);
+  const fitScale =
+    0.95 / Math.max(bounds.width / width, bounds.height / height);
+  const label = g.select("text.nodeLabel").node();
+  const svgFontPx = label
+    ? parseFloat(label.style.fontSize || getComputedStyle(label).fontSize) || 16
+    : 16;
+  const scale = fitScaleWithReadableLabels(fitScale, svgFontPx, 13);
   svg
     .transition()
     .duration(750)
@@ -870,6 +1164,7 @@ function zoomToFit() {
 }
 
 function generateGraph() {
+  if (viewModel.bandPrompt) return;
   if (!viewModel.dataReady) {
     updateStatus("No Data Loaded");
     dataLoaded(false);
@@ -1091,8 +1386,7 @@ function generateGraph() {
   if (viewModel.matchURL() === 0) {
     showPresets();
     $("#nonodes").removeClass("hidden");
-    $("#loading").addClass("hidden");
-
+    dataLoaded(true);
     return;
   } else {
     $("#nonodes").addClass("hidden");
@@ -1274,7 +1568,14 @@ function generateGraph() {
       return;
     const dx = bounds.x;
     const dy = bounds.y;
-    const scale = 0.8 / Math.max(bounds.width / width, bounds.height / height);
+    const fitScale =
+      0.8 / Math.max(bounds.width / width, bounds.height / height);
+    const label = g.select("text.nodeLabel").node();
+    const svgFontPx = label
+      ? parseFloat(label.style.fontSize || getComputedStyle(label).fontSize) ||
+        16
+      : 16;
+    const scale = fitScaleWithReadableLabels(fitScale, svgFontPx, 13);
     svg.call(
       zoom.transform,
       d3.zoomIdentity
@@ -1327,10 +1628,10 @@ function updateLayoutButtons() {
 }
 
 function fontSizeFromHeight(height) {
-  return (
+  const raw =
     ((boundaryScaleFactorY * 2) / FONT_CONSTANT) *
-    Math.min(48, Math.max(FONT_SIZE, 10, height / FONT_CONSTANT))
-  );
+    Math.min(48, Math.max(FONT_SIZE, 10, height / FONT_CONSTANT));
+  return Math.max(14, raw);
 }
 
 function defaultSize() {
@@ -1506,11 +1807,7 @@ function renderFocusedSankey(
     .attr("stroke", (d) => getColorForEIN(d.source.id))
     .attr("stroke-width", (d) => d.width || 1);
 
-  linkEnter
-    .append("title")
-    .text(
-      (d) => `${d.source.name} → ${d.target.name}\n$${formatNumber(d.amt)}`,
-    );
+  linkEnter.style("cursor", nodeCursor());
 
   // Function to extract points from path (unchanged)
   function extractPointsFromPath(pathString) {
@@ -1582,14 +1879,7 @@ function renderFocusedSankey(
     .attr("stroke-opacity", "0.6")
     .attr("stroke-width", (d) => 0.1 * d.width);
 
-  circularLinkEnter
-    .append("title")
-    .text(
-      (d) =>
-        `${d.source.name} → ${d.target.name}\n$${formatNumber(
-          d.amt,
-        )} (Circular)`,
-    );
+  circularLinkEnter.style("cursor", nodeCursor());
 
   // Node rendering
   const nodeGroup = masterGroup
@@ -1651,9 +1941,7 @@ function renderFocusedSankey(
         d.kind === "ghost" || d.kind === "leftover" ? "4 3" : null,
       )
       .attr("stroke-width", d.kind === "bmf" ? 2.5 : 1)
-      .style("cursor", d.isTerminal ? "zoom-in" : "grab")
-      .append("title")
-      .text((d) => d.toolTipText());
+      .style("cursor", nodeCursor());
   });
 
   // Fallback if transition fails
@@ -1847,7 +2135,7 @@ function renderFocusedSankey(
     .attr("text-anchor", (d) =>
       d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
     )
-    .style("cursor", "crosshair")
+    .style("cursor", nodeCursor())
     .attr("class", (d) => "nodeLabel" + (d.kind ? ` nodeLabel-${d.kind}` : ""))
     .attr("fill", (d) => getTextColorForEIN(d.ein))
     .style("font-style", (d) =>
@@ -1865,7 +2153,7 @@ function renderFocusedSankey(
       .attr("text-anchor", (d) =>
         d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
       )
-      .style("cursor", "crosshair")
+      .style("cursor", nodeCursor())
       .attr("class", (d) => "nodeLabel" + (d.kind ? ` nodeLabel-${d.kind}` : ""))
       .attr("fill", (d) => getTextColorForEIN(d.ein))
       .style("font-style", (d) =>
@@ -1882,7 +2170,7 @@ function renderFocusedSankey(
       .attr("text-anchor", (d) =>
         d.x0 < sankey.nodeWidth() / 2 ? "start" : "end",
       )
-      .style("cursor", "crosshair")
+      .style("cursor", nodeCursor())
       .attr("class", (d) => "nodeLabel" + (d.kind ? ` nodeLabel-${d.kind}` : ""))
       .attr("fill", (d) => getTextColorForEIN(d.ein))
       .style("font-style", (d) =>
@@ -2035,6 +2323,7 @@ function refresh() {
   updateQueryParams();
   renderActiveEINs();
   renderHideEINs();
+  renderBreadCrumbs();
   updateScaledConstants();
   generateGraph();
 }
@@ -2154,19 +2443,32 @@ function showControlPanel(type, data, element) {
         <p>${node.grantSearchLink("Show me the Grants")}</p>
         <p>${node.propublicaLink("Take me to Propublica")}</p>
         <p>${node.googleLink("Google")}</p>
-        <p>${node.grokLink("Grok")}</p>
+        <p>${node.grokLink("Grumpy Take")}</p>
         <p>${node.guideStarLink("Guide Star")}</p>
         <p>${node.charityNavigatorLink("Charity Navigator")}</p>
       `;
       } else if (node.isGhost) {
         const sug = node.suggestedEin
-          ? `<p>Phone book suggests EIN ${node.suggestedEin.slice(0, 2)}-${node.suggestedEin.slice(2)} (not from the 990). Trust-the-phone-book is a later toggle.</p>`
-          : `<p>No IRS EIN on the form. This is a name+address ghost.</p>`;
-        links = `<p>${node.orgShort}</p>${sug}<p>${node.googleLink("Google the name")}</p>`;
+          ? `<p>Phone book suggests EIN ${node.suggestedEin.slice(0, 2)}-${node.suggestedEin.slice(2)} (not from the 990).</p>`
+          : `<p>Name-only: no EIN on the 990.</p>`;
+        links = `<p>${node.orgShort}</p>${sug}<p>${node.googleLink("Google the name")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
       } else if (node.isBmfOnly) {
-        links = `<p>${node.orgShort}</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google")}</p>`;
+        const nameless =
+          !node.name ||
+          node.name.replace(/\D/g, "") === String(node.ein).replace(/\D/g, "");
+        links = nameless
+          ? `<p>Name-only: no 990 in this set, and we don't have a name for this EIN — often a university or hospital.</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google this EIN")}</p>`
+          : `<p>${node.orgShort}</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
+      } else if (node.ein === PATIENT_SUBSIDY_ID) {
+        links = `<p>${node.orgShort}</p>
+          <p>Rolled-up copay / drug subsidies. The 990 lists HIPAA-redacted patients, “see statement,” and similar — not named NGOs. Hats on a manufacturer’s foundation still expand any real named grants.</p>`;
       } else if (node.isLeftover) {
-        links = `<p>${node.orgShort}</p><p>Grants from this org to counterparties omitted by the $10M cut.</p>`;
+        const cut = bandCutLabel(viewModel.loadedBand);
+        const nextId = nextBandId(viewModel.loadedBand) || "1M";
+        const nextLabel = bandCutLabel(nextId);
+        links = `<p>${node.orgShort}</p>
+          <p>Name-only stub: grants from this org to counterparties below the <b>${cut}</b> cut.</p>
+          <p>You must download the <b>${nextLabel}</b> band to see this detail. <a href="#" onclick="requestBand('${nextId}'); return false;">Click here</a> to do that.</p>`;
       } else {
         links = `<p>${node.orgShort}</p>`;
       }
@@ -2297,16 +2599,19 @@ window.compressOutflows = function (ein) {
 window.focusNode = function (ein) {
   const charity = Charity.getCharity(ein);
   if (charity) {
+    if (charity.isLeftover) {
+      showControlPanel("node", charity, null);
+      return;
+    }
     charity.tunnelNode();
     refresh();
+    requestAnimationFrame(() => zoomToFit());
     closePanel();
   }
 };
 
 const extraStyle = `
   .node { fill: #999; }
-  .node.expand { cursor: grab; }
-  .node.no-grants { cursor: zoom-in; }
   .link { stroke-opacity: 0.5; }
   .hat-up, .hat-down { cursor: crosshair; }
   .selected { stroke: #ff0; stroke-width: 2px; }

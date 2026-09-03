@@ -5,6 +5,16 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-09-02 (Patient Subsidies at export)
+
+### Biggest Pharma graph
+- **Why:** Client-side sink wiring never survived a refresh (URL still had the old 14 PAPs and per-GIN HIPAA ghosts). A hardcoded `isPatientSubsidyName` regex also drifted from `big_pharma_subsidy.json`.
+- **Change:** Export remaps non-EIN subsidy-pattern names to `etc997777777` (Patient Subsidies). Leftover stubs no longer swallow those dollars. Preset narrowed to seven high-volume PAPs. $10M zip rebuilt (~12.8 MB).
+- **Failure:** Parallel synthetic grants + `place(0,1)` still revealed the original HIPAA ghost when amounts tied. JSON `import … with { type: "json" }` was a load risk; patterns now ship as `big_pharma_subsidy.js`.
+- **Doc:** `docs/export_browse_band.md`. Tests: `test_export_browse_band.py`, `npm run test:browse`.
+
+---
+
 ## [Unreleased] - 2026-09-02 (browse M/VM tests)
 
 ### Vitest for Charity / Grant / ViewModel

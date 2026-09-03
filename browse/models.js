@@ -2,7 +2,7 @@ const POWER_LAW_RESET = 3;
 const TOP_N_INITIAL = 5;
 const START_REVEAL = 5;
 const MAX_EXPAND_SCALE = 4096;
-const MIN_EXPAND_SCALE = 0.1;
+const MIN_EXPAND_SCALE = 1.5;
 const EXPAND_FACTOR = 1.25;
 
 const MIN_REVEAL = 2;
@@ -22,11 +22,54 @@ const CHARITY_STORE = "charities";
 const GRANT_STORE = "grants";
 const METADATA_STORE = "metadata";
 const DATA_VERSION = "2026-09-02";
+/** Sanity floor after the $10M band export (~104k orgs / ~580k grants), not the old 910k dump. */
+const MIN_LOADED_CHARITIES = 10000;
+const MIN_LOADED_GRANTS = 10000;
 const BALANCELIMIT = 20;
 const PER_COL = 3;
 const PER_ROW = 3;
 
 import { DATA_FILES } from "./data_files.js"; // Adjust path if needed
+
+export const BAND_ORDER = ["10M", "1M", "all"];
+
+export function browseBands() {
+  return DATA_FILES.bands || [];
+}
+
+export function defaultBandId() {
+  return DATA_FILES.defaultBand || "10M";
+}
+
+export function bandById(id) {
+  return browseBands().find((b) => b.id === id) || null;
+}
+
+export function bandIndex(id) {
+  const i = BAND_ORDER.indexOf(id);
+  return i < 0 ? 0 : i;
+}
+
+export function canUpgradeBand(fromId, toId) {
+  return bandIndex(toId) > bandIndex(fromId);
+}
+
+export function bandHasFiles(band) {
+  if (!band) return false;
+  const files = band.files || [];
+  return files.some((f) => (f.chunkCount || 0) > 0);
+}
+
+export function filesForBand(id) {
+  const band = bandById(id);
+  if (bandHasFiles(band)) return band.files;
+  if (id === defaultBandId() || id === "10M") return DATA_FILES.files || [];
+  return [];
+}
+
+export function bandCutLabel(id) {
+  return (bandById(id) || bandById(defaultBandId()) || { label: "$10M" }).label;
+}
 
 import ORGANIZATION_TYPES from "./charityTypes.js";
 import { iso3166_alpha2 } from "./countryCodes.js";
@@ -36,12 +79,22 @@ import presetsData from "./presets.js";
 import {
   compareCharities,
   compareLinks,
+  fitScaleWithReadableLabels,
   formatNumber,
   isGraphKey,
   kindFrom,
+  PATIENT_SUBSIDY_ID,
 } from "./graphIdentity.js";
 
-export { compareCharities, compareLinks, formatNumber, isGraphKey, kindFrom };
+export {
+  compareCharities,
+  compareLinks,
+  fitScaleWithReadableLabels,
+  formatNumber,
+  isGraphKey,
+  kindFrom,
+  PATIENT_SUBSIDY_ID,
+};
 let DEBUGLOG = false;
 let DEBUGSTOP = false;
 
@@ -225,29 +278,44 @@ function idbCount(db, storeName) {
   });
 }
 
+function idbGetMeta(db, id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(METADATA_STORE, "readonly");
+    const request = tx.objectStore(METADATA_STORE).get(id);
+    request.onsuccess = () => resolve(request.result?.value);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbPutMeta(db, entries) {
+  const tx = db.transaction(METADATA_STORE, "readwrite");
+  const store = tx.objectStore(METADATA_STORE);
+  await Promise.all(
+    Object.entries(entries).map(
+      ([id, value]) =>
+        new Promise((resolve, reject) => {
+          const request = store.put({ id, value });
+          request.onsuccess = resolve;
+          request.onerror = () => reject(request.error);
+        })
+    )
+  );
+  await tx.done;
+}
+
 async function hasValidData(db) {
   try {
-    const tx = db.transaction(METADATA_STORE, "readonly");
-    const store = tx.objectStore(METADATA_STORE);
-    const versionRequest = await new Promise((resolve, reject) => {
-      const request = store.get("version");
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const generatedRequest = await new Promise((resolve, reject) => {
-      const request = store.get("generated");
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    const versionRequest = await idbGetMeta(db, "version");
+    const generatedRequest = await idbGetMeta(db, "generated");
     if (
-      versionRequest?.value !== DATA_FILES.dbVersion ||
-      generatedRequest?.value !== true
+      versionRequest !== DATA_FILES.dbVersion ||
+      generatedRequest !== true
     ) {
       return false;
     }
     const nCharities = await idbCount(db, CHARITY_STORE);
     const nGrants = await idbCount(db, GRANT_STORE);
-    if (nCharities < 400000 || nGrants < 400000) {
+    if (nCharities < MIN_LOADED_CHARITIES || nGrants < MIN_LOADED_GRANTS) {
       console.warn(
         `IndexedDB incomplete (${nCharities} charities, ${nGrants} grants); reloading`
       );
@@ -317,20 +385,8 @@ async function storeData(db, storeName, records) {
     let storedRecords = 0;
 
     for (const record of records) {
-      await new Promise((resolve, reject) => {
-        const request = store.put(record);
-        request.onsuccess = () => {
-          storedRecords++;
-          resolve();
-        };
-        request.onerror = () => {
-          console.error(
-            `Failed to store record in ${storeName} with filer_ein ${record.filer_ein}:`,
-            request.error
-          );
-          reject(request.error);
-        };
-      });
+      store.put(record);
+      storedRecords++;
     }
 
     await new Promise((resolve, reject) => {
@@ -347,6 +403,13 @@ async function storeData(db, storeName, records) {
     updateStatus(`Error storing ${storeName}: ${err.message}`, "red", false);
     throw err;
   }
+}
+
+async function clearGraphStores(db) {
+  const tx = db.transaction([CHARITY_STORE, GRANT_STORE], "readwrite");
+  await tx.objectStore(CHARITY_STORE).clear();
+  await tx.objectStore(GRANT_STORE).clear();
+  await tx.done;
 }
 
 async function exportDB() {
@@ -415,7 +478,13 @@ async function fetchAndStoreTSV(db, files) {
     let grantRowsProcessed = 0;
     let grantRowsSkipped = 0;
     const BATCH_SIZE = STORE_CHUNK_SIZE;
-    const MAX_CONCURRENT = 5;
+    const MAX_CONCURRENT = 16;
+    let writeChain = Promise.resolve();
+    const enqueueWrite = (fn) => {
+      const next = writeChain.then(fn, fn);
+      writeChain = next.catch(() => {});
+      return next;
+    };
 
     async function processChunk({
       tsvText,
@@ -558,12 +627,15 @@ async function fetchAndStoreTSV(db, files) {
           if (DEBUGLOG) console.timeEnd(`processTSV-${tsvFile}-${startIndex}`);
 
           if (records.length > 0) {
+            const batch = records.splice(0, records.length);
             if (DEBUGLOG) console.time(`storeTSV-${tsvFile}-${startIndex}`);
             try {
-              await storeData(
-                db,
-                type === "charities" ? CHARITY_STORE : GRANT_STORE,
-                records.splice(0, records.length)
+              await enqueueWrite(() =>
+                storeData(
+                  db,
+                  type === "charities" ? CHARITY_STORE : GRANT_STORE,
+                  batch
+                )
               );
             } catch (storeError) {
               console.error(
@@ -623,50 +695,44 @@ async function fetchAndStoreTSV(db, files) {
       }
     }
 
-    async function fetchWithLimit(tasks) {
-      const results = [];
-      const executing = new Set();
-
-      for (let i = 0; i < tasks.length; i++) {
-        if (executing.size >= MAX_CONCURRENT) {
-          await Promise.race(executing);
-          const completed = [...executing].find(
-            (p) =>
-              p[Symbol.toStringTag] === "Promise" && p.status === "fulfilled"
-          );
-          if (completed) {
-            results.push(await completed);
-            executing.delete(completed);
+    async function runPool(jobs, limit, worker) {
+      const results = new Array(jobs.length);
+      let next = 0;
+      let done = 0;
+      const total = jobs.length;
+      async function runOne() {
+        while (next < jobs.length) {
+          const idx = next++;
+          results[idx] = await worker(jobs[idx], idx);
+          done++;
+          if (done === 1 || done % 8 === 0 || done === total) {
+            updateStatus(
+              `Loading ${bandCutLabel(viewModel?.loadedBand || defaultBandId())}: ${done}/${total} files, ${formatNumber(
+                Object.keys(Charity.charityLookup).length
+              )} orgs, ${formatNumber(Object.keys(Grant.grantLookup).length)} grants`
+            );
           }
         }
-        const promise = tasks[i]().then((result) => {
-          executing.delete(promise);
-          return result;
-        });
-        executing.add(promise);
-        results.push(promise);
       }
-
-      return Promise.all(results);
+      const n = Math.min(limit, jobs.length) || 1;
+      await Promise.all(Array.from({ length: n }, () => runOne()));
+      return results;
     }
 
+    const jobs = [];
     for (const file of files) {
-      updateStatus(
-        `Processing ${file.tsvFilePrefix}: ${formatNumber(
-          Object.keys(Charity.charityLookup).length
-        )} charities, ${formatNumber(
-          Object.keys(Grant.grantLookup).length
-        )} grants`
-      );
-      const tasks = [];
-      const maxChunks = file.chunkCount;
+      const maxChunks = file.chunkCount || 0;
       for (let chunkIndex = 0; chunkIndex < maxChunks; chunkIndex++) {
-        tasks.push(() =>
-          fetchAndProcessChunk(file, file.type, file.grantType, chunkIndex)
-        );
+        jobs.push({ file, chunkIndex });
       }
-      const results = await fetchWithLimit(tasks);
-      for (const result of results) {
+    }
+    {
+      const results = await runPool(jobs, MAX_CONCURRENT, ({ file, chunkIndex }) =>
+        fetchAndProcessChunk(file, file.type, file.grantType, chunkIndex)
+      );
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const file = jobs[i].file;
         if (result) {
           if (file.type === "charities") {
             charityRowsProcessed += result.processed;
@@ -679,6 +745,7 @@ async function fetchAndStoreTSV(db, files) {
       }
     }
 
+    await writeChain;
     return [];
   } catch (error) {
     console.error(`Error processing files:`, error);
@@ -723,12 +790,18 @@ export class BrowseViewModel {
      * of the users explorations, so we can replay them to adjust the visibility.
      */
     this.breadCrumbs = [];
+    this.focusTip = null;
+    this.lastPresetTitle = null;
     this.keywords = {};
 
     /** Essentially globals */
     this.renderData = null;
     this.dataReady = false;
     this.urlAdapter = urlAdapter;
+    this.loadedBand = defaultBandId();
+    this.bandLoading = false;
+    this.bandPrompt = false;
+    this.clickMode = "focus";
     viewModel = this;
     this.resetAll();
   }
@@ -737,7 +810,7 @@ export class BrowseViewModel {
   static compareLinks = compareLinks;
 
   exportDB() {
-    exportDB();
+    window.open("https://www.grumpytechbro.com/irs990.html", "_blank", "noopener");
   }
 
   clearAll() {
@@ -764,22 +837,78 @@ export class BrowseViewModel {
 
   loadPreset(preset, mode) {
     const eins = preset.eins;
+    this.lastPresetTitle = preset.title || null;
+    const useSink = preset.sink === "patientSubsidies";
+    const sinkPlace = (e) => (useSink ? `${e}~0~1` : e);
     if (mode === "replace") {
       this.clearAll();
-      this.setShowList(eins);
-      //this.computeImpliedVisibility();
+      this.setShowList(eins.map(sinkPlace));
+      this.breadCrumbs = [];
+      this.focusTip = { title: preset.title || "Preset" };
       this.computeAndSaveURLParams();
     } else {
+      const had = this.getShowList().length;
       for (const e of eins) {
         if (e === "-86") {
           // quick hack.
           clearStorage();
           return;
         }
-        const ex = `${e}~${START_REVEAL}~${START_REVEAL}`;
+        const ex = useSink
+          ? `${e}~0~1`
+          : `${e}~${START_REVEAL}~${START_REVEAL}`;
         this.addToShowList(ex);
       }
+      this.focusTip = {
+        title:
+          !had && this.lastPresetTitle
+            ? this.lastPresetTitle
+            : this.lastPresetTitle
+              ? `${this.lastPresetTitle} +`
+              : `${this.getShowList().length} orgs`,
+      };
     }
+  }
+
+  snapshotTitle(show) {
+    const ids = (show || []).map((s) => String(s).split(/[:~]/)[0]);
+    if (ids.length === 1) {
+      const c = Charity.getCharity(ids[0]);
+      return (c && c.name) || ids[0];
+    }
+    if (this.lastPresetTitle) return this.lastPresetTitle;
+    return `${ids.length} orgs`;
+  }
+
+  pushFocusSnapshot() {
+    const show = this.getShowList();
+    if (!show.length) return;
+    const key = show
+      .map((s) => String(s).split(/[:~]/)[0])
+      .sort()
+      .join(",");
+    const last = this.breadCrumbs[this.breadCrumbs.length - 1];
+    if (last && last.key === key) return;
+    this.breadCrumbs.push({
+      title: this.focusTip?.title || this.snapshotTitle(show),
+      key,
+      showList: show.slice(),
+      hideList: this.getHideList().slice(),
+    });
+  }
+
+  restoreCrumb(index) {
+    const crumb = this.breadCrumbs[index];
+    if (!crumb) return false;
+    this.breadCrumbs = this.breadCrumbs.slice(0, index);
+    this.clearAll();
+    this.clearKeywordList();
+    this.setShowList(crumb.showList);
+    this.setHideList(crumb.hideList || []);
+    this.focusTip = { title: crumb.title };
+    this.setZoom(null, null, null);
+    this.computeAndSaveURLParams();
+    return true;
   }
 
   /**Called when we focus on just one node*/
@@ -864,15 +993,15 @@ export class BrowseViewModel {
 
   resetExpandScaleY() {
     const rows = this.countGraphRows() * PER_ROW;
-    this.expandScaleY = rows;
+    this.expandScaleY = Math.max(rows, 8);
     this.balanceScales();
   }
 
   defaultSize() {
     const rows = this.countGraphRows();
     const layers = this.countGraphColumns();
-    this.expandScaleX = layers * PER_COL;
-    this.expandScaleY = rows * PER_ROW;
+    this.expandScaleX = Math.max(layers * PER_COL, 4);
+    this.expandScaleY = Math.max(rows * PER_ROW, 8);
     this.balanceScales();
     /*const aspect = this.graphSizeX / this.graphSizeY;
     let scaleX = this.getExpandScaleX();
@@ -1459,6 +1588,14 @@ export class BrowseViewModel {
           request.onsuccess = resolve;
           request.onerror = () => reject(request.error);
         }),
+        new Promise((resolve, reject) => {
+          const request = store.put({
+            id: "band",
+            value: this.loadedBand || defaultBandId(),
+          });
+          request.onsuccess = resolve;
+          request.onerror = () => reject(request.error);
+        }),
       ]);
       await tx.done;
       if (DEBUGLOG) console.timeEnd("storeMetadata");
@@ -1490,10 +1627,39 @@ export class BrowseViewModel {
    * clicked on) its now desired, which has implications for the implied propogation
    * as it will step 1 node farther down the graph.
    */
+  setClickMode(mode) {
+    if (mode === "add" || mode === "inspect" || mode === "focus") {
+      this.clickMode = mode;
+    } else {
+      this.clickMode = "focus";
+    }
+    return this.clickMode;
+  }
+
   clickNode(event, charity, refreshCallback) {
+    if (charity.isLeftover) {
+      if (DEBUGLOG)
+        console.log(
+          `See-more stub ${charity.id}; deeper load is the ${bandCutLabel("1M")} notch`
+        );
+      return "leftover";
+    }
+    const mode =
+      event && event.altKey ? "inspect" : this.clickMode || "focus";
+    if (mode === "inspect") {
+      return "inspect";
+    }
+    if (mode === "add") {
+      this.addToShowList(
+        `${charity.ein}~${START_REVEAL}~${START_REVEAL}`
+      );
+      if (refreshCallback) refreshCallback();
+      return "add";
+    }
     if (DEBUGLOG) console.log(`Focus node ${charity.id} ${charity.name}`);
     charity.tunnelNode();
     if (refreshCallback) refreshCallback();
+    return "focus";
   }
 
   /**
@@ -1829,7 +1995,15 @@ export class BrowseViewModel {
         );
 
       if (await hasValidData(this.db)) {
-        updateStatus("Loading from local storage...");
+        const storedBand =
+          (await idbGetMeta(this.db, "band")) || defaultBandId();
+        this.loadedBand = storedBand;
+        if (typeof window !== "undefined" && window.applyLoadingCopy) {
+          window.applyLoadingCopy(this.loadedBand, { fromStore: true });
+        }
+        updateStatus(
+          `Loading ${bandCutLabel(this.loadedBand)} band from local store...`
+        );
         if (DEBUGLOG) console.time("loadCharitiesFromDB");
         const charities = await fetchLocalData(this.db, CHARITY_STORE);
         if (DEBUGLOG) console.timeEnd("loadCharitiesFromDB");
@@ -1944,50 +2118,14 @@ export class BrowseViewModel {
           false
         );
       } else {
-        updateStatus("Fetching data from server...");
+        this.loadedBand = defaultBandId();
+        updateStatus(
+          `Downloading ${bandCutLabel(this.loadedBand)} band (one-time for this data version)...`
+        );
         loadingViaWeb();
 
         try {
-          if (DEBUGLOG) console.time("buildTheWorld");
-          await this.buildTheWorld(this.db);
-          if (DEBUGLOG) console.timeEnd("buildTheWorld");
-
-          if (DEBUGLOG) console.time("loadTSVFiles");
-          await fetchAndStoreTSV(this.db, DATA_FILES.files);
-          if (DEBUGLOG) console.timeEnd("loadTSVFiles");
-
-          if (DEBUGLOG) console.time("buildGovCharity");
-          await this.buildGovCharity(this.db);
-          if (DEBUGLOG) console.timeEnd("buildGovCharity");
-
-          const nCharities = Object.keys(Charity.charityLookup).length;
-          const nGrants = Object.keys(Grant.grantLookup).length;
-          if (nCharities < 400000 || nGrants < 400000) {
-            throw new Error(
-              `Incomplete data load: ${nCharities} charities, ${nGrants} grants`
-            );
-          }
-
-          if (DEBUGLOG) console.time("storeMetadata");
-          const tx = this.db.transaction(METADATA_STORE, "readwrite");
-          const store = tx.objectStore(METADATA_STORE);
-          await Promise.all([
-            new Promise((resolve, reject) => {
-              const request = store.put({ id: "generated", value: true });
-              request.onsuccess = resolve;
-              request.onerror = () => reject(request.error);
-            }),
-            new Promise((resolve, reject) => {
-              const request = store.put({
-                id: "version",
-                value: DATA_FILES.dbVersion,
-              });
-              request.onsuccess = resolve;
-              request.onerror = () => reject(request.error);
-            }),
-          ]);
-          await tx.done;
-          if (DEBUGLOG) console.timeEnd("storeMetadata");
+          await this.ingestBandFromWeb(this.loadedBand);
 
           updateStatus(
             `Loaded ${formatNumber(
@@ -2024,7 +2162,91 @@ export class BrowseViewModel {
       console.error("Error in loadData:", err);
       updateStatus(`Error loading data: ${err.message}`, "red", false);
       this.dataReady = false;
-      return Object.keys(Grant.grantLookup).length;
+      throw err;
+    }
+  }
+
+  async ingestBandFromWeb(bandId) {
+    const files = filesForBand(bandId);
+    if (!files.length) {
+      throw new Error(`No files published for ${bandCutLabel(bandId)}`);
+    }
+    this.loadedBand = bandId;
+    if (DEBUGLOG) console.time("buildTheWorld");
+    await this.buildTheWorld(this.db);
+    if (DEBUGLOG) console.timeEnd("buildTheWorld");
+
+    if (DEBUGLOG) console.time("loadTSVFiles");
+    await fetchAndStoreTSV(this.db, files);
+    if (DEBUGLOG) console.timeEnd("loadTSVFiles");
+
+    if (DEBUGLOG) console.time("buildGovCharity");
+    await this.buildGovCharity(this.db);
+    if (DEBUGLOG) console.timeEnd("buildGovCharity");
+
+    const nCharities = Object.keys(Charity.charityLookup).length;
+    const nGrants = Object.keys(Grant.grantLookup).length;
+    if (nCharities < MIN_LOADED_CHARITIES || nGrants < MIN_LOADED_GRANTS) {
+      throw new Error(
+        `Incomplete data load: ${nCharities} charities, ${nGrants} grants`
+      );
+    }
+
+    await idbPutMeta(this.db, {
+      generated: true,
+      version: DATA_FILES.dbVersion,
+      band: bandId,
+    });
+  }
+
+  /**
+   * Opt-in to a deeper dollar band. Returns { status: current|unavailable|loaded, band }.
+   * Caller shows the loader; this fetches/replaces IndexedDB when files exist.
+   */
+  async requestBand(bandId) {
+    if (!canUpgradeBand(this.loadedBand, bandId)) {
+      return { status: "current", band: this.loadedBand };
+    }
+    const band = bandById(bandId);
+    if (!band) return { status: "unknown", band: bandId };
+    if (!bandHasFiles(band)) {
+      return { status: "unavailable", band: bandId };
+    }
+    if (this.bandLoading) {
+      return { status: "busy", band: this.loadedBand };
+    }
+    this.bandLoading = true;
+    this.dataReady = false;
+    try {
+      this.db = this.db || (await initDB());
+      Charity.charityLookup = {};
+      Grant.grantLookup = {};
+      Charity.rootCharities = null;
+      await clearGraphStores(this.db);
+      loadingViaWeb();
+      updateStatus(
+        `Downloading ${bandCutLabel(bandId)} band (another wait)...`
+      );
+      await this.ingestBandFromWeb(bandId);
+      this.loadedBand = bandId;
+      this.dataReady = true;
+      updateStatus(
+        `Loaded ${formatNumber(
+          Object.keys(Charity.charityLookup).length
+        )} charities, ${formatNumber(
+          Object.keys(Grant.grantLookup).length
+        )} grants from ${bandCutLabel(bandId)}`,
+        "green",
+        false
+      );
+      return { status: "loaded", band: bandId };
+    } catch (err) {
+      console.error("Error loading band", bandId, err);
+      updateStatus(`Error loading ${bandCutLabel(bandId)}: ${err.message}`, "red", false);
+      this.dataReady = false;
+      throw err;
+    } finally {
+      this.bandLoading = false;
     }
   }
   /*
@@ -3032,8 +3254,12 @@ export class Charity {
    * I'd provide a way that it would just jump to a new starting point.
    */
   tunnelNode() {
+    viewModel.pushFocusSnapshot();
     viewModel.clearAll();
+    viewModel.clearKeywordList();
     viewModel.setShowList([this.ein]);
+    viewModel.focusTip = { title: this.name || this.ein };
+    viewModel.setZoom(null, null, null);
     viewModel.computeAndSaveURLParams();
   }
 
@@ -3058,9 +3284,14 @@ export class Charity {
   }
 
   get orgShort() {
-    if (this.isGhost) return "Ghost (name on a 990-PF, no EIN on the form)";
-    if (this.isLeftover) return "Below the $10M cut";
-    if (this.isBmfOnly) return "BMF only (no 990 in this set)";
+    if (this.isGhost) return "Name-only (no EIN on the 990)";
+    if (this.ein === PATIENT_SUBSIDY_ID)
+      return "Name-only (HIPAA-redacted copays / patient assistance)";
+    if (this.isLeftover)
+      return `Name-only (see more below ${bandCutLabel(
+        viewModel?.loadedBand || defaultBandId()
+      )})`;
+    if (this.isBmfOnly) return "Name-only (no 990 in this set)";
     if (!this.org_type) return "n/a";
     if (this.ein === "001") return "US Government";
     if (this.ein.length == 3) return "Country";
@@ -3163,12 +3394,15 @@ export class Charity {
   }
 
   grokLink(message) {
+    const who = this.longEIN
+      ? `${this.name} (EIN ${this.longEIN})`
+      : this.name;
     const params = new URLSearchParams();
     params.set(
       "q",
-      `Tell me about ${this.name} who has EIN ${this.longEIN} are they legit? argue both pro and con and provide sources. Do not blindly think because they file tax returns they're legit. Read the instructions here for correcting bias: https://raw.githubusercontent.com/twinforces/grok-prompts/refs/heads/Less-Woke/bias_correction.j2 put con first because your pro arguments are generally weak.`
+      `I want a Grumpy Take on: ${who}\n\nRead and apply fully: https://gist.github.com/twinforces/534d9b662de4a010c1c4ebad934cd99a`
     );
-    return `<a href="https://grok.com/?${params.toString()}"} target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
+    return `<a href="https://grok.com/?${params.toString()}" target="_blank" rel="noopener noreferrer" class="whitespace-nowrap">${message}</a>`;
   }
 
   charityNavigatorLink(message) {
@@ -3486,6 +3720,14 @@ export class Grant {
 
   get relativeAmount() {
     return this.amt / (this.grantee.grantsTotal + 1);
+  }
+
+  toolTipText() {
+    const from = (this.filer && this.filer.name) || this.filer_ein || "?";
+    const to = (this.grantee && this.grantee.name) || this.grant_ein || "?";
+    return `${from} → ${to}\n$${formatNumber(this.amt)}${
+      this.circular ? " (circular)" : ""
+    }`;
   }
 
   clearVisibility() {

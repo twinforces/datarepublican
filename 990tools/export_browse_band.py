@@ -5,6 +5,9 @@ Nodes: latest-year Charities in the $T set, BMF-only 9-digit endpoints,
 ghosts (GIN), per-org leftover stubs. Edges: all-year grants between in-set
 keys. GINs stay graph keys; suggested_ein is phonebook only.
 
+HIPAA / patient-redacted / see-attach grantee names (big_pharma_subsidy.json)
+are rolled into one Patient Subsidies node (etc997777777), not per-GIN ghosts.
+
 Does not write recipient_ein.
 """
 
@@ -18,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+
+from dot_reporting.grant_suppress import is_suppressed_sql, subsidy_graph_key
 
 DEFAULT_DB = Path(__file__).resolve().parent / "irs990.duckdb"
 ROOT = Path(__file__).resolve().parent.parent
@@ -145,6 +150,10 @@ WHERE g.filer_ein IN (SELECT ein FROM inset_ein)
     g.recipient_ein IN (SELECT ein FROM inset_ein)
     OR g.recipient_ein IN (SELECT gin FROM inset_gin)
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM subsidy_named s
+    WHERE s.filer_ein = g.filer_ein AND s.recipient_ein = g.recipient_ein
+  )
 GROUP BY 1
 HAVING SUM(g.grant_amt) > 0;
 """
@@ -153,7 +162,12 @@ NODES_SQL = r"""
 CREATE OR REPLACE TEMP TABLE band_nodes AS
 SELECT
   l.ein AS filer_ein,
-  COALESCE(NULLIF(TRIM(l.filer_name), ''), l.ein) AS filer_name,
+  COALESCE(
+    NULLIF(TRIM(l.filer_name), ''),
+    NULLIF(TRIM(b.NAME), ''),
+    NULLIF(TRIM(gn.grantee_name), ''),
+    l.ein
+  ) AS filer_name,
   COALESCE(l.xml_name, '') AS xml_name,
   COALESCE(l.receipt_amt, 0)::BIGINT AS receipt_amt,
   COALESCE(l.govt_amt, 0)::BIGINT AS govt_amt,
@@ -165,13 +179,24 @@ SELECT
   COALESCE(l.denominator, 0) AS denominator,
   'charity' AS kind
 FROM latest_charity l
+LEFT JOIN BMF b ON b.EIN = l.ein
+LEFT JOIN (
+  SELECT recipient_ein, ANY_VALUE(grantee_name) AS grantee_name
+  FROM Grants
+  WHERE regexp_matches(recipient_ein, '^[0-9]{9}$')
+  GROUP BY 1
+) gn ON gn.recipient_ein = l.ein
 WHERE l.ein IN (SELECT ein FROM inset_ein)
 
 UNION ALL
 
 SELECT
   i.ein AS filer_ein,
-  COALESCE(NULLIF(TRIM(b.NAME), ''), i.ein) AS filer_name,
+  COALESCE(
+    NULLIF(TRIM(b.NAME), ''),
+    NULLIF(TRIM(gn.grantee_name), ''),
+    i.ein
+  ) AS filer_name,
   'backfill' AS xml_name,
   0, 0, 0, NULL,
   'backfill' AS org_type,
@@ -180,6 +205,12 @@ SELECT
 FROM inset_ein i
 LEFT JOIN latest_charity l ON l.ein = i.ein
 LEFT JOIN BMF b ON b.EIN = i.ein
+LEFT JOIN (
+  SELECT recipient_ein, ANY_VALUE(grantee_name) AS grantee_name
+  FROM Grants
+  WHERE regexp_matches(recipient_ein, '^[0-9]{9}$')
+  GROUP BY 1
+) gn ON gn.recipient_ein = i.ein
 WHERE l.ein IS NULL
 
 UNION ALL
@@ -208,6 +239,104 @@ SELECT
   'leftover' AS kind
 FROM leftovers lo;
 """
+
+
+SINK_NAME = "Patient Subsidies"
+
+
+def map_subsidy_grants(con) -> tuple[str, int]:
+    """Roll name-suppressed GIN / leftover grantees into one Patient Subsidies node.
+
+    9-digit EIN counterparties stay as themselves even if the name matches.
+    """
+    sink = subsidy_graph_key()
+    is_sub = is_suppressed_sql("g.grantee_name")
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE subsidy_named AS
+        SELECT g.filer_ein, g.recipient_ein, g.grant_amt
+        FROM Grants g
+        WHERE g.filer_ein IN (SELECT ein FROM inset_ein)
+          AND g.filer_ein IS DISTINCT FROM g.recipient_ein
+          AND g.grant_amt IS NOT NULL
+          AND NOT regexp_matches(COALESCE(g.recipient_ein, ''), '^[0-9]{{9}}$')
+          AND {is_sub}
+        """
+    )
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE subsidy_gin AS
+        SELECT DISTINCT recipient_ein AS gin FROM subsidy_named
+        WHERE (length(recipient_ein) = 66 OR length(recipient_ein) = 130)
+          AND recipient_ein LIKE '70%'
+        """
+    )
+    con.execute("DELETE FROM inset_gin WHERE gin IN (SELECT gin FROM subsidy_gin)")
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE subsidy_edges AS
+        SELECT
+          filer_ein AS from_key,
+          '{sink}' AS to_key,
+          SUM(grant_amt)::BIGINT AS amt,
+          1 AS inferred,
+          '' AS suggested_ein
+        FROM subsidy_named
+        GROUP BY 1
+        HAVING SUM(grant_amt) > 0
+        """
+    )
+    n = con.execute("SELECT COUNT(*) FROM subsidy_edges").fetchone()[0]
+    return sink, n
+
+
+def build_band_tables(con, T: int) -> dict:
+    """Populate inset_*, band_edges, leftovers, band_nodes, subsidy_* on con."""
+    con.execute(SETUP_SQL.replace("$T", str(T)))
+    sink, n_sub = map_subsidy_grants(con)
+    n_ein = con.execute("SELECT COUNT(*) FROM inset_ein").fetchone()[0]
+    n_gin = con.execute("SELECT COUNT(*) FROM inset_gin").fetchone()[0]
+    con.execute(EDGES_SQL)
+    n_edge = con.execute("SELECT COUNT(*) FROM band_edges").fetchone()[0]
+    con.execute(LEFTOVER_SQL)
+    n_lo = con.execute("SELECT COUNT(*) FROM leftovers").fetchone()[0]
+    con.execute(NODES_SQL)
+    insert_sink_node(con, sink)
+    kinds = con.execute(
+        "SELECT kind, COUNT(*) FROM band_nodes GROUP BY 1 ORDER BY 1"
+    ).fetchall()
+    return {
+        "inset_ein": n_ein,
+        "inset_gin": n_gin,
+        "subsidy_edges": n_sub,
+        "sink": sink,
+        "edges": n_edge,
+        "leftovers": n_lo,
+        "kinds": kinds,
+    }
+
+
+def insert_sink_node(con, sink: str) -> None:
+    con.execute(
+        f"""
+        INSERT INTO band_nodes
+        SELECT
+          '{sink}', '{SINK_NAME}', 'leftover',
+          0, 0, 0, NULL, 'leftover', 0, '', 0, 'leftover'
+        WHERE EXISTS (SELECT 1 FROM subsidy_edges)
+          AND NOT EXISTS (SELECT 1 FROM band_nodes WHERE filer_ein = '{sink}')
+        """
+    )
+
+
+def _iter_query(con, sql: str, batch: int = CHUNK):
+    res = con.execute(sql)
+    while True:
+        chunk = res.fetchmany(batch)
+        if not chunk:
+            break
+        for row in chunk:
+            yield row
 
 
 def _write_chunks(rows, header, prefix: Path, zip_dir: Path) -> int:
@@ -244,28 +373,122 @@ def _write_chunks(rows, header, prefix: Path, zip_dir: Path) -> int:
     return n_chunks
 
 
-def _write_data_files(path: Path, db_version: str, n_char: int, n_grant: int) -> None:
-    payload = {
-        "dbVersion": db_version,
-        "files": [
-            {
-                "status": "Loading Charities",
-                "baseFile": "/browse/tsv_chunks/charities_chunk_",
-                "tsvFilePrefix": "charities_chunk_",
-                "type": "charities",
-                "chunkCount": n_char,
-            },
-            {
-                "status": "Loading Grants",
-                "baseFile": "/browse/tsv_chunks/grants_final_chunk_",
-                "tsvFilePrefix": "grants_final_chunk_",
-                "type": "grants",
-                "chunkCount": n_grant,
-                "grantType": "regular",
-            },
-        ],
-    }
-    path.write_text("export const DATA_FILES = " + json.dumps(payload, indent=2) + ";\n")
+def _write_data_files(
+    path: Path,
+    db_version: str,
+    n_char: int,
+    n_grant: int,
+    stats: dict | None = None,
+) -> None:
+    """Rewrite $10M chunk counts; keep $1M / All file lists from the previous manifest."""
+    files_10m = [
+        {
+            "status": "Loading Charities",
+            "baseFile": "/browse/tsv_chunks/charities_chunk_",
+            "tsvFilePrefix": "charities_chunk_",
+            "type": "charities",
+            "chunkCount": n_char,
+        },
+        {
+            "status": "Loading Grants",
+            "baseFile": "/browse/tsv_chunks/grants_final_chunk_",
+            "tsvFilePrefix": "grants_final_chunk_",
+            "type": "grants",
+            "chunkCount": n_grant,
+            "grantType": "regular",
+        },
+    ]
+    s = stats or {}
+    body = f"""const FILES_10M = {json.dumps(files_10m, indent=2)};
+
+export const DATA_FILES = {{
+  dbVersion: {json.dumps(db_version)},
+  defaultBand: "10M",
+  bands: [
+    {{
+      id: "10M",
+      label: "$10M",
+      threshold: 10000000,
+      nodes: {s.get("nodes", "null")},
+      grants: {s.get("grants", "null")},
+      dollars: {s.get("dollars", "null")},
+      edges: {s.get("edges", "null")},
+      files: FILES_10M,
+    }},
+    {{
+      id: "1M",
+      label: "$1M",
+      threshold: 1000000,
+      nodes: 371236,
+      grants: 1698597,
+      dollars: 2574763247168,
+      edges: 1618824,
+      files: [
+        {{
+          status: "Loading Charities ($1M)",
+          baseFile: "/browse/tsv_chunks/1m/charities_chunk_",
+          tsvFilePrefix: "charities_chunk_",
+          type: "charities",
+          chunkCount: 38,
+        }},
+        {{
+          status: "Loading Grants ($1M)",
+          baseFile: "/browse/tsv_chunks/1m/grants_final_chunk_",
+          tsvFilePrefix: "grants_final_chunk_",
+          type: "grants",
+          chunkCount: 170,
+          grantType: "regular",
+        }},
+      ],
+    }},
+    {{
+      id: "all",
+      label: "All",
+      threshold: 1,
+      nodes: 2641709,
+      grants: 5627968,
+      dollars: 2600747385432,
+      edges: 5604343,
+      files: [
+        {{
+          status: "Loading Charities (All)",
+          baseFile: "/browse/tsv_chunks/all/charities_chunk_",
+          tsvFilePrefix: "charities_chunk_",
+          type: "charities",
+          chunkCount: 265,
+        }},
+        {{
+          status: "Loading Grants (All)",
+          baseFile: "/browse/tsv_chunks/all/grants_final_chunk_",
+          tsvFilePrefix: "grants_final_chunk_",
+          type: "grants",
+          chunkCount: 563,
+          grantType: "regular",
+        }},
+      ],
+    }},
+  ],
+  files: FILES_10M,
+}};
+"""
+    path.write_text(body)
+
+
+def _copy_dest_to_docs(dest: Path) -> Path:
+    """Copy dest into docs/browse at the same relative path. Never rmtree tsv_chunks/."""
+    browse_root = (ROOT / "browse").resolve()
+    dest_res = dest.resolve()
+    try:
+        rel = dest_res.relative_to(browse_root)
+    except ValueError:
+        rel = Path(dest.name)
+    docs_dest = ROOT / "docs" / "browse" / rel
+    docs_dest.mkdir(parents=True, exist_ok=True)
+    for old in docs_dest.glob("*.tsv.zip"):
+        old.unlink()
+    for src in dest_res.glob("*.tsv.zip"):
+        shutil.copy2(src, docs_dest / src.name)
+    return docs_dest
 
 
 def main() -> int:
@@ -274,55 +497,61 @@ def main() -> int:
     p.add_argument("--threshold", type=int, default=DEFAULT_T)
     p.add_argument("--dest", type=Path, default=ROOT / "browse" / "tsv_chunks")
     p.add_argument("--also-docs", action="store_true", default=True)
+    p.add_argument(
+        "--skip-manifest",
+        action="store_true",
+        help="Do not rewrite data_files.js (keep $10M dbVersion / IndexedDB).",
+    )
     args = p.parse_args()
     db = args.db_path.expanduser().resolve()
     dest = args.dest
     T = args.threshold
-    print(f"DB {db} T=${T:,}", flush=True)
+    print(f"DB {db} T=${T:,} dest={dest}", flush=True)
 
     con = duckdb.connect(str(db), read_only=True)
     con.execute("SET threads TO 8")
-    con.execute(SETUP_SQL.replace("$T", str(T)))
-    n_ein = con.execute("SELECT COUNT(*) FROM inset_ein").fetchone()[0]
-    n_gin = con.execute("SELECT COUNT(*) FROM inset_gin").fetchone()[0]
+    stats = build_band_tables(con, T)
+    n_ein, n_gin, n_sub, sink, n_edge, n_lo, kinds = (
+        stats["inset_ein"],
+        stats["inset_gin"],
+        stats["subsidy_edges"],
+        stats["sink"],
+        stats["edges"],
+        stats["leftovers"],
+        stats["kinds"],
+    )
     print(f"inset EIN {n_ein:,}; inset GIN {n_gin:,}", flush=True)
-    con.execute(EDGES_SQL)
-    n_edge = con.execute("SELECT COUNT(*) FROM band_edges").fetchone()[0]
+    print(f"subsidy edges {n_sub:,} → {sink}", flush=True)
     print(f"edges {n_edge:,}", flush=True)
-    con.execute(LEFTOVER_SQL)
-    n_lo = con.execute("SELECT COUNT(*) FROM leftovers").fetchone()[0]
     print(f"leftover stubs {n_lo:,}", flush=True)
-    con.execute(NODES_SQL)
-    kinds = con.execute("SELECT kind, COUNT(*) FROM band_nodes GROUP BY 1 ORDER BY 1").fetchall()
     print("nodes", kinds, flush=True)
-
-    leftover_edges = con.execute(
-        """
-        SELECT filer_ein, 'etc' || filer_ein, leftover_amt, 1, NULL
-        FROM leftovers
-        """
-    ).fetchall()
 
     dest.mkdir(parents=True, exist_ok=True)
     for old in dest.glob("*.tsv.zip"):
         old.unlink()
 
-    node_rows = con.execute(
+    node_rows = _iter_query(
+        con,
         """
         SELECT filer_ein, filer_name, xml_name, receipt_amt, govt_amt, contrib_amt,
                tax_year, org_type, total_assets, form_type, denominator
         FROM band_nodes
         ORDER BY kind, filer_ein
-        """
-    ).fetchall()
-    grant_rows = con.execute(
+        """,
+    )
+    grant_rows = _iter_query(
+        con,
         """
         SELECT from_key, to_key, amt, inferred, COALESCE(suggested_ein, '')
         FROM band_edges
-        ORDER BY amt DESC
-        """
-    ).fetchall()
-    grant_rows = list(grant_rows) + list(leftover_edges)
+        UNION ALL
+        SELECT from_key, to_key, amt, inferred, suggested_ein
+        FROM subsidy_edges
+        UNION ALL
+        SELECT filer_ein, 'etc' || filer_ein, leftover_amt, 1, ''
+        FROM leftovers
+        """,
+    )
 
     n_char_chunks = _write_chunks(node_rows, CHARITY_HEADER, dest / "charities_chunk", dest)
     n_grant_chunks = _write_chunks(grant_rows, GRANT_HEADER, dest / "grants_final_chunk", dest)
@@ -332,7 +561,32 @@ def main() -> int:
     print(f"zip bytes {zip_bytes:,} ({zip_bytes/1e6:.1f} MB)", flush=True)
 
     db_version = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _write_data_files(ROOT / "browse" / "data_files.js", db_version, n_char_chunks, n_grant_chunks)
+    if args.skip_manifest:
+        print("skip-manifest: not rewriting data_files.js", flush=True)
+    else:
+        n_nodes = con.execute("SELECT COUNT(*) FROM band_nodes").fetchone()[0]
+        n_grant_rows = n_edge + n_lo + n_sub
+        dollars = con.execute(
+            """
+            SELECT COALESCE(SUM(amt), 0) FROM (
+              SELECT amt FROM band_edges
+              UNION ALL SELECT amt FROM subsidy_edges
+              UNION ALL SELECT leftover_amt FROM leftovers
+            )
+            """
+        ).fetchone()[0]
+        _write_data_files(
+            ROOT / "browse" / "data_files.js",
+            db_version,
+            n_char_chunks,
+            n_grant_chunks,
+            stats={
+                "nodes": n_nodes,
+                "grants": n_grant_rows,
+                "dollars": int(dollars or 0),
+                "edges": n_edge + n_sub,
+            },
+        )
 
     gates = con.execute(
         """
@@ -348,13 +602,11 @@ def main() -> int:
         print(f"  {row}", flush=True)
 
     if args.also_docs:
-        docs_chunks = ROOT / "docs" / "browse" / "tsv_chunks"
-        if docs_chunks.resolve() != dest.resolve():
-            if docs_chunks.exists():
-                shutil.rmtree(docs_chunks)
-            shutil.copytree(dest, docs_chunks)
-        shutil.copy2(ROOT / "browse" / "data_files.js", ROOT / "docs" / "browse" / "data_files.js")
-        print(f"copied chunks + data_files.js to docs/browse", flush=True)
+        docs_dest = _copy_dest_to_docs(dest)
+        print(f"copied zips to {docs_dest}", flush=True)
+        if not args.skip_manifest:
+            shutil.copy2(ROOT / "browse" / "data_files.js", ROOT / "docs" / "browse" / "data_files.js")
+            print("copied data_files.js to docs/browse", flush=True)
 
     print(
         json.dumps(
@@ -365,6 +617,8 @@ def main() -> int:
                 "nodes": {k: v for k, v in kinds},
                 "edges": n_edge,
                 "leftovers": n_lo,
+                "subsidy_edges": n_sub,
+                "sink": sink,
                 "charity_chunks": n_char_chunks,
                 "grant_chunks": n_grant_chunks,
                 "zip_mb": round(zip_bytes / 1e6, 2),

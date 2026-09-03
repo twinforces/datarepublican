@@ -65,7 +65,10 @@ def _duckdb_safe_pattern(pat: str) -> str | None:
     """
     if not pat or not pat.strip():
         return None
-    # Reject lookaround / inline flags other than non-capturing groups
+    # Drop lookaround groups (DuckDB/RE2); keep the rest so (?<!C)ATCH → ATCH
+    pat = re.sub(r"\(\?<[=!][^)]*\)", "", pat)
+    pat = re.sub(r"\(\?[=!][^)]*\)", "", pat)
+    # Reject remaining inline flags other than non-capturing groups
     if re.search(r"\(\?(?![:])", pat):
         return None
     if "(?P" in pat or "(?>" in pat:
@@ -120,3 +123,23 @@ def suppressed_sql_predicate(column_sql: str = "g.grantee_name") -> str:
         return "TRUE"
     joined = "|".join(alts)
     return f"NOT regexp_matches(COALESCE({column_sql}, ''), '{joined}', 'i')"
+
+
+def is_suppressed_sql(column_sql: str = "g.grantee_name") -> str:
+    """DuckDB SQL: TRUE when the name matches a subsidy / privacy pattern."""
+    keep = suppressed_sql_predicate(column_sql)
+    if keep.strip() == "TRUE":
+        return "FALSE"
+    return f"NOT ({keep})"
+
+
+def subsidy_graph_key(path: str | None = None) -> str:
+    """Browse leftover-style key for the shared Patient Subsidies node."""
+    p = Path(path) if path else DEFAULT_PATH
+    digits = "997777777"
+    if p.exists():
+        data = json.loads(p.read_text(encoding="utf-8"))
+        raw = data.get("BIG PHARMA SUBSIDY", data)
+        if isinstance(raw, dict) and raw.get("synthetic_ein"):
+            digits = re.sub(r"\D", "", str(raw["synthetic_ein"])) or digits
+    return f"etc{digits.zfill(9)}"
