@@ -10,7 +10,7 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **Why:** Per-GIN “Individual Patient Programs” / leftover See More made a $95B graph with no sharing. Mapping belongs with `big_pharma_subsidy.json`, same as Python reports.
 
-**How:** `export_browse_band.py` + `grant_suppress.is_suppressed_sql`; 9-digit EINs not remapped. `browse/big_pharma_subsidy.js` for identity tests. `python3 test_export_browse_band.py`; `npm run test:browse` (36). Doc: `docs/export_browse_band.md`.
+**How:** `export_browse_band.py` + `grant_suppress.is_suppressed_sql`; 9-digit EINs not remapped. `browse/big_pharma_subsidy.js` for identity tests. `python3 test_export_browse_band.py`; `npm run test:browse` (36). Doc: `docs/export_browse_band.md`. Hash `f9e5336e`.
 
 **Next:** Re-export `$1M` / All with the same rollup if those notches should match. Refresh still restores URL seeds — use Replace + Biggest Pharma. Trust-the-phone-book later.
 
