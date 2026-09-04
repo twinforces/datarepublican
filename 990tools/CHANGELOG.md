@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Why:** The old card duplicated Focus/Remove/±3 and vanished on any graph click. `$1M` belongs on leftover See more. Zoom that fitted all 1-hop Y extents (or a full column pitch) equaled fit-to-graph, so only the pan changed.
 - **Change:** Sticky right drawer (kind, in/out, neighbor jumps, compact links, pork). Zoom mode + card button: node ~55% of view height, modest side margin, same transform as the brush. `$10M` load ms still scales `$1M`/All estimates.
 - **Failure:** First Zoom used the bounding box of every visible donor/grantee — that’s the whole column. Then `2× columnPitch` on a 3-column Focus graph is the whole Sankey.
-- **Doc:** `docs/RECENTGOALS.md`. Tests: `npm run test:browse`.
+- **Doc:** `docs/RECENTGOALS.md`. Hash `8c18cf27`. Tests: `npm run test:browse`.
 
 ---
 

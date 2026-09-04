@@ -10,9 +10,9 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **Why:** Overlay controls eat the Sankey. `$1M`/`All` are triggered from See more / inspect, not the top notches. Fitting every 1-hop neighbor (or `2×` column pitch) is the whole 3-column graph, so scale never moved.
 
-**How:** Box is this node’s layout rect; height so the node is ~55% of the view; horizontal margin `min(pitch, 3×nodeH, 8×nodeW)`. `npm run test:browse` (42).
+**How:** Box is this node’s layout rect; height so the node is ~55% of the view; horizontal margin `min(pitch, 3×nodeH, 8×nodeW)`. `npm run test:browse` (42). Hash `8c18cf27`.
 
-**Next:** Push `grokrefactor3`. Map view later. Overlay layout flyout still optional polish.
+**Next:** Map view later. Overlay layout flyout still optional polish.
 
 ---
 
