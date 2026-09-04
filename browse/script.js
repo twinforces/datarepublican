@@ -15,7 +15,11 @@ import {
   bandHasFiles,
   bandCutLabel,
   canUpgradeBand,
+  nextHostedBandId,
   defaultBandId,
+  estimateBandLoadMs,
+  formatDuration,
+  lastBandLoadMs,
   PATIENT_SUBSIDY_ID,
 } from "./models.js";
 
@@ -89,9 +93,11 @@ function bandCopy(bandId, { missing = false, fromStore = false } = {}) {
   const label = band?.label || "$10M";
   const current = bandCutLabel(viewModel.loadedBand || defaultBandId());
   if (missing) {
+    const zipMb = band?.zipBytes ? (band.zipBytes / 1e6).toFixed(0) : null;
+    const size = zipMb ? ` (${zipMb} MB zip; ${nodes} organizations)` : "";
     return {
-      title: `No ${label} data yet.`,
-      body: `Stay on ${current}.`,
+      title: `<b>${label}</b> is coming soon.`,
+      body: `This band is too large to ship with the site${size}. Stay on ${current}. Full filings are on <a href="https://www.grumpytechbro.com/irs990.html" target="_blank" rel="noopener">Export Database</a>.`,
       local: "",
     };
   }
@@ -99,12 +105,28 @@ function bandCopy(bandId, { missing = false, fromStore = false } = {}) {
     nodes && grants
       ? ` About ${nodes} organizations and ${grants} grants.`
       : "";
+  const zipMb = band?.zipBytes ? (band.zipBytes / 1e6).toFixed(1) : null;
+  const measured = lastBandLoadMs(bandId, fromStore ? "idb" : "web");
+  const est = !fromStore && bandId !== "10M" ? estimateBandLoadMs(bandId) : null;
+  let wait = "";
+  if (fromStore && measured) {
+    wait = ` Last local load of this band: ${formatDuration(measured)}.`;
+  } else if (measured) {
+    wait = ` Last download of this band: ${formatDuration(measured)}.`;
+  } else if (est) {
+    const t10 = lastBandLoadMs("10M", "web");
+    wait = t10
+      ? ` Zip ${zipMb} MB. If $10M took ${formatDuration(t10)}, plan on about ${formatDuration(est)}.`
+      : ` Zip ${zipMb} MB (~${zipMb ? (band.zipBytes / 14122476).toFixed(1) : "?"}× the $10M download).`;
+  } else if (zipMb) {
+    wait = ` Zip ${zipMb} MB.`;
+  }
   return {
     title: `This is the <b>${label} band</b>.${extra} Each deeper notch is a full new load (not an add-on). Dashed octagons are <b>name-only</b> — no EIN on the 990, or grants below this cut.`,
     body: fromStore
-      ? `Welcome back — loading ${label} from your local store.`
-      : `This downloads into this browser. Reloads of the same band should be faster. Click a node to focus it. Shift-drag box-zooms; shift-click hides a node.`,
-    local: `Welcome back — loading the ${label} band from your local store.`,
+      ? `Welcome back — loading ${label} from your local store.${wait}`
+      : `This downloads into this browser.${wait} Reloads of the same band should be faster. Click a node to focus it. Shift-drag box-zooms; shift-click hides a node.`,
+    local: `Welcome back — loading the ${label} band from your local store.${wait}`,
   };
 }
 
@@ -129,7 +151,7 @@ function showBandLoader(bandId, { missing = false } = {}) {
     document.documentElement.style.setProperty("--db-load", "none");
     $("#loadingBandMissing").removeClass("hidden");
     $("#loadingBandDismiss").removeClass("hidden");
-    updateStatus(`No ${bandCutLabel(bandId)} data yet`, "black", false);
+    updateStatus(`${bandCutLabel(bandId)} coming soon`, "black", false);
   } else {
     viewModel.bandPrompt = false;
     $("#loadingBandMissing").addClass("hidden");
@@ -141,15 +163,17 @@ function renderBandControl() {
   const el = document.getElementById("bandControl");
   if (!el) return;
   const loaded = viewModel.loadedBand || defaultBandId();
-  const nextId = nextBandId(loaded);
+  const nextId = nextHostedBandId(loaded);
   el.innerHTML = browseBands()
     .map((band) => {
       const isCurrent = band.id === loaded;
-      const isNext = band.id === nextId;
+      const hosted = bandHasFiles(band);
+      const isNext = hosted && band.id === nextId;
       const classes = [
         "band-notch",
         isCurrent ? "is-current" : "",
         isNext ? "is-next" : "",
+        !hosted && !isCurrent ? "is-locked" : "",
       ]
         .filter(Boolean)
         .join(" ");
@@ -162,14 +186,30 @@ function renderBandControl() {
             : "—";
       const dollars =
         band.dollars != null ? `$${formatNumber(band.dollars)}` : "—";
+      const zipMb = band.zipBytes ? `${(band.zipBytes / 1e6).toFixed(1)} MB` : "";
+      const t10 = lastBandLoadMs("10M", "web");
+      const est = estimateBandLoadMs(band.id);
+      const waitHint =
+        band.id === loaded
+          ? lastBandLoadMs(band.id, "idb")
+            ? ` last local ${formatDuration(lastBandLoadMs(band.id, "idb"))}`
+            : lastBandLoadMs(band.id, "web")
+              ? ` last download ${formatDuration(lastBandLoadMs(band.id, "web"))}`
+              : ""
+          : est && t10
+            ? ` est. ${formatDuration(est)}`
+            : zipMb
+              ? ` ${zipMb}`
+              : "";
       const title = isCurrent
-        ? `${band.label} loaded — ${nodes} nodes, ${grants} grants, ${dollars}`
-        : bandHasFiles(band)
-          ? `Download ${band.label} (${nodes} nodes, ${grants} grants, ${dollars}) — another wait`
-          : `${band.label} (${nodes} nodes) — no data yet`;
+        ? `${band.label} loaded — ${nodes} nodes, ${grants} grants, ${dollars}${waitHint}`
+        : hosted
+          ? `Download ${band.label} (${nodes} nodes, ${grants} grants, ${dollars}${waitHint ? "," + waitHint : ""}) — another wait`
+          : `${band.label} coming soon — too large to ship with this site (${nodes} orgs${zipMb ? ", " + zipMb : ""}). Warehouse: Export Database`;
       return `<button type="button" class="${classes}" data-band="${band.id}" title="${title}" role="radio" aria-checked="${isCurrent}">
         <span class="dot"></span>
         <span class="label">${band.label}</span>
+        ${!hosted && !isCurrent ? `<span class="soon">Coming soon</span>` : ""}
         <span class="stats">
           <span class="stat-nodes">${nodes}</span>
           <span class="stat-grants">${grants}</span>
@@ -177,12 +217,6 @@ function renderBandControl() {
       </button>`;
     })
     .join("");
-}
-
-function nextBandId(loaded) {
-  const order = ["10M", "1M", "all"];
-  const i = order.indexOf(loaded);
-  return i >= 0 && i < order.length - 1 ? order[i + 1] : null;
 }
 
 window.requestBand = async function (id) {
@@ -2518,11 +2552,13 @@ function showControlPanel(type, data, element) {
           <p>Rolled-up copay / drug subsidies. The 990 lists HIPAA-redacted patients, “see statement,” and similar — not named NGOs. Hats on a manufacturer’s foundation still expand any real named grants.</p>`;
       } else if (node.isLeftover) {
         const cut = bandCutLabel(viewModel.loadedBand);
-        const nextId = nextBandId(viewModel.loadedBand) || "1M";
-        const nextLabel = bandCutLabel(nextId);
+        const nextId = nextHostedBandId(viewModel.loadedBand);
+        const nextBit = nextId
+          ? `<p>You must download the <b>${bandCutLabel(nextId)}</b> band to see this detail. <a href="#" onclick="requestBand('${nextId}'); return false;">Click here</a> to do that.</p>`
+          : `<p>Smaller grants live in the <b>$1M</b> and <b>All</b> bands, which are coming soon — too large to ship with this site. Full filings: <a href="https://www.grumpytechbro.com/irs990.html" target="_blank" rel="noopener">Export Database</a>.</p>`;
         links = `<p>${node.orgShort}</p>
           <p>Name-only stub: grants from this org to counterparties below the <b>${cut}</b> cut.</p>
-          <p>You must download the <b>${nextLabel}</b> band to see this detail. <a href="#" onclick="requestBand('${nextId}'); return false;">Click here</a> to do that.</p>`;
+          ${nextBit}`;
       } else {
         links = `<p>${node.orgShort}</p>`;
       }

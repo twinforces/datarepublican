@@ -5,6 +5,7 @@ import {
   bandHasFiles,
   canUpgradeBand,
   defaultBandId,
+  nextHostedBandId,
 } from "../models.js";
 import { IDS, buildGatesGraph } from "./gatesGraph.js";
 
@@ -146,7 +147,7 @@ describe("BrowseViewModel", () => {
     expect(g.nodes.leftover.kind).toBe("leftover");
   });
 
-  it("default band is $10M; $1M and All are upgrades", () => {
+  it("default band is $10M; $1M and All are hosted upgrades", () => {
     expect(defaultBandId()).toBe("10M");
     expect(g.vm.loadedBand).toBe("10M");
     expect(canUpgradeBand("10M", "1M")).toBe(true);
@@ -156,6 +157,8 @@ describe("BrowseViewModel", () => {
     expect(bandHasFiles(bandById("10M"))).toBe(true);
     expect(bandHasFiles(bandById("1M"))).toBe(true);
     expect(bandHasFiles(bandById("all"))).toBe(true);
+    expect(nextHostedBandId("10M")).toBe("1M");
+    expect(bandById("1M").files[0].baseFile).toMatch(/^https:\/\/www\.grumpytechbro\.com\//);
   });
 
   it("requestBand same band is a no-op", async () => {

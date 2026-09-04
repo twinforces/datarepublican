@@ -173,6 +173,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
       it (this org and its up/down only). Hats still expand 3 more on that side;
       double-click expands both sides. Alt-click opens the control panel.
       The <b>$10M / $1M / All</b> notches each load a full new set (another wait).
+      $10M ships with the site; $1M and All download from grumpytechbro.com.
       Preset <b>add</b> seeds several nodes (Uniparty); flip the switch to replace.
       Click mode sits above circular links: pointing hand isolates that org,
       plus keeps the graph and seeds it, magnifying glass inspects. Drag pans.
@@ -218,7 +219,7 @@ title: Charity explorer - Sankey chart of NGOs and their flows
         <li>Drag to pan</li>
         <li>Wheel to zoom</li>
         <li>Shift-drag box-zooms a region</li>
-        <li>Click mode: Focus / Add / Inspect (above circular)</li>
+        <li>Click mode: Focus / Add / Remove / Inspect (above circular)</li>
         <li>Shift-click a node hides it</li>
       </ul>
     </div>
@@ -662,11 +663,11 @@ L21.96,11.51"
           <button type="button" data-mode="add" title="Add: keep the graph and seed this org">
             <i class="fas fa-plus" data-fa-svg></i>
           </button>
-          <button type="button" data-mode="inspect" title="Inspect: open the card">
-            <i class="fas fa-magnifying-glass" data-fa-svg></i>
-          </button>
           <button type="button" data-mode="subtract" title="Remove this org from the graph (Shift)">
             <i class="fas fa-xmark" data-fa-svg></i>
+          </button>
+          <button type="button" data-mode="inspect" title="Inspect: open the card">
+            <i class="fas fa-magnifying-glass" data-fa-svg></i>
           </button>
         </div>
         <div class="circular-toggle ngopreset-mode-switch" title="Looping grant flows">

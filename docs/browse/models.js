@@ -55,9 +55,18 @@ export function canUpgradeBand(fromId, toId) {
 }
 
 export function bandHasFiles(band) {
-  if (!band) return false;
+  if (!band || band.available === false) return false;
   const files = band.files || [];
   return files.some((f) => (f.chunkCount || 0) > 0);
+}
+
+/** Next deeper band that this origin actually hosts. */
+export function nextHostedBandId(fromId) {
+  const start = bandIndex(fromId);
+  for (const b of browseBands()) {
+    if (bandIndex(b.id) > start && bandHasFiles(b)) return b.id;
+  }
+  return null;
 }
 
 export function filesForBand(id) {
@@ -69,6 +78,58 @@ export function filesForBand(id) {
 
 export function bandCutLabel(id) {
   return (bandById(id) || bandById(defaultBandId()) || { label: "$10M" }).label;
+}
+
+export function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 90) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  const r = Math.round(s - m * 60);
+  return r ? `${m}m ${r}s` : `${m}m`;
+}
+
+const LOAD_TIME_KEY = "browseBandLoadMs";
+
+export function recordBandLoadMs(bandId, source, ms) {
+  if (typeof localStorage === "undefined" || !bandId || !Number.isFinite(ms))
+    return;
+  try {
+    const all = JSON.parse(localStorage.getItem(LOAD_TIME_KEY) || "{}");
+    const ver = DATA_FILES.dbVersion || "";
+    if (!all[ver]) all[ver] = {};
+    if (!all[ver][bandId]) all[ver][bandId] = {};
+    all[ver][bandId][source] = Math.round(ms);
+    localStorage.setItem(LOAD_TIME_KEY, JSON.stringify(all));
+  } catch (e) {
+    /* quota / private mode */
+  }
+}
+
+export function lastBandLoadMs(bandId, source) {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const all = JSON.parse(localStorage.getItem(LOAD_TIME_KEY) || "{}");
+    const ver = DATA_FILES.dbVersion || "";
+    const ms = all[ver] && all[ver][bandId] && all[ver][bandId][source];
+    return Number.isFinite(ms) ? ms : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Scale a measured $10M load by zip bytes and grant rows (CPU-bound unzip+IDB). */
+export function estimateBandLoadMs(bandId) {
+  const base = lastBandLoadMs("10M", "web") || lastBandLoadMs("10M", "idb");
+  const from = bandById("10M");
+  const to = bandById(bandId);
+  if (!base || !from || !to || bandId === "10M") return base;
+  const byteR =
+    from.zipBytes && to.zipBytes ? to.zipBytes / from.zipBytes : 1;
+  const grantR =
+    from.grants && to.grants ? to.grants / from.grants : byteR;
+  return Math.round(base * Math.max(byteR, grantR));
 }
 
 import ORGANIZATION_TYPES from "./charityTypes.js";
@@ -2033,6 +2094,7 @@ export class BrowseViewModel {
         updateStatus(
           `Loading ${bandCutLabel(this.loadedBand)} band from local store...`
         );
+        const tLoad = typeof performance !== "undefined" ? performance.now() : Date.now();
         if (DEBUGLOG) console.time("loadCharitiesFromDB");
         const charities = await fetchLocalData(this.db, CHARITY_STORE);
         if (DEBUGLOG) console.timeEnd("loadCharitiesFromDB");
@@ -2137,12 +2199,16 @@ export class BrowseViewModel {
             }`
           );
 
+        const idbMs =
+          (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+          tLoad;
+        recordBandLoadMs(this.loadedBand, "idb", idbMs);
         updateStatus(
           `Loaded ${formatNumber(
             Object.keys(Charity.charityLookup).length
           )} charities, ${formatNumber(
             Object.keys(Grant.grantLookup).length
-          )} grants from local storage`,
+          )} grants from local storage in ${formatDuration(idbMs)}`,
           "green",
           false
         );
@@ -2154,14 +2220,19 @@ export class BrowseViewModel {
         loadingViaWeb();
 
         try {
+          const tWeb = typeof performance !== "undefined" ? performance.now() : Date.now();
           await this.ingestBandFromWeb(this.loadedBand);
+          const webMs =
+            (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+            tWeb;
+          recordBandLoadMs(this.loadedBand, "web", webMs);
 
           updateStatus(
             `Loaded ${formatNumber(
               Object.keys(Charity.charityLookup).length
             )} charities, ${formatNumber(
               Object.keys(Grant.grantLookup).length
-            )} grants from server`,
+            )} grants from server in ${formatDuration(webMs)}`,
             "green",
             false
           );
@@ -2256,7 +2327,12 @@ export class BrowseViewModel {
       updateStatus(
         `Downloading ${bandCutLabel(bandId)} band (another wait)...`
       );
+      const tWeb = typeof performance !== "undefined" ? performance.now() : Date.now();
       await this.ingestBandFromWeb(bandId);
+      const webMs =
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+        tWeb;
+      recordBandLoadMs(bandId, "web", webMs);
       this.loadedBand = bandId;
       this.dataReady = true;
       updateStatus(
@@ -2264,7 +2340,7 @@ export class BrowseViewModel {
           Object.keys(Charity.charityLookup).length
         )} charities, ${formatNumber(
           Object.keys(Grant.grantLookup).length
-        )} grants from ${bandCutLabel(bandId)}`,
+        )} grants from ${bandCutLabel(bandId)} in ${formatDuration(webMs)}`,
         "green",
         false
       );

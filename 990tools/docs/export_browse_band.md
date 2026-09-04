@@ -13,7 +13,15 @@ python export_browse_band.py --db-path irs990.duckdb --threshold 10000000
 
 Writes `browse/tsv_chunks/*.tsv.zip`, `browse/data_files.js`, copies into `docs/browse/`.
 
-Browse `$10M / $1M / All` notches read `DATA_FILES.bands`. Default load is **$10M**. `$1M` and **All** are opt-in (new loader) once those subdir chunks exist (`chunkCount > 0`). Export Database in the UI is the Hugging Face warehouse (`https://www.grumpytechbro.com/irs990.html`), not an IndexedDB dump.
+Browse `$10M / $1M / All` notches read `DATA_FILES.bands`. Default load is **$10M** from Vercel `/browse/tsv_chunks/` (~14 MB, belongs in git). `$1M` (~58 MB) and **All** (~363 MB) are **not** in git: Vercel/GitHub cannot carry All, LFS is the wrong tool for a public `fetch()`, and Hugging Face is a dataset warehouse (already used by Export Database) not a website CDN. Those bands’ `baseFile` URLs are `https://www.grumpytechbro.com/browse/tsv_chunks/{1m,all}/…` (DreamHost; CORS `*` on that directory). After a deeper export, rsync the zip tree:
+
+```bash
+# from grumpytechbro.com
+./scripts/rsync-browse-bands.sh --1m
+./scripts/rsync-browse-bands.sh --all
+```
+
+Then bump that band's `files[].chunkCount` / `nodes` / `edges` / `zipBytes` in `browse/data_files.js`. Export Database is still the Hugging Face warehouse (`https://www.grumpytechbro.com/irs990.html`), not an IndexedDB dump.
 
 ```bash
 python export_browse_band.py --db-path irs990.duckdb --threshold 1000000 --dest ../browse/tsv_chunks/1m --skip-manifest

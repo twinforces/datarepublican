@@ -584,8 +584,23 @@
     border-style: dashed;
   }
   .band-notch.is-locked {
-    opacity: 0.5;
-    cursor: default;
+    opacity: 0.55;
+    cursor: pointer;
+  }
+  .band-notch.is-locked .dot {
+    border-style: dotted;
+    background: #e5e7eb;
+  }
+  .band-notch.is-locked .soon {
+    font-size: 9px;
+    font-weight: 600;
+    font-style: italic;
+    color: #6b7280;
+    line-height: 1.1;
+  }
+  .band-notch.is-locked .stat-nodes,
+  .band-notch.is-locked .stat-grants {
+    color: #9ca3af;
   }
   .band-notch:focus-visible {
     outline: 2px solid #2563eb;
