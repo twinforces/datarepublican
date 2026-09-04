@@ -9,8 +9,8 @@
       src="https://platform.twitter.com/widgets.js"
       charset="utf-8"
     ></script>
-    <link rel="stylesheet" href="/assets/css/styles.css?v=1788493031">
-<link rel="stylesheet" href="/assets/css/map-style.css?v=1788493031">
+    <link rel="stylesheet" href="/assets/css/styles.css?v=1788535664">
+<link rel="stylesheet" href="/assets/css/map-style.css?v=1788535664">
 <script src="/assets/js/jquery.min.js"></script>
 <script src="/assets/js/functions.js"></script>
 
@@ -1075,7 +1075,9 @@ $(document).ready(function() {
       $10M ships with the site; $1M and All download from grumpytechbro.com.
       Preset <b>add</b> seeds several nodes (Uniparty); flip the switch to replace.
       Click mode sits above circular links: pointing hand isolates that org,
-      plus keeps the graph and seeds it, magnifying glass inspects. Drag pans.
+      expand-arrows frames it ± one hop (camera only), plus keeps the graph,
+      magnifying glass opens the inspector. Deeper bands load from leftover
+      See more in that drawer. Drag pans.
       Wheel zooms. <b>Shift-drag</b> box-zooms. <b>Shift-click</b> hides a node.
     </p>
     <p class="text-xs">In the control panel:</p>
@@ -1138,7 +1140,7 @@ $(document).ready(function() {
         <li>Drag to pan</li>
         <li>Wheel to zoom</li>
         <li>Shift-drag box-zooms a region</li>
-        <li>Click mode: Focus / Add / Remove / Inspect (above circular)</li>
+        <li>Click mode: Focus / Zoom / Add / Remove / Inspect</li>
         <li>Shift-click a node hides it</li>
       </ul>
     </div>
@@ -1587,6 +1589,9 @@ L21.96,11.51"
           <button type="button" data-mode="focus" class="is-on" title="Focus: click isolates this org; click it again to expand both sides">
             <i class="fas fa-hand-pointer" data-fa-svg></i>
           </button>
+          <button type="button" data-mode="zoom" title="Zoom: frame this org and one hop up/down">
+            <i class="fas fa-expand" data-fa-svg></i>
+          </button>
           <button type="button" data-mode="add" title="Add: keep the graph and seed this org">
             <i class="fas fa-plus" data-fa-svg></i>
           </button>
@@ -1626,15 +1631,7 @@ L21.96,11.51"
     </div>
   </div>
   <div id="graphTip" class="graph-tip hidden"></div>
-  <div
-    id="control-panel"
-    class="hidden fixed top-2 right-2 bg-white border border-gray-300 p-4 z-30 shadow-lg rounded"
-  >
-    <button onclick="closePanel()" class="absolute top-1 right-1 text-sm">
-      X
-    </button>
-    <!-- Dynamic content will be inserted here -->
-  </div>
+  <div id="control-panel" class="inspector-drawer"></div>
   <!-- Floating Message Box: Centered below -->
   <div
     id="loading"

@@ -5,7 +5,9 @@ import {
   bandHasFiles,
   canUpgradeBand,
   defaultBandId,
+  estimateBandLoadMs,
   nextHostedBandId,
+  recordBandLoadMs,
 } from "../models.js";
 import { IDS, buildGatesGraph } from "./gatesGraph.js";
 
@@ -55,6 +57,15 @@ describe("BrowseViewModel", () => {
     const before = g.vm.getShowList().slice();
     expect(g.vm.clickNode({}, g.nodes.foundation, null)).toBe("inspect");
     expect(g.vm.getShowList()).toEqual(before);
+  });
+
+  it("click mode zoom does not tunnel or seed", () => {
+    g.nodes.trust.place(1, 1);
+    g.vm.setClickMode("zoom");
+    const before = g.vm.getShowList().slice();
+    expect(g.vm.clickNode({}, g.nodes.foundation, null)).toBe("zoom");
+    expect(g.vm.getShowList()).toEqual(before);
+    expect(g.nodes.foundation.kindCaption).toBe("Charity");
   });
 
   it("clicking a leftover stub does not tunnel or load more", () => {
@@ -159,6 +170,32 @@ describe("BrowseViewModel", () => {
     expect(bandHasFiles(bandById("all"))).toBe(true);
     expect(nextHostedBandId("10M")).toBe("1M");
     expect(bandById("1M").files[0].baseFile).toMatch(/^https:\/\/www\.grumpytechbro\.com\//);
+  });
+
+  it("estimates $1M and All from this machine's $10M load, ignoring origin", () => {
+    const store = {};
+    const prev = globalThis.localStorage;
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => {
+        store[k] = String(v);
+      },
+    };
+    try {
+      recordBandLoadMs("10M", "web", 136000);
+      const ten = bandById("10M");
+      const one = bandById("1M");
+      const all = bandById("all");
+      expect(estimateBandLoadMs("1M")).toBe(
+        Math.round(136000 * (one.zipBytes / ten.zipBytes))
+      );
+      expect(estimateBandLoadMs("all")).toBe(
+        Math.round(136000 * (all.zipBytes / ten.zipBytes))
+      );
+    } finally {
+      if (prev === undefined) delete globalThis.localStorage;
+      else globalThis.localStorage = prev;
+    }
   });
 
   it("requestBand same band is a no-op", async () => {

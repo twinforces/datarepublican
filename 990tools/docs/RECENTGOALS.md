@@ -4,6 +4,18 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-09-04: Sticky inspector + Zoom camera
+
+**What:** Inspect opens a right drawer (kind, money, top-5 in/out, compact links). Graph click does not close it (Escape / ×). Click mode **Zoom** (and the card’s Zoom ±1 hop) is a camera: same `k`/`translate` as shift-drag box zoom. Leftover See more loads the next hosted band from the card (`$1M` wait scaled from this machine’s `$10M`). Graph surgery stays in click-mode, not the card. Map view later as a popup from the drawer (`openInspectorMap` stub).
+
+**Why:** Overlay controls eat the Sankey. `$1M`/`All` are triggered from See more / inspect, not the top notches. Fitting every 1-hop neighbor (or `2×` column pitch) is the whole 3-column graph, so scale never moved.
+
+**How:** Box is this node’s layout rect; height so the node is ~55% of the view; horizontal margin `min(pitch, 3×nodeH, 8×nodeW)`. `npm run test:browse` (42).
+
+**Next:** Push `grokrefactor3`. Map view later. Overlay layout flyout still optional polish.
+
+---
+
 ## 2026-09-03: $1M / All bands on grumpytechbro.com
 
 **What:** `$10M` stays in the Vercel `docs/` deploy. `$1M` (~58 MB / 208 zips) and **All** (~363 MB / 823 zips) `baseFile` is `https://www.grumpytechbro.com/browse/tsv_chunks/{1m,all}/`. CORS `Access-Control-Allow-Origin: *` on that directory. Loader records last `$10M` unzip+IDB time and estimates deeper bands. Leftover “See more” offers the next *hosted* notch. Local zip trees stay untracked.
@@ -36,6 +48,6 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **How:** BMF `street/city/state/zip` on $10M export (`dbVersion` `2026-09-03T17:26:39Z`). `npm run test:browse` (40). Hash `d1301a4c`.
 
-**Next:** Octopus/Leaflet later. Manual demo on the live graph.
+**Next:** Map view (Leaflet) as an inspector popup, not a Sankey overlay.
 
 ---

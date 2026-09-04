@@ -276,6 +276,12 @@
 #graph-container.click-subtract .circular-link {
   cursor: not-allowed;
 }
+#graph-container.click-zoom .node path,
+#graph-container.click-zoom .nodeLabel,
+#graph-container.click-zoom .link,
+#graph-container.click-zoom .circular-link {
+  cursor: crosshair;
+}
 .graph-tip {
   position: fixed;
   z-index: 50;
@@ -334,40 +340,111 @@
     overflow: hidden;
   }
 
-  #control-panel {
-    background: #f9f9f9;
-    border: 1px solid #ddd;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    padding: 15px;
-    width: 500px;
-    font-family: Arial, sans-serif;
+  #control-panel,
+  .inspector-drawer {
+    display: none;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(340px, 92vw);
+    margin: 0;
+    padding: 12px 14px 20px;
+    background: #f8fafc;
+    border: none;
+    border-left: 1px solid #d1d5db;
+    box-shadow: -8px 0 24px rgba(0,0,0,0.12);
+    z-index: 40;
+    overflow-y: auto;
+    flex-direction: column;
+    font-family: system-ui, sans-serif;
   }
-
+  #control-panel.is-open,
+  .inspector-drawer.is-open {
+    display: flex;
+  }
   #control-panel h3 {
-    margin-top: 0;
-    font-size: 0.8rem;
+    margin: 0.2rem 0 0.35rem;
+    font-size: 0.95rem;
+    line-height: 1.25;
   }
-
   #control-panel p {
-    margin: 5px 0;
+    margin: 0.25rem 0;
     font-size: 0.75rem;
   }
-
-  #control-panel button {
-    margin-right: 5px;
-    margin-top: 5px;
-    padding: 0.3rem 0.6rem;
-    background: #007bff;
-    color: white;
+  .insp-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: none;
     border: none;
-    border-radius: 3px;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    color: #111;
+  }
+  .insp-kind {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #4b5563;
+    margin: 0;
+  }
+  .insp-id { color: #4b5563; }
+  .insp-primary {
+    display: block;
+    width: 100%;
+    margin: 8px 0;
+    padding: 0.45rem 0.6rem;
+    background: #111;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .insp-primary:hover { background: #2563eb; }
+  .insp-links {
+    font-size: 11px;
+    line-height: 1.5;
+    margin-top: 0.75rem;
+  }
+  .insp-links a { text-decoration: underline; }
+  .insp-note { font-size: 10px; color: #6b7280; }
+  .insp-neighbors ul {
+    list-style: none;
+    margin: 0 0 0.5rem;
+    padding: 0;
+  }
+  .insp-neighbors li {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 11px;
+    margin: 0.15rem 0;
+  }
+  .insp-k { font-weight: 700; font-size: 10px; text-transform: uppercase; margin-top: 0.6rem; }
+  .insp-neighbor {
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
     cursor: pointer;
     font-size: 11px;
-    line-height: 1rem;
+    color: #111;
   }
-
-  #control-panel button:hover {
-    background: #0056b3;
+  .insp-grant {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 12px;
+  }
+  #control-panel button.insp-primary,
+  #control-panel button.insp-neighbor,
+  #control-panel button.insp-close {
+    margin-right: 0;
   }
 
   .disabled button {
@@ -564,9 +641,14 @@
     line-height: 1.15;
   }
   .band-notch .stat-nodes,
-  .band-notch .stat-grants {
+  .band-notch .stat-grants,
+  .band-notch .stat-wait {
     font-size: 10px;
     color: #4b5563;
+  }
+  .band-notch .stat-wait {
+    font-size: 9px;
+    font-style: italic;
   }
   .band-notch .stat-nodes {
     font-weight: 600;

@@ -119,17 +119,23 @@ export function lastBandLoadMs(bandId, source) {
   }
 }
 
-/** Scale a measured $10M load by zip bytes and grant rows (CPU-bound unzip+IDB). */
+/** This machine's $10M wait. Prefer first download; IDB reload is the fallback. */
+export function tenMLoadMs() {
+  return lastBandLoadMs("10M", "web") || lastBandLoadMs("10M", "idb");
+}
+
+/**
+ * Scale the measured $10M load by zip bytes.
+ * Origin (Vercel vs DreamHost) is ignored — unzip+IDB dominates, and we
+ * only have one timed wait per visitor.
+ */
 export function estimateBandLoadMs(bandId) {
-  const base = lastBandLoadMs("10M", "web") || lastBandLoadMs("10M", "idb");
+  const base = tenMLoadMs();
   const from = bandById("10M");
   const to = bandById(bandId);
   if (!base || !from || !to || bandId === "10M") return base;
-  const byteR =
-    from.zipBytes && to.zipBytes ? to.zipBytes / from.zipBytes : 1;
-  const grantR =
-    from.grants && to.grants ? to.grants / from.grants : byteR;
-  return Math.round(base * Math.max(byteR, grantR));
+  if (!from.zipBytes || !to.zipBytes) return null;
+  return Math.round(base * (to.zipBytes / from.zipBytes));
 }
 
 import ORGANIZATION_TYPES from "./charityTypes.js";
@@ -1697,7 +1703,8 @@ export class BrowseViewModel {
       mode === "add" ||
       mode === "inspect" ||
       mode === "focus" ||
-      mode === "subtract"
+      mode === "subtract" ||
+      mode === "zoom"
     ) {
       this.clickMode = mode;
     } else {
@@ -1730,6 +1737,9 @@ export class BrowseViewModel {
     }
     if (mode === "inspect") {
       return "inspect";
+    }
+    if (mode === "zoom") {
+      return "zoom";
     }
     if (mode === "add") {
       this.addToShowList(
@@ -3390,6 +3400,16 @@ export class Charity {
       console.log(
         `Placed ${this.id}: ${this.visibleGrants.length} outflows visible, ${this.invisibleGrants.length} outflows invisible, ${this.visibleGrantsIn.length} inflows visible`
       );
+  }
+
+  get kindCaption() {
+    if (this.isGov) return "US Government";
+    if (this.ein === PATIENT_SUBSIDY_ID) return "Patient subsidies";
+    if (this.isLeftover) return "Below this cut";
+    if (this.isGhost) return "Name-only";
+    if (this.isBmfOnly) return "BMF only (no 990 here)";
+    if (this.has990Card) return "Charity";
+    return "Organization";
   }
 
   get orgShort() {

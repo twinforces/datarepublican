@@ -20,6 +20,7 @@ import {
   estimateBandLoadMs,
   formatDuration,
   lastBandLoadMs,
+  tenMLoadMs,
   PATIENT_SUBSIDY_ID,
 } from "./models.js";
 
@@ -107,19 +108,22 @@ function bandCopy(bandId, { missing = false, fromStore = false } = {}) {
       : "";
   const zipMb = band?.zipBytes ? (band.zipBytes / 1e6).toFixed(1) : null;
   const measured = lastBandLoadMs(bandId, fromStore ? "idb" : "web");
+  const t10 = tenMLoadMs();
   const est = !fromStore && bandId !== "10M" ? estimateBandLoadMs(bandId) : null;
   let wait = "";
   if (fromStore && measured) {
     wait = ` Last local load of this band: ${formatDuration(measured)}.`;
   } else if (measured) {
     wait = ` Last download of this band: ${formatDuration(measured)}.`;
-  } else if (est) {
-    const t10 = lastBandLoadMs("10M", "web");
-    wait = t10
-      ? ` Zip ${zipMb} MB. If $10M took ${formatDuration(t10)}, plan on about ${formatDuration(est)}.`
-      : ` Zip ${zipMb} MB (~${zipMb ? (band.zipBytes / 14122476).toFixed(1) : "?"}× the $10M download).`;
+  } else if (est && t10) {
+    const tenM = bandById("10M");
+    const x =
+      tenM?.zipBytes && band?.zipBytes
+        ? (band.zipBytes / tenM.zipBytes).toFixed(1)
+        : "?";
+    wait = ` $10M took ${formatDuration(t10)} on this machine; this band is ${x}× that zip — about ${formatDuration(est)}.`;
   } else if (zipMb) {
-    wait = ` Zip ${zipMb} MB.`;
+    wait = ` Zip ${zipMb} MB. After $10M finishes we will estimate from that wait.`;
   }
   return {
     title: `This is the <b>${label} band</b>.${extra} Each deeper notch is a full new load (not an add-on). Dashed octagons are <b>name-only</b> — no EIN on the 990, or grants below this cut.`,
@@ -187,7 +191,7 @@ function renderBandControl() {
       const dollars =
         band.dollars != null ? `$${formatNumber(band.dollars)}` : "—";
       const zipMb = band.zipBytes ? `${(band.zipBytes / 1e6).toFixed(1)} MB` : "";
-      const t10 = lastBandLoadMs("10M", "web");
+      const t10 = tenMLoadMs();
       const est = estimateBandLoadMs(band.id);
       const waitHint =
         band.id === loaded
@@ -197,10 +201,12 @@ function renderBandControl() {
               ? ` last download ${formatDuration(lastBandLoadMs(band.id, "web"))}`
               : ""
           : est && t10
-            ? ` est. ${formatDuration(est)}`
+            ? ` est. ${formatDuration(est)} from your $10M load`
             : zipMb
               ? ` ${zipMb}`
               : "";
+      const waitLabel =
+        band.id !== loaded && est && t10 ? `est. ${formatDuration(est)}` : "";
       const title = isCurrent
         ? `${band.label} loaded — ${nodes} nodes, ${grants} grants, ${dollars}${waitHint}`
         : hosted
@@ -213,6 +219,7 @@ function renderBandControl() {
         <span class="stats">
           <span class="stat-nodes">${nodes}</span>
           <span class="stat-grants">${grants}</span>
+          ${waitLabel ? `<span class="stat-wait">${waitLabel}</span>` : ""}
         </span>
       </button>`;
     })
@@ -1015,6 +1022,8 @@ function nodeCursor() {
       return "cell";
     case "inspect":
       return "zoom-in";
+    case "zoom":
+      return "crosshair";
     case "subtract":
       return "not-allowed";
     default:
@@ -1035,6 +1044,7 @@ function applyModeTooltips() {
   const tips = {
     focus:
       "Focus: click isolates this org; click it again to expand both sides",
+    zoom: "Zoom: frame this org and one hop up/down (camera, graph stays)",
     add: `Add: keep the graph and seed this org (${addMod})`,
     inspect: `Inspect: open the card (${inspectMod})`,
     subtract: "Remove this org from the graph (Shift)",
@@ -1056,6 +1066,7 @@ function applyClickMode(mode) {
       "click-add",
       "click-inspect",
       "click-subtract",
+      "click-zoom",
     );
     host.classList.add(`click-${viewModel.clickMode}`);
   }
@@ -1124,6 +1135,7 @@ function handleGraphNodeClick(event, d, el) {
   if (action === "leftover" || action === "inspect") {
     showControlPanel("node", d, el);
   }
+  if (action === "zoom") requestAnimationFrame(() => zoomToNeighborhood(d));
   if (action === "focus") requestAnimationFrame(() => zoomToFit());
 }
 
@@ -1208,6 +1220,60 @@ function bindEvents(g) {
   });
 }
 
+function graphViewSize() {
+  const container = document.getElementById("graph-container");
+  const panel = document.getElementById("control-panel");
+  const drawer =
+    panel && panel.classList.contains("is-open") ? panel.offsetWidth : 0;
+  return {
+    width: Math.max(120, (container?.offsetWidth || 800) - drawer),
+    height: container?.offsetHeight || window.innerHeight * 0.9,
+  };
+}
+
+function zoomToBounds(x, y, w, h, { keepLabelsReadable = true } = {}) {
+  if (!svg || !zoom) return;
+  let g = svg.select("g.main");
+  if (g.empty()) return;
+  if (!isFinite(w) || w <= 0 || !isFinite(h) || h <= 0) return;
+  const pad = 0.14;
+  x -= w * pad;
+  y -= h * pad;
+  w *= 1 + 2 * pad;
+  h *= 1 + 2 * pad;
+  const min = 64;
+  if (w < min) {
+    x -= (min - w) / 2;
+    w = min;
+  }
+  if (h < min) {
+    y -= (min - h) / 2;
+    h = min;
+  }
+  const { width, height } = graphViewSize();
+  let scale = 0.95 / Math.max(w / width, h / height);
+  if (keepLabelsReadable) {
+    const label = g.select("text.nodeLabel").node();
+    const svgFontPx = label
+      ? parseFloat(label.style.fontSize || getComputedStyle(label).fontSize) ||
+        16
+      : 16;
+    scale = fitScaleWithReadableLabels(scale, svgFontPx, 13);
+  }
+  const maxScale = 10;
+  scale = Math.min(maxScale, scale);
+  svg
+    .transition()
+    .duration(500)
+    .call(
+      zoom.transform,
+      d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(scale)
+        .translate(-x - w / 2, -y - h / 2),
+    );
+}
+
 function zoomToFit() {
   let g = svg.select("g.main");
   if (g.empty()) {
@@ -1216,7 +1282,7 @@ function zoomToFit() {
       .append("g")
       .attr("class", "main")
       .attr("transform", "translate(50, 50)");
-    return; // Skip zooming until graph is rendered
+    return;
   }
   const bounds = g.node().getBBox();
   if (
@@ -1228,29 +1294,68 @@ function zoomToFit() {
     console.warn("Invalid bounds for zoom:", bounds);
     return;
   }
-  const container = document.getElementById("graph-container");
-  const width = container.offsetWidth;
-  const height = container.offsetHeight || window.innerHeight * 0.9;
-  const dx = bounds.x;
-  const dy = bounds.y;
-  const fitScale =
-    0.95 / Math.max(bounds.width / width, bounds.height / height);
-  const label = g.select("text.nodeLabel").node();
-  const svgFontPx = label
-    ? parseFloat(label.style.fontSize || getComputedStyle(label).fontSize) || 16
-    : 16;
-  const scale = fitScaleWithReadableLabels(fitScale, svgFontPx, 13);
+  zoomToBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+}
+
+/** Horizontal distance to the nearest 1-hop neighbor column. */
+function columnPitch(node) {
+  const cx = ((node.x0 || 0) + (node.x1 || 0)) / 2;
+  let best = null;
+  const consider = (other) => {
+    if (!other || other.x0 == null) return;
+    const oc = (other.x0 + (other.x1 != null ? other.x1 : other.x0)) / 2;
+    const d = Math.abs(oc - cx);
+    if (d > 4 && (best == null || d < best)) best = d;
+  };
+  for (const grant of node.visibleGrantsIn || []) consider(grant.filer);
+  for (const grant of node.visibleGrants || []) consider(grant.grantee);
+  const nw = Math.max(24, (node.x1 || 0) - (node.x0 || 0));
+  return best || nw * 5;
+}
+
+/**
+ * Camera only. Same transform as shift-drag box zoom:
+ *   k = min(viewW / boxW, viewH / boxH), then
+ *   translate(view/2 - center * k).
+ *
+ * Box is this node's layout rect (x0,y0)–(x1,y1) plus a modest margin —
+ * not the union of every 1-hop neighbor (that is the whole column / the
+ * whole 3-column graph, so k never changes).
+ *
+ * Vertical: node fills ~55% of the view.
+ * Horizontal: node plus at most one column pitch, capped so a 500× layout
+ * scale cannot force k back to fit-to-graph.
+ */
+function zoomToNeighborhood(node) {
+  if (!svg || !zoom || !node || node.x0 == null || node.y0 == null) {
+    zoomToFit();
+    return;
+  }
+  const { width, height } = graphViewSize();
+  const nw = Math.max(1, node.x1 - node.x0);
+  const nh = Math.max(1, node.y1 - node.y0);
+  const cx = (node.x0 + node.x1) / 2;
+  const cy = (node.y0 + node.y1) / 2;
+  const pitch = columnPitch(node);
+  const side = Math.min(pitch, nh * 3, nw * 8);
+  const boxW = nw + 2 * side;
+  const boxH = nh / 0.55;
+  const k = Math.min(
+    10,
+    Math.max(0.01, Math.min(width / boxW, height / boxH)),
+  );
+  const tx = width / 2 - cx * k;
+  const ty = height / 2 - cy * k;
   svg
     .transition()
-    .duration(750)
-    .call(
-      zoom.transform,
-      d3.zoomIdentity
-        .translate(width / 2, height / 2)
-        .scale(scale)
-        .translate(-dx - bounds.width / 2, -dy - bounds.height / 2),
-    );
+    .duration(500)
+    .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
 }
+
+window.zoomNeighborhood = function (ein) {
+  const c = Charity.getCharity(ein);
+  if (c) zoomToNeighborhood(c);
+};
 
 function generateGraph() {
   if (viewModel.bandPrompt) return;
@@ -1289,7 +1394,8 @@ function generateGraph() {
     .style("display", "block")
     .style("background", "#fff")
     .attr("class", "flex-1")
-    .style("user-select", "none"); // Prevent text selection during drag
+    .style("user-select", "none")
+    .on("click", (event) => event.stopPropagation());
 
   let g = svg
     .append("g")
@@ -2438,201 +2544,187 @@ window.billClick = function (ein) {
   viewModel.billClick(ein);
 };
 
+function bandWaitPhrase(bandId) {
+  const est = estimateBandLoadMs(bandId);
+  const t10 = tenMLoadMs();
+  if (est && t10) return `about ${formatDuration(est)} on this machine`;
+  const band = bandById(bandId);
+  if (band?.zipBytes) return `${(band.zipBytes / 1e6).toFixed(0)} MB zip`;
+  return "another wait";
+}
+
+function inspectorLinkRow(node) {
+  const bits = [];
+  if (node.has990Card) {
+    bits.push(`<a href="${node.financialsLink()}">990</a>`);
+    bits.push(`<a href="${node.officersLink()}">Officers</a>`);
+    bits.push(`<a href="${node.nonprofitsLink()}">Money</a>`);
+    bits.push(node.grantSearchLink("Grants"));
+    bits.push(node.propublicaLink("ProPublica"));
+  }
+  bits.push(node.googleLink("Search"));
+  bits.push(node.mapsLink("Maps"));
+  bits.push(node.grokLink("Grok"));
+  return `<div class="insp-links">${bits.join(" · ")}</div>
+    <p class="insp-note">Maps is the IRS mailing address of record (often a PO Box).</p>`;
+}
+
+function inspectorNeighbors(node) {
+  const top = (grants, pick, n = 5) =>
+    [...grants]
+      .sort((a, b) => (b.amt || 0) - (a.amt || 0))
+      .slice(0, n)
+      .map((g) => {
+        const other = pick(g);
+        if (!other) return "";
+        return `<li><button type="button" class="insp-neighbor" onclick="inspectOrg('${other.ein}')">${other.name || other.ein}</button> <span>$${formatNumber(g.amt)}</span></li>`;
+      })
+      .join("");
+  const ins = top(node.visibleGrantsIn || [], (g) => g.filer);
+  const outs = top(node.visibleGrants || [], (g) => g.grantee);
+  if (!ins && !outs) return "";
+  return `<div class="insp-neighbors">
+    ${ins ? `<p class="insp-k">In</p><ul>${ins}</ul>` : ""}
+    ${outs ? `<p class="insp-k">Out</p><ul>${outs}</ul>` : ""}
+  </div>`;
+}
+
+function inspectorPrimary(node) {
+  if (node.isLeftover) {
+    const cut = bandCutLabel(viewModel.loadedBand);
+    const nextId = nextHostedBandId(viewModel.loadedBand);
+    if (!nextId) {
+      return `<p>Smaller grants sit below the <b>${cut}</b> cut. Warehouse: <a href="https://www.grumpytechbro.com/irs990.html" target="_blank" rel="noopener">Export Database</a>.</p>`;
+    }
+    const label = bandCutLabel(nextId);
+    return `<p>Counterparties below the <b>${cut}</b> cut.</p>
+      <button type="button" class="insp-primary" onclick="requestBand('${nextId}')">Load ${label} (${bandWaitPhrase(nextId)})</button>`;
+  }
+  if (node.isGhost && node.suggestedEin) {
+    const sug = `${node.suggestedEin.slice(0, 2)}-${node.suggestedEin.slice(2)}`;
+    const hit = Charity.getCharity(node.suggestedEin);
+    if (hit) {
+      return `<p>Phone book suggests ${sug} (not from the 990).</p>
+        <button type="button" class="insp-primary" onclick="focusSuggested('${node.suggestedEin}')">Focus ${sug}</button>`;
+    }
+    return `<p>Phone book suggests ${sug}, not in this band.</p>`;
+  }
+  if (node.isGhost) return `<p>Name-only: no EIN on the 990.</p>`;
+  if (node.ein === PATIENT_SUBSIDY_ID) {
+    return `<p>Rolled-up copay / drug subsidies (HIPAA / “see statement”). Hats on a manufacturer’s foundation still expand named grants.</p>`;
+  }
+  if (node.isGov) return "";
+  return `<button type="button" class="insp-primary" onclick="zoomNeighborhood('${node.ein}')">Zoom ±1 hop</button>`;
+}
+
+function inspectorPork(node) {
+  if (!node.has990Card || node.isGov) return "";
+  const bacon = "<span>&#x1F953;</span>";
+  const stop = "<span>&#x1F6D1;</span>";
+  let pork = '<span class="emoji">&#x1F437;</span>';
+  if (node.govDepth > 0) pork = `${bacon} ${node.govDepth}`;
+  if (node.govDepth == Infinity) pork = stop;
+  const { grift } = node.usgIndirectGrift();
+  return `<p>USG direct <b>$${formatNumber(node.govt_amt)}</b></p>
+    <p>Indirect <i>$${formatNumber(grift)}</i>
+      <a onclick="porkClick('${node.ein}')" title="Show USG path" style="cursor:pointer">${pork}<span id="porkDepth"></span></a>
+    </p>`;
+}
+
+function inspectorMoney(node) {
+  if (node.isGov) {
+    return `<p>US Taxpayers: <b>$4.6T</b></p>
+      <p>Out $${formatNumber(node.visibleGrantsTotal)} visible (${node.visibleGrants.length})</p>`;
+  }
+  const hiddenIn = node.invisibleGrantsIn?.length
+    ? ` · $${formatNumber(node.invisibleGrantsIn.reduce((s, g) => s + g.amt, 0))} hidden`
+    : "";
+  const hiddenOut = node.invisibleGrants?.length
+    ? ` · $${formatNumber(node.invisibleGrants.reduce((s, g) => s + g.amt, 0))} hidden`
+    : "";
+  return `<p>In $${formatNumber(node.visibleGrantsInTotal || 0)} visible (${(node.visibleGrantsIn || []).length})${hiddenIn}</p>
+    <p>Out $${formatNumber(node.visibleGrantsTotal || 0)} visible (${(node.visibleGrants || []).length})${hiddenOut}</p>`;
+}
+
+function renderInspectorNode(node) {
+  const idLine =
+    node.has990Card || node.isBmfOnly
+      ? `EIN ${node.longEIN}`
+      : node.orgShort;
+  return `<header class="insp-head">
+      <p class="insp-kind">${node.kindCaption || "Organization"}</p>
+      <h3>${node.name} <a onclick="flashNode('${node.ein}')" title="Flash" style="cursor:pointer">🔦</a></h3>
+      <p class="insp-id">${idLine}</p>
+    </header>
+    <div class="insp-body">
+      ${inspectorPrimary(node)}
+      ${inspectorPork(node)}
+      ${inspectorMoney(node)}
+      ${inspectorNeighbors(node)}
+      ${inspectorLinkRow(node)}
+    </div>`;
+}
+
 function showControlPanel(type, data, element) {
   const panel = document.getElementById("control-panel");
-  let content = "";
-
-  function renderButtons(node, withButtons) {
-    if (!withButtons) return "";
-    return `
-      <div class="flex-1 bg-gray-200 p-4">
-        <button onclick="focusNode('${node.ein}')">Only This</button>
-        <button ${
-          !node.canExpandInflows ? 'disabled class="bg-gray-100 disabled"' : ""
-        } onclick="expandInflows('${node.ein}')">Show 3 Inflows</button>
-        <button ${
-          !node.canExpandOutflows ? 'disabled class="bg-gray-100 disabled"' : ""
-        } onclick="expandOutflows('${node.ein}')">Expand 3 Outflows</button>
-      </div>
-      <div class="flex-1 bg-gray-200 p-4">
-        <button onclick="removeNode('${node.ein}')">Remove This</button>
-        <button ${
-          !node.canCompressInflows ? "disabled class='disabled'" : ""
-        } onclick="compressInflows('${node.ein}')">Hide 3 Inflows</button>
-        <button ${
-          !node.canCompressOutflows ? "disabled class='disabled'" : ""
-        } onclick="compressOutflows('${node.ein}')">Hide 3 Outflows</button>
-      </div>
-    `;
-  }
-
-  function renderNode(node, withButtons = false) {
-    let buttons = renderButtons(node, withButtons);
-    let links = "";
-    let inflows = "<p>Inflows: N/A</p>";
-    let outflows = "<p>Outflows: N/A</p>";
-    let hiddenInflows = node.invisibleGrantsIn.length
-      ? `<p><i>$${formatNumber(
-          node.invisibleGrantsIn.reduce((sum, g) => sum + g.amt, 0),
-        )} hidden (${node.invisibleGrantsIn.length} grants)</i></p>`
-      : "";
-    let hiddenOutflows = node.invisibleGrants.length
-      ? `<p><i>$${formatNumber(
-          node.invisibleGrants.reduce((sum, g) => sum + g.amt, 0),
-        )} hidden (${node.invisibleGrants.length} grants)</i></p>`
-      : "";
-
-    if (node.isGov) {
-      return `
-        <div class="bg-blue-500 text-white flex-col p-4 text-center">
-          <h3>${node.name}</h3>
-        </div>
-        <div class="flex flex-row gap-4">
-          <div class="flex-1 bg-gray-200 p-4">
-            <p>US Taxpayers: <b>$4.6T</b></p>
-            <p>Outflows: $${formatNumber(node.visibleGrantsTotal)} visible (${
-              node.visibleGrants.length
-            } grants)</p>
-            ${hiddenOutflows}
-          </div>
-          ${buttons}
-        </div>
-      `;
-    } else {
-      if (!node.isRoot)
-        inflows = `<p>Inflows: $${formatNumber(
-          node.visibleGrantsInTotal - node.govt_amt,
-        )} visible (${
-          node.visibleGrantsIn.length
-        } grants)</p> ${hiddenInflows}`;
-      if (!node.isTerminal)
-        outflows = `<p>Outflows: $${formatNumber(
-          node.visibleGrantsTotal,
-        )} visible (${node.visibleGrants.length} grants)</p> ${hiddenOutflows}`;
-      const bacon = "<span>&#x1F953;</span>";
-      const stop = "<span>&#x1F6D1;</span>";
-      let pork = '<span class="emoji">&#x1F437;</span>';
-      if (node.govDepth > 0) {
-        pork = `${bacon} ${node.govDepth}`;
-      }
-      if (node.govDepth == Infinity) pork = stop; // no path to USG
-      const { grift, griftMap } = node.usgIndirectGrift();
-
-      if (node.has990Card) {
-        links = `
-        <p>Direct From US Gov: <b>$${formatNumber(node.govt_amt)}</b></p>
-        <p>Find indirect USG sources:  <i>$${formatNumber(grift)}</i>
-           <a onClick="porkClick('${
-             node.ein
-           }')" title="Show USG Indirect" style="cursor:pointer">${pork}<span id="porkDepth"></span></a>
-           </p>
-        <p><a href="${node.financialsLink()}">Show me the Financials</a></p>
-        <p><a href="${node.officersLink()}">Show me the Officers</a></p>
-        <p><a href="${node.nonprofitsLink()}">Show me the Money!</a></p>
-        <p>${node.grantSearchLink("Show me the Grants")}</p>
-        <p>${node.propublicaLink("Take me to Propublica")}</p>
-        <p>${node.googleLink("Google")}</p>
-        <p>${node.mapsLink("Google Maps")}</p>
-        <p>${node.grokLink("Grumpy Take")}</p>
-      `;
-      } else if (node.isGhost) {
-        const sug = node.suggestedEin
-          ? `<p>Phone book suggests EIN ${node.suggestedEin.slice(0, 2)}-${node.suggestedEin.slice(2)} (not from the 990).</p>`
-          : `<p>Name-only: no EIN on the 990.</p>`;
-        links = `<p>${node.orgShort}</p>${sug}<p>${node.googleLink("Google the name")}</p><p>${node.mapsLink("Google Maps")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
-      } else if (node.isBmfOnly) {
-        const nameless =
-          !node.name ||
-          node.name.replace(/\D/g, "") === String(node.ein).replace(/\D/g, "");
-        links = nameless
-          ? `<p>Name-only: no 990 in this set, and we don't have a name for this EIN — often a university or hospital.</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google this EIN")}</p><p>${node.mapsLink("Google Maps")}</p>`
-          : `<p>${node.orgShort}</p><p>EIN: ${node.longEIN}</p><p>${node.googleLink("Google")}</p><p>${node.mapsLink("Google Maps")}</p><p>${node.grokLink("Grumpy Take")}</p>`;
-      } else if (node.ein === PATIENT_SUBSIDY_ID) {
-        links = `<p>${node.orgShort}</p>
-          <p>Rolled-up copay / drug subsidies. The 990 lists HIPAA-redacted patients, “see statement,” and similar — not named NGOs. Hats on a manufacturer’s foundation still expand any real named grants.</p>`;
-      } else if (node.isLeftover) {
-        const cut = bandCutLabel(viewModel.loadedBand);
-        const nextId = nextHostedBandId(viewModel.loadedBand);
-        const nextBit = nextId
-          ? `<p>You must download the <b>${bandCutLabel(nextId)}</b> band to see this detail. <a href="#" onclick="requestBand('${nextId}'); return false;">Click here</a> to do that.</p>`
-          : `<p>Smaller grants live in the <b>$1M</b> and <b>All</b> bands, which are coming soon — too large to ship with this site. Full filings: <a href="https://www.grumpytechbro.com/irs990.html" target="_blank" rel="noopener">Export Database</a>.</p>`;
-        links = `<p>${node.orgShort}</p>
-          <p>Name-only stub: grants from this org to counterparties below the <b>${cut}</b> cut.</p>
-          ${nextBit}`;
-      } else {
-        links = `<p>${node.orgShort}</p>`;
-      }
-    }
-
-    const idLine = node.has990Card || node.isBmfOnly
-      ? `<p>EIN: ${node.longEIN}</p>`
-      : `<p>${node.orgShort}</p>`;
-    return `
-      <div class="bg-blue-500 text-white flex-col p-4 text-center">
-        <h3>${node.name} <a onClick="flashNode('${node.ein}')" title="Flash" style="cursor:pointer"><span>&#128294;</span></a></h3>
-        ${idLine}
-      </div>
-      <div class="flex flex-row gap-4">
-        <div class="flex-1 bg-gray-200 p-4">
-          ${links}
-          ${inflows}
-          ${outflows}
-        </div>
-        ${buttons}
-      </div>
-    `;
-  }
-
+  let content = `<button type="button" class="insp-close" onclick="closePanel()" aria-label="Close">×</button>`;
   if (type === "node") {
-    content = renderNode(data, true);
+    content += renderInspectorNode(data);
   } else if (type === "link") {
-    content = `
-      <div class="flex flex-col gap-4">
-        <div class="bg-blue-500 text-white p-4 text-center">
-          <h3>Grant Details</h3>
-          <p>Amount: $${formatNumber(data.amt)}</p>
-        </div>
-        <div class="flex flex-row gap-4">
-          <div class="flex-1 bg-gray-200 p-4">
-            <h4>From:</h4>
-            ${renderNode(data.filer)}
-            <button onclick="expandOutflows('${
-              data.filer.ein
-            }')">Expand Source</button>
-            <button onclick="compressOutflows('${
-              data.filer.ein
-            }')">Compress Source</button>
-          </div>
-          <div class="flex-1 bg-gray-300 p-4">
-            <h4>To:</h4>
-            ${renderNode(data.grantee)}
-            <button onclick="expandInflows('${
-              data.grantee.ein
-            }')">Expand Target</button>
-            <button onclick="compressInflows('${
-              data.grantee.ein
-            }')">Compress Target</button>
-          </div>
-        </div>
-      </div>
-    `;
+    const from = data.filer;
+    const to = data.grantee;
+    content += `<header class="insp-head">
+        <p class="insp-kind">Grant</p>
+        <h3>$${formatNumber(data.amt)}</h3>
+      </header>
+      <div class="insp-body">
+        <p class="insp-grant">
+          <button type="button" class="insp-neighbor" onclick="inspectOrg('${from?.ein}')">${from?.name || "?"}</button>
+          <span>→</span>
+          <button type="button" class="insp-neighbor" onclick="inspectOrg('${to?.ein}')">${to?.name || "?"}</button>
+        </p>
+      </div>`;
   }
-
   panel.innerHTML = content;
-  panel.style.display = "block";
-
+  panel.classList.remove("hidden");
+  panel.classList.add("is-open");
+  panel.style.display = "flex";
+  panel.dataset.mapEin = type === "node" ? data.ein : "";
   d3.selectAll(".node").classed("selected", false);
   d3.selectAll(".link").classed("selected", false);
-  d3.select(element).classed("selected", true);
+  if (element) d3.select(element).classed("selected", true);
 }
 
 function closePanel() {
-  document.getElementById("control-panel").style.display = "none";
+  const panel = document.getElementById("control-panel");
+  if (panel) {
+    panel.classList.remove("is-open");
+    panel.style.display = "none";
+  }
   d3.selectAll(".node").classed("selected", false);
   d3.selectAll(".link").classed("selected", false);
 }
+window.closePanel = closePanel;
 
-document.addEventListener("click", closePanel);
+window.inspectOrg = function (ein) {
+  const c = Charity.getCharity(ein);
+  if (c) showControlPanel("node", c, null);
+};
+
+window.focusSuggested = function (ein) {
+  const c = Charity.getCharity(ein);
+  if (!c) {
+    updateStatus("That EIN is not in this band");
+    return;
+  }
+  c.tunnelNode();
+  refresh();
+  requestAnimationFrame(() => zoomToFit());
+};
+
+/** Stretch: Leaflet map popup from this drawer. */
+window.openInspectorMap = function () {};
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closePanel();
 });
