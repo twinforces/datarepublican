@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Why:** All is ~363 MB / 823 zips. GitHub clone + Vercel `docs/` cannot carry that. LFS does not make GitHub Pages/Vercel a CDN. Hugging Face as a live `fetch()` origin for one website is against Hub “community reuse” guidance, and the Hub sold to Nvidia (close aimed H1 2027).
 - **Change:** `$10M` stays on Vercel. `$1M` and All `baseFile` point at `www.grumpytechbro.com/browse/tsv_chunks/{1m,all}/` with CORS `*`. `rsync-browse-bands.sh` pushes zips (gitignored). Loader stores last `$10M` load ms and estimates deeper waits. `available: false` remains a kill switch; both bands are hosted.
 - **Failure (avoided):** Coming soon gray-out was a stopgap; flipped off once CORS `fetch` from `localhost:4000` returned a real zip and `$1M` ingested `8/208` files.
-- **Doc:** `docs/export_browse_band.md`. GTB: `scripts/rsync-browse-bands.sh`, `browse/tsv_chunks/.htaccess`.
+- **Doc:** `docs/export_browse_band.md`. Hash `58f0659f`. GTB: `scripts/rsync-browse-bands.sh`, `browse/tsv_chunks/.htaccess` (`13e6689`).
 
 ---
 

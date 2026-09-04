@@ -10,9 +10,9 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 **Why:** GitHub/Vercel cannot ship All (~350 MB extra in every clone and deploy). Git LFS is for clones, not a CDN. Hugging Face as a free-account website origin is a TOS gray area (community reuse, not a private CDN) and the Hub just sold to Nvidia. DreamHost already rsyncs multi-GB `/fun/` trees.
 
-**How:** `grumpytechbro.com/scripts/rsync-browse-bands.sh` (not `deploy.sh --delete`). After a deeper `export_browse_band.py`, rsync then bump `chunkCount` / `nodes` / `edges` / `zipBytes` in `browse/data_files.js`. Smoke: browser `fetch` of a `$1M` zip from `localhost:4000` (413 707 bytes) then `Loading $1M: 8/208 files`. `npm run test:browse` (40). Doc: `docs/export_browse_band.md`.
+**How:** `grumpytechbro.com/scripts/rsync-browse-bands.sh` (not `deploy.sh --delete`). After a deeper `export_browse_band.py`, rsync then bump `chunkCount` / `nodes` / `edges` / `zipBytes` in `browse/data_files.js`. Smoke: browser `fetch` of a `$1M` zip from `localhost:4000` (413 707 bytes) then `Loading $1M: 8/208 files`. `npm run test:browse` (40). Doc: `docs/export_browse_band.md`. Hash `58f0659f` (GTB `13e6689`).
 
-**Next:** Commit this slice (datarepublican browse + GTB rsync/CORS only). Re-export `$1M`/All when the DuckDB changes. All is still a 2.6M-node in-browser freeze risk.
+**Next:** Re-export `$1M`/All when the DuckDB changes. All is still a 2.6M-node in-browser freeze risk.
 
 ---
 
