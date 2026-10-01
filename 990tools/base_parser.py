@@ -540,12 +540,9 @@ class BaseParser:
                     try:
                         comp_value = int(float(comp_text.replace(',', '')))
                         if comp_value > 0:
-                            from models import Contractor
-                            contractor = Contractor(
+                            contractor = charity_obj.build_contractor(
                                 name=name_text,
                                 amount=comp_value,
-                                tax_year=charity_obj.tax_year,
-                                charity_id=charity_obj.id
                             )
                             context.addObjectToDatabase(contractor)
 
@@ -561,8 +558,13 @@ class BaseParser:
                                 context.addObjectToDatabase(contractor_address)
 
                             if not global_config.is_quiet():
-                                log_info("Parsed contractor {0} compensation: ${1} for EIN {2} in {3}",
-                                          name_text, comp_value, charity_obj.ein, xml_filename)
+                                log_info(
+                                    "Parsed contractor {contractor_name} compensation: ${amt} for EIN {filer_ein} in {xml_name}",
+                                    contractor_name=name_text,
+                                    amt=comp_value,
+                                    filer_ein=charity_obj.ein,
+                                    xml_name=xml_filename,
+                                )
                     except (ValueError, AttributeError):
                         continue
     def parse_address(

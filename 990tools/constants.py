@@ -113,6 +113,9 @@ DEFAULT_FINAL_DIR = "/Volumes/Data/final"
 
 # Bulk insert batch size for database operations
 BULK_INSERT_BATCH_SIZE = 100000
+# Rows at or above this go TSV+COPY first. Smaller batches use executemany
+# (faster with ART indexes). OOM on executemany retries the same rows via COPY.
+BULK_INSERT_COPY_THRESHOLD = 10000
 
 # Bulk update batch size for database operations (smaller for updates)
 BULK_UPDATE_BATCH_SIZE = 10

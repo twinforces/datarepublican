@@ -4,6 +4,98 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-10-01: XML checkpoint skips Geocoding histogram
+
+**What:** Intermediate FORCE CHECKPOINT no longer `GROUP BY geocoding_status` unless `LOG_GEOCODING_STATUS_COUNTS=1`.
+
+**Why:** 08A catch-up died at 567/51,530 files: that histogram OOM'd DuckDB at 7.4 GiB. Address COPY had already succeeded.
+
+**How:** `pending_database_context.py` `_log_geocoding_status_counts`.
+
+---
+
+## 2026-10-01: Finger is Focus; + is Expand
+
+**What:** Focus (hand, default) always isolates. Plus expands hops both ways and keeps the rest of the graph.
+
+**Why:** Second Focus click was expanding. Uniparty seeds stayed on the graph. Expand is its own mode.
+
+**How:** `clickNode` in `browse/models.js`. Tooltips/help. Tests in `browse/test/viewModel.test.js`.
+
+---
+
+## 2026-10-01: IndexedDB replaces itself on dbVersion mismatch
+
+**What:** Stale `CharityDatabase` is cleared and re-downloaded when `DATA_FILES.dbVersion` moves, or when ingest never wrote `generated: true`.
+
+**Why:** Version mismatch used to keep the old charities/grants stores. `put()` mixed rows. `generated: true` used to be written before TSV ingest, so a half-load looked valid. Users had to delete IndexedDB by hand.
+
+**How:** `idbDataIsCurrent` in `browse/data_files.js`. `hasValidData` false → `clearGraphStores` (charities, grants, metadata). `generated: true` only after `ingestBandFromWeb` finishes. Bumped `dbVersion` to `2026-10-01T12:00:00Z`. Tests in `browse/test/data_files.test.js`.
+
+---
+
+## 2026-10-01: Uniparty Focus actually isolates
+
+**What:** Focus click tunnels unless that org is already the only seed. Inspector has Focus (`tunnelNode`) plus Zoom ±1 hop.
+
+**Why:** Uniparty seeds are `desiredVisible`. First Focus click was treated as “click again → expand,” so Freedom House grew and the rest of the preset stayed.
+
+**How:** `browse/models.js` `clickNode`, `browse/script.js` inspector, `browse/test/viewModel.test.js`.
+
+---
+
+## 2026-10-01: executemany first, COPY fallback
+
+**What:** `bulk_insert` uses `executemany` below 10k rows. Larger batches, or OOM, go TSV COPY. COPY OOM still `os._exit(75)`.
+
+**Why:** XML-sized inserts were faster as `executemany`; 78k-grant files and PPP-scale heaps need COPY.
+
+**How:** `BULK_INSERT_COPY_THRESHOLD`, `_copy_insert_chunk`.
+
+---
+
+## 2026-10-01: Skip XmlFiles whose xml_name is already in Charities
+
+**What:** Before XML work, mark those files processed. Charity `bulk_insert` also drops duplicate `xml_name`s.
+
+**Why:** Mid-PDC COPY committed Charities then aborted. Resume died on unique `xml_name`.
+
+**How:** `mark_xml_processed_if_charity_exists`, always-on skip in `bulk_insert`.
+
+---
+
+## 2026-10-01: COPY is INSERT, not OR IGNORE
+
+**What:** `insert_tsv_via_copy` uses `INSERT`. Models still `prep_for_insert` / UUID7 before the TSV is written.
+
+**Why:** Address UUID7 did run. DuckDB `INSERT OR IGNORE` needs a UNIQUE/PK. Production Addresses is a heap, so 3872 Address rows failed even with IDs.
+
+**How:** Same path as old executemany: serialize prepped objects, insert.
+
+---
+
+## 2026-10-01: Schedule L contractors dropped filer_ein
+
+**What:** `parse_schedule_l` now uses `charity.build_contractor()` so `filer_ein` is the form EIN.
+
+**Why:** Direct `Contractor(name, amount, tax_year, charity_id)` never set `filer_ein`. `executemany` stored `''`; COPY turned empty TSV into NULL and hit `Contractors.filer_ein NOT NULL`. Log `{0}` was rewritten to `[MISSING]` before `.format(*args)` — the charity EIN was there.
+
+**How:** `base_parser.py`. Not a 990-EZ vs 990 path; Schedule L is on the root 990.
+
+---
+
+## 2026-10-01: bulk_insert is TSV + COPY
+
+**What:** `DatabaseOperations.bulk_insert` writes a TSV then `INSERT OR IGNORE … SELECT FROM read_csv`. Indexes stay. `test_bulk_insert_copy.py`.
+
+**Why:** XML `executemany` OOM at 7.4 GiB with ~78k grants in one PDC. PPP already proved heap COPY. Incremental XML cannot drop Addresses ART (rebuild is hours).
+
+**How:** `database_operations.py` (`write_bulk_tsv`, `insert_tsv_via_copy`). Chunk size still `BULK_INSERT_BATCH_SIZE`.
+
+**Next:** Kick XML-only overnight with this path.
+
+---
+
 ## 2026-09-04: Sticky inspector + Zoom camera
 
 **What:** Inspect opens a right drawer (kind, money, top-5 in/out, compact links). Graph click does not close it (Escape / ×). Click mode **Zoom** (and the card’s Zoom ±1 hop) is a camera: same `k`/`translate` as shift-drag box zoom. Leftover See more loads the next hosted band from the card (`$1M` wait scaled from this machine’s `$10M`). Graph surgery stays in click-mode, not the card. Map view later as a popup from the drawer (`openInspectorMap` stub).

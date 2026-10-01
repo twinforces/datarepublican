@@ -5,6 +5,74 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-10-01 (XML checkpoint)
+
+### XML FORCE CHECKPOINT no longer scans Geocoding
+- **Why:** `GROUP BY geocoding_status` during the 08A run OOM'd at 7.4 GiB after Address COPY had succeeded.
+- **Change:** Histogram only when `LOG_GEOCODING_STATUS_COUNTS=1`.
+
+---
+
+## [Unreleased] - 2026-10-01 (Focus vs Expand)
+
+### Finger isolates; plus expands
+- **Why:** Focus click-again was growing hops, so Uniparty seeds stayed on the graph.
+- **Change:** Hand mode always `tunnelNode`. Plus mode expands both sides and keeps other orgs. Zoom stays the expand-arrows camera.
+- **Doc:** `docs/RECENTGOALS.md`. Tests: `browse/test/viewModel.test.js`.
+
+---
+
+## [Unreleased] - 2026-10-01 (IndexedDB auto-replace)
+
+### New browse data no longer needs a hand-deleted IndexedDB
+- **Why:** `hasValidData` returned false on version mismatch but `loadData` still `put()` into the old charities/grants stores. `generated: true` was written before TSV ingest.
+- **Change:** `idbDataIsCurrent`; wipe charities/grants/metadata before web ingest; write `generated` only after the band is complete. `dbVersion` `2026-10-01T12:00:00Z`.
+- **Doc:** `docs/RECENTGOALS.md`. Test: `browse/test/data_files.test.js`.
+
+---
+
+## [Unreleased] - 2026-10-01 (executemany + COPY fallback)
+
+### Small inserts use executemany; COPY is the OOM / 10k+ path
+- **Why:** Against live ART indexes, executemany was ~2–4k rows/s vs COPY ~570/s. COPY still needed for 78k-grant PDCs and 16GB pin failures.
+- **Change:** `BULK_INSERT_COPY_THRESHOLD=10000`. OOM on executemany retries the same prepped rows via TSV. COPY OOM still exits 75.
+
+---
+
+## [Unreleased] - 2026-10-01 (skip inserted xml_names)
+
+### XML resume no longer dies on unique xml_name
+- **Why:** Failed PDC saves committed Charities (`commit_batches`) without marking XmlFiles processed.
+- **Change:** `mark_xml_processed_if_charity_exists()` at XML start; Charity `bulk_insert` skips existing `xml_name`.
+
+---
+
+## [Unreleased] - 2026-10-01 (COPY INSERT not OR IGNORE)
+
+### Address UUID7 was generated; OR IGNORE needs a PK
+- **Why:** `bulk_insert` still calls `prep_for_insert` / `set_id_if_needed` before writing the TSV. Production `Addresses` has no UNIQUE/PK, so `INSERT OR IGNORE` failed with “specify ON CONFLICT columns manually.”
+- **Change:** COPY uses `INSERT`, matching the old executemany.
+
+---
+
+## [Unreleased] - 2026-10-01 (Schedule L filer_ein)
+
+### Contractors from Schedule L omitted the filer EIN
+- **Why:** `parse_schedule_l` constructed `Contractor` without `filer_ein`. COPY maps empty TSV to NULL → `NOT NULL` abort after Charities/Officers/Grants already committed. The `[MISSING]` log was `{0}` eaten by the named-placeholder sanitizer.
+- **Change:** Use `charity.build_contractor()`. Named log fields.
+- **Doc:** `docs/RECENTGOALS.md`.
+
+---
+
+## [Unreleased] - 2026-10-01 (bulk_insert COPY)
+
+### XML address/grant insert no longer uses executemany
+- **Why:** 16GB host: Charity/Grant `executemany` against ART indexes died at 7.4/7.4 GiB (~4k XML files, one PDC with ~78k grants). Restart loop never chewed the 07A/08A remainder.
+- **Change:** `bulk_insert` writes a TSV and `INSERT OR IGNORE` from `read_csv`. Indexes stay. PK duplicates on resume are ignored.
+- **Doc:** `docs/RECENTGOALS.md`, `docs/pipeline_overview.md`, `docs/how_to_run_tools.md`. Test: `python3 test_bulk_insert_copy.py`.
+
+---
+
 ## [Unreleased] - 2026-09-04 (inspector drawer + Zoom)
 
 ### Browse inspector is a dossier, Zoom is a camera

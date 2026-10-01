@@ -168,6 +168,9 @@ class XMLProcessor(BaseProcessor):
         Returns:
             Number of XML files processed
         """
+        skipped = self.db_ops.mark_xml_processed_if_charity_exists()
+        if skipped:
+            log_info(f"Skipped {skipped} XML files whose xml_name is already in Charities")
         return self.process_parallel(max_files, workers)
 
 

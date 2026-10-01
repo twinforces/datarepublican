@@ -28,4 +28,4 @@ python export_browse_band.py --db-path irs990.duckdb --threshold 1000000 --dest 
 python export_browse_band.py --db-path irs990.duckdb --threshold 1 --dest ../browse/tsv_chunks/all --skip-manifest
 ```
 
-`--skip-manifest` keeps the $10M `dbVersion` so existing IndexedDB does not refetch. Do not point `--dest` at `tsv_chunks/` for a deeper band — that glob-deletes the $10M zips. After export, set that band's `files[].chunkCount` and `nodes`/`edges` in `data_files.js`.
+`--skip-manifest` keeps the $10M `dbVersion` so existing IndexedDB does not refetch. Bumping `DATA_FILES.dbVersion` now **clears** charities, grants, and metadata, then re-downloads; a half-finished ingest (`generated` not true) does the same. Do not point `--dest` at `tsv_chunks/` for a deeper band — that glob-deletes the $10M zips. After export, set that band's `files[].chunkCount` and `nodes`/`edges` in `data_files.js`.

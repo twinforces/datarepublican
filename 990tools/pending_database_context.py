@@ -30,6 +30,7 @@ from models import Charity, Officer, Grant, Contractor, PoliticalContribution, A
 from database_operations import DatabaseOperations, DatabaseOperation, DatabaseOperationType
 from logging_utils import log_info, log_error, log_warning, log_debug
 from datetime import datetime
+import os
 import threading
 
 PDC_DEBUG = False
@@ -556,7 +557,17 @@ class PendingDatabaseContext:
                     log_error(f"Failed to update addresses for canonical_address {geocoding.canonical_address}: {e}")
                     # Continue with the transaction - geocoding record update will still succeed
     def _log_geocoding_status_counts(self, conn, label: str = "checkpoint") -> None:
-        """Emit status histogram for monitor after checkpoint — single grep-friendly line."""
+        """Emit status histogram for monitor after checkpoint — single grep-friendly line.
+
+        Off during XML: a GROUP BY on Geocoding at 8GB OOM'd the 08A catch-up.
+        Set LOG_GEOCODING_STATUS_COUNTS=1 for geolocate overnight.
+        """
+        if os.environ.get("LOG_GEOCODING_STATUS_COUNTS", "0") not in (
+            "1",
+            "true",
+            "TRUE",
+        ):
+            return
         try:
             rows = conn.execute(
                 "SELECT geocoding_status, COUNT(*) AS n "

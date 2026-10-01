@@ -11,7 +11,7 @@ ARCHITECTURE OVERVIEW:
 - DatabaseOperations: Main class handling all DuckDB interactions
 - GENERIC_INSERT(): Organizes objects by type and inserts in ownership order (Charity→Officer→Grant→Contractor→PoliticalContribution→Address)
 - INSERT_BY_TYPE(): For PDC when objects are pre-sorted by type
-- bulk_insert(): High-performance batched inserts with client-side UUID generation
+- bulk_insert(): prep models (UUID7) then TSV + read_csv INSERT
 - Thread-local connections for multi-threaded safety
 - Static ZIP file path cache for performance
 
@@ -28,7 +28,7 @@ DATABASE CONSTRAINTS:
 
 PERFORMANCE FEATURES:
 - Preloaded ZIP file path cache at startup
-- Batched executemany operations for bulk inserts
+- TSV COPY for bulk inserts (16GB host; ART indexes stay)
 - Connection pooling with thread-local storage
 - Query timeout protection and error handling
 """
@@ -38,13 +38,15 @@ import pandas as pd
 import inspect
 from typing import Optional, List, Tuple, Dict, Any, Type, Union, Generator, ContextManager
 from dataclasses import fields
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 import uuid
 import time
 import random
 import sys
 import os
+import csv
+import tempfile
 import threading
 from enum import Enum
 from functools import lru_cache
@@ -62,7 +64,6 @@ from models.base import BaseModel
 from constants import VALID_STATES, CURRENT_PROCESSING_VERSION, WAL_COMPACTION_TIMEOUT,ENABLE_AUTO_CHECKPOINTS
 from logging_utils import log_error, log_debug, log_info, log_warning
 from loggingDuckDB import LoggingDuckDBConnection
-from constants import ENABLE_CHARITY_DEDUP_CHECK
 
 
 def _oom_hard_exit(context: str, exc: BaseException) -> None:
@@ -85,6 +86,95 @@ def _oom_hard_exit(context: str, exc: BaseException) -> None:
     except Exception:
         pass
     os._exit(75)  # EX_TEMPFAIL-ish; non-zero for shell loops
+
+
+def is_duckdb_oom(exc: BaseException) -> bool:
+    err = str(exc).lower()
+    return (
+        "out of memory" in err
+        or "failed to offload" in err
+        or "failed to pin" in err
+        or "could not allocate" in err
+    )
+
+
+def tsv_cell(value: Any) -> str:
+    """One TSV field. Empty string is DuckDB NULL via NULLIF / COPY NULL ''."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ", timespec="microseconds")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def cast_select_expr(col: str, duck_type: str) -> str:
+    """SELECT expression that turns a VARCHAR CSV column into the table type."""
+    ident = f'"{col}"'
+    t = (duck_type or "VARCHAR").upper()
+    if "UUID" in t:
+        return f"CAST(NULLIF({ident}, '') AS UUID)"
+    if "TIMESTAMP" in t or t == "DATE" or t.startswith("DATE"):
+        return f"TRY_CAST(NULLIF({ident}, '') AS {duck_type})"
+    if any(tok in t for tok in ("INT", "DOUBLE", "FLOAT", "DECIMAL", "HUGEINT", "BIGINT", "SMALLINT", "TINYINT", "REAL", "NUMERIC")):
+        return f"TRY_CAST(NULLIF({ident}, '') AS {duck_type})"
+    if "BOOL" in t:
+        return f"TRY_CAST(NULLIF({ident}, '') AS BOOLEAN)"
+    return ident
+
+
+def write_bulk_tsv(columns: List[str], param_rows: List[tuple], directory: Optional[str] = None) -> str:
+    """Write header + rows as UTF-8 TSV. Returns an absolute path DuckDB can read."""
+    tmp_dir = directory or os.environ.get("DUCKDB_TEMP_DIRECTORY") or tempfile.gettempdir()
+    os.makedirs(tmp_dir, exist_ok=True)
+    fd, path = tempfile.mkstemp(prefix="bulk_insert_", suffix=".tsv", dir=tmp_dir)
+    os.close(fd)
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(
+            handle,
+            delimiter="\t",
+            lineterminator="\n",
+            quoting=csv.QUOTE_MINIMAL,
+        )
+        writer.writerow(columns)
+        for row in param_rows:
+            writer.writerow([tsv_cell(v) for v in row])
+    return str(Path(path).resolve())
+
+
+def insert_tsv_via_copy(
+    conn,
+    table_name: str,
+    columns: List[str],
+    duck_types: List[str],
+    tsv_path: str,
+) -> None:
+    """Heap-load a TSV with read_csv, then INSERT into the real table.
+
+    Objects must already be through prep_for_insert / set_id_if_needed (UUID7,
+    Address.canonicalize). COPY only serializes those fields. Indexes stay.
+    """
+    col_list = ", ".join(f'"{c}"' for c in columns)
+    select_list = ", ".join(
+        cast_select_expr(col, dtype) for col, dtype in zip(columns, duck_types)
+    )
+    # Plain INSERT, same as the old executemany. INSERT OR IGNORE needs a
+    # UNIQUE/PK; production Addresses is a heap (PPP index rebuild) so OR IGNORE
+    # fails even when Address.prep_for_insert already stamped a UUID7.
+    sql = (
+        f"INSERT INTO {table_name} ({col_list}) "
+        f"SELECT {select_list} FROM read_csv(?, "
+        f"header := true, delim := chr(9), quote := '\"', escape := '\"', "
+        f"all_varchar := true, parallel := false)"
+    )
+    conn.execute(sql, [tsv_path])
 
 
 _WRITE_KEYWORD_PATTERN = re.compile(
@@ -357,7 +447,7 @@ class DatabaseOperations:
 
     PERFORMANCE FEATURES:
     - Preloaded ZIP file path cache at startup
-    - Batched executemany operations for bulk inserts
+    - TSV COPY for bulk inserts (16GB host; ART indexes stay)
     - Client-side UUID7 generation for object relationships
     - Connection pooling and reuse
 
@@ -1219,21 +1309,46 @@ class DatabaseOperations:
             self.commit()
         return geocoding_id
 
+    def _copy_insert_chunk(
+        self,
+        conn,
+        table_name: str,
+        insert_cols: List[str],
+        duck_types: List[str],
+        batch_params: List[tuple],
+        type_name: str,
+    ) -> None:
+        """Serialize one chunk to TSV and INSERT via read_csv. OOM here is fatal."""
+        tsv_path = write_bulk_tsv(insert_cols, batch_params)
+        log_info(
+            f"DEBUG: COPY {len(batch_params)} {type_name} rows via {tsv_path} into {table_name}"
+        )
+        try:
+            try:
+                insert_tsv_via_copy(conn, table_name, insert_cols, duck_types, tsv_path)
+            except Exception as e:
+                if is_duckdb_oom(e):
+                    _oom_hard_exit("bulk_insert_copy", e)
+                raise
+        finally:
+            try:
+                os.unlink(tsv_path)
+            except OSError:
+                pass
+
     # Bulk operations
     def bulk_insert(self, objects: List[BaseModel], batch_size: Optional[int] = None, commit_batches: bool = True, validate_counts: bool = False, conn: Optional[duckdb.DuckDBPyConnection] = None) -> List[str]:
         if conn is None:
             with self.acquire_write_conn() as inner_conn:
-                self._bulk_insert_impl(objects, inner_conn, batch_size, commit_batches, validate_counts)
-        else:
-            return self._bulk_insert_impl(objects, conn, batch_size, commit_batches, validate_counts)
+                return self._bulk_insert_impl(objects, inner_conn, batch_size, commit_batches, validate_counts)
+        return self._bulk_insert_impl(objects, conn, batch_size, commit_batches, validate_counts)
 
     def _bulk_insert_impl(self, objects: List[BaseModel], conn: duckdb.DuckDBPyConnection,batch_size: Optional[int] = None, commit_batches: bool = True, validate_counts: bool = False) -> List[str]:
         """
-        High-performance bulk insert with executemany and client-side UUID generation.
+        High-performance bulk insert: prep models, then executemany or TSV COPY.
 
-        This is the CORE insert method used by both GENERIC_INSERT and INSERT_BY_TYPE.
-        Uses batched executemany operations for maximum throughput while maintaining
-        thread safety and referential integrity.
+        Small batches: executemany (faster against live ART indexes).
+        >= BULK_INSERT_COPY_THRESHOLD rows, or executemany OOM: TSV + read_csv INSERT.
 
         Args:
             objects: Non-empty same-type BaseModels (all must be same type)
@@ -1247,7 +1362,7 @@ class DatabaseOperations:
             ValueError: Invalid inputs or type mismatches
             RuntimeError: Database errors with detailed validation
 
-        PERFORMANCE: Batched executemany with client-side UUIDs for relationship integrity
+        PERFORMANCE: executemany, COPY fallback; client-side UUIDs for relationships
         THREADING: Uses thread-local connections for DuckDB writer safety
         VALIDATION: Count validation ensures all rows were inserted successfully
         """
@@ -1282,8 +1397,10 @@ class DatabaseOperations:
         if missing_prep_types:
             log_warning(f"Objects without prep_for_insert method: {missing_prep_types}")
 
-        # Pre-insert deduplication check for Charities - controlled by command-line parameter
-        if type(objects[0]).__name__ == 'Charity' and objects and ENABLE_CHARITY_DEDUP_CHECK:
+        # Skip Charities whose xml_name is already in the table (unique constraint).
+        # Failed PDC saves used to commit charities then abort, so XML resume
+        # would COPY the same xml_name and die.
+        if type(objects[0]).__name__ == 'Charity' and objects:
             # Collect all xml_names for batch query
             xml_names = [getattr(obj, 'xml_name', '') for obj in objects if hasattr(obj, 'xml_name') and getattr(obj, 'xml_name', '')]
             if xml_names:
@@ -1342,7 +1459,6 @@ class DatabaseOperations:
         insert_cols = table_cols
 
 
-        # executemany core: Build param lists (excluding ID field)
         build_start = time.perf_counter()
         param_rows = []
         for obj in objects:
@@ -1351,40 +1467,55 @@ class DatabaseOperations:
         build_time = time.perf_counter() - build_start
         log_debug(f"Built {len(objects)} param rows in {build_time:.2f}s")
 
-        # Batched executemany for inserts - IDs already generated client-side
+        describe_rows = conn.execute(f"DESCRIBE {table_name}").fetchall()
+        type_by_name = {r[0]: r[1] for r in describe_rows}
+        duck_types = [str(type_by_name.get(col, "VARCHAR")) for col in insert_cols]
+
+        from constants import BULK_INSERT_COPY_THRESHOLD
+        copy_threshold = BULK_INSERT_COPY_THRESHOLD if isinstance(BULK_INSERT_COPY_THRESHOLD, int) else 10000
+
         insert_start = time.perf_counter()
-        for i in range(0, len(objects), batch_size):
-            batch_params = param_rows[i:i + batch_size]
+        used_copy = False
+        chunk = batch_size if batch_size and batch_size > 0 else len(param_rows)
+        col_list = ", ".join(insert_cols)
+        placeholders = ", ".join(["?" for _ in insert_cols])
+        insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
 
-            # Use executemany with single row inserts - no RETURNING needed since IDs are client-generated
-            col_list = ', '.join(insert_cols)
-            placeholders = ', '.join(['?' for _ in insert_cols])
-            insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
-            log_info(f"DEBUG: About to execute INSERT SQL: {insert_sql[:100]}...")
-            log_info(f"DEBUG: Batch has {len(batch_params)} parameter sets")
-
-            if global_config.log_sql:
-                log_info(f"bulk SQL {insert_sql}")
-
-            # SQL logging handled by execute_query method
-
-            batch_start = time.perf_counter()
-            try:
-                conn.executemany(insert_sql, batch_params)  # type: ignore
-            except Exception as e:
-                # Check for out-of-memory errors specifically
-                error_str = str(e).lower()
-                if "out of memory" in error_str or "failed to offload data block" in error_str or "failed to pin" in error_str:
-                    _oom_hard_exit("bulk_insert", e)
-                raise
+        for i in range(0, len(param_rows), chunk):
+            batch_params = param_rows[i : i + chunk]
+            if len(batch_params) >= copy_threshold:
+                self._copy_insert_chunk(
+                    conn, table_name, insert_cols, duck_types, batch_params, obj_type.__name__
+                )
+                used_copy = True
+            else:
+                try:
+                    conn.executemany(insert_sql, batch_params)  # type: ignore
+                except Exception as e:
+                    if is_duckdb_oom(e):
+                        log_warning(
+                            f"executemany OOM on {len(batch_params)} {obj_type.__name__} "
+                            f"rows; retrying via TSV COPY"
+                        )
+                        self._copy_insert_chunk(
+                            conn,
+                            table_name,
+                            insert_cols,
+                            duck_types,
+                            batch_params,
+                            obj_type.__name__,
+                        )
+                        used_copy = True
+                    else:
+                        raise
             if commit_batches:
                 conn.commit()
-            batch_elapsed = time.perf_counter() - batch_start
-            rate = len(batch_params) / batch_elapsed if batch_elapsed > 0 else 0
-            log_debug(f"Batch {i//batch_size + 1} ({len(batch_params)} rows): {batch_elapsed:.2f}s ({rate:.0f} rows/s)")
-            insert_time = time.perf_counter() - insert_start
-            log_info(f"executemany inserted {len(objects)} rows in {insert_time:.2f}s ({len(objects)/insert_time:.0f} rows/s)")
-        total_processed = len(objects)
+        insert_time = time.perf_counter() - insert_start
+        rate = len(objects) / insert_time if insert_time > 0 else 0
+        method = "COPY" if used_copy else "executemany"
+        log_info(
+            f"{method} inserted {len(objects)} rows in {insert_time:.2f}s ({rate:.0f} rows/s)"
+        )
         conn.commit()
 
         # COUNT VALIDATION: Check count after insert (optional for performance)
@@ -1529,6 +1660,39 @@ class DatabaseOperations:
         """Get bulk operations handler"""
         # DuckDB handles bulk operations internally
         return self
+
+    def mark_xml_processed_if_charity_exists(self) -> int:
+        """Mark XmlFiles processed when Charities already has that xml_name.
+
+        Leftover from mid-PDC commits: charity row landed, processed stayed FALSE.
+        """
+        sql_count = """
+            SELECT COUNT(*) FROM XmlFiles xf
+            WHERE xf.processed = FALSE
+              AND EXISTS (
+                  SELECT 1 FROM Charities c
+                  WHERE c.xml_name = xf.filename
+              )
+        """
+        sql_update = """
+            UPDATE XmlFiles xf
+            SET processed = TRUE,
+                processed_at = CURRENT_TIMESTAMP,
+                error_message = 'skipped: xml_name already in Charities'
+            WHERE xf.processed = FALSE
+              AND EXISTS (
+                  SELECT 1 FROM Charities c
+                  WHERE c.xml_name = xf.filename
+              )
+        """
+        with self.acquire_write_conn() as conn:
+            row = conn.execute(sql_count).fetchone()
+            n = int(row[0]) if row else 0
+            if n:
+                conn.execute(sql_update)
+                conn.commit()
+                log_info(f"Marked {n} XmlFiles processed (xml_name already in Charities)")
+            return n
 
     def get_xml_files_to_process(self, processing_version: int, max_files: Optional[int] = None, last_xml_id: Optional[str] = None) -> List[XMLFile]:
         """Get unprocessed XML files with key-value paging support"""
