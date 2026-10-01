@@ -1,8 +1,7 @@
-/** Copied from 990tools/big_pharma_subsidy.json — edit the JSON, then recopy. */
+/** Names rolled into the single Patient Subsidies node. Patterns are regexes. */
 export default {
   "BIG PHARMA SUBSIDY": {
     "synthetic_ein": "99-7777777",
-    "description": "Rollup for all subsidy/aggregate/privacy rows (SEE ATTACHED, VARIOUS, HIPPA, PATIENT, Drugs & Medicines, etc.). Synthetic EIN for grant visualization and fraud detection. Patterns are treated as regex in the generator and as substring in extractor/TUI. 20260603: +11 from 100M part01 + bmf stats; +~25 more from hard analysis. 20260604: + pass-through/flow (PASS THROUGH, AGENCY DISTRIB, REIMBURSE, FBO, CACFP, VPK, DISTRIBUTIONS, FOOD REIMBURS, and more FBO/(FBO/FOR THE BENEFIT/SUB RECIPIENT etc.) per user observation that many remaining after phonebook are intermediary/forwarded/subgrant flows or accounting lines rather than direct BMF org recipients (NGO A passes to B, or listed name is the flow desc). User review (post 89% cream): 'we're done with this mapping project. 89% from 34% is huge... Just need to finish the hygiene, then think about how we want to tie this off in a bow' (options: A move einless to subfolder 990tools/einless/{data,docs,code}; B leave as-is; C integrate as step in irs990processor.py). Next: integrate results with address_matcher.py + grant_matcher.py (leverage pre-phonebook generate_name_rules.py canonical rollup heuristics + secondary geo pass). Trusts big_pharma rules over is_org keep logic for hard sus per user. Real common foundations that match BMF still need to pass trad layers to not be hard.",
     "patterns": [
       "AMALGAMATED CHARITABLE",
       "ATTACH(ED|MENT|MENTS)?",
@@ -130,5 +129,5 @@ export default {
       "PASS THRU",
       "THRU PMTS"
     ]
-  }
+  },
 };

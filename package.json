@@ -11,7 +11,6 @@
     "test": "playwright test",
     "test:routes": "scripts/check-routes.sh",
     "test:browse": "vitest run",
-    "demo:browse": "npx playwright test tests/browse_sankey.spec.js --project=demo",
     "data:split": "node scripts/split-noblogs-data.mjs"
   },
   "dependencies": {

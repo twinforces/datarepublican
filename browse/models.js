@@ -126,8 +126,8 @@ export function tenMLoadMs() {
 
 /**
  * Scale the measured $10M load by zip bytes.
- * Origin (Vercel vs DreamHost) is ignored — unzip+IDB dominates, and we
- * only have one timed wait per visitor.
+ * Origin is ignored — unzip+IDB dominates, and we only have one timed wait
+ * per visitor.
  */
 export function estimateBandLoadMs(bandId) {
   const base = tenMLoadMs();
@@ -2904,6 +2904,8 @@ export class Charity {
       this.isOrganized = false;
       if (value) Charity._desiredCharities.add(this);
       else Charity._desiredCharities.delete(this);
+      if (value || this._impliedVisible) Charity._visibleCharities.add(this);
+      else Charity._visibleCharities.delete(this);
       if (
         value &&
         viewModel.debugCloneDesired &&
@@ -3344,9 +3346,9 @@ export class Charity {
   hide() {
     viewModel.addToBreadCrumbs(`Hide|${this.id}`);
     viewModel.addToHideList(this.id);
-    this.desiredVisible = false;
-    this.grantsIn.forEach((g) => this.clearVisibility());
-    this.grants.forEach((g) => this.clearVisibility());
+    this.clearVisibility();
+    this.grantsIn.forEach((g) => g.clearVisibility());
+    this.grants.forEach((g) => g.clearVisibility());
   }
 
   /**

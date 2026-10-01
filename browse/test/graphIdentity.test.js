@@ -28,7 +28,7 @@ describe("isGraphKey", () => {
     expect(isGraphKey("etc911663695")).toBe(true);
     expect(isGraphKey(PATIENT_SUBSIDY_ID)).toBe(true);
   });
-  it("flags HIPAA / patient-assistance strings from big_pharma_subsidy.json", () => {
+  it("flags HIPAA / patient-assistance strings from big_pharma_subsidy.js", () => {
     expect(PATIENT_SUBSIDY_ID).toBe("etc997777777");
     expect(isPatientSubsidyName("HIPAA REGULATIONS PREVENT THE LISTING")).toBe(
       true

@@ -261,38 +261,6 @@ window.loadPreset = function (value, mode) {
   zoomToFit();
 };
 
-window.__clickNodeByName = function (src, event) {
-  const re = new RegExp(src, "i");
-  const c = Object.values(Charity.charityLookup || {}).find(
-    (x) => re.test(x.name || "") && x.isVisible,
-  );
-  if (!c) return { ok: false, reason: "not-visible" };
-  const action = viewModel.clickNode(event || {}, c, () => {
-    if (typeof refresh === "function") refresh();
-  });
-  if (
-    (action === "inspect" || action === "leftover") &&
-    typeof showControlPanel === "function"
-  ) {
-    const el = document.querySelector(`#graph .node[data-id="${c.ein}"]`);
-    showControlPanel("node", c, el);
-  }
-  return { ok: true, action, ein: c.ein, name: c.name };
-};
-
-window.__browseStats = function () {
-  return {
-    ready: !!(viewModel && viewModel.dataReady),
-    charities: Object.keys(Charity.charityLookup || {}).length,
-    grants: Object.keys(Grant.grantLookup || {}).length,
-    search: String(window.location.search || ""),
-    show: viewModel ? viewModel.getShowList() : [],
-    ned: Charity.getCharity("521344831")
-      ? Charity.getCharity("521344831").name
-      : null,
-  };
-};
-
 function escapeCrumb(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")

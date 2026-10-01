@@ -73,9 +73,7 @@ jobs:
         run: scripts/check-routes.sh http://localhost:4000 _site
 
       - name: Playwright
-        # default project only. browse_sankey.spec.js is --project=demo:
-        # it needs $10M chunks and a persistent IndexedDB profile, which CI does not have.
-        run: npx playwright test --project=default
+        run: npx playwright test
         env:
           HOST: http://localhost:4000
 
