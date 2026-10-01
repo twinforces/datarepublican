@@ -104,6 +104,7 @@
   --dr-z-modal:       90;
   --dr-z-skip:       100;   /* the skip link. Must beat everything. */
 }
+
 /* Data-encoding colors.
  *
  * A restyle must NOT touch these. The map legend, the pin colors and the
@@ -120,6 +121,7 @@
   --dr-data-state:  #B8860B;
   --dr-data-veneer: #4A6FA5;
 }
+
 /* The component layer. Everything under components/ is OUTSIDE @layer, by
    convention rather than by memory: Tailwind drops a layered rule whose
    selector it cannot find in the scanned HTML, and these classes are written
@@ -153,6 +155,7 @@
  * Outside @layer, like everything in components/: Tailwind drops a layered rule
  * whose selector it cannot find in the scanned HTML.
  */
+
 .dr-btn {
   /* The reset. Everything here is undoing the global `button` rule, and it is
      the reason a component can now be written in terms of what it IS. */
@@ -186,7 +189,9 @@
               border-color var(--dr-dur-fast, 120ms),
               color var(--dr-dur-fast, 120ms);
 }
+
 .dr-btn:hover { background: var(--dr-fill, #EFF1F4); }
+
 /* Pressed is a fill, not a color. The accent is near-ink on purpose: chrome
    must not compete with the thirteen categories the data encodes. */
 .dr-btn[aria-pressed="true"],
@@ -198,6 +203,7 @@
 }
 .dr-btn--solid:hover,
 .dr-btn[aria-pressed="true"]:hover { background: var(--dr-accent-hover, #3A3D52); }
+
 /* No border, no fill — for a control that sits inside something already bounded. */
 .dr-btn--ghost {
   border-color: transparent;
@@ -205,6 +211,7 @@
   color: var(--dr-ink-muted, #5A5A5A);
 }
 .dr-btn--ghost:hover { background: var(--dr-fill, #EFF1F4); color: var(--dr-ink-strong, #000); }
+
 /* Icon only. The <button> carries the aria-label; the <svg> is aria-hidden. */
 .dr-btn--icon {
   position: relative;      /* for .dr-btn__dot */
@@ -212,6 +219,7 @@
   padding: 0;
   gap: 0;
 }
+
 /* The value on an ICON-ONLY toggle.
  *
  * .dr-btn__state below needs a label beside it to be a value OF anything, and
@@ -237,9 +245,11 @@
   box-shadow: 0 0 0 2px var(--dr-panel, #fff);
   pointer-events: none;
 }
+
 /* Absent means off — the rule the whole affordance rests on. */
 .dr-btn[aria-pressed="false"] .dr-btn__dot { display: none; }
 .dr-btn[aria-pressed="true"] .dr-btn__dot { box-shadow: 0 0 0 2px var(--dr-accent, #252739); }
+
 /* 32px. Desktop only, inside a panel or a toolbar — never below md, where the
    44px target is the floor. */
 .dr-btn--sm {
@@ -247,10 +257,12 @@
   padding: 0 14px;
   font-size: 12px;
 }
+
 .dr-btn:focus-visible {
   outline: 2px solid var(--dr-accent, #252739);
   outline-offset: 2px;
 }
+
 .dr-btn:disabled,
 .dr-btn[aria-disabled="true"] {
   border-color: var(--dr-line, #D3D7DE);
@@ -258,6 +270,7 @@
   color: var(--dr-line-strong, #878D99);
   cursor: default;
 }
+
 /* Only the real `disabled` goes inert. An aria-disabled control has to keep
  * receiving hover and focus, because the moment a control is unavailable is
  * exactly when someone needs to read what it would do — and a browser fires no
@@ -267,12 +280,14 @@
  * This is why an icon-only control that can be unavailable uses aria-disabled:
  * an unexplained gray glyph is the worst case of the icon-only trade. */
 .dr-btn:disabled { pointer-events: none; }
+
 /* Busy keeps its width so a label swapped for "Rendering…" does not shunt the
    controls beside it. */
 .dr-btn[aria-busy="true"] {
   color: var(--dr-ink-faint, #6B7280);
   cursor: progress;
 }
+
 /* The value on a toggle.
  *
  * A filled pill says "this control is in a state" but not WHICH state, and in a
@@ -305,11 +320,13 @@
   line-height: 1;
   letter-spacing: 0.01em;
 }
+
 /* Inverted on the pressed fill, like the count badge. */
 .dr-btn[aria-pressed="true"] .dr-btn__state {
   background: rgba(255, 255, 255, 0.92);
   color: var(--dr-accent, #252739);
 }
+
 /* The count badge on a filter button.
  *
  * It is a flex item inside a flex row, so `padding` alone does not give it a
@@ -363,6 +380,7 @@
  *
  * Outside @layer, like everything in components/.
  */
+
 .dr-wordmark {
   margin: 0;
   min-width: 0;
@@ -373,6 +391,7 @@
   letter-spacing: -0.05em;   /* tailwind.config.js `tracking.display` */
   color: var(--dr-ink-strong, #000);
 }
+
 /* The link is the wordmark, not a link that happens to be in it. Everything
    the global `a` rule sets — color, weight, underline — has to come back off,
    and `font: inherit` is what keeps the weight correct if the type above ever
@@ -406,6 +425,7 @@
  *    since Tailwind cannot find a single one of these runtime classes in the
  *    scanned HTML and would purge the whole block from a layer.
  */
+
 .leaflet-container .leaflet-bar,
 .leaflet-container.leaflet-touch .leaflet-bar {
   border: 0;
@@ -417,6 +437,7 @@
   flex-direction: column;
   gap: 6px;
 }
+
 .leaflet-container .leaflet-bar a,
 .leaflet-container.leaflet-touch .leaflet-bar a {
   width: var(--dr-tap, 2.75rem);
@@ -430,6 +451,7 @@
   font-size: 18px;
   font-weight: 700;
 }
+
 /* Leaflet rounds only the ends of the bar and squares the join. There is no
    join any more, so every control gets the same four corners. */
 .leaflet-container .leaflet-bar a:first-child,
@@ -438,15 +460,18 @@
 .leaflet-container.leaflet-touch .leaflet-bar a:last-child {
   border-radius: var(--dr-radius-control, 0.625rem);
 }
+
 .leaflet-container .leaflet-bar a:hover,
 .leaflet-container.leaflet-touch .leaflet-bar a:hover {
   background: var(--dr-fill, #EFF1F4);
   border-color: var(--dr-line-strong, #878D99);
 }
+
 .leaflet-container .leaflet-bar a:focus-visible {
   outline: 2px solid var(--dr-accent, #252739);
   outline-offset: 2px;
 }
+
 /* Leaflet's own disabled state, which it sets at the zoom limits. */
 .leaflet-container .leaflet-bar a.leaflet-disabled,
 .leaflet-container .leaflet-bar a.leaflet-disabled:hover {
@@ -454,6 +479,7 @@
   background: var(--dr-panel, #fff);
   color: var(--dr-line-strong, #878D99);
 }
+
 /* 32px on a pointer device, like .dr-btn--sm — the 44px floor is a thumb
    measurement, and on the canvas space is the scarce thing. */
 @media (min-width: 768px) and (pointer: fine) {
@@ -495,6 +521,7 @@
  * whose selector it cannot find in the scanned HTML, and these classes are
  * written by tool markup and by JS.
  */
+
 .dr-dialog {
   /* The closed state is the UA's `display: none`; do not set display here or
      the dialog is visible with nothing to dismiss it. See the [open] rule. */
@@ -510,10 +537,12 @@
   overflow: hidden;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
 }
+
 .dr-dialog[open] {
   display: flex;
   flex-direction: column;
 }
+
 /* ---- Motion ------------------------------------------------------------
    THE RULE: every surface that arrives from an edge uses --dr-dur-sheet and
    --dr-ease-sheet. There is one bottom-sheet motion on this site and both
@@ -538,16 +567,19 @@
   opacity: 0;
   transform: translateY(1rem) scale(0.98);
 }
+
 .dr-dialog[open] {
   opacity: 1;
   transform: none;
 }
+
 @starting-style {
   .dr-dialog[open] {
     opacity: 0;
     transform: translateY(1rem) scale(0.98);
   }
 }
+
 .dr-dialog::backdrop {
   background: rgba(20, 20, 18, 0.45);
   opacity: 0;
@@ -555,14 +587,18 @@
               overlay var(--dr-dur-sheet, 240ms) allow-discrete,
               display var(--dr-dur-sheet, 240ms) allow-discrete;
 }
+
 .dr-dialog[open]::backdrop { opacity: 1; }
+
 @starting-style {
   .dr-dialog[open]::backdrop { opacity: 0; }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .dr-dialog,
   .dr-dialog::backdrop { transition: none; }
 }
+
 /* Header stays put; only the body scrolls. A long legal notice is the whole
    reason this exists, so the close control must never scroll out of reach. */
 .dr-dialog__head {
@@ -574,12 +610,14 @@
   padding: 0.875rem 0.875rem 0.875rem 1.25rem;
   border-bottom: 1px solid var(--dr-line, #D3D7DE);
 }
+
 .dr-dialog__head h2 {
   margin: 0;
   font-size: var(--dr-text-section, 18px);
   font-weight: 700;
   line-height: 1.25;
 }
+
 .dr-dialog__body {
   flex: 1 1 auto;
   min-height: 0;
@@ -589,8 +627,10 @@
   font-size: var(--dr-text-meta, 13px);
   line-height: 1.6;
 }
+
 .dr-dialog__body > p { margin: 0 0 0.75rem; }
 .dr-dialog__body > p:last-child { margin-bottom: 0; }
+
 /* ---- Phone -------------------------------------------------------------
    Bottom-anchored, full width, square at the bottom edge. A centered card on a
    390px screen wastes the two safest thumb zones and puts the close button at
@@ -624,6 +664,7 @@
     padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
   }
 }
+
 /* The opener. A button, not an <a> — it goes nowhere, and a link that does not
    navigate is the most common false affordance in this codebase's older tools.
    Sized as text rather than as a control: it sits on a type row beside the tool
@@ -651,12 +692,15 @@
   text-underline-offset: 2px;
   cursor: pointer;
 }
+
 .dr-dialog-open:hover { color: var(--dr-ink-strong, #000); }
+
 .dr-dialog-open:focus-visible {
   outline: 2px solid var(--dr-accent, #252739);
   outline-offset: 2px;
   border-radius: var(--dr-radius-sm, 6px);
 }
+
 /* On a phone it is one of the few controls on the identity row, so it takes the
    thumb floor there. */
 @media (max-width: 767px) {
@@ -683,6 +727,7 @@
  * whose selector it cannot find in the scanned HTML, and this element is
  * created by JS.
  */
+
 .dr-tip {
   position: fixed;
   z-index: var(--dr-z-popover, 70);
@@ -705,11 +750,13 @@
   opacity: 0;
   transition: opacity var(--dr-dur-fast, 120ms) linear;
 }
+
 /* `:not([hidden])` is load-bearing — the same trap as .dr-sheet__scrim and
    .dr-btn__count. `hidden` is only a UA display:none, so any `display` or
    visibility rule here beats it. */
 .dr-tip[hidden] { display: none; }
 .dr-tip.is-on { opacity: 1; }
+
 /* The arrow. A pseudo-element on the tip itself, flipped by the class JS sets
    when it has to place the tip below its trigger instead of above. */
 .dr-tip::after {
@@ -721,14 +768,17 @@
   margin-left: -5px;
   border: 5px solid transparent;
 }
+
 .dr-tip--above::after {
   top: 100%;
   border-top-color: var(--dr-accent, #252739);
 }
+
 .dr-tip--below::after {
   bottom: 100%;
   border-bottom-color: var(--dr-accent, #252739);
 }
+
 .dr-tip__title {
   display: flex;
   align-items: center;
@@ -737,6 +787,7 @@
   /* The name and the explanation are one block, so the gap is small. */
   margin-bottom: 0.125rem;
 }
+
 /* The value of a two-state control, opposite its name. Written by DRTip from
    the trigger's `aria-pressed`, so it cannot disagree with the button. */
 .dr-tip__state {
@@ -751,13 +802,16 @@
   letter-spacing: 0.04em;
   line-height: 1.45;
 }
+
 .dr-tip__state[data-state="on"] {
   background: var(--dr-on, #19B270);
   color: #fff;
 }
+
 @media (prefers-reduced-motion: reduce) {
   .dr-tip { transition: none; }
 }
+
 *, ::before, ::after {
   --tw-border-spacing-x:      0;
   --tw-border-spacing-y:      0;
@@ -811,6 +865,7 @@
   --tw-contain-paint:       ;
   --tw-contain-style:       ;
 }
+
 ::backdrop {
   --tw-border-spacing-x:      0;
   --tw-border-spacing-y:      0;
@@ -864,11 +919,12 @@
   --tw-contain-paint:       ;
   --tw-contain-style:       ;
 }
-/* ! tailwindcss v3.4.14 | MIT License | https://tailwindcss.com */
-/*
+
+/* ! tailwindcss v3.4.14 | MIT License | https://tailwindcss.com *//*
 1. Prevent padding and border from affecting element width. (https://github.com/mozdevs/cssremedy/issues/4)
 2. Allow adding a border to an element by just adding a border-width. (https://github.com/tailwindcss/tailwindcss/pull/116)
 */
+
 *,
 ::before,
 ::after {
@@ -877,10 +933,12 @@
   border-style: solid; /* 2 */
   border-color: #e5e7eb; /* 2 */
 }
+
 ::before,
 ::after {
   --tw-content: '';
 }
+
 /*
 1. Use a consistent sensible line-height in all browsers.
 2. Prevent adjustments of font size after orientation changes in iOS.
@@ -890,6 +948,7 @@
 6. Use the user's configured `sans` font-variation-settings by default.
 7. Disable tap highlights on iOS
 */
+
 html,
 :host {
   line-height: 1.5; /* 1 */
@@ -902,34 +961,42 @@ html,
   font-variation-settings: normal; /* 6 */
   -webkit-tap-highlight-color: transparent; /* 7 */
 }
+
 /*
 1. Remove the margin in all browsers.
 2. Inherit line-height from `html` so users can set them as a class directly on the `html` element.
 */
+
 body {
   margin: 0; /* 1 */
   line-height: inherit; /* 2 */
 }
+
 /*
 1. Add the correct height in Firefox.
 2. Correct the inheritance of border color in Firefox. (https://bugzilla.mozilla.org/show_bug.cgi?id=190655)
 3. Ensure horizontal rules are visible by default.
 */
+
 hr {
   height: 0; /* 1 */
   color: inherit; /* 2 */
   border-top-width: 1px; /* 3 */
 }
+
 /*
 Add the correct text decoration in Chrome, Edge, and Safari.
 */
+
 abbr:where([title]) {
   -webkit-text-decoration: underline dotted;
           text-decoration: underline dotted;
 }
+
 /*
 Remove the default font size and weight for headings.
 */
+
 h1,
 h2,
 h3,
@@ -939,26 +1006,32 @@ h6 {
   font-size: inherit;
   font-weight: inherit;
 }
+
 /*
 Reset links to optimize for opt-in styling instead of opt-out.
 */
+
 a {
   color: inherit;
   text-decoration: inherit;
 }
+
 /*
 Add the correct font weight in Edge and Safari.
 */
+
 b,
 strong {
   font-weight: bolder;
 }
+
 /*
 1. Use the user's configured `mono` font-family by default.
 2. Use the user's configured `mono` font-feature-settings by default.
 3. Use the user's configured `mono` font-variation-settings by default.
 4. Correct the odd `em` font sizing in all browsers.
 */
+
 code,
 kbd,
 samp,
@@ -968,15 +1041,19 @@ pre {
   font-variation-settings: normal; /* 3 */
   font-size: 1em; /* 4 */
 }
+
 /*
 Add the correct font size in all browsers.
 */
+
 small {
   font-size: 80%;
 }
+
 /*
 Prevent `sub` and `sup` elements from affecting the line height in all browsers.
 */
+
 sub,
 sup {
   font-size: 75%;
@@ -984,27 +1061,33 @@ sup {
   position: relative;
   vertical-align: baseline;
 }
+
 sub {
   bottom: -0.25em;
 }
+
 sup {
   top: -0.5em;
 }
+
 /*
 1. Remove text indentation from table contents in Chrome and Safari. (https://bugs.chromium.org/p/chromium/issues/detail?id=999088, https://bugs.webkit.org/show_bug.cgi?id=201297)
 2. Correct table border color inheritance in all Chrome and Safari. (https://bugs.chromium.org/p/chromium/issues/detail?id=935729, https://bugs.webkit.org/show_bug.cgi?id=195016)
 3. Remove gaps between table borders by default.
 */
+
 table {
   text-indent: 0; /* 1 */
   border-color: inherit; /* 2 */
   border-collapse: collapse; /* 3 */
 }
+
 /*
 1. Change the font styles in all browsers.
 2. Remove the margin in Firefox and Safari.
 3. Remove default padding in all browsers.
 */
+
 button,
 input,
 optgroup,
@@ -1021,17 +1104,21 @@ textarea {
   margin: 0; /* 2 */
   padding: 0; /* 3 */
 }
+
 /*
 Remove the inheritance of text transform in Edge and Firefox.
 */
+
 button,
 select {
   text-transform: none;
 }
+
 /*
 1. Correct the inability to style clickable types in iOS and Safari.
 2. Remove default button styles.
 */
+
 button,
 input:where([type='button']),
 input:where([type='reset']),
@@ -1040,62 +1127,80 @@ input:where([type='submit']) {
   background-color: transparent; /* 2 */
   background-image: none; /* 2 */
 }
+
 /*
 Use the modern Firefox focus style for all focusable elements.
 */
+
 :-moz-focusring {
   outline: auto;
 }
+
 /*
 Remove the additional `:invalid` styles in Firefox. (https://github.com/mozilla/gecko-dev/blob/2f9eacd9d3d995c937b4251a5557d95d494c9be1/layout/style/res/forms.css#L728-L737)
 */
+
 :-moz-ui-invalid {
   box-shadow: none;
 }
+
 /*
 Add the correct vertical alignment in Chrome and Firefox.
 */
+
 progress {
   vertical-align: baseline;
 }
+
 /*
 Correct the cursor style of increment and decrement buttons in Safari.
 */
+
 ::-webkit-inner-spin-button,
 ::-webkit-outer-spin-button {
   height: auto;
 }
+
 /*
 1. Correct the odd appearance in Chrome and Safari.
 2. Correct the outline style in Safari.
 */
+
 [type='search'] {
   -webkit-appearance: textfield; /* 1 */
   outline-offset: -2px; /* 2 */
 }
+
 /*
 Remove the inner padding in Chrome and Safari on macOS.
 */
+
 ::-webkit-search-decoration {
   -webkit-appearance: none;
 }
+
 /*
 1. Correct the inability to style clickable types in iOS and Safari.
 2. Change font properties to `inherit` in Safari.
 */
+
 ::-webkit-file-upload-button {
   -webkit-appearance: button; /* 1 */
   font: inherit; /* 2 */
 }
+
 /*
 Add the correct display in Chrome and Safari.
 */
+
 summary {
   display: list-item;
 }
+
 /*
 Removes the default spacing and border for appropriate elements.
 */
+
 blockquote,
 dl,
 dd,
@@ -1111,13 +1216,16 @@ p,
 pre {
   margin: 0;
 }
+
 fieldset {
   margin: 0;
   padding: 0;
 }
+
 legend {
   padding: 0;
 }
+
 ol,
 ul,
 menu {
@@ -1125,49 +1233,60 @@ menu {
   margin: 0;
   padding: 0;
 }
+
 /*
 Reset default styling for dialogs.
 */
 dialog {
   padding: 0;
 }
+
 /*
 Prevent resizing textareas horizontally by default.
 */
+
 textarea {
   resize: vertical;
 }
+
 /*
 1. Reset the default placeholder opacity in Firefox. (https://github.com/tailwindlabs/tailwindcss/issues/3300)
 2. Set the default placeholder color to the user's configured gray 400 color.
 */
+
 input::-moz-placeholder, textarea::-moz-placeholder {
   opacity: 1; /* 1 */
   color: #9ca3af; /* 2 */
 }
+
 input::placeholder,
 textarea::placeholder {
   opacity: 1; /* 1 */
   color: #9ca3af; /* 2 */
 }
+
 /*
 Set the default cursor for buttons.
 */
+
 button,
 [role="button"] {
   cursor: pointer;
 }
+
 /*
 Make sure disabled buttons don't get the pointer cursor.
 */
 :disabled {
   cursor: default;
 }
+
 /*
 1. Make replaced elements `display: block` by default. (https://github.com/mozdevs/cssremedy/issues/14)
 2. Add `vertical-align: middle` to align replaced elements more sensibly by default. (https://github.com/jensimmons/cssremedy/issues/14#issuecomment-634934210)
    This can trigger a poorly considered lint error in some tools but is included by design.
 */
+
 img,
 svg,
 video,
@@ -1179,14 +1298,17 @@ object {
   display: block; /* 1 */
   vertical-align: middle; /* 2 */
 }
+
 /*
 Constrain images and videos to the parent width and preserve their intrinsic aspect ratio. (https://github.com/mozdevs/cssremedy/issues/14)
 */
+
 img,
 video {
   max-width: 100%;
   height: auto;
 }
+
 /* Make elements with the HTML hidden attribute stay hidden by default */
 [hidden]:where(:not([hidden="until-found"])) {
   display: none;
@@ -1853,7 +1975,7 @@ video {
 .prose-sm :where(.prose-sm > :last-child):not(:where([class~="not-prose"],[class~="not-prose"] *)) {
   margin-bottom:      0;
 }
-body {
+  body {
   margin:      0px;
   min-height:      100vh;
   --tw-bg-opacity:      1;
@@ -1867,14 +1989,15 @@ body {
     font-style: normal;
     padding-bottom: var(--nav-clearance);
 }
-/* The shell. One measure for every page — banner, masthead, nav and content
+
+  /* The shell. One measure for every page — banner, masthead, nav and content
      all line up on it, and it does not change between the tools index, a tool
      and a narrative page. 20px gutters either side, from the mocks.
 
      Reading measures are NOT set here. A narrow column is a property of the
      content that needs it: `.text-column` below, and `.prose max-w-column` in
      the markdown layout. */
-.page-column {
+  .page-column {
   margin-left:      auto;
   margin-right:      auto;
   width:      100%;
@@ -1882,31 +2005,35 @@ body {
   padding-right:      1.25rem;
     max-width: var(--column-max);
 }
-/* Tools index sorting.
+
+  /* Tools index sorting.
      Jekyll writes each card's position under every sort onto the <li> as a
      custom property; the <select> sets data-sort on the <ul>; `order` does the
      work. The list is correctly ordered before any script runs, and stays
      usable with JavaScript off — it just cannot be re-sorted. */
-[data-sort] > li { order: var(--order-latest); }
-[data-sort="featured"] > li { order: var(--order-featured); }
-[data-sort="alpha"]    > li { order: var(--order-alpha); }
-[data-sort="category"] > li { order: var(--order-category); }
-/* Group headings belong to category mode only. */
-.tool-group-header { display: none; }
-[data-sort="category"] > .tool-group-header { display: block; }
-/* The narrative measure, shared by /about/ and /donate/.
+  [data-sort] > li { order: var(--order-latest); }
+  [data-sort="featured"] > li { order: var(--order-featured); }
+  [data-sort="alpha"]    > li { order: var(--order-alpha); }
+  [data-sort="category"] > li { order: var(--order-category); }
+
+  /* Group headings belong to category mode only. */
+  .tool-group-header { display: none; }
+  [data-sort="category"] > .tool-group-header { display: block; }
+
+  /* The narrative measure, shared by /about/ and /donate/.
      One class, because the two pages had set this independently and drifted:
      About was `max-w-[46rem]` with lede type, Donate was `max-w-3xl` (48rem)
      with default body type and centered with mx-auto. Change the measure here
      and both move together. */
-.text-column {
+  .text-column {
   margin-top:      1.25rem;
   font-size:      1.0625rem;
   letter-spacing:      -0.01em;
   line-height:      1.625;
     max-width: 52rem;
 }
-.skip-link {
+
+  .skip-link {
   position:      absolute;
   width:      1px;
   height:      1px;
@@ -1917,7 +2044,8 @@ body {
   white-space:      nowrap;
   border-width:      0;
 }
-.skip-link:focus {
+
+  .skip-link:focus {
   position:      static;
   width:      auto;
   height:      auto;
@@ -1942,17 +2070,20 @@ body {
   color:      rgb(255 255 255 / var(--tw-text-opacity)) !important;
   text-decoration-line:      none !important;
 }
-strong {
+
+  strong {
   font-weight:      700;
 }
-table {
+
+  table {
   margin-bottom:      1.25rem;
   width:      100%;
   border-collapse:      collapse;
   font-size:      0.875rem;
   line-height:      1.25rem;
 }
-th {
+
+  th {
   cursor:      pointer;
   white-space:      nowrap;
   border-width:      1px;
@@ -1967,11 +2098,13 @@ th {
   text-align:      left;
   font-weight:      600;
 }
-th:hover {
+
+  th:hover {
   --tw-bg-opacity:      1;
   background-color:      rgb(229 231 235 / var(--tw-bg-opacity));
 }
-td {
+
+  td {
   border-width:      1px;
   --tw-border-opacity:      1;
   border-color:      rgb(229 231 235 / var(--tw-border-opacity));
@@ -1983,7 +2116,8 @@ td {
   padding-right:      0.5rem;
   text-align:      left;
 }
-button {
+
+  button {
   min-width:      65px;
   border-radius:      0.25rem;
   --tw-bg-opacity:      1;
@@ -1998,14 +2132,16 @@ button {
   --tw-text-opacity:      1;
   color:      rgb(255 255 255 / var(--tw-text-opacity));
 }
-@media (min-width: 768px) {
+
+  @media (min-width: 768px) {
   button {
     margin-right:      0.5rem;
     padding-top:      0.25rem;
     padding-bottom:      0.25rem;
   }
 }
-button {
+
+  button {
 
     &.active {
     font-weight:      700;
@@ -2040,7 +2176,8 @@ button {
     color:      rgb(52 156 226 / var(--tw-text-opacity));
   }
   }
-th.sort-asc::after,
+
+  th.sort-asc::after,
   th.sort-desc::after {
     content: "⌃";
     position:      relative;
@@ -2052,51 +2189,63 @@ th.sort-asc::after,
     transition-timing-function:      cubic-bezier(0.4, 0, 0.2, 1);
     transition-duration:      200ms;
   }
-th.sort-asc::after {
+
+  th.sort-asc::after {
   top:      2px;
   --tw-rotate:      0deg;
   transform:      translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
 }
-th.sort-desc::after {
+
+  th.sort-desc::after {
   top:      -1px;
   --tw-rotate:      -180deg;
   transform:      translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
 }
-tbody td {
+
+  tbody td {
     background-color: #fff;
   }
-a {
+
+  a {
   font-weight:      600;
   --tw-text-opacity:      1;
   color:      rgb(52 156 226 / var(--tw-text-opacity));
   text-decoration-line:      underline;
 }
-h1, h2, h3, h4, h5, h6 {
+
+  h1, h2, h3, h4, h5, h6 {
   margin-bottom:      0.5rem;
   font-weight:      700;
 }
-h2, h3 {
+
+  h2, h3 {
   margin-top:      1.5rem;
 }
-h1 {
+
+  h1 {
   font-size:      1.5rem;
   line-height:      2rem;
 }
-h2 {
+
+  h2 {
   font-size:      1.25rem;
   line-height:      1.75rem;
 }
-h4, h5, h6 {
+
+  h4, h5, h6 {
   margin-top:      1rem;
 }
-h1 {
+
+  h1 {
   font-size:      1.5rem;
   line-height:      2rem;
 }
-p {
+
+  p {
   margin-bottom:      0.5rem;
 }
-.radio-group {
+
+  .radio-group {
   display:      flex;
   flex-direction:      column;
 
@@ -2135,7 +2284,7 @@ p {
     }
     }
 }
-.lucide-icon {
+  .lucide-icon {
     speak: never;
     display: inline-block;
     text-decoration: inherit;
@@ -2145,14 +2294,16 @@ p {
     line-height: 1;
     -webkit-font-smoothing: antialiased;
   }
-select {
+
+  select {
   border-radius:      0.375rem;
   border-width:      1px;
   --tw-border-opacity:      1;
   border-color:      rgb(209 213 219 / var(--tw-border-opacity));
   padding:      0.25rem;
 }
-.prose {
+
+  .prose {
     li {
       p {
       margin-top:      0px !important;
@@ -2160,7 +2311,8 @@ select {
     }
     }
   }
-/* The collapsible left rail (header#site-header, #main-content.menu-*) was
+
+  /* The collapsible left rail (header#site-header, #main-content.menu-*) was
      removed with the v2 chrome. Its styles went with it — the eleven-item nav
      is now the three-item pill in _includes/nav.html, and the tools it used to
      list are cards on the home page. */
@@ -2266,6 +2418,9 @@ select {
 .z-10 {
   z-index:      10;
 }
+.z-20 {
+  z-index:      20;
+}
 .z-30 {
   z-index:      30;
 }
@@ -2322,6 +2477,10 @@ select {
 .mx-2 {
   margin-left:      0.5rem;
   margin-right:      0.5rem;
+}
+.mx-4 {
+  margin-left:      1rem;
+  margin-right:      1rem;
 }
 .mx-auto {
   margin-left:      auto;
@@ -3103,6 +3262,10 @@ select {
   --tw-border-opacity:      1;
   border-color:      rgb(209 213 219 / var(--tw-border-opacity));
 }
+.border-gray-400 {
+  --tw-border-opacity:      1;
+  border-color:      rgb(156 163 175 / var(--tw-border-opacity));
+}
 .border-gray-700 {
   --tw-border-opacity:      1;
   border-color:      rgb(55 65 81 / var(--tw-border-opacity));
@@ -3490,6 +3653,9 @@ select {
 .text-2xl {
   font-size:      1.5rem;
   line-height:      2rem;
+}
+.text-\[10px\] {
+  font-size:      10px;
 }
 .text-\[11px\] {
   font-size:      11px;
@@ -3898,15 +4064,19 @@ select {
 .\[scrollbar-width\:none\] {
   scrollbar-width:      none;
 }
+
 :root {
   /* How much room the floating nav pill needs at the bottom of a phone
      viewport. Tool pages size canvases against this so nothing ends up
      underneath the nav. Cleared at md, where the pill becomes static. */
   --nav-clearance: 5.5rem;
 }
+
 @media (min-width: 768px) {
   :root { --nav-clearance: 0rem; }
 }
+
+
 /* ================================================================
    The shell measure. One number for the whole site, read by every
    .page-column and by the banner bar's content column.
@@ -3930,11 +4100,15 @@ select {
    Tailwind finds its selector in the scanned HTML, and `body` bare is not a
    class it looks for.
    ================================================================ */
+
 :root { --column-max: 87.5rem; }
+
 @media (min-width: 100rem) {
   :root { --column-max: 100rem; }
 }
+
 .banner-bar { max-width: var(--column-max); }
+
 /* The band is the book's promo, not the site's voice: it sets its own
    Helvetica/Arial rather than inheriting Libre Franklin from <body>. Scoped to
    .banner-bar so nothing else picks it up.
@@ -3944,6 +4118,8 @@ select {
   font-family: Helvetica, "Helvetica Neue", Arial, sans-serif;
   letter-spacing: -0.01em;
 }
+
+
 /* ================================================================
    Tool shell — canvas, floating controls, and the bottom sheet.
 
@@ -3957,9 +4133,11 @@ select {
    The .tooltip rules below are outside the layer for the same
    reason.
    ================================================================ */
+
 /* ---- Tool shell -----------------------------------------------------
    Shared behavior for the graph and map tools. See assets/js/sheet.js for
    why the detail panel becomes a sheet below 768px. */
+
 /* A canvas sized to what is left of the viewport, never taller. The old
    tools hardcode `calc(100vh - 110px)` and similar, which assumes a fixed
    chrome height and is wrong on every phone with a dynamic URL bar. */
@@ -3971,7 +4149,9 @@ select {
   touch-action: pan-y;
   overscroll-behavior: contain;
 }
+
 .dr-canvas--grab { touch-action: none; }
+
 /* Floating control cluster. 44px targets, and it does not run under the
    nav pill. */
 .dr-controls {
@@ -3980,6 +4160,7 @@ select {
   display:      flex;
   gap:      0.375rem;
 }
+
 .dr-controls button,
 .dr-controls .dr-btn {
   margin-right:      0px !important;
@@ -4008,13 +4189,16 @@ select {
   min-height: 2.75rem;
   min-width: 2.75rem;
 }
+
 .dr-controls button[aria-pressed="true"] {
   --tw-bg-opacity:      1 !important;
   background-color:      rgb(0 0 0 / var(--tw-bg-opacity)) !important;
   --tw-text-opacity:      1 !important;
   color:      rgb(255 255 255 / var(--tw-text-opacity)) !important;
 }
+
 /* ---- Sheet ---------------------------------------------------------- */
+
 /* The wrapper vanishes from layout at desktop width so the panel it wraps
    stays a direct child of the tool's own grid.
 
@@ -4030,9 +4214,11 @@ select {
   display: contents;
   --dr-sheet-surface: #fff;
 }
+
 .dr-sheet__grip,
 .dr-sheet__close,
 .dr-sheet__scrim { display: none; }
+
 @media (max-width: 767px) {
   .dr-sheet {
     position: fixed;
@@ -4138,9 +4324,12 @@ select {
   /* The nav pill must not sit on top of an open sheet. */
   body:has(.dr-sheet.is-open) nav[aria-label="Primary"] { display: none; }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .dr-sheet { transition: none; }
 }
+
+
 .tooltip {
   position: absolute;
   background: white;
@@ -4155,162 +4344,208 @@ select {
   opacity: 0;
   transition: opacity 0.2s;
 }
+
 .tooltip.visible {
   opacity: 1;
 }
+
 .after\:absolute::after {
   content:      var(--tw-content);
   position:      absolute;
 }
+
 .after\:inset-0::after {
   content:      var(--tw-content);
   inset:      0px;
 }
+
 .first\:mt-6:first-child {
   margin-top:      1.5rem;
 }
+
 .empty\:hidden:empty {
   display:      none;
 }
+
 .hover\:border-blue:hover {
   --tw-border-opacity:      1;
   border-color:      rgb(52 156 226 / var(--tw-border-opacity));
 }
+
 .hover\:border-white\/50:hover {
   border-color:      rgb(255 255 255 / 0.5);
 }
+
 .hover\:border-white\/75:hover {
   border-color:      rgb(255 255 255 / 0.75);
 }
+
 .hover\:\!bg-green-light:hover {
   --tw-bg-opacity:      1 !important;
   background-color:      rgb(52 226 151 / var(--tw-bg-opacity)) !important;
 }
+
 .hover\:bg-black:hover {
   --tw-bg-opacity:      1;
   background-color:      rgb(0 0 0 / var(--tw-bg-opacity));
 }
+
 .hover\:bg-black\/\[0\.06\]:hover {
   background-color:      rgb(0 0 0 / 0.06);
 }
+
 .hover\:bg-blue\/10:hover {
   background-color:      rgb(52 156 226 / 0.1);
 }
+
 .hover\:bg-gray-100:hover {
   --tw-bg-opacity:      1;
   background-color:      rgb(243 244 246 / var(--tw-bg-opacity));
 }
+
 .hover\:bg-gray-200:hover {
   --tw-bg-opacity:      1;
   background-color:      rgb(229 231 235 / var(--tw-bg-opacity));
 }
+
 .hover\:bg-green:hover {
   --tw-bg-opacity:      1;
   background-color:      rgb(25 178 112 / var(--tw-bg-opacity));
 }
+
 .hover\:bg-green-light\/20:hover {
   background-color:      rgb(52 226 151 / 0.2);
 }
+
 .hover\:bg-green\/20:hover {
   background-color:      rgb(25 178 112 / 0.2);
 }
+
 .hover\:bg-red\/20:hover {
   background-color:      rgb(239 62 40 / 0.2);
 }
+
 .hover\:bg-white\/10:hover {
   background-color:      rgb(255 255 255 / 0.1);
 }
+
 .hover\:from-\[\#E4E4E4\]:hover {
   --tw-gradient-from:      #E4E4E4 var(--tw-gradient-from-position);
   --tw-gradient-to:      rgb(228 228 228 / 0) var(--tw-gradient-to-position);
   --tw-gradient-stops:      var(--tw-gradient-from), var(--tw-gradient-to);
 }
+
 .hover\:to-\[\#BEBEBE\]:hover {
   --tw-gradient-to:      #BEBEBE var(--tw-gradient-to-position);
 }
+
 .hover\:text-blue:hover {
   --tw-text-opacity:      1;
   color:      rgb(52 156 226 / var(--tw-text-opacity));
 }
+
 .hover\:text-navy:hover {
   --tw-text-opacity:      1;
   color:      rgb(37 39 57 / var(--tw-text-opacity));
 }
+
 .hover\:text-white:hover {
   --tw-text-opacity:      1;
   color:      rgb(255 255 255 / var(--tw-text-opacity));
 }
+
 .hover\:\!text-opacity-100:hover {
   --tw-text-opacity:      1 !important;
 }
+
 .hover\:\!underline:hover {
   text-decoration-line:      underline !important;
 }
+
 .hover\:underline:hover {
   text-decoration-line:      underline;
 }
+
 .hover\:opacity-100:hover {
   opacity:      1;
 }
+
 .hover\:opacity-80:hover {
   opacity:      0.8;
 }
+
 .hover\:shadow-\[0_4px_16px_rgba\(0\2c 0\2c 0\2c 0\.12\)\]:hover {
   --tw-shadow:      0 4px 16px rgba(0,0,0,0.12);
   --tw-shadow-colored:      0 4px 16px var(--tw-shadow-color);
   box-shadow:      var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
+
 .focus\:border-transparent:focus {
   border-color:      transparent;
 }
+
 .focus\:outline:focus {
   outline-style:      solid;
 }
+
 .focus\:outline-2:focus {
   outline-width:      2px;
 }
+
 .focus\:outline-offset-2:focus {
   outline-offset:      2px;
 }
+
 .focus\:outline-blue:focus {
   outline-color:      #349CE2;
 }
+
 .focus\:ring-2:focus {
   --tw-ring-offset-shadow:      var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);
   --tw-ring-shadow:      var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color);
   box-shadow:      var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000);
 }
+
 .focus\:ring-blue-500:focus {
   --tw-ring-opacity:      1;
   --tw-ring-color:      rgb(52 156 226 / var(--tw-ring-opacity));
 }
+
 .focus-visible\:outline:focus-visible {
   outline-style:      solid;
 }
+
 .focus-visible\:outline-2:focus-visible {
   outline-width:      2px;
 }
+
 .focus-visible\:outline-offset-2:focus-visible {
   outline-offset:      2px;
 }
+
 .focus-visible\:outline-ink-strong:focus-visible {
   outline-color:      #000000;
 }
+
 .group:hover .group-hover\:scale-\[1\.02\] {
   --tw-scale-x:      1.02;
   --tw-scale-y:      1.02;
   transform:      translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
 }
+
 .group:hover .group-hover\:bg-black\/75 {
   background-color:      rgb(0 0 0 / 0.75);
 }
+
 .group:hover .group-hover\:text-navy {
   --tw-text-opacity:      1;
   color:      rgb(37 39 57 / var(--tw-text-opacity));
 }
+
 .group:hover .group-hover\:opacity-100 {
   opacity:      1;
 }
+
 @container (min-width: 32rem) {
   .\@lg\:max-h-none {
     max-height:      none;
@@ -4325,6 +4560,7 @@ select {
     flex-direction:      row;
   }
 }
+
 @container (min-width: 36rem) {
   .\@xl\:col-span-2 {
     grid-column:      span 2 / span 2;
@@ -4378,6 +4614,7 @@ select {
     text-align:      right;
   }
 }
+
 @container (min-width: 42rem) {
   .\@2xl\:flex-row {
     flex-direction:      row;
@@ -4405,6 +4642,7 @@ select {
     line-height:      2.25rem;
   }
 }
+
 @container (min-width: 48rem) {
   .\@3xl\:columns-2 {
     -moz-columns:      2;
@@ -4419,6 +4657,7 @@ select {
     padding-right:      2rem;
   }
 }
+
 @container (min-width: 56rem) {
   .\@4xl\:col-span-2 {
     grid-column:      span 2 / span 2;
@@ -4464,12 +4703,14 @@ select {
     letter-spacing:      -0.02em;
   }
 }
+
 @container (min-width: 64rem) {
   .\@5xl\:text-xl {
     font-size:      1.25rem;
     line-height:      1.75rem;
   }
 }
+
 @container (min-width: 72rem) {
   .\@6xl\:col-span-2 {
     grid-column:      span 2 / span 2;
@@ -4499,11 +4740,13 @@ select {
          column-gap:      1rem;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .motion-reduce\:transform-none {
     transform:      none;
   }
 }
+
 @media (min-width: 640px) {
   .sm\:h-\[156px\] {
     height:      156px;
@@ -4536,6 +4779,7 @@ select {
     letter-spacing:      -0.01em;
   }
 }
+
 @media (min-width: 768px) {
   .md\:visible {
     visibility:      visible;
@@ -4838,6 +5082,7 @@ select {
     background-color:      rgb(255 255 255 / var(--tw-bg-opacity));
   }
 }
+
 @media (min-width: 1024px) {
   .lg\:mt-5 {
     margin-top:      1.25rem;
@@ -4889,6 +5134,7 @@ select {
     padding-right:      2rem;
   }
 }
+
 @media (min-width: 1280px) {
   .xl\:-mx-6 {
     margin-left:      -1.5rem;
@@ -4902,35 +5148,45 @@ select {
     padding-right:      1.5rem;
   }
 }
+
 .\[\&\:\:-webkit-scrollbar\]\:hidden::-webkit-scrollbar {
   display:      none;
 }
+
 .\[\&\>div\:first-child\]\:\!mt-0>div:first-child {
   margin-top:      0px !important;
 }
+
 .\[\&_\.right-icon\]\:text-green-light .right-icon {
   --tw-text-opacity:      1;
   color:      rgb(52 226 151 / var(--tw-text-opacity));
 }
+
 .\[\&_\.twitter-tweet\]\:\!mb-4 .twitter-tweet {
   margin-bottom:      1rem !important;
 }
+
 .\[\&_\.twitter-tweet\]\:\!mt-0 .twitter-tweet {
   margin-top:      0px !important;
 }
+
 .\[\&_\.twitter-tweet\]\:break-inside-avoid .twitter-tweet {
   -moz-column-break-inside:      avoid;
        break-inside:      avoid;
 }
+
 .\[\&_div\]\:\!mb-4 div {
   margin-bottom:      1rem !important;
 }
+
 .\[\&_p\]\:mb-0 p {
   margin-bottom:      0px;
 }
+
 .\[\&_p\]\:mt-2 p {
   margin-top:      0.5rem;
 }
+
 .\[\&_p\]\:text-\[15px\] p {
   font-size:      15px;
 }

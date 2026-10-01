@@ -105,6 +105,8 @@ exclude:
   - pa
   - 990tools
   - python
+  - browse/test
+  - vitest.config.js
   # Repo docs, not site content. Without these Jekyll copies them into the
   # build, which publishes them and adds routes that tests/routes.txt does not
   # list — failing the deploy's route-contract gate.
