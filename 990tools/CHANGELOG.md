@@ -5,6 +5,14 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-10-01 (XML OOM wrapper)
+
+### Wrapper actually resumes after os._exit(75)
+- **Why:** `set -u` + `$start→$stop` unbound; first 08A OOM killed the shell instead of attempt 2.
+- **Change:** `${start}->${stop}`. `XML_OOM_RESTARTS` default 120.
+
+---
+
 ## [Unreleased] - 2026-10-01 (XML checkpoint)
 
 ### XML FORCE CHECKPOINT no longer scans Geocoding

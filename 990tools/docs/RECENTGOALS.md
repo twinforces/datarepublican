@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-10-01: overnight wrapper restarts after XML OOM
+
+**What:** `log` after `wait` uses `${start}->${stop}`. Default `XML_OOM_RESTARTS=120`.
+
+**Why:** `set -u` treated `$start→$stop` as one unset name, so the wrapper exited 1 after `os._exit(75)` and never resumed. 08A is ~51k files at ~500–600 per OOM.
+
+**How:** `overnight_ingest_run.sh`.
+
+---
+
 ## 2026-10-01: XML checkpoint skips Geocoding histogram
 
 **What:** Intermediate FORCE CHECKPOINT no longer `GROUP BY geocoding_status` unless `LOG_GEOCODING_STATUS_COUNTS=1`.
