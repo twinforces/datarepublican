@@ -41,6 +41,7 @@ Thumbs.db
 __pycache__
 test-results
 playwright-report
+.playwright-browse-profile
 charities.tsv
 grants.pf.tsv
 grants_final.tsv
