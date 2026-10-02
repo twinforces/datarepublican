@@ -24,6 +24,9 @@ DB_THREADS="${DB_THREADS:-1}"
 XML_OOM_RESTARTS="${XML_OOM_RESTARTS:-120}"
 # XML_ONLY=1 skips irsfetch→bmf (resume leftover XML after a dead fetch).
 XML_ONLY="${XML_ONLY:-0}"
+# XML Address rows append to $FINAL/xml_addresses.tsv; DuckDB insert waits for the address step.
+export XML_DEFER_ADDRESSES="${XML_DEFER_ADDRESSES:-1}"
+export XML_ADDRESS_TSV="${XML_ADDRESS_TSV:-$FINAL/xml_addresses.tsv}"
 
 mkdir -p "$ROOT/logs" "$FINAL/duckdb_tmp" 2>/dev/null || true
 

@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-10-02: XML addresses go to TSV, not DuckDB
+
+**What:** XML PDC save appends Address rows to `{final_dir}/xml_addresses.tsv`. DuckDB insert waits for the `address` step (indexes down, then COPY).
+
+**Why:** Address COPY of ~3.5k rows sat at 100% CPU for 10–14h on the 105M-row heap. Queue frozen at 45,683.
+
+**How:** `xml_address_tsv.py`, `pending_database_context.py`, `xml_processor.py`, `address_deduplication_processor.py`. Tests: `test_xml_address_tsv.py`. `XML_DEFER_ADDRESSES=1`.
+
+---
+
 ## 2026-10-01: overnight wrapper restarts after XML OOM
 
 **What:** `log` after `wait` uses `${start}->${stop}`. Default `XML_OOM_RESTARTS=120`.

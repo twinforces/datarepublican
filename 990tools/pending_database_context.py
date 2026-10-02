@@ -270,6 +270,14 @@ class PendingDatabaseContext:
                                     'contractor', 'political_contribution', 'address', 'geocoding','irsbmf']:
                     objects = self.objects.get(obj_type, [])
                     if objects:   # <-- only call if there are actual objects
+                        if obj_type == 'address':
+                            from xml_address_tsv import append_xml_addresses, defer_xml_addresses
+                            if defer_xml_addresses():
+                                n = append_xml_addresses(objects)
+                                PendingDatabaseContext._updated_counter += n
+                                if PDC_DEBUG:
+                                    print(f"###DEBUG### PDC_SAVE: Deferred {n} address rows to TSV")
+                                continue
                         if PDC_DEBUG: print(f"###DEBUG### PDC_SAVE: Inserting {len(objects)} {obj_type} objects")
                         new_ids = db_ops.INSERT_BY_TYPE(objects, obj_type.capitalize(), commit_batches=False)
                         PendingDatabaseContext._updated_counter += len(new_ids or [])

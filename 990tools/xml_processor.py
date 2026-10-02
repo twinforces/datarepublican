@@ -168,10 +168,16 @@ class XMLProcessor(BaseProcessor):
         Returns:
             Number of XML files processed
         """
-        skipped = self.db_ops.mark_xml_processed_if_charity_exists()
-        if skipped:
-            log_info(f"Skipped {skipped} XML files whose xml_name is already in Charities")
-        return self.process_parallel(max_files, workers)
+        import os
+        os.environ["XML_DEFER_ADDRESSES"] = "1"
+        try:
+            skipped = self.db_ops.mark_xml_processed_if_charity_exists()
+            if skipped:
+                log_info(f"Skipped {skipped} XML files whose xml_name is already in Charities")
+            log_info("XML Address rows go to xml_addresses.tsv (DuckDB insert skipped)")
+            return self.process_parallel(max_files, workers)
+        finally:
+            os.environ.pop("XML_DEFER_ADDRESSES", None)
 
 
     def get_work_count(self, max_files: Optional[int] = None) -> int:

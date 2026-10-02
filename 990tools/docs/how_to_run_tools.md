@@ -28,6 +28,8 @@ Checks for bad variants. Should say "No significant bad variants detected".
 Full step order:
 ```
 irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate_* → grant_match → backfill → photos → ratios → percentiles → export
+
+XML writes Charities/Grants/Officers to DuckDB. Address rows append `/Volumes/Data/final/xml_addresses.tsv` (`XML_DEFER_ADDRESSES=1`). Load them at `--step address`, not during XML.
 ```
 
 Common invocations:

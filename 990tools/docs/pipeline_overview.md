@@ -59,7 +59,7 @@ irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → 
   → grant_match → backfill → photos → ratios → percentiles → export
 ```
 
-**XML `bulk_insert`:** models `prep_for_insert` (UUID7, Address canonicalize), then `executemany` for batches under 10k rows. At 10k+ or on DuckDB pin/OOM, TSV + `read_csv` `INSERT`. COPY is the fallback, not the default: small ART-index inserts are faster as `executemany`.
+**XML `bulk_insert`:** models `prep_for_insert` (UUID7, Address canonicalize), then `executemany` for batches under 10k rows. At 10k+ or on DuckDB pin/OOM, TSV + `read_csv` `INSERT`. COPY is the fallback, not the default: small ART-index inserts are faster as `executemany`. **XML does not INSERT Addresses** — those rows append `{final_dir}/xml_addresses.tsv` and load at the `address` step with indexes down (`docs/xml_address_tsv.md`).
 
 **Geolocate trilogy:**
 | Step | Role |

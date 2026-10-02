@@ -5,6 +5,15 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-10-02 (XML address TSV)
+
+### XML no longer INSERTs into Addresses
+- **Why:** COPY of 3,475 Address rows burned a core for 10h+ against seven ART indexes on a 105M-row heap; Charities/Grants never moved.
+- **Change:** Append `{final_dir}/xml_addresses.tsv` during XML (`XML_DEFER_ADDRESSES=1`). `address` step drops indexes, COPY, rebuilds.
+- **Doc:** `docs/xml_address_tsv.md`. Test: `test_xml_address_tsv.py`.
+
+---
+
 ## [Unreleased] - 2026-10-01 (XML OOM wrapper)
 
 ### Wrapper actually resumes after os._exit(75)

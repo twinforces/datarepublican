@@ -1152,6 +1152,10 @@ class AddressDeduplicationProcessor(BaseProcessor):
         deleted from the file once you confirm this works.
         """
         self._emit_progress("Starting address deduplication (pure DuckDB SQL, incremental)")
+        from xml_address_tsv import load_deferred_xml_addresses
+        loaded = load_deferred_xml_addresses(self.db_ops)
+        if loaded:
+            self._emit_progress(f"Loaded {loaded:,} deferred XML Address rows from TSV")
         self._log_preflight_stats()
 
         start = time.time()
