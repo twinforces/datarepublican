@@ -27,7 +27,7 @@ Checks for bad variants. Should say "No significant bad variants detected".
 
 Full step order:
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match → geolocate_* → grant_match → backfill → photos → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → address → einless → match → geolocate_* → grant_match → backfill → photos → ratios → percentiles → export
 
 XML writes Charities/Grants/Officers to DuckDB. Address rows append `/Volumes/Data/final/xml_addresses.tsv` (`XML_DEFER_ADDRESSES=1`). Load them at `--step address`, not during XML.
 ```
@@ -40,6 +40,8 @@ python -u irs990processor.py --db-path irs990.duckdb
 # Single step (resilient to CLI crashes — use nohup)
 nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_step.log 2>&1 &
 nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
+nohup python -u irs990processor.py --step dot_safety --nostats -v > dot_safety_step.log 2>&1 &
+python3 -u dot_reporting/generate_safety_gallery.py --db-path /Volumes/Data/final/irs990.duckdb
 nohup python -u irs990processor.py --step einless --nostats -v > einless_step.log 2>&1 &
 
 # XML catch-up (16GB). TSV+COPY in bulk_insert. XML_ONLY=1 skips irsfetch.

@@ -7,6 +7,7 @@ import argparse
 import re
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_REPORTS = SCRIPT_DIR / "reports"
@@ -42,6 +43,23 @@ SKIP_DIR_PREFIXES = (
     "smoke_",
     "colocator_smoke",
     "address_smoke",
+)
+
+# Suites that are not a focus×slice matrix cell (Rogues galleries, etc.).
+FEATURED = (
+    {
+        "name": "unsafe_colocators",
+        "title": "DOT SMS Rogues gallery",
+        "blurb": (
+            "Physical yards ranked by crash deaths, Apple/PU (worst USDOT / "
+            "its trucks), and mill×harm identity farms. FMCSA SMS current window."
+        ),
+        "links": (
+            ("Volume", "index.html", "Deaths first; click Apple/PU for 1-truck mass-casualty"),
+            ("Harm / PU", "rates.html", "Yard/PU and Apple/PU on expected-fatality weights"),
+            ("Identity farms", "stacks.html", "Mill×harm = Apple/PU × physical USDOT names"),
+        ),
+    },
 )
 
 
@@ -144,6 +162,25 @@ def parse_suite(name: str) -> dict | None:
     return None
 
 
+def collect_featured(reports_dir: Path) -> list[dict]:
+    """Rogues galleries and other non-matrix suites with a live index.html."""
+    out: list[dict] = []
+    for spec in FEATURED:
+        child = reports_dir / spec["name"]
+        index = child / "index.html"
+        rec = dict(spec)
+        rec["ready"] = index.is_file()
+        rec["href"] = f"{spec['name']}/index.html" if rec["ready"] else None
+        rec["mtime"] = (
+            datetime.fromtimestamp(index.stat().st_mtime) if rec["ready"] else None
+        )
+        rec["n_html"] = (
+            sum(1 for _ in child.rglob("*.html")) if child.is_dir() else 0
+        )
+        out.append(rec)
+    return out
+
+
 def collect_suites(reports_dir: Path) -> list[dict]:
     suites: list[dict] = []
     if not reports_dir.is_dir():
@@ -200,8 +237,16 @@ def pick_latest(suites: list[dict]) -> list[dict]:
     )
 
 
-def render_html(suites: list[dict], *, all_suites: list[dict], reports_dir: Path) -> str:
-    generated = datetime.now().isoformat(timespec="seconds")
+def render_html(
+    suites: list[dict],
+    *,
+    all_suites: list[dict],
+    reports_dir: Path,
+    featured: list[dict] | None = None,
+) -> str:
+    generated = datetime.now(ZoneInfo("America/Los_Angeles")).strftime(
+        "%Y-%m-%d %H:%M %Z"
+    )
     focuses = ["dot", "medicare", "fec", "contractor", "grants", "grants_out", "usg"]
     slices = ["colocator", "zipcode", "loose_colocator", "address"]
     geos = [("national", "National clusters"), ("by_state", "By-state maps & details")]
@@ -226,6 +271,48 @@ def render_html(suites: list[dict], *, all_suites: list[dict], reports_dir: Path
             f'<a href="{s["href"]}">{SLICE_LABELS.get(slice_by, slice_by)}</a>'
             f'{extra}<div class="sub">{day_lbl} · {mtime}</div></td>'
         )
+
+    featured_html = ""
+    if featured:
+        frows = []
+        for f in featured:
+            if f.get("ready"):
+                mtime = f["mtime"].strftime("%Y-%m-%d %H:%M") if f.get("mtime") else ""
+                links = " · ".join(
+                    f'<a href="{f["name"]}/{href}">{lab}</a>'
+                    for lab, href, _tip in f.get("links") or ()
+                )
+                tips = "<br>".join(
+                    f'<span class="sub">{lab}: {tip}</span>'
+                    for lab, _href, tip in f.get("links") or ()
+                    if tip
+                )
+                open_td = (
+                    f'<td class="ok">'
+                    f'<a href="{f["href"]}">{f["title"]}</a>'
+                    f'<div class="sub">{f.get("n_html", 0)} html · {mtime}</div>'
+                    f"<div>{links}</div>{tips}</td>"
+                )
+            else:
+                open_td = (
+                    f'<td class="pending" title="{f["name"]}">'
+                    f'{f["title"]} (no index yet)</td>'
+                )
+            frows.append(
+                f"<tr><th>{f['title']}</th>"
+                f'<td colspan="3">{f.get("blurb") or ""}</td>{open_td}</tr>'
+            )
+        featured_html = f"""
+<section>
+  <h2>Rogues galleries</h2>
+  <table class="matrix">
+    <thead><tr><th>Gallery</th><th colspan="3">What it is</th><th>Open</th></tr></thead>
+    <tbody>
+      {"".join(frows)}
+    </tbody>
+  </table>
+</section>
+"""
 
     sections = []
     for geo, geo_label in geos:
@@ -322,6 +409,7 @@ def render_html(suites: list[dict], *, all_suites: list[dict], reports_dir: Path
     contractor = distinct addresses · medicare = provider rows.
   </p>
 
+  {featured_html}
   {"".join(sections)}
 
   <section>
@@ -364,8 +452,14 @@ def main() -> int:
     out = args.out or (reports_dir / OUT_NAME)
 
     all_suites = collect_suites(reports_dir)
+    featured = collect_featured(reports_dir)
     matrix = all_suites if args.all_days else pick_latest(all_suites)
-    html = render_html(matrix, all_suites=all_suites, reports_dir=reports_dir)
+    html = render_html(
+        matrix,
+        all_suites=all_suites,
+        reports_dir=reports_dir,
+        featured=featured,
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     ready = sum(1 for s in matrix if s.get("ready"))

@@ -65,6 +65,7 @@ from einless_processor import EinlessProcessor
 from fec_processor import FECProcessor
 from medicare_processor import MedicareProcessor
 from sanctions_processor import SanctionsProcessor
+from fmcsa_safety_processor import FmcsaSafetyProcessor
 from dot_processor import DotProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning, update_logging_config
 from config import global_config
@@ -108,7 +109,7 @@ BATCH_SIZE = 100
 # Geolocate (after match): prev → census bulk → API tail → grok batch → archive.
 # geolocate_new = legacy combined census+api (one step); prefer census then api separately.
 PIPELINE_STEPS = [
-    "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "address", "einless", "match",
+    "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "dot_safety", "address", "einless", "match",
     "geolocate_prev", "geolocate_census", "geolocate_api", "geolocate_new", "geolocate_grok",
     "geolocate_archive",
     "grant_match", "backfill", "photos", "ratios",
@@ -215,6 +216,9 @@ class IRS990Processor(BaseProcessor):
             self.db_ops, data_dir=cms_data_dir / "treasury"
         )
         self.dot_processor = DotProcessor(self.db_ops, data_dir=cms_data_dir / "dot")
+        self.fmcsa_safety_processor = FmcsaSafetyProcessor(
+            self.db_ops, data_dir=cms_data_dir / "dot"
+        )
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -527,6 +531,16 @@ class IRS990Processor(BaseProcessor):
         stats = self.dot_processor.run()
         self.processed_steps += 1
         return stats.get("carriers", 0)
+
+    def run_dot_safety(self):
+        """SMS crash / inspection / BASIC files. Does not write Addresses."""
+        if self.exit_processing:
+            log_info("Shutdown requested before DOT safety")
+            return 0
+        log_info("Running FMCSA SMS crash / inspection / BASIC ingest")
+        stats = self.fmcsa_safety_processor.run()
+        self.processed_steps += 1
+        return stats.get("crash", 0) + stats.get("inspection", 0) + stats.get("basics", 0)
 
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
@@ -974,6 +988,7 @@ def main():
         "medicare": lambda: processor.run_medicare(),
         "sanctions": lambda: processor.run_sanctions(),
         "dot": lambda: processor.run_dot(),
+        "dot_safety": lambda: processor.run_dot_safety(),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),

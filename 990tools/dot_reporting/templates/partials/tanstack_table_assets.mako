@@ -33,6 +33,11 @@ Note: do not use ## comments inside <%text> — they are emitted literally.
     background: #f4f4f4; position: sticky; top: 0; cursor: pointer; user-select: none;
     white-space: nowrap;
   }
+  .ts-table-root th[title],
+  #ts-table-root th[title] {
+    text-decoration: underline dotted;
+    text-underline-offset: 0.18em;
+  }
   .ts-table-root th .sort-ind,
   #ts-table-root th .sort-ind { color: #888; font-size: 0.75rem; margin-left: 0.25rem; }
   .ts-table-root th.sorted,
@@ -85,6 +90,7 @@ function buildColumns(colDefs) {
     cell: (info) => info.getValue(),
     sortingFn: (rowA, rowB, columnId) =>
       cmp(rowA.getValue(columnId), rowB.getValue(columnId)),
+    meta: c.title ? { title: c.title } : undefined,
   }));
 }
 
@@ -235,7 +241,9 @@ export function mountTanStackTable(root, cfg) {
         const ind = sorted === "asc" ? "▲" : sorted === "desc" ? "▼" : "⇅";
         const cls = sorted ? "sorted" : "";
         const label = col.columnDef.header;
-        return `<th class="${cls}" data-col="${escapeHtml(id)}">${escapeHtml(String(label))}<span class="sort-ind">${ind}</span></th>`;
+        const tip = col.columnDef.meta && col.columnDef.meta.title;
+        const titleAttr = tip ? ` title="${escapeHtml(String(tip))}"` : "";
+        return `<th class="${cls}" data-col="${escapeHtml(id)}"${titleAttr}>${escapeHtml(String(label))}<span class="sort-ind">${ind}</span></th>`;
       })
       .join("");
 

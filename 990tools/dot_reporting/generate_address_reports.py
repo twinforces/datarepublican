@@ -32,6 +32,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -41,9 +42,15 @@ from urllib.parse import quote_plus
 import duckdb
 from mako.template import Template
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+_ROOT = SCRIPT_DIR.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 DEFAULT_DB = "/Volumes/Data/final/irs990.duckdb.geolocate"
 DEFAULT_FINAL_DIR = "/Volumes/Data/final"
-SCRIPT_DIR = Path(__file__).resolve().parent
 
 # How clusters are defined. SQL expressions are relative to Addresses alias `a` where needed.
 SLICE_MODES: dict[str, dict[str, str]] = {
@@ -893,6 +900,14 @@ def write_report(
         pop_cache = ensure_population_cutpoints(conn)
         pop_cutpoints = cutpoints_for_focus("dot", pop_cache)
 
+        from fmcsa_safety_processor import (  # noqa: WPS433
+            attach_sms,
+            load_sms_by_dot,
+            sms_cluster_totals,
+        )
+
+        sms_by_dot = load_sms_by_dot(conn)
+
         clusters_raw = fetch_clusters(
             conn,
             slice_by,
@@ -916,6 +931,8 @@ def write_report(
             dot_carriers_full = fetch_dot_carriers(
                 conn, slice_by, key, 9999, lat_long=lat_long
             )
+            attach_sms(dot_carriers_full, sms_by_dot)
+            c.update(sms_cluster_totals(dot_carriers_full))
 
             active_count = sum(1 for d in dot_carriers_full if d.get("status_code") == "A")
             inactive_count = sum(1 for d in dot_carriers_full if d.get("status_code") == "I")
@@ -972,6 +989,7 @@ def write_report(
             dot_carriers_display = fetch_dot_carriers(
                 conn, slice_by, key, top_n, lat_long=lat_long
             )
+            attach_sms(dot_carriers_display, sms_by_dot)
 
             phone_groups: dict[str, list] = defaultdict(list)
             for d in dot_carriers_full:
@@ -1074,6 +1092,10 @@ def write_report(
                 "dot_carrier_count": c.get("dot_carrier_count"),
                 "active_power_units": c.get("dot_active_power_units"),
                 "inactive_power_units": c.get("dot_inactive_power_units"),
+                "sms_fatalities": c.get("sms_fatalities"),
+                "sms_crashes": c.get("sms_crashes"),
+                "sms_oos_inspections": c.get("sms_oos_inspections"),
+                "sms_basic_alert_carriers": c.get("sms_basic_alert_carriers"),
                 "ia_ratio": c.get("ia_ratio"),
                 "distinct_address_count": c.get("distinct_address_count"),
                 "physical_note": physical_note_for(sample, notes),

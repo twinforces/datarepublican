@@ -37,8 +37,11 @@ import duckdb
 from mako.template import Template
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+_ROOT = SCRIPT_DIR.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from generate_address_reports import (  # noqa: E402
     CSS,
@@ -745,6 +748,13 @@ def write_state_suite(
 
         pop_cache = ensure_population_cutpoints(con)
         pop_cutpoints = cutpoints_for_focus(focus if focus != "dot" else "dot", pop_cache)
+        from fmcsa_safety_processor import (  # noqa: WPS433
+            attach_sms,
+            load_sms_by_dot,
+            sms_cluster_totals,
+        )
+
+        sms_by_dot = load_sms_by_dot(con) if focus == "dot" else None
         methodology = index_methodology_context(
             focus if focus != "dot" else "dot", pop_cutpoints
         )
@@ -1004,6 +1014,8 @@ Detail pages: {total_pages:,}
                 if focus == "dot":
                     # enrich with full DOT list for scoring
                     dots = fetch_dot_carriers(con, slice_by, key, 9999)
+                    attach_sms(dots, sms_by_dot)
+                    c.update(sms_cluster_totals(dots))
                     act = [d for d in dots if d.get("status_code") == "A"]
                     ina = [d for d in dots if d.get("status_code") == "I"]
                     c["dot_active_count"] = len(act)
@@ -1058,6 +1070,7 @@ Detail pages: {total_pages:,}
                     # Full carrier list (same as national write_report): active by
                     # phone, inactive collapsed; also group by street address.
                     dots_full = fetch_dot_carriers(con, slice_by, key, 9999)
+                    attach_sms(dots_full, sms_by_dot)
                     dots_disp = dots_full[:top_n]
                     phone_groups: dict[str, list] = defaultdict(list)
                     for d in dots_full:

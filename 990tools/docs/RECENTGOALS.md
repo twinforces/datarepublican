@@ -4,6 +4,26 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-10-02: Ship DOT SMS on the whole stack + Rogues hub row
+
+**What:** Master index has a featured Rogues galleries row for `unsafe_colocators` (Volume / Harm/PU / Identity farms). Gallery pages link All reports. `regen_dot_sms.sh` refreshes the gallery, then the four national DOT slices, then the four by-state DOT slices, against `irs990.duckdb`, rebuilding the hub after each.
+
+**Why:** Existing colocator/zip/address detail pages already attach SMS; the HTML was stale. `parse_suite` cannot see `unsafe_colocators`, so the gallery never appeared in the matrix. Featured extras keep it on the hub without stealing the DOT/colocator cell.
+
+**How:** `dot_reporting/build_master_index.py` `FEATURED` + `collect_featured`. Tests: `test_build_master_index.py`, `test_fmcsa_safety.py`. Regen: `dot_reporting/regen_dot_sms.sh`. Docs: `docs/build_master_index.md`, `docs/generate_safety_gallery.md`.
+
+---
+
+## 2026-10-02: FMCSA SMS + unsafe-address gallery
+
+**What:** `dot_safety` ingests SMS crash / inspection / BASIC. Gallery has volume rank plus identity-farm / chameleon stack rank (shared census phone, paper new vinyl on a small-harm mill phone).
+
+**Why:** Signal Hill is 535 one-truck LLCs on one phone. A 30-PU “fleet HQ” cap drops real farms; the fatality-only gate dropped Signal Hill (OOS/BASIC, 0 deaths). Vinyl is paper extras next to small harm, not agent shells around United Van Lines.
+
+**How:** `fmcsa_safety_processor.py`, `dot_reporting/generate_safety_gallery.py`, `--step dot_safety`. Stack: ≥2 USDOTs on a 10-digit phone with SMS harm, and (≥2 paper extras when every harm DOT has PU ≤ 50, or ≥2 small fatality DOTs). Sort is Mill×harm = Apple/PU × physical USDOT records (vet-your-drivers stain on a legal mill). Rate rank: Yard/PU and Apple/PU on `rates.html`, weights universe-wide sum(fatalities)/sum(metric) (~0.030 per crash, ~0.0069 per OOS). Each BASIC flag has its own weight (unsafe ≈ 187, maint ≈ 23.5, HOS ≈ 12.7); lit flags add. Tests: `test_fmcsa_safety.py`.
+
+---
+
 ## 2026-10-02: XML addresses go to TSV, not DuckDB
 
 **What:** XML PDC save appends Address rows to `{final_dir}/xml_addresses.tsv`. DuckDB insert waits for the `address` step (indexes down, then COPY).

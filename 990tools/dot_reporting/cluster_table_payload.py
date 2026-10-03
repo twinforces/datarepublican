@@ -5,14 +5,64 @@ from __future__ import annotations
 
 import html
 import json
+import sys
+from pathlib import Path
 from typing import Any
+
+_DIR = Path(__file__).resolve().parent
+_ROOT = _DIR.parent
+if str(_DIR) not in sys.path:
+    sys.path.insert(0, str(_DIR))
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from html_format import linkify_zip_codes, zip_link_html  # noqa: E402
 from percentiles import MetricScale  # noqa: E402
+from fmcsa_safety_processor import (  # noqa: E402
+    ACTIVE_FLAG_WEIGHTS,
+    BASIC_CATEGORIES,
+    TERMS,
+)
 
 
 def _esc(s: Any) -> str:
     return html.escape("" if s is None else str(s), quote=True)
+
+
+def _flag_on(row: dict, key: str) -> bool:
+    v = row.get(key)
+    if isinstance(v, str):
+        return v.strip().upper() in {"Y", "TRUE", "T", "1"}
+    return bool(v)
+
+
+def basic_flags_plain(row: dict) -> str:
+    return " · ".join(
+        short
+        for key, short, _, _, _ in BASIC_CATEGORIES
+        if _flag_on(row, f"basic_{key}")
+    )
+
+
+def basic_flag_weight(row: dict) -> float:
+    """Sum of universe weights for lit BASIC flags on this USDOT."""
+    total = 0.0
+    for key, *_rest in BASIC_CATEGORIES:
+        if _flag_on(row, f"basic_{key}"):
+            total += float(ACTIVE_FLAG_WEIGHTS.get(key) or 0.0)
+    return total
+
+
+def basic_flags_html(row: dict) -> str:
+    """Lit BASIC categories as hoverable short labels (title carries the weight)."""
+    bits = []
+    for key, short, title, _, _ in BASIC_CATEGORIES:
+        if _flag_on(row, f"basic_{key}"):
+            tip = TERMS.get(f"basic_{key}") or title
+            bits.append(
+                f'<span class="term" title="{_esc(tip)}">{_esc(short)}</span>'
+            )
+    return " · ".join(bits)
 
 
 def metric_tier(value: float, vmax: float) -> str:
@@ -363,16 +413,27 @@ def dumps_table_json(payload: Any) -> str:
 
 
 def _dot_link_html(dot_number: Any) -> str:
-    d = _esc(dot_number or "")
-    if not d:
+    raw = str(dot_number or "").strip()
+    if not raw:
         return "—"
+    d = _esc(raw)
+    digits = "".join(ch for ch in raw if ch.isdigit()) or d
+    sc = f"https://searchcarriers.com/company/{d}"
+    sc_map = f"https://searchcarriers.com/map/company/{d}"
+    motus = f"https://motus.dot.gov/customer/{d}/account"
+    safer = (
+        "https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY"
+        "&query_type=queryCarrierSnapshot&query_param=USDOT"
+        f"&query_string={digits}"
+    )
     return (
-        f'<a href="https://searchcarriers.com/company/{d}" target="_blank" rel="noopener">{d}</a> '
+        f'<a href="{sc}" target="_blank" rel="noopener">{d}</a> '
         f'<small>['
-        f'<a href="https://searchcarriers.com/company/{d}" target="_blank" rel="noopener">SC</a>] '
-        f'[<a href="https://searchcarriers.com/map/company/{d}" target="_blank" rel="noopener" '
+        f'<a href="{sc}" target="_blank" rel="noopener" title="Search Carriers">SC</a>] '
+        f'[<a href="{sc_map}" target="_blank" rel="noopener" '
         f'title="Search Carriers map" aria-label="Search Carriers map">🌐</a>] '
-        f'[<a href="https://motus.dot.gov/customer/{d}/account" target="_blank" rel="noopener">MOTUS</a>]'
+        f'[<a href="{motus}" target="_blank" rel="noopener" title="MOTUS">MOTUS</a>] '
+        f'[<a href="{safer}" target="_blank" rel="noopener" title="FMCSA SAFER snapshot">SAFER</a>]'
         f"</small>"
     )
 
@@ -531,24 +592,34 @@ def build_detail_tables(
                 pu = r.get("power_units")
                 street = r.get("canonical_address") or ""
                 ph_disp = phone if phone != "No Phone" else (r.get("phone") or "—")
-                carriers_flat.append(
-                    {
-                        "dot": dn,
-                        "dot_html": _dot_link_html(dn),
-                        "name": r.get("legal_name") or r.get("dba_name") or "",
-                        "phone": ph_disp,
-                        "phone_html": (
-                            f'<button type="button" class="ts-filter-phone" '
-                            f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
-                            f'title="Filter to this phone">{_esc(ph_disp)}</button>'
-                        ),
-                        "status": status or "—",
-                        "power_units": pu if pu is not None else None,
-                        "address": street,
-                        "address_html": linkify_zip_codes(street),
-                        "dot_heavy": status == "I",
-                    }
-                )
+                fat = int(r.get("fatalities") or 0) if "fatalities" in r else None
+                rec = {
+                    "dot": dn,
+                    "dot_html": _dot_link_html(dn),
+                    "name": r.get("legal_name") or r.get("dba_name") or "",
+                    "phone": ph_disp,
+                    "phone_html": (
+                        f'<button type="button" class="ts-filter-phone" '
+                        f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
+                        f'title="Filter to this phone">{_esc(ph_disp)}</button>'
+                    ),
+                    "status": status or "—",
+                    "power_units": pu if pu is not None else None,
+                    "address": street,
+                    "address_html": linkify_zip_codes(street),
+                    "dot_heavy": status == "I" or (fat or 0) >= 5,
+                }
+                if "fatalities" in r:
+                    rec["fatalities"] = fat or 0
+                    rec["crashes"] = int(r.get("crashes") or 0)
+                    rec["oos"] = int(r.get("oos_inspections") or 0)
+                    rec["basic_n"] = int(r.get("basic_flags") or 0)
+                    rec["basic"] = basic_flags_plain(r)
+                    rec["basic_html"] = basic_flags_html(r)
+                    rec["basic_w"] = round(basic_flag_weight(r), 2)
+                    for key, _, _, _, _ in BASIC_CATEGORIES:
+                        rec[f"basic_{key}"] = _flag_on(r, f"basic_{key}")
+                carriers_flat.append(rec)
     if address_groups and not carriers_flat:
         for ag in address_groups:
             for r in ag.get("carriers") or []:
@@ -561,26 +632,36 @@ def build_detail_tables(
                 pu = r.get("power_units")
                 street = ag.get("canonical_address") or r.get("canonical_address") or ""
                 ph_disp = r.get("phone") or "—"
-                carriers_flat.append(
-                    {
-                        "dot": dn,
-                        "dot_html": _dot_link_html(dn),
-                        "name": r.get("legal_name") or r.get("dba_name") or "",
-                        "phone": ph_disp,
-                        "phone_html": (
-                            f'<button type="button" class="ts-filter-phone" '
-                            f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
-                            f'title="Filter to this phone">{_esc(ph_disp)}</button>'
-                            if ph_disp and ph_disp != "—"
-                            else _esc(ph_disp)
-                        ),
-                        "status": status or "—",
-                        "power_units": pu if pu is not None else None,
-                        "address": street,
-                        "address_html": linkify_zip_codes(street),
-                        "dot_heavy": status == "I",
-                    }
-                )
+                fat = int(r.get("fatalities") or 0) if "fatalities" in r else None
+                rec = {
+                    "dot": dn,
+                    "dot_html": _dot_link_html(dn),
+                    "name": r.get("legal_name") or r.get("dba_name") or "",
+                    "phone": ph_disp,
+                    "phone_html": (
+                        f'<button type="button" class="ts-filter-phone" '
+                        f'data-phone="{_esc(ph_disp)}" data-target="ts-carriers" '
+                        f'title="Filter to this phone">{_esc(ph_disp)}</button>'
+                        if ph_disp and ph_disp != "—"
+                        else _esc(ph_disp)
+                    ),
+                    "status": status or "—",
+                    "power_units": pu if pu is not None else None,
+                    "address": street,
+                    "address_html": linkify_zip_codes(street),
+                    "dot_heavy": status == "I" or (fat or 0) >= 5,
+                }
+                if "fatalities" in r:
+                    rec["fatalities"] = fat or 0
+                    rec["crashes"] = int(r.get("crashes") or 0)
+                    rec["oos"] = int(r.get("oos_inspections") or 0)
+                    rec["basic_n"] = int(r.get("basic_flags") or 0)
+                    rec["basic"] = basic_flags_plain(r)
+                    rec["basic_html"] = basic_flags_html(r)
+                    rec["basic_w"] = round(basic_flag_weight(r), 2)
+                    for key, _, _, _, _ in BASIC_CATEGORIES:
+                        rec[f"basic_{key}"] = _flag_on(r, f"basic_{key}")
+                carriers_flat.append(rec)
     if carriers_flat:
         pu_vals = [
             float(r["power_units"])
@@ -598,6 +679,41 @@ def build_detail_tables(
             )
             r["percentile"] = pu_scale.percentile(pu)
         # Default: group by phone, active first, then power units (classic stack view)
+        carrier_cols = [
+            {"id": "dot", "header": "DOT#", "title": TERMS["dot"]},
+            {"id": "name", "header": "Legal name"},
+            {"id": "phone", "header": "Phone", "title": TERMS["phone"]},
+            {"id": "status", "header": "Status", "title": TERMS["status"]},
+            {
+                "id": "power_units",
+                "header": "● Power units",
+                "title": TERMS["power_units"],
+            },
+            {"id": "address", "header": "Street"},
+        ]
+        if any("fatalities" in r for r in carriers_flat):
+            carrier_cols.extend(
+                [
+                    {
+                        "id": "fatalities",
+                        "header": "Fatalities",
+                        "title": TERMS["fatalities"],
+                    },
+                    {"id": "crashes", "header": "Crashes", "title": TERMS["crashes"]},
+                    {"id": "oos", "header": "OOS insp", "title": TERMS["oos"]},
+                    {
+                        "id": "basic",
+                        "header": "BASICs",
+                        "title": TERMS["basic_flag"],
+                    },
+                    {"id": "basic_n", "header": "#", "title": TERMS["basic"]},
+                    {
+                        "id": "basic_w",
+                        "header": "Flag wt",
+                        "title": TERMS["basic_w"],
+                    },
+                ]
+            )
         tables.append(
             {
                 "rootId": "ts-carriers",
@@ -607,14 +723,7 @@ def build_detail_tables(
                     {"id": "status", "desc": False},
                     {"id": "power_units", "desc": True},
                 ],
-                "columns": [
-                    {"id": "dot", "header": "DOT#"},
-                    {"id": "name", "header": "Legal name"},
-                    {"id": "phone", "header": "Phone"},
-                    {"id": "status", "header": "Status"},
-                    {"id": "power_units", "header": "● Power units"},
-                    {"id": "address", "header": "Street"},  # uses address_html when set
-                ],
+                "columns": carrier_cols,
                 "rows": carriers_flat,
             }
         )

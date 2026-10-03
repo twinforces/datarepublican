@@ -109,6 +109,35 @@
     </div>
   </section>
 
+% if 'sms_fatalities' in cluster:
+  <section>
+    <h2>SMS harm (current window)</h2>
+    <p style="font-size:0.85rem; color:#666; margin-bottom:0.5rem;">
+      FMCSA Safety Measurement System public files joined by USDOT.
+      Fatalities / crashes / OOS inspections / BASIC alerts also appear on each carrier row
+      (Search Carriers, MOTUS, SAFER links on the DOT#).
+    </p>
+    <div class="cards">
+      <div class="card">
+        <strong>${"{:,}".format(cluster.get('sms_fatalities') or 0)}</strong>
+        <span>Fatalities</span>
+      </div>
+      <div class="card">
+        <strong>${"{:,}".format(cluster.get('sms_crashes') or 0)}</strong>
+        <span>Crashes</span>
+      </div>
+      <div class="card">
+        <strong>${"{:,}".format(cluster.get('sms_oos_inspections') or 0)}</strong>
+        <span>OOS inspections</span>
+      </div>
+      <div class="card">
+        <strong>${"{:,}".format(cluster.get('sms_basic_alert_carriers') or 0)}</strong>
+        <span>BASIC-alert carriers</span>
+      </div>
+    </div>
+  </section>
+% endif
+
 % if show_address_subgroups and address_subgroups:
   <section>
     <h2>Addresses in this cluster (${len(address_subgroups)})</h2>

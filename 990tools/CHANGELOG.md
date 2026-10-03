@@ -5,6 +5,24 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-10-02 (DOT SMS ship)
+
+### Rogues gallery on the master index; SMS on the DOT stack
+- **Why:** The unsafe-yard gallery is a ranking, not a focus×slice suite, so `parse_suite` skipped `unsafe_colocators`. National/by-state DOT details already know how to attach SMS; the pages needed a regen against `irs990.duckdb`.
+- **Change:** Featured extras on `build_master_index.py`. Gallery nav to `../master_index.html`. `regen_dot_sms.sh` runs gallery → 4 national slices → 4 by-state slices, sequential, rebuilds the hub after each. Volume Apple/PU is score/PU on the death-first 100.
+- **Doc:** `docs/build_master_index.md`, `docs/generate_safety_gallery.md`. Tests: `test_build_master_index.py`, `test_fmcsa_safety.py`.
+
+---
+
+## [Unreleased] - 2026-10-02 (DOT SMS gallery)
+
+### SMS harm stacked on physical colocators
+- **Why:** Census yards are identity. Crash / inspection / BASIC files are the current SMS window (~256k / ~5.8M / ~717k). Mail addresses should not rank a place.
+- **Change:** `--step dot_safety` loads SMS into DuckDB without touching Addresses. Gallery has volume rank (`index.html`), harm/PU rate rank (`rates.html`: Yard/PU = max(fat, sum of per-flag weights, w_crash×crash, w_oos×OOS)/yard PU; Apple/PU = worst USDOT of the same max / that USDOT's PU), and identity-farm / mill×harm stack rank (`stacks.html`): shared census phone, paper extras (PU ≤ 5) as new vinyl when every harm DOT on that phone has PU ≤ 50 (Signal Hill mill phones). Sort is Apple/PU × physical USDOT records — a legal mill times the worst apple. Weights are universe-wide sum(fatalities)/sum(metric) (~0.030 per crash, ~0.0069 per OOS). Each BASIC category has its own weight (unsafe ≈ 187, maint ≈ 23.5, HOS ≈ 12.7, drugs ≈ 12.6, fitness ≈ 10.3); lit flags add and hover shows the score. No 30-PU HQ gate, no fatality-only gate, no 100000-scale composite score. Sort is new vinyl, then Fat DOTs. Index and detail use TanStack tables (sort/search/page). Column headers and dotted terms carry `title` hover definitions. USDOT cells use Search Carriers / MOTUS / SAFER; census power units sit on the carrier roster. Existing DOT cluster details attach SMS harm the same way (`load_sms_by_dot`). Truncated Socrata CSVs are not promoted; curl resumes when Content-Length is missing.
+- **Doc:** `docs/fmcsa_safety_processor.md`, `docs/generate_safety_gallery.md`. Test: `test_fmcsa_safety.py`.
+
+---
+
 ## [Unreleased] - 2026-10-02 (XML address TSV)
 
 ### XML no longer INSERTs into Addresses

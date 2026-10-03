@@ -136,14 +136,34 @@ def curl_download(
 ) -> None:
     """Download url to dest using curl. Supports resume when dest partially exists."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["curl", "-L", "--fail", "--retry", "3", "--retry-delay", "5", "-o", str(dest)]
+
+    def _run(*, resume_flag: bool) -> subprocess.CompletedProcess:
+        cmd = ["curl", "-L", "--fail"]
+        if resume_flag and dest.exists():
+            cmd.extend(["-C", "-"])
+        else:
+            cmd.extend(
+                ["--retry", "8", "--retry-delay", "5", "--retry-all-errors"]
+            )
+        cmd.extend(["-o", str(dest)])
+        if timeout > 0:
+            cmd.extend(["--max-time", str(timeout)])
+        cmd.append(url)
+        return subprocess.run(cmd)
+
     if resume and dest.exists():
-        cmd.insert(1, "-C")
-        cmd.insert(2, "-")
-    if timeout > 0:
-        cmd.extend(["--max-time", str(timeout)])
-    cmd.append(url)
-    subprocess.run(cmd, check=True)
+        first = _run(resume_flag=True)
+        if first.returncode == 0:
+            return
+        log_warning(
+            f"Resume failed for {dest.name} (curl {first.returncode}); full GET"
+        )
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+    result = _run(resume_flag=False)
+    result.check_returncode()
 
 
 def ensure_download(
@@ -189,10 +209,17 @@ def ensure_download(
         ):
             same_object = True
         # Partial of same object: allow resume. Otherwise wipe and full GET.
+        # Socrata often omits Content-Length; keep bytes and resume when there
+        # is no sidecar (a prior successful download would have written one).
         if same_object and remote_len and local_size < remote_len:
             use_resume = True
             log_info(
                 f"Resuming partial {dest.name} ({local_size:,}/{remote_len:,} bytes)"
+            )
+        elif dest.exists() and not saved and not remote_len:
+            use_resume = True
+            log_info(
+                f"Resuming {dest.name} ({local_size:,} bytes; remote length unknown)"
             )
         else:
             use_resume = False
@@ -383,11 +410,30 @@ OFAC_SDN_LEGACY_URL = "https://www.treasury.gov/ofac/downloads/sdn.xml"
 FMCSA_COMPANY_CENSUS_URL = (
     "https://data.transportation.gov/api/views/az4n-8mr2/rows.csv?accessType=DOWNLOAD"
 )
+# SMS monthly public files (current measurement window, not full MCMIS history).
+FMCSA_SMS_CRASH_URL = (
+    "https://data.transportation.gov/api/views/4wxs-vbns/rows.csv?accessType=DOWNLOAD"
+)
+FMCSA_SMS_INSPECTION_URL = (
+    "https://data.transportation.gov/api/views/rbkj-cgst/rows.csv?accessType=DOWNLOAD"
+)
+FMCSA_SMS_BASICS_URL = (
+    "https://data.transportation.gov/api/views/4y6x-dmck/rows.csv?accessType=DOWNLOAD"
+)
 
 
 def discover_fmcsa_census_url() -> str:
     """Return FMCSA Company Census CSV export URL (data.transportation.gov Socrata)."""
     return FMCSA_COMPANY_CENSUS_URL
+
+
+def discover_fmcsa_sms_urls() -> dict:
+    """Socrata CSV export URLs for SMS crash, inspection, and BASIC (PassProperty)."""
+    return {
+        "crash": FMCSA_SMS_CRASH_URL,
+        "inspection": FMCSA_SMS_INSPECTION_URL,
+        "basics": FMCSA_SMS_BASICS_URL,
+    }
 
 
 def discover_ofac_sdn_url() -> str:

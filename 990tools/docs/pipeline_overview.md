@@ -54,7 +54,7 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → address → einless → match
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → address → einless → match
   → geolocate_prev → geolocate_census → geolocate_api → geolocate_grok → geolocate_archive
   → grant_match → backfill → photos → ratios → percentiles → export
 ```
@@ -93,6 +93,13 @@ Country-only OFAC locations use `FA:<iso>` colocators; blank/`undetermined` rows
 Run standalone (use `nohup` — long-running on large DBs):
 ```bash
 nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
+```
+
+**`dot_safety` step** (`fmcsa_safety_processor.py`): FMCSA SMS monthly public files (crash `4wxs-vbns`, inspection `rbkj-cgst`, BASIC PassProperty `4y6x-dmck`). Promotes to `fmcsa_sms_crashes` / `fmcsa_sms_inspections` / `fmcsa_sms_basics` with `dot_norm`. **Does not write Addresses.** Physical-yard gallery: `dot_reporting/generate_safety_gallery.py` (`docs/generate_safety_gallery.md`).
+
+```bash
+nohup python -u irs990processor.py --step dot_safety --nostats -v > dot_safety_step.log 2>&1 &
+python3 -u dot_reporting/generate_safety_gallery.py --db-path /Volumes/Data/final/irs990.duckdb
 ```
 
 **Production resume point (June 2026):** `--start-step match` (address dedup complete; `einless` already run — skip unless re-hygiene needed).
