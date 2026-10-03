@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-10-02: SBA PPP FOIA ingest
+
+**What:** `--step ppp` loads the SBA PPP FOIA CSVs into `ppp_loans` and borrower streets into `Addresses` (`ppp_borrower`). No EIN in the public file.
+
+**Why:** ~$800B COVID payroll loans, joinable later by name + address. Same ingest-only pattern as DOT/OFAC. Do not treat borrower name as an IRS EIN.
+
+**How:** `ppp_processor.py`, `models/ppp_loan.py`, `overnight_ppp_run.sh`. Pipeline: after `dot_safety`, before `address`. Tests: `test_ppp_processor.py`. Doc: `docs/ppp.md`.
+
+---
+
 ## 2026-10-02: Ship DOT SMS on the whole stack + Rogues hub row
 
 **What:** Master index has a featured Rogues galleries row for `unsafe_colocators` (Volume / Harm/PU / Identity farms). Gallery pages link All reports. `regen_dot_sms.sh` refreshes the gallery, then the four national DOT slices, then the four by-state DOT slices, against `irs990.duckdb`, rebuilding the hub after each.

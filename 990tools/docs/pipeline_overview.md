@@ -54,7 +54,7 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → address → einless → match
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → address → einless → match
   → geolocate_prev → geolocate_census → geolocate_api → geolocate_grok → geolocate_archive
   → grant_match → backfill → photos → ratios → percentiles → export
 ```
@@ -100,6 +100,14 @@ nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 ```bash
 nohup python -u irs990processor.py --step dot_safety --nostats -v > dot_safety_step.log 2>&1 &
 python3 -u dot_reporting/generate_safety_gallery.py --db-path /Volumes/Data/final/irs990.duckdb
+```
+
+**`ppp` step** (`ppp_processor.py`): SBA PPP FOIA (~11.8M loans, no EIN). Promotes to `ppp_loans` + `Addresses` (`ppp_borrower`). Data under `{final_dir}/cms_data/ppp/`. Ingest only — name+address join is a later consumer. Does not run the global `address` dedup. Doc: `docs/ppp.md`.
+
+```bash
+nohup python -u irs990processor.py --step ppp --nostats -v > ppp_step.log 2>&1 &
+# or
+./overnight_ppp_run.sh
 ```
 
 **Production resume point (June 2026):** `--start-step match` (address dedup complete; `einless` already run — skip unless re-hygiene needed).

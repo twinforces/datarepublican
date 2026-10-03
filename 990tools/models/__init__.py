@@ -33,6 +33,7 @@ from .sanctioned_entity import (
     SanctionedProgram,
 )
 from .dot_carrier import DotCarrier
+from .ppp_loan import PppLoan
 
 __all__ = [
     'Address',
@@ -60,4 +61,5 @@ __all__ = [
     'SanctionedIdentifier',
     'SanctionedProgram',
     'DotCarrier',
+    'PppLoan',
 ]

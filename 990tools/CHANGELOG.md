@@ -5,6 +5,15 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-10-02 (PPP FOIA)
+
+### SBA Paycheck Protection Program loans into DuckDB
+- **Why:** Public FOIA dump has name + street, not EIN. Load first; colocator / grant-match later. Do not treat borrower name as an IRS EIN.
+- **Change:** `--step ppp` COPY into `ppp_loans` (heap, unique `loan_number` after all files). Borrower streets go through `PppLoan.build_address()` / `Address.py` then COPY as `ppp_borrower`. Drops secondary Address indexes for the 11M load, rebuilds after. `--max-files` for smoke. Overnight: `overnight_ppp_run.sh`.
+- **Doc:** `docs/ppp.md`. Test: `test_ppp_processor.py`.
+
+---
+
 ## [Unreleased] - 2026-10-02 (DOT SMS ship)
 
 ### Rogues gallery on the master index; SMS on the DOT stack
