@@ -68,6 +68,7 @@ from sanctions_processor import SanctionsProcessor
 from fmcsa_safety_processor import FmcsaSafetyProcessor
 from dot_processor import DotProcessor
 from ppp_processor import PppProcessor
+from sam_processor import SamProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning, update_logging_config
 from config import global_config
 from queue_status_display import QueueStatusDisplay
@@ -110,7 +111,7 @@ BATCH_SIZE = 100
 # Geolocate (after match): prev → census bulk → API tail → grok batch → archive.
 # geolocate_new = legacy combined census+api (one step); prefer census then api separately.
 PIPELINE_STEPS = [
-    "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "dot_safety", "ppp", "address", "einless", "match",
+    "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "dot_safety", "ppp", "sam", "address", "einless", "match",
     "geolocate_prev", "geolocate_census", "geolocate_api", "geolocate_new", "geolocate_grok",
     "geolocate_archive",
     "grant_match", "backfill", "photos", "ratios",
@@ -223,6 +224,11 @@ class IRS990Processor(BaseProcessor):
         self.ppp_processor = PppProcessor(
             self.db_ops,
             data_dir=cms_data_dir / "ppp",
+            max_files=self.max_files,
+        )
+        self.sam_processor = SamProcessor(
+            self.db_ops,
+            data_dir=cms_data_dir / "sam",
             max_files=self.max_files,
         )
         # Initialize bulk operations
@@ -557,6 +563,16 @@ class IRS990Processor(BaseProcessor):
         stats = self.ppp_processor.run()
         self.processed_steps += 1
         return stats.get("loans", 0)
+
+    def run_sam(self):
+        """SAM.gov public entities + phy/mail streets. Does not run address-dedup."""
+        if self.exit_processing:
+            log_info("Shutdown requested before SAM")
+            return 0
+        log_info("Running SAM.gov Entity Registration Public V2 ingest")
+        stats = self.sam_processor.run()
+        self.processed_steps += 1
+        return stats.get("entities", 0)
 
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
@@ -1006,6 +1022,7 @@ def main():
         "dot": lambda: processor.run_dot(),
         "dot_safety": lambda: processor.run_dot_safety(),
         "ppp": lambda: processor.run_ppp(),
+        "sam": lambda: processor.run_sam(),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),

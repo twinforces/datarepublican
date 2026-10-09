@@ -5,6 +5,15 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-10-09 (SAM.gov entities)
+
+### SAM Entity Registration Public V2 into DuckDB
+- **Why:** Public extract has UEI + CAGE + legal name + physical/mailing street, not EIN. Load first; colocator / USASpending join later. Do not treat UEI or CAGE as an IRS EIN.
+- **Change:** `--step sam` after `ppp`. Monthly UTF-8 ZIP via sam.gov fileextractservices (no API key). Slim CSV off the pipe DAT (skip BOF/EOF), heap COPY into `sam_entities`, unique `uei` after. Phy/mail streets go through `SamEntity.build_addresses()` / `Address.py` then COPY as `sam_entity_phy` / `sam_entity_mail`. Drops secondary Address indexes for the load, rebuilds after. `--max-files` is a DAT row cap for smoke. Overnight: `overnight_sam_run.sh`. Exclusions not in this step.
+- **Doc:** `docs/sam.md`. Test: `test_sam_processor.py`.
+
+---
+
 ## [Unreleased] - 2026-10-02 (PPP FOIA)
 
 ### SBA Paycheck Protection Program loans into DuckDB

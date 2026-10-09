@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-10-09: SAM.gov public entity ingest
+
+**What:** `--step sam` loads the SAM Entity Registration Public V2 monthly extract into `sam_entities` and phy/mail streets into `Addresses` (`sam_entity_phy`, `sam_entity_mail`). No EIN/TIN in the public file.
+
+**Why:** Bounded (~800–900k) federal-vendor registry with UEI + street, joinable later to 990/DOT/PPP by name+address and to USASpending by UEI. USASpending itself stays parked (disk). Do not treat UEI/CAGE as an IRS EIN.
+
+**How:** `sam_processor.py`, `models/sam_entity.py`, `overnight_sam_run.sh`. Pipeline: after `ppp`, before `address`. Tests: `test_sam_processor.py`. Doc: `docs/sam.md`. Does not run `--step address`.
+
+---
+
 ## 2026-10-02: SBA PPP FOIA ingest
 
 **What:** `--step ppp` loads the SBA PPP FOIA CSVs into `ppp_loans` and borrower streets into `Addresses` (`ppp_borrower`). No EIN in the public file.

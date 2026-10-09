@@ -54,7 +54,7 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → address → einless → match
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → sam → address → einless → match
   → geolocate_prev → geolocate_census → geolocate_api → geolocate_grok → geolocate_archive
   → grant_match → backfill → photos → ratios → percentiles → export
 ```
@@ -108,6 +108,14 @@ python3 -u dot_reporting/generate_safety_gallery.py --db-path /Volumes/Data/fina
 nohup python -u irs990processor.py --step ppp --nostats -v > ppp_step.log 2>&1 &
 # or
 ./overnight_ppp_run.sh
+```
+
+**`sam` step** (`sam_processor.py`): SAM.gov Entity Registration Public V2 (~800–900k entities, no EIN). Promotes to `sam_entities` + `Addresses` (`sam_entity_phy`, `sam_entity_mail`). Data under `{final_dir}/cms_data/sam/`. Ingest only — name+address / UEI joins are later consumers. Does not run the global `address` dedup. Doc: `docs/sam.md`.
+
+```bash
+nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
+# or
+./overnight_sam_run.sh
 ```
 
 **Production resume point (June 2026):** `--start-step match` (address dedup complete; `einless` already run — skip unless re-hygiene needed).
