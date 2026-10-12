@@ -16,6 +16,11 @@
 {%- assign t = include.tool -%}
 {%- assign img = '/assets/images/products/' | append: t.preview -%}
 {%- assign badge_cls = 'mb-1.5 inline-block rounded-pill bg-green px-2.5 py-0.5 text-meta font-bold uppercase tracking-body !text-white' -%}
+{%- capture launched -%}
+  {%- if t.launched -%}
+  <p class="m-0 mt-1.5 text-meta font-semibold !text-ink-muted">Launched <time datetime="{{ t.launched | date: '%Y-%m-%d' }}">{{ t.launched | date: '%b %Y' }}</time></p>
+  {%- endif -%}
+{%- endcapture -%}
 
 <a href="{{ t.href | relative_url }}"
    class="group relative block overflow-hidden rounded-card border border-rule/70 bg-card !no-underline shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-shadow hover:shadow-[0_4px_16px_rgba(0,0,0,0.12)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-strong">
@@ -34,6 +39,7 @@
         it. Without this the description sets at the same weight as the tagline
         above it and the two stop reading as different things. {%- endcomment -%}
       <p class="m-0 mt-1 text-dense font-normal !text-ink">{{ t.description }}</p>
+      {{ launched }}
     </div>
   </div>
 
@@ -50,6 +56,7 @@
     {%- comment -%} See the note on the feature card's description above — the
       card is an <a>, so font-normal is what stops this inheriting semibold. {%- endcomment -%}
     <p class="m-0 mt-1 text-dense font-normal !text-ink">{{ t.description }}</p>
+    {{ launched }}
   </div>
   {%- endif -%}
 </a>

@@ -432,7 +432,7 @@ while an invisible overlay eats every tap a real thumb makes.
   (facet rail, scrim, drawer, both canvases) was wrong. Both tools now scope to
   `#nb-header` / `#dsa-header`; `test_review_regressions.spec.js` guards it.
 - **The tools index** — `/` is the tools page, which is why the nav has no Home
-  item. `_data/tools.yml` is the single source of truth for all thirteen tools.
+  item. `_data/tools.yml` is the single source of truth for all fifteen tools.
   `updated` is the last commit touching that tool's directory, so the default
   "Latest" sort means something; keep it honest.
 - **Nav sizing** — the 16px label is the anchor and the pill is sized in `em`
