@@ -55,13 +55,13 @@
 
 - href: /migration-explorer/
   name: Migration explorer
-  tagline: The border, the map, and the money
+  tagline: A joint project with the Oversight Project
   description: >-
     What changed at the border after January 2025, where immigration settled
     county by county since 1990, and which organizations were paid to resettle
-    people, each figure linked to its federal record or filing.
+    and shelter people, each figure linked to its record or filing.
   rank: 1
-  updated: 2026-10-06
+  updated: 2026-10-14
   launched: 2026-10-06
   category: Networks & influence
   preview: migration-explorer.webp

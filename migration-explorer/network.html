@@ -8,7 +8,7 @@ main.page-column:has(.mx-page) {
   container-type: normal;
 }
 .mx-page {
-  --mx-accent:#B22234;
+  --mx-accent:#B33939;
   font-family: var(--dr-font-content,"Libre Franklin",system-ui,sans-serif);
 }
 .mx-bar {
@@ -70,8 +70,79 @@ main.page-column:has(.mx-page) {
 }
 :is(#mx-map, #mx-net, #mx-tour, #mx-hub) .mx-switch a.on {
   background: var(--dr-panel,#fff);
-  color: #B22234;
+  color: #B33939;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+.mx-page .mx-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mx-partner {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 9px;
+  border: 1px solid var(--dr-line,#D3D7DE);
+  border-left: 3px solid #B33939;
+  border-radius: 3px;
+  background: var(--dr-panel,#fff);
+  color: #111 !important;
+  text-decoration: none !important;
+  line-height: 1;
+}
+.mx-partner span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dr-ink-faint,#6B7280);
+}
+.mx-partner .op-logo {
+  height: 25px;
+  width: auto;
+  display: block;
+}
+.mx-partner:hover {
+  border-color: #B33939;
+}
+.mx-credit {
+  margin: 48px auto 8px;
+  padding: 22px 0 6px;
+  border-top: 3px double #C9A44E;
+  text-align: center;
+  max-width: 760px;
+}
+.mx-credit__marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  margin-bottom: 10px;
+}
+.mx-credit .dr-mark {
+  height: 58px;
+  width: auto;
+}
+.mx-credit .op-logo {
+  height: 30px;
+  width: auto;
+  color: #111;
+  display: block;
+}
+.mx-credit .mx-x {
+  color: #C9A44E;
+  font-size: 18px;
+}
+.mx-credit p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dr-ink-faint,#6B7280);
+}
+.mx-credit p a {
+  color: #B33939;
+  font-weight: 600;
 }
 @media (max-width: 600px) {
   .mx-switch {
@@ -536,6 +607,16 @@ main.page-column:has(.mx-page) {
   border-color: rgba(220, 38, 38, .3);
   color: #991b1b;
   background: rgba(220, 38, 38, .06);
+}
+#mx-net .chip.fema {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fed7aa;
+}
+#mx-net .chip.city {
+  background: #f1f5f9;
+  color: #334155;
+  border-color: #cbd5e1;
 }
 #mx-net .chip.fnd {
   border-color: rgba(124, 58, 237, .3);
@@ -1217,10 +1298,10 @@ main.page-column:has(.mx-page) {
   max-width: 250px;
 }
 #mx-net {
-  --accent:#B22234;
+  --accent:#B33939;
 }
 #mx-net .tab.on {
-  background: #B22234;
+  background: #B33939;
 }
 #mx-net > header {
   border: 1px solid var(--line);
@@ -1277,7 +1358,7 @@ main.page-column:has(.mx-page) {
 </style>
 <div class="mx-page" id="mx-net">
 <div class="mx-bar">
-  <div class="mx-id"><p class="mx-title">Migration explorer</p><div class="mx-sub" id="mx-net-sub"></div></div>
+  <div class="mx-id"><p class="mx-title">Migration explorer <a class="mx-partner" href="https://itsyourgov.org" target="_blank" rel="noopener" title="A collaboration with the Oversight Project"><span>with</span><svg class="op-logo" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210.3 47.3" role="img" aria-label="The Oversight Project"><g><path d="M14.4,26.1c0,1.1-.3,2.2-.7,3.1-.3.8-.9,1.5-1.6,2.1-.8.6-1.8,1-3.2,1s-2.5-.3-3.2-1c-.8-.6-1.3-1.3-1.6-2.1-.4-.9-.7-1.9-.7-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v16.6ZM10.2,9.5c0-.8-.2-1.3-.5-1.8-.2-.2-.5-.3-.8-.3-.7,0-1.1.5-1.2,1-.1.3-.2.7-.2,1v16.6c0,.8.2,1.3.6,1.8.2.2.5.3.8.3.7,0,1.1-.5,1.2-1,.1-.3.2-.6.2-1V9.5Z"></path><path d="M24.7,3.7h4l-4.3,28.1h-4.1L16,3.7h4l2.1,15.5.2,1.2h.2l.2-1.2,2.1-15.5Z"></path><path d="M30.6,3.7h9.5v4.2h-5.3v7.4h3.8v4.5h-3.8v7.7h5.3v4.2h-9.5V3.7Z"></path><path d="M49.7,31.9l-2.1-11.9h-1.1v11.9h-4.1V3.7h4.1c4.9,0,7,2.8,7,8.1s-.7,5.3-2.3,6.4l2.6,13.6h-4.1ZM46.5,16.2c.6,0,1.3,0,2-.6.6-.5,1.1-1.6,1.1-3.6s-.5-3.1-1.1-3.6c-.6-.5-1.4-.6-2-.6v8.3Z"></path><path d="M63,11.3c0-.9,0-2-.3-2.8-.3-.8-.7-1.3-1.3-1.3-1.1,0-1.4,1.1-1.4,2.8s.4,2,1,3c.6,1.1,1.4,2.2,2.2,3.4,1,1.4,1.9,2.9,2.6,4.3s1.2,2.9,1.2,4.4-.3,3.6-1.2,4.9c-.9,1.3-2.3,2.1-4.6,2.1s-4.1-1-5-2.5c-.8-1.5-1-3.6-1-5.7l4.1-.4c0,1.2,0,2.4.3,3.3.3.9.7,1.5,1.6,1.5s1.7-1.3,1.7-3.1-.5-2-1.1-3.1c-.3-.5-.7-1.1-1.1-1.7-.8-1.1-1.7-2.5-2.6-3.9s-1.6-2.9-2-4.4c-.2-.7-.3-1.5-.3-2.3,0-1.5.3-3.2,1.2-4.4.9-1.2,2.2-2.1,4.2-2.1,2.5,0,3.9,1,4.7,2.5.8,1.5,1,3.4,1,5l-4.1.4Z"></path><path d="M69.3,3.7h4.1v28.1h-4.1V3.7Z"></path><path d="M83.1,13.8v-4.3c0-.8-.2-1.3-.5-1.8-.2-.2-.5-.3-.8-.3-.7,0-1.1.5-1.2,1-.1.3-.2.7-.2,1v16.9c0,.8.2,1.3.6,1.8.2.2.5.3.8.3.7,0,1.1-.5,1.2-1,.1-.3.2-.6.2-1v-5.1h-1.6v-3.5h5.8v14h-2.5l-.5-1.3c-.8,1-1.9,1.6-3.2,1.6s-2.3-.3-2.9-1c-.7-.6-1.1-1.3-1.5-2.1-.3-.9-.5-1.9-.5-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v4.3h-4.1Z"></path><path d="M97.6,19.6h-3.2v12.3h-4.1V3.7h4.1v11.6h3.2V3.7h4.1v28.1h-4.1v-12.3Z"></path><path d="M103.4,8V3.7h11.9v4.2h-3.9v23.9h-4.1V8h-3.9Z"></path><path d="M122.8,3.7h4.1c1.8,0,3.6.5,5,1.8,1.4,1.3,2.3,3.4,2.3,6.7s-.9,5.3-2.3,6.6c-1.4,1.3-3.2,1.8-5,1.8v11.3h-4.1V3.7ZM126.9,16.4c1.3,0,2.1-.2,2.5-.9.5-.6.6-1.6.6-3.2s-.1-2.7-.6-3.4c-.5-.7-1.3-1-2.5-1v8.5Z"></path><path d="M143.7,31.9l-2.1-11.9h-1.1v11.9h-4.1V3.7h4.1c4.9,0,7,2.8,7,8.1s-.7,5.3-2.3,6.4l2.6,13.6h-4.1ZM140.4,16.2c.6,0,1.3,0,2-.6.6-.5,1.1-1.6,1.1-3.6s-.5-3.1-1.1-3.6c-.6-.5-1.4-.6-2-.6v8.3Z"></path><path d="M160.9,26.1c0,1.1-.3,2.2-.7,3.1-.3.8-.9,1.5-1.6,2.1-.8.6-1.8,1-3.2,1s-2.5-.3-3.2-1c-.8-.6-1.3-1.3-1.6-2.1-.4-.9-.7-1.9-.7-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v16.6ZM156.7,9.5c0-.8-.2-1.3-.5-1.8-.2-.2-.5-.3-.8-.3-.7,0-1.1.5-1.2,1-.1.3-.2.7-.2,1v16.6c0,.8.2,1.3.6,1.8.2.2.5.3.8.3.7,0,1.1-.5,1.2-1,.1-.3.2-.6.2-1V9.5Z"></path><path d="M162.4,28.1c.8.1,1.4,0,1.9-.7.2-.3.3-.7.3-1.4V3.7h4.1v22.9c0,1.5-.4,2.9-1.3,4s-2.6,1.6-5,1.5v-4.1Z"></path><path d="M171.6,3.7h9.5v4.2h-5.3v7.4h3.8v4.5h-3.8v7.7h5.3v4.2h-9.5V3.7Z"></path><path d="M194.1,22.2v3.9c0,1.1-.3,2.2-.7,3.1-.3.8-.9,1.5-1.6,2.1-.8.6-1.8,1-3.2,1s-2.5-.3-3.2-1c-.8-.6-1.3-1.3-1.6-2.1-.4-.9-.7-1.9-.7-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v3.9h-3.9v-3.9c0-.8-.2-1.3-.6-1.8-.2-.2-.5-.3-1-.3-.7,0-1.1.5-1.3,1-.1.3-.2.7-.2,1v16.6c0,.8.3,1.3.7,1.8.2.2.5.3.8.3.9,0,1.2-.5,1.4-1,.1-.3.2-.6.2-1v-3.9h3.9Z"></path><path d="M195.1,8V3.7h11.9v4.2h-3.9v23.9h-4.1V8h-3.9Z"></path></g><g><path d="M6.1,44.1h-.6v-8.4h.6v8.4Z"></path><path d="M17.5,35.7v.5h-3v7.9h-.6v-7.9h-3v-.5h6.6Z"></path><path d="M22.4,35.3c0,.2.2.3.2.5,0,.1,0,.3,0,.5,0,.3,0,.6-.2.9-.2.3-.3.5-.6.8h-.2c0-.1,0-.2,0-.2s0,0,0,0c.2-.2.3-.4.4-.6,0-.2.1-.4.1-.6s0-.5-.2-.7c0,0,0,0,0,0,0,0,0,0,0-.1l.4-.2Z"></path><path d="M31.9,36.7c0,0,0,.1-.2.1s-.1,0-.2-.1c0,0-.2-.2-.3-.2s-.3-.2-.5-.2c-.2,0-.5-.1-.8-.1s-.6,0-.8.1c-.2,0-.4.2-.6.4-.2.2-.3.3-.4.5,0,.2-.1.4-.1.6s0,.5.2.7c.1.2.3.3.5.5.2.1.4.2.7.3.3,0,.5.2.8.3.3,0,.5.2.8.3.3.1.5.2.7.4.2.2.4.4.5.6.1.2.2.5.2.9s0,.7-.2,1c-.1.3-.3.6-.5.8s-.5.4-.8.5c-.3.1-.7.2-1.1.2s-1,0-1.4-.3-.8-.5-1.1-.8l.2-.3c0,0,.1,0,.2,0s0,0,.1,0,.1.1.2.2c0,0,.2.1.3.2.1,0,.2.2.4.2.1,0,.3.1.5.2s.4,0,.7,0,.6,0,.9-.2c.3-.1.5-.2.7-.4s.3-.4.4-.6c0-.2.1-.5.1-.8s0-.5-.2-.7c-.1-.2-.3-.4-.5-.5-.2-.1-.4-.2-.7-.3-.3,0-.5-.2-.8-.3s-.5-.2-.8-.3c-.3-.1-.5-.2-.7-.4-.2-.2-.4-.4-.5-.6-.1-.2-.2-.5-.2-.9s0-.6.2-.8.3-.5.5-.7c.2-.2.5-.4.8-.5.3-.1.7-.2,1-.2s.8,0,1.2.2c.3.1.7.4,1,.6v.3Z"></path><path d="M45.4,40.6v3.5h-.6v-3.5l-3.1-5h.5c0,0,.1,0,.1,0,0,0,0,0,0,.1l2.4,3.9c0,0,.1.2.1.3,0,0,0,.2.1.3,0,0,0-.2.1-.3,0,0,0-.2.1-.3l2.4-3.9s0,0,0-.1c0,0,0,0,.1,0h.5l-3.1,5Z"></path><path d="M60.2,39.9c0,.7,0,1.2-.3,1.8-.2.5-.5,1-.8,1.4s-.8.7-1.3.9c-.5.2-1,.3-1.6.3s-1.1-.1-1.6-.3c-.5-.2-.9-.5-1.3-.9-.4-.4-.6-.8-.8-1.4-.2-.5-.3-1.1-.3-1.8s0-1.2.3-1.8c.2-.5.5-1,.8-1.4.4-.4.8-.7,1.3-.9.5-.2,1-.3,1.6-.3s1.1.1,1.6.3c.5.2.9.5,1.3.9s.6.8.8,1.4c.2.5.3,1.1.3,1.8ZM59.5,39.9c0-.6,0-1.1-.2-1.6s-.4-.9-.7-1.2c-.3-.3-.7-.6-1.1-.7-.4-.2-.9-.3-1.4-.3s-1,0-1.4.3c-.4.2-.8.4-1.1.7-.3.3-.5.7-.7,1.2s-.2,1-.2,1.6,0,1.1.2,1.6.4.9.7,1.2c.3.3.7.6,1.1.7.4.2.9.3,1.4.3s1,0,1.4-.3c.4-.2.8-.4,1.1-.7.3-.3.5-.7.7-1.2s.2-1,.2-1.6Z"></path><path d="M68.5,43.7c.4,0,.8,0,1.1-.2.3-.1.6-.3.8-.6s.4-.5.5-.9.2-.7.2-1.1v-5.2h.6v5.2c0,.5,0,.9-.2,1.3-.1.4-.4.8-.6,1.1-.3.3-.6.5-1,.7-.4.2-.8.3-1.3.3s-.9,0-1.3-.3c-.4-.2-.7-.4-1-.7-.3-.3-.5-.7-.6-1.1-.1-.4-.2-.8-.2-1.3v-5.2h.6v5.2c0,.4,0,.8.2,1.1s.3.6.5.9c.2.2.5.4.8.6.3.1.7.2,1.1.2Z"></path><path d="M78.1,40.3v3.8h-.6v-8.4h2.2c1,0,1.7.2,2.2.6.5.4.7.9.7,1.7s0,.6-.2.9c-.1.3-.3.5-.5.7s-.5.4-.8.5c-.3.1-.6.2-1,.3,0,0,.2.1.3.2l2.9,3.6h-.5c0,0-.1,0-.2,0,0,0,0,0-.1-.1l-2.7-3.4c0,0-.1-.1-.2-.2,0,0-.2,0-.4,0h-1.1ZM78.1,39.8h1.5c.4,0,.7,0,1-.1s.5-.2.8-.4c.2-.2.4-.4.5-.6.1-.2.2-.5.2-.8,0-.6-.2-1-.6-1.3s-1-.4-1.7-.4h-1.5v3.7Z"></path><path d="M97.2,43.7c.3,0,.6,0,.8,0,.2,0,.5,0,.7-.1.2,0,.4-.1.6-.2s.4-.2.6-.3v-2.3h-1.6s0,0-.1,0c0,0,0,0,0,0v-.3h2.3v3c-.2.1-.4.3-.7.4s-.5.2-.7.3c-.3,0-.5.1-.8.2-.3,0-.6,0-1,0-.6,0-1.2-.1-1.7-.3-.5-.2-.9-.5-1.3-.9-.4-.4-.6-.8-.8-1.4-.2-.5-.3-1.1-.3-1.8s0-1.2.3-1.8c.2-.5.5-1,.8-1.4.4-.4.8-.7,1.3-.9.5-.2,1.1-.3,1.8-.3s.6,0,.9,0c.3,0,.5.1.8.2s.5.2.7.3c.2.1.4.3.6.4l-.2.3c0,0,0,0-.1,0s0,0-.1,0c0,0-.1,0-.3-.2-.1,0-.3-.2-.5-.3-.2,0-.4-.2-.7-.3s-.6-.1-1.1-.1-1,0-1.5.3c-.4.2-.8.4-1.1.8-.3.3-.6.7-.7,1.2-.2.5-.3,1-.3,1.6s0,1.1.3,1.6c.2.5.4.9.7,1.2.3.3.7.6,1.1.8.4.2.9.3,1.4.3Z"></path><path d="M113.3,39.9c0,.7,0,1.2-.3,1.8-.2.5-.5,1-.8,1.4s-.8.7-1.3.9c-.5.2-1,.3-1.6.3s-1.1-.1-1.6-.3c-.5-.2-.9-.5-1.3-.9-.4-.4-.6-.8-.8-1.4-.2-.5-.3-1.1-.3-1.8s0-1.2.3-1.8c.2-.5.5-1,.8-1.4.4-.4.8-.7,1.3-.9.5-.2,1-.3,1.6-.3s1.1.1,1.6.3c.5.2.9.5,1.3.9s.6.8.8,1.4c.2.5.3,1.1.3,1.8ZM112.6,39.9c0-.6,0-1.1-.2-1.6s-.4-.9-.7-1.2c-.3-.3-.7-.6-1.1-.7-.4-.2-.9-.3-1.4-.3s-1,0-1.4.3-.8.4-1.1.7c-.3.3-.5.7-.7,1.2s-.2,1-.2,1.6,0,1.1.2,1.6.4.9.7,1.2c.3.3.7.6,1.1.7s.9.3,1.4.3,1,0,1.4-.3c.4-.2.8-.4,1.1-.7.3-.3.5-.7.7-1.2s.2-1,.2-1.6Z"></path><path d="M117,35.7h.5c0,0,.1,0,.1,0,0,0,0,0,0,.1l2.9,7c0,.2.1.4.2.6,0-.2.1-.4.2-.6l2.9-7s0,0,0-.1,0,0,.1,0h.5l-3.5,8.4h-.5l-3.5-8.4Z"></path><path d="M134.1,35.7v.5h-4.4v3.4h3.7v.5h-3.7v3.5h4.4v.5h-5.1v-8.4h5.1Z"></path><path d="M140.1,40.3v3.8h-.6v-8.4h2.2c1,0,1.7.2,2.2.6.5.4.7.9.7,1.7s0,.6-.2.9c-.1.3-.3.5-.5.7s-.5.4-.8.5c-.3.1-.6.2-1,.3,0,0,.2.1.3.2l2.9,3.6h-.5c0,0-.1,0-.2,0,0,0,0,0-.1-.1l-2.7-3.4c0,0-.1-.1-.2-.2,0,0-.2,0-.4,0h-1.1ZM140.1,39.8h1.5c.4,0,.7,0,1-.1s.5-.2.8-.4c.2-.2.4-.4.5-.6.1-.2.2-.5.2-.8,0-.6-.2-1-.6-1.3s-1-.4-1.7-.4h-1.5v3.7Z"></path><path d="M150.5,35.7s0,0,.1,0l5.5,7.3c0-.1,0-.2,0-.3v-7.1h.5v8.4h-.3c0,0-.2,0-.2-.1l-5.5-7.3c0,.1,0,.2,0,.3v7.1h-.5v-8.4h.3c0,0,0,0,.1,0Z"></path><path d="M166.5,42c0,0,0-.1,0-.2,0,0,0-.1,0-.2l3.3-5.9c0,0,0,0,0,0,0,0,0,0,.1,0h.4v8.4h-.5v-7.2c0-.1,0-.2,0-.3l-3.3,5.9c0,.1-.1.2-.2.2h0c0,0-.2,0-.2-.2l-3.4-5.9c0,.1,0,.2,0,.3v7.2h-.5v-8.4h.4c0,0,.1,0,.1,0,0,0,0,0,0,0l3.4,5.9c0,.1.1.2.2.4Z"></path><path d="M181.4,35.7v.5h-4.4v3.4h3.7v.5h-3.7v3.5h4.4v.5h-5.1v-8.4h5.1Z"></path><path d="M187.1,35.7s0,0,.1,0l5.5,7.3c0-.1,0-.2,0-.3v-7.1h.5v8.4h-.3c0,0-.2,0-.2-.1l-5.5-7.3c0,.1,0,.2,0,.3v7.1h-.5v-8.4h.3c0,0,0,0,.1,0Z"></path><path d="M204.4,35.7v.5h-3v7.9h-.6v-7.9h-3v-.5h6.6Z"></path></g></svg></a></p><div class="mx-sub" id="mx-net-sub"></div></div>
   <div class="mx-right"><div class="mx-switch" title="Switch between the parts of the migration explorer"><a href="/migration-explorer/">Overview</a><a href="/migration-explorer/tour/">The border</a><a href="/migration-explorer/map/">County map</a><a href="/migration-explorer/network/" class="on" aria-current="page">NGO network</a></div>
     <button type="button" class="dr-dialog-open" id="mx-net-dlg-open" aria-haspopup="dialog">About &amp; disclaimer</button>
   </div>
@@ -1302,6 +1383,7 @@ main.page-column:has(.mx-page) {
   <aside id="facets">
     <button type="button" class="fdone" onclick="document.getElementById('facets').classList.remove('open')">Done ✕</button><span class="fclear" id="fclear" onclick="clearFilters()">✕ clear filters</span>
     <div class="fgroup"><h3>Federal awards</h3><div id="status-facets"></div></div>
+    <div class="fgroup"><h3>Migrant shelter money (FEMA / city)</h3><div id="money-facets"></div></div>
     <div class="fgroup"><h3>Tier</h3><div id="tier-facets"></div></div>
     <div class="fgroup"><h3>Faith / network</h3><div id="faith-facets"></div></div>
     <div class="fgroup"><h3>State (HQ)</h3><div id="state-facets"></div></div>
@@ -1374,7 +1456,7 @@ main.page-column:has(.mx-page) {
 const TIER = {
   1: { c: "#1d4ed8", bg: "#eff6ff", l: "National resettlement agency" },
   2: { c: "#0891b2", bg: "#ecfeff", l: "Local affiliate" },
-  3: { c: "#dc2626", bg: "#fef2f2", l: "ORR-funded provider" },
+  3: { c: "#dc2626", bg: "#fef2f2", l: "Service provider (ORR, FEMA or city-paid)" },
   4: { c: "#16a34a", bg: "#f0fdf4", l: "Legal services" },
   5: { c: "#7c3aed", bg: "#faf5ff", l: "Advocacy/policy" },
   6: { c: "#92400e", bg: "#fef3c7", l: "Funder" }
@@ -1385,7 +1467,10 @@ const EDGE_STYLE = {
   foundation_grant: { c: "#7c3aed", d: "6 3", w: 1.5, l: "Private grant (990-PF / Sched. I)" },
   regrant: { c: "#a16207", d: "2 3", w: 1.5, l: "Re-grant (Sched. I; may pass through federal $)" },
   affiliate_of: { c: "#0891b2", d: "3 4", w: 1.5, l: "Affiliate of" },
-  schedule_r: { c: "#92400e", d: "8 4", w: 1.5, l: "Schedule R" }
+  schedule_r: { c: "#92400e", d: "8 4", w: 1.5, l: "Schedule R" },
+  fema_allocation: { c: "#b45309", d: "5 3", w: 1.5, l: "FEMA award table (FEMA's own allocation list)" },
+  fema_passthrough: { c: "#0f766e", d: void 0, w: 2, l: "FEMA money passed through a city or county (documented)" },
+  city_migrant_contract: { c: "#64748b", d: "2 2", w: 1.5, l: "City/state-paid migrant services (FEMA link not established)" }
 };
 const EV_KIND_COLOR = {
   usaspending_award: "#dc2626",
@@ -1409,7 +1494,7 @@ const LOGOS = typeof window.NGO_LOGOS !== "undefined" ? window.NGO_LOGOS : {};
 const TOP_T3_LIMIT = 150;
 const BIG_THRESHOLD = 250;
 let DATA = null, cy = null, SEL = null, view = "cards", FSET = null, MAP_DIRTY = true, GRAPH_DIRTY = true;
-const F = { tiers: new Set(), states: new Set(), kinds: new Set(), faiths: new Set(), stat: new Set() };
+const F = { tiers: new Set(), states: new Set(), kinds: new Set(), faiths: new Set(), stat: new Set(), money: new Set() };
 const FAITH_NONE = "None stated";
 const faithOf = (o) => o.faith || FAITH_NONE;
 let CONN = {};
@@ -1512,12 +1597,40 @@ const fmtM = (v) => {
   return m >= 1e3 ? "$" + (v / 1e9).toFixed(1) + "B" : m >= 1 ? "$" + m.toFixed(0) + "M" : "$" + (v / 1e3).toFixed(0) + "k";
 };
 const fmtMleast = (v) => v > 0 ? `at least ${fmtM(v)} (documented)` : "–";
+const isCityRow = (f) => /^City migrant services/.test(f.program || "");
+const isFemaRow = (f) => /^97\./.test(f.cfda || "") && !isCityRow(f);
 function maxFed(o) {
-  return Math.max(0, ...(o.federal || []).filter((f) => !f.is_subaward).map((f) => f.amount || 0));
+  return Math.max(0, ...(o.federal || []).filter((f) => !f.is_subaward && !isCityRow(f)).map((f) => f.amount || 0));
+}
+function maxCity(o) {
+  return Math.max(0, ...(o.federal || []).filter(isCityRow).map((f) => f.amount || 0));
+}
+let MONEY = {};
+function buildMoney() {
+  MONEY = {};
+  DATA.edges.forEach((e) => {
+    let b = null;
+    if (e.source === "fema" && e.type === "federal_award" && e.subtype !== "ffata_subaward") b = "fema_direct";
+    else if (e.subtype === "fema_passthrough" || e.subtype === "ffata_subaward" && /^97\./.test(e.cfda || "")) b = "fema_pass";
+    else if (e.subtype === "city_migrant_contract") b = "city";
+    if (b) (MONEY[e.target] = MONEY[e.target] || new Set()).add(b);
+  });
+}
+const MONEY_FACET = { fema_direct: "FEMA shelter award (direct)", fema_pass: "FEMA money via a city, county or agency (documented)", city: "City/state-paid migrant services (FEMA link not established)", none: "None" };
+const MONEY_TIP = {
+  fema_direct: "Prime award under FEMA's Shelter and Services Program (CFDA 97.141/97.149) or a line in FEMA's own award tables",
+  fema_pass: "A city, county or agency passed FEMA money to this org, and a document (audit schedule, council record, FFATA report) says so",
+  city: "A city or state paid this org for migrant shelter or services, but no document ties the payment to FEMA dollars. Shown as city money."
+};
+const moneyOf = (o) => MONEY[o.id] ? [...MONEY[o.id]] : ["none"];
+function moneyMatch(o) {
+  if (!F.money.size) return true;
+  return moneyOf(o).some((b) => F.money.has(b));
 }
 function maxFnd(o) {
   return Math.max(0, ...(o.foundation_in || []).map((f) => f.amount || 0));
 }
+const AGENCY_NAME = { prm: "State Dept. PRM", orr: "HHS/ORR", fema: "DHS/FEMA" };
 const AST_LABEL = { cancelled_2025: "Terminated or cut short in 2025–26", reinstated: "Terminated, then reinstated by court", active: "Still live", expired: "Expired / ended" };
 function astSum(o, s) {
   return o.award_status?.summary?.[s] || { n: 0, value: 0, deobligated: 0 };
@@ -1550,7 +1663,7 @@ function cutBanner() {
   const ex25 = Object.values(A.awards).filter((a) => a.ended_after_inauguration).length;
   box.hidden = false;
   box.textContent = "";
-  box.appendChild(el("div", "cb-head", "Federal resettlement and ORR awards to the organizations in this explorer, by status as of " + A.meta.as_of));
+  box.appendChild(el("div", "cb-head", "Federal resettlement, ORR and FEMA shelter awards to the organizations in this explorer, by status as of " + A.meta.as_of));
   const tiles = el("div", "cb-tiles");
   const mk = (cls, key, n, label, sub) => {
     const b = el("button", "cbt " + cls + (F.stat.size === 1 && F.stat.has(key) ? " on" : ""));
@@ -1628,7 +1741,7 @@ function cutBanner() {
   box.appendChild(el(
     "div",
     "cb-note",
-    `Dollar figures are total obligations over each award's life (for cut awards, what was obligated before the cut), not savings, and the groups are never added together. "Terminated" means a USASpending modification dated after Jan 20, 2025 says the award was terminated; "cut short or not renewed" means a modification moved the end date up by at least 14 days. Each one quotes the modification text. "Still live" is split by what each award pays for: awards naming unaccompanied children, formula and block grants, and everything else. Open "Why?" and hover a row for how many began after Jan 20, 2025. FFATA subawards are not included.`
+    `Dollar figures are total obligations over each award's life (for cut awards, what was obligated before the cut), not savings, and the groups are never added together. "Terminated" means a USASpending modification dated after Jan 20, 2025 says the award was terminated; "cut short or not renewed" means a modification moved the end date up by at least 14 days. Each one quotes the modification text. "Still live" is split by what each award pays for: awards naming unaccompanied children, formula and block grants, and everything else. Open "Why?" and hover a row for how many began after Jan 20, 2025. FEMA deobligated most Shelter and Services Program awards on Feb 10, 2025; those count as cut. FFATA subawards and city/state contracts are not included.`
   ));
 }
 function orgRank(o) {
@@ -1643,6 +1756,7 @@ function filtered() {
     if (F.kinds.size && !F.kinds.has(kindOf(o))) return false;
     if (F.faiths.size && !F.faiths.has(faithOf(o))) return false;
     if (!statMatch(o)) return false;
+    if (!moneyMatch(o)) return false;
     return true;
   });
 }
@@ -1690,6 +1804,7 @@ function matchExcept(o, i, except) {
   if (except !== "kind" && F.kinds.size && !F.kinds.has(kindOf(o))) return false;
   if (except !== "faith" && F.faiths.size && !F.faiths.has(faithOf(o))) return false;
   if (except !== "stat" && !statMatch(o)) return false;
+  if (except !== "money" && !moneyMatch(o)) return false;
   return true;
 }
 let stateShowAll = false;
@@ -1697,7 +1812,7 @@ function buildFacets() {
   const tierCounts = {}, stateCounts = {}, kindCounts = {}, faithCounts = {};
   DATA.orgs.forEach((o, i) => {
     if (matchExcept(o, i, "tier")) tierCounts[o.tier] = (tierCounts[o.tier] || 0) + 1;
-    if (matchExcept(o, i, "state")) stateCounts[o.hq_state] = (stateCounts[o.hq_state] || 0) + 1;
+    if (o.hq_state && matchExcept(o, i, "state")) stateCounts[o.hq_state] = (stateCounts[o.hq_state] || 0) + 1;
     if (matchExcept(o, i, "kind")) kindCounts[kindOf(o)] = (kindCounts[kindOf(o)] || 0) + 1;
     if (matchExcept(o, i, "faith")) faithCounts[faithOf(o)] = (faithCounts[faithOf(o)] || 0) + 1;
   });
@@ -1771,6 +1886,32 @@ function buildFacets() {
     });
   }
   cutBanner();
+  const monCounts = {};
+  DATA.orgs.forEach((o, i) => {
+    if (matchExcept(o, i, "money")) moneyOf(o).forEach((b) => monCounts[b] = (monCounts[b] || 0) + 1);
+  });
+  const mfx = document.getElementById("money-facets");
+  if (mfx) {
+    mfx.textContent = "";
+    ["fema_direct", "fema_pass", "city"].forEach((k) => {
+      if (!monCounts[k] && !F.money.has(k)) return;
+      const on = F.money.has(k);
+      const row = el("div", "fitem" + (on ? " act" : ""));
+      row.dataset.money = k;
+      row.title = MONEY_TIP[k];
+      const cb = el("input");
+      cb.type = "checkbox";
+      if (on) cb.checked = true;
+      row.append(cb, el("span", null, MONEY_FACET[k]), el("span", "c", String(monCounts[k] || 0)));
+      row.onclick = () => {
+        if (F.money.has(k)) F.money.delete(k);
+        else F.money.add(k);
+        buildFacets();
+        render();
+      };
+      mfx.appendChild(row);
+    });
+  }
   const tf = document.getElementById("tier-facets");
   tf.textContent = "";
   [1, 2, 3, 4, 5, 6].forEach((t) => {
@@ -1830,6 +1971,7 @@ function clearFilters() {
   F.kinds.clear();
   F.faiths.clear();
   F.stat.clear();
+  F.money.clear();
   document.getElementById("search").value = "";
   setSearch("");
   SRCHSET = null;
@@ -1887,7 +2029,7 @@ function makeCard(o) {
   const top = el("div", "card-top");
   top.appendChild(logoEl(o.id, 60, "card-logo"));
   const tt = el("div", "card-title");
-  const badge = el("span", "tier-badge", "T" + o.tier + " · " + t.l);
+  const badge = el("span", "tier-badge", "T" + o.tier + " · " + (o.tier === 3 && o.tier_label || t.l));
   badge.style.background = t.c;
   tt.append(badge, el("span", "card-name", o.display_name || o.name));
   top.appendChild(tt);
@@ -1920,6 +2062,20 @@ function makeCard(o) {
   }
   if (CONN[o.id]) meta.appendChild(el("span", "chip", CONN[o.id] + (CONN[o.id] === 1 ? " link" : " links")));
   if (mf > 0) meta.appendChild(el("span", "chip fed", "Fed " + fmtM(mf)));
+  {
+    const mb = MONEY[o.id];
+    if (mb && (mb.has("fema_direct") || mb.has("fema_pass"))) {
+      const ch = el("span", "chip fema", "FEMA shelter");
+      ch.title = [...mb].filter((b) => b !== "city").map((b) => MONEY_TIP[b]).join(". ");
+      meta.appendChild(ch);
+    }
+    const mc = maxCity(o);
+    if (mb && mb.has("city")) {
+      const ch = el("span", "chip city", mc > 0 ? "City " + fmtM(mc) : "City-paid");
+      ch.title = MONEY_TIP.city + ". Largest single contract shown; may be a contract ceiling, not money paid (open the card).";
+      meta.appendChild(ch);
+    }
+  }
   if (mn > 0) meta.appendChild(el("span", "chip fnd", "Found. " + fmtM(mn)));
   const nc = o.counties_active?.length || 0;
   if (nc > 0) meta.appendChild(el("span", "chip cty", nc + (nc === 1 ? " county" : " counties")));
@@ -1961,6 +2117,8 @@ function render() {
   items.forEach(({ o }) => grid.appendChild(makeCard(o)));
 }
 function edgeStyleKey(e) {
+  if (e.type === "city_award") return e.subtype || "city_migrant_contract";
+  if (e.subtype === "fema_allocation") return "fema_allocation";
   return e.subtype === "ffata_subaward" ? "ffata_subaward" : e.type;
 }
 const CLUSTER_KEEP_T3 = 12;
@@ -1998,7 +2156,7 @@ function clusterSetup(BYID) {
     } else if (k.startsWith("c6:")) {
       meta[k] = { tier: 6, n, state: "funders", label: k === "c6:pf" ? `${n} more private foundations` : `${n} more grantmaking public charities` };
     } else {
-      meta[k] = { tier: 3, n, state: k.slice(3), label: `${k.slice(3)} · ${n} ORR-funded providers` };
+      meta[k] = { tier: 3, n, state: k.slice(3), label: `${k.slice(3)} · ${n} service providers` };
     }
   });
   return { memberKey, members, meta, keep, keep6, expanded: new Set() };
@@ -2102,6 +2260,8 @@ function clusterRender() {
           dash: es.d || "none",
           label: e.years || "",
           amount: e.amount,
+          amount_label: e.amount_label || "",
+          note: e.note || "",
           years: e.years,
           evidence_ids: e.evidence_ids || []
         } });
@@ -2424,14 +2584,17 @@ function buildGraphLegend() {
     ["foundation_grant", EDGE_STYLE.foundation_grant],
     ["regrant", EDGE_STYLE.regrant],
     ["affiliate_of", EDGE_STYLE.affiliate_of],
-    ["schedule_r", EDGE_STYLE.schedule_r]
+    ["schedule_r", EDGE_STYLE.schedule_r],
+    ["fema_allocation", EDGE_STYLE.fema_allocation],
+    ["fema_passthrough", EDGE_STYLE.fema_passthrough],
+    ["city_migrant_contract", EDGE_STYLE.city_migrant_contract]
   ];
   legendEdges.forEach(([k, es]) => {
     const bstyle = es.d ? `border-top:${es.w}px dashed ${es.c}` : `border-top:${es.w}px solid ${es.c}`;
     h += `<div class="row"><div class="ln" style="${bstyle}"></div>${es.l}</div>`;
   });
   h += '<h4 style="margin-top:8px">Clusters</h4><div class="row"><div class="sw" style="background:#fff;border:2px solid #555;border-radius:50%"></div>Number = orgs grouped. Hover to list them, click to expand and zoom.</div>';
-  h += '<div style="font-size:10.5px;color:#999;margin-top:4px">Local affiliates sit under their national agency. ORR-funded providers are grouped by HQ state, laid out like a map. Line labels = number of links grouped (hover to list them). The 12 largest ORR providers and 15 largest private funders are shown individually; the rest of the funders sit in two bubbles at the top.</div>';
+  h += '<div style="font-size:10.5px;color:#999;margin-top:4px">Local affiliates sit under their national agency. Service providers (ORR, FEMA or city-paid) are grouped by HQ state, laid out like a map. Line labels = number of links grouped (hover to list them). The 12 largest providers (by federal award) and 15 largest private funders are shown individually; the rest of the funders sit in two bubbles at the top.</div>';
   h += '<div style="font-size:10.5px;color:#999;margin-top:6px">Node size = largest single federal award (log scale)</div>';
   body.innerHTML = h;
 }
@@ -2695,7 +2858,7 @@ function renderOrgDrawer(o) {
   }
   d.appendChild(el("div", "org-name", dispName));
   const sub = el("div", "org-sub");
-  const badge = el("span", "tier-badge", "T" + o.tier + " " + t.l);
+  const badge = el("span", "tier-badge", "T" + o.tier + " " + (o.tier_label || t.l));
   badge.style.background = t.c;
   sub.appendChild(badge);
   if (o.ein || o.eins_all?.length) {
@@ -2706,6 +2869,11 @@ function renderOrgDrawer(o) {
     const kc = el("span", "chip kind", o.org_kind);
     kc.title = "Recipient type (" + (o.org_kind_basis === "name" ? "from its name" : "IRS " + o.org_kind_basis) + "). Listed because it received documented refugee/ORR or grant money; not a resettlement NGO.";
     sub.append(" ", kc);
+  }
+  if (o.id_status === "ein_not_found") {
+    const ic = el("span", "chip", o.id_status_label || "EIN not found; document-verified");
+    ic.title = "No IRS record found for this name and address (parishes and Salvation Army units often file under a group ruling). Included because a primary document names it as the recipient.";
+    sub.append(" ", ic);
   }
   if (o.grade) sub.append(el("span", "chip", "Grade " + o.grade));
   d.appendChild(sub);
@@ -2804,9 +2972,9 @@ function renderOrgDrawer(o) {
       const a = AW[k], c = a.cancel || {};
       const b = el("div", "astat");
       const top = el("div");
-      top.append(el("span", "damt", fmtM(a.value) + " "), /^terminated/.test(c.basis || "") ? " terminated " : " cut short ", el("b", null, c.date || ""), ` · ${a.agency === "prm" ? "State Dept. PRM" : "HHS/ORR"} · `, awLink(k, a));
+      top.append(el("span", "damt", fmtM(a.value) + " "), /^terminated/.test(c.basis || "") ? " terminated " : " cut short ", el("b", null, c.date || ""), ` · ${AGENCY_NAME[a.agency] || a.agency} · `, awLink(k, a));
       b.appendChild(top);
-      b.appendChild(el("div", "fy", `Period ${a.start || "?"} → ${c.end_before ? "was " + c.end_before + ", " : ""}now ${c.end_after || a.end || "?"} · basis: ${c.basis}${a.deobligated_2025 > 0 ? " · " + fmtM(a.deobligated_2025) + " deobligated" : ""}`));
+      b.appendChild(el("div", "fy", `Period ${a.start || "?"} → ${c.end_after || a.end ? (c.end_before ? "was " + c.end_before + ", " : "") + "now " + (c.end_after || a.end) : (c.end_before || "?") + " (end date not changed; money pulled back)"} · basis: ${c.basis}${a.deobligated_2025 > 0 ? " · " + fmtM(a.deobligated_2025) + " deobligated" : ""}`));
       if (c.desc) b.appendChild(el("q", null, c.desc));
       d.appendChild(b);
     });
@@ -2856,7 +3024,51 @@ function renderOrgDrawer(o) {
       d.appendChild(det);
     }
   }
-  const primeAwards = (o.federal || []).filter((f) => !f.is_subaward);
+  const primeAwards = (o.federal || []).filter((f) => !f.is_subaward && !isCityRow(f) && !isFemaRow(f));
+  const femaRows = (o.federal || []).filter((f) => !f.is_subaward && isFemaRow(f)), cityRows = (o.federal || []).filter(isCityRow);
+  if (femaRows.length || cityRows.length) {
+    d.appendChild(el("h3", null, "Migrant shelter money: FEMA and city/state contracts (not added to the federal awards below)"));
+    d.appendChild(el("div", "dnote", "FEMA's Shelter and Services Program (SSP) and EFSP-Humanitarian paid for short-term shelter, food and transport for migrants released by DHS. That is not refugee resettlement. Amounts are floors: cities seldom report which groups got the FEMA money they passed on. City or state payments that no document ties to FEMA are shown as city money."));
+    const NM = (id) => {
+      const x = DATA.orgs.find((y) => y.id === id);
+      return x ? x.display_name || x.name : id;
+    };
+    const row = (f, tag, col) => {
+      const box = el("div", "dfund");
+      box.style.borderLeftColor = col;
+      const top = el("div");
+      top.appendChild(el("span", "damt", f.amount_label || fmtMleast(f.amount)));
+      box.appendChild(top);
+      const pay = f.agency && f.agency !== "fema" ? " · paid by " + NM(f.agency) : f.agency === "fema" ? " · DHS/FEMA" : "";
+      box.appendChild(el("div", "fy", tag + pay));
+      if (f.award_ids?.length) {
+        const aidDiv = el("div", "fy");
+        f.award_ids.forEach((aid, k) => {
+          const key = (f.award_keys || [])[k];
+          const a = el("a", null, `#${aid}`);
+          const st = key && DATA.award_status?.awards?.[key]?.status;
+          if (st) {
+            a.className = st === "cancelled_2025" ? "aid-cut" : st === "active" ? "aid-live" : st === "expired" ? "aid-exp" : "";
+            a.title = AST_LABEL[st] || "";
+          }
+          a.href = key ? `https://www.usaspending.gov/award/${encodeURIComponent(key)}` : `https://www.usaspending.gov/keyword_search/${encodeURIComponent(aid)}`;
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.style.marginRight = "6px";
+          aidDiv.appendChild(a);
+        });
+        box.appendChild(aidDiv);
+      }
+      if (f.evidence_ids?.length) {
+        const evFrag = renderEvidenceList(f.evidence_ids);
+        if (evFrag) box.appendChild(evFrag);
+      }
+      d.appendChild(box);
+    };
+    femaRows.forEach((f) => row(f, (f.award_ids?.length ? "FEMA prime award (USASpending)" : "FEMA award table") + " · " + (f.program || f.cfda || ""), EDGE_STYLE.federal_award.c));
+    cityRows.filter((f) => /FEMA pass-through/.test(f.program || "")).forEach((f) => row(f, "FEMA money passed through a city or county (documented)", EDGE_STYLE.fema_passthrough.c));
+    cityRows.filter((f) => !/FEMA pass-through/.test(f.program || "")).forEach((f) => row(f, "City/state money · FEMA link not established", EDGE_STYLE.city_migrant_contract.c));
+  }
   if (primeAwards.length) {
     d.appendChild(el("h3", null, "Federal awards by program (documented; not a complete total; red = terminated or cut short, green = live)"));
     primeAwards.forEach((f) => {
@@ -3009,7 +3221,7 @@ function renderOrgDrawer(o) {
       let extra = "";
       if (e.type === "affiliate_of" && e.basis) extra = ` · ${e.basis}`;
       if (e.subtype === "ffata_subaward" && e.via_state) extra += " · via state agencies";
-      row.append(` (${es.l}${e.years ? " · " + e.years : ""}${e.amount ? " · " + fmtMleast(e.amount) : ""}${extra})`);
+      row.append(` (${es.l}${e.years ? " · " + e.years : ""}${e.amount_label ? " · " + e.amount_label : e.amount ? " · " + fmtMleast(e.amount) : ""}${extra})`);
       const edgeEvIds = e.evidence_ids || [];
       if (edgeEvIds.length) {
         const evFrag = renderEvidenceList(edgeEvIds.slice(0, 2));
@@ -3033,11 +3245,12 @@ function openEdge(d) {
   din.textContent = "";
   const SRCS = DATA.sources || {};
   const src = DATA.orgs.find((x) => x.id === d.source), tgt = DATA.orgs.find((x) => x.id === d.target);
-  const sk = d.subtype === "ffata_subaward" ? "ffata_subaward" : d.type;
-  const es = EDGE_STYLE[sk] || EDGE_STYLE.federal_award;
+  const es = EDGE_STYLE[edgeStyleKey(d)] || EDGE_STYLE.federal_award;
   din.appendChild(el("h2", null, es.l));
   din.appendChild(el("div", "org-sub", (src?.display_name || src?.name || d.source) + " → " + (tgt?.display_name || tgt?.name || d.target)));
-  if (d.amount) din.appendChild(el("div", "drow", fmtMleast(d.amount)));
+  if (d.amount_label) din.appendChild(el("div", "drow", d.amount_label));
+  else if (d.amount) din.appendChild(el("div", "drow", fmtMleast(d.amount)));
+  if (d.type === "city_award") din.appendChild(el("div", "dnote", d.subtype === "fema_passthrough" ? "A document ties this payment to FEMA shelter money passed through the paying government." : "City or state money. No document found ties this payment to FEMA dollars."));
   if (d.years) din.appendChild(el("div", "drow", "Years: " + d.years));
   if (d.source_id && SRCS[d.source_id]) {
     const s = SRCS[d.source_id];
@@ -3179,6 +3392,7 @@ document.getElementById("sortby").addEventListener("change", render);
     CONN[e.source] = (CONN[e.source] || 0) + 1;
     CONN[e.target] = (CONN[e.target] || 0) + 1;
   });
+  buildMoney();
   buildFacets();
   render();
   const qp = new URLSearchParams(location.search);
@@ -3202,6 +3416,12 @@ document.addEventListener("keydown", (e) => {
 });
 </script>
 
+<div class="mx-credit">
+  <div class="mx-credit__marks"><img src="/assets/images/logo.png" alt="DataRepublican" class="dr-mark"><span class="mx-x" aria-hidden="true">★</span>
+    <a href="https://itsyourgov.org" target="_blank" rel="noopener"><svg class="op-logo" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210.3 47.3" role="img" aria-label="The Oversight Project"><g><path d="M14.4,26.1c0,1.1-.3,2.2-.7,3.1-.3.8-.9,1.5-1.6,2.1-.8.6-1.8,1-3.2,1s-2.5-.3-3.2-1c-.8-.6-1.3-1.3-1.6-2.1-.4-.9-.7-1.9-.7-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v16.6ZM10.2,9.5c0-.8-.2-1.3-.5-1.8-.2-.2-.5-.3-.8-.3-.7,0-1.1.5-1.2,1-.1.3-.2.7-.2,1v16.6c0,.8.2,1.3.6,1.8.2.2.5.3.8.3.7,0,1.1-.5,1.2-1,.1-.3.2-.6.2-1V9.5Z"></path><path d="M24.7,3.7h4l-4.3,28.1h-4.1L16,3.7h4l2.1,15.5.2,1.2h.2l.2-1.2,2.1-15.5Z"></path><path d="M30.6,3.7h9.5v4.2h-5.3v7.4h3.8v4.5h-3.8v7.7h5.3v4.2h-9.5V3.7Z"></path><path d="M49.7,31.9l-2.1-11.9h-1.1v11.9h-4.1V3.7h4.1c4.9,0,7,2.8,7,8.1s-.7,5.3-2.3,6.4l2.6,13.6h-4.1ZM46.5,16.2c.6,0,1.3,0,2-.6.6-.5,1.1-1.6,1.1-3.6s-.5-3.1-1.1-3.6c-.6-.5-1.4-.6-2-.6v8.3Z"></path><path d="M63,11.3c0-.9,0-2-.3-2.8-.3-.8-.7-1.3-1.3-1.3-1.1,0-1.4,1.1-1.4,2.8s.4,2,1,3c.6,1.1,1.4,2.2,2.2,3.4,1,1.4,1.9,2.9,2.6,4.3s1.2,2.9,1.2,4.4-.3,3.6-1.2,4.9c-.9,1.3-2.3,2.1-4.6,2.1s-4.1-1-5-2.5c-.8-1.5-1-3.6-1-5.7l4.1-.4c0,1.2,0,2.4.3,3.3.3.9.7,1.5,1.6,1.5s1.7-1.3,1.7-3.1-.5-2-1.1-3.1c-.3-.5-.7-1.1-1.1-1.7-.8-1.1-1.7-2.5-2.6-3.9s-1.6-2.9-2-4.4c-.2-.7-.3-1.5-.3-2.3,0-1.5.3-3.2,1.2-4.4.9-1.2,2.2-2.1,4.2-2.1,2.5,0,3.9,1,4.7,2.5.8,1.5,1,3.4,1,5l-4.1.4Z"></path><path d="M69.3,3.7h4.1v28.1h-4.1V3.7Z"></path><path d="M83.1,13.8v-4.3c0-.8-.2-1.3-.5-1.8-.2-.2-.5-.3-.8-.3-.7,0-1.1.5-1.2,1-.1.3-.2.7-.2,1v16.9c0,.8.2,1.3.6,1.8.2.2.5.3.8.3.7,0,1.1-.5,1.2-1,.1-.3.2-.6.2-1v-5.1h-1.6v-3.5h5.8v14h-2.5l-.5-1.3c-.8,1-1.9,1.6-3.2,1.6s-2.3-.3-2.9-1c-.7-.6-1.1-1.3-1.5-2.1-.3-.9-.5-1.9-.5-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v4.3h-4.1Z"></path><path d="M97.6,19.6h-3.2v12.3h-4.1V3.7h4.1v11.6h3.2V3.7h4.1v28.1h-4.1v-12.3Z"></path><path d="M103.4,8V3.7h11.9v4.2h-3.9v23.9h-4.1V8h-3.9Z"></path><path d="M122.8,3.7h4.1c1.8,0,3.6.5,5,1.8,1.4,1.3,2.3,3.4,2.3,6.7s-.9,5.3-2.3,6.6c-1.4,1.3-3.2,1.8-5,1.8v11.3h-4.1V3.7ZM126.9,16.4c1.3,0,2.1-.2,2.5-.9.5-.6.6-1.6.6-3.2s-.1-2.7-.6-3.4c-.5-.7-1.3-1-2.5-1v8.5Z"></path><path d="M143.7,31.9l-2.1-11.9h-1.1v11.9h-4.1V3.7h4.1c4.9,0,7,2.8,7,8.1s-.7,5.3-2.3,6.4l2.6,13.6h-4.1ZM140.4,16.2c.6,0,1.3,0,2-.6.6-.5,1.1-1.6,1.1-3.6s-.5-3.1-1.1-3.6c-.6-.5-1.4-.6-2-.6v8.3Z"></path><path d="M160.9,26.1c0,1.1-.3,2.2-.7,3.1-.3.8-.9,1.5-1.6,2.1-.8.6-1.8,1-3.2,1s-2.5-.3-3.2-1c-.8-.6-1.3-1.3-1.6-2.1-.4-.9-.7-1.9-.7-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v16.6ZM156.7,9.5c0-.8-.2-1.3-.5-1.8-.2-.2-.5-.3-.8-.3-.7,0-1.1.5-1.2,1-.1.3-.2.7-.2,1v16.6c0,.8.2,1.3.6,1.8.2.2.5.3.8.3.7,0,1.1-.5,1.2-1,.1-.3.2-.6.2-1V9.5Z"></path><path d="M162.4,28.1c.8.1,1.4,0,1.9-.7.2-.3.3-.7.3-1.4V3.7h4.1v22.9c0,1.5-.4,2.9-1.3,4s-2.6,1.6-5,1.5v-4.1Z"></path><path d="M171.6,3.7h9.5v4.2h-5.3v7.4h3.8v4.5h-3.8v7.7h5.3v4.2h-9.5V3.7Z"></path><path d="M194.1,22.2v3.9c0,1.1-.3,2.2-.7,3.1-.3.8-.9,1.5-1.6,2.1-.8.6-1.8,1-3.2,1s-2.5-.3-3.2-1c-.8-.6-1.3-1.3-1.6-2.1-.4-.9-.7-1.9-.7-3.1V9.5c0-1.1.3-2.1.7-3,.3-.8.8-1.5,1.6-2.1s1.8-1,3.2-1,2.4.4,3.2,1,1.3,1.3,1.6,2.1c.4.9.7,1.9.7,3v3.9h-3.9v-3.9c0-.8-.2-1.3-.6-1.8-.2-.2-.5-.3-1-.3-.7,0-1.1.5-1.3,1-.1.3-.2.7-.2,1v16.6c0,.8.3,1.3.7,1.8.2.2.5.3.8.3.9,0,1.2-.5,1.4-1,.1-.3.2-.6.2-1v-3.9h3.9Z"></path><path d="M195.1,8V3.7h11.9v4.2h-3.9v23.9h-4.1V8h-3.9Z"></path></g><g><path d="M6.1,44.1h-.6v-8.4h.6v8.4Z"></path><path d="M17.5,35.7v.5h-3v7.9h-.6v-7.9h-3v-.5h6.6Z"></path><path d="M22.4,35.3c0,.2.2.3.2.5,0,.1,0,.3,0,.5,0,.3,0,.6-.2.9-.2.3-.3.5-.6.8h-.2c0-.1,0-.2,0-.2s0,0,0,0c.2-.2.3-.4.4-.6,0-.2.1-.4.1-.6s0-.5-.2-.7c0,0,0,0,0,0,0,0,0,0,0-.1l.4-.2Z"></path><path d="M31.9,36.7c0,0,0,.1-.2.1s-.1,0-.2-.1c0,0-.2-.2-.3-.2s-.3-.2-.5-.2c-.2,0-.5-.1-.8-.1s-.6,0-.8.1c-.2,0-.4.2-.6.4-.2.2-.3.3-.4.5,0,.2-.1.4-.1.6s0,.5.2.7c.1.2.3.3.5.5.2.1.4.2.7.3.3,0,.5.2.8.3.3,0,.5.2.8.3.3.1.5.2.7.4.2.2.4.4.5.6.1.2.2.5.2.9s0,.7-.2,1c-.1.3-.3.6-.5.8s-.5.4-.8.5c-.3.1-.7.2-1.1.2s-1,0-1.4-.3-.8-.5-1.1-.8l.2-.3c0,0,.1,0,.2,0s0,0,.1,0,.1.1.2.2c0,0,.2.1.3.2.1,0,.2.2.4.2.1,0,.3.1.5.2s.4,0,.7,0,.6,0,.9-.2c.3-.1.5-.2.7-.4s.3-.4.4-.6c0-.2.1-.5.1-.8s0-.5-.2-.7c-.1-.2-.3-.4-.5-.5-.2-.1-.4-.2-.7-.3-.3,0-.5-.2-.8-.3s-.5-.2-.8-.3c-.3-.1-.5-.2-.7-.4-.2-.2-.4-.4-.5-.6-.1-.2-.2-.5-.2-.9s0-.6.2-.8.3-.5.5-.7c.2-.2.5-.4.8-.5.3-.1.7-.2,1-.2s.8,0,1.2.2c.3.1.7.4,1,.6v.3Z"></path><path d="M45.4,40.6v3.5h-.6v-3.5l-3.1-5h.5c0,0,.1,0,.1,0,0,0,0,0,0,.1l2.4,3.9c0,0,.1.2.1.3,0,0,0,.2.1.3,0,0,0-.2.1-.3,0,0,0-.2.1-.3l2.4-3.9s0,0,0-.1c0,0,0,0,.1,0h.5l-3.1,5Z"></path><path d="M60.2,39.9c0,.7,0,1.2-.3,1.8-.2.5-.5,1-.8,1.4s-.8.7-1.3.9c-.5.2-1,.3-1.6.3s-1.1-.1-1.6-.3c-.5-.2-.9-.5-1.3-.9-.4-.4-.6-.8-.8-1.4-.2-.5-.3-1.1-.3-1.8s0-1.2.3-1.8c.2-.5.5-1,.8-1.4.4-.4.8-.7,1.3-.9.5-.2,1-.3,1.6-.3s1.1.1,1.6.3c.5.2.9.5,1.3.9s.6.8.8,1.4c.2.5.3,1.1.3,1.8ZM59.5,39.9c0-.6,0-1.1-.2-1.6s-.4-.9-.7-1.2c-.3-.3-.7-.6-1.1-.7-.4-.2-.9-.3-1.4-.3s-1,0-1.4.3c-.4.2-.8.4-1.1.7-.3.3-.5.7-.7,1.2s-.2,1-.2,1.6,0,1.1.2,1.6.4.9.7,1.2c.3.3.7.6,1.1.7.4.2.9.3,1.4.3s1,0,1.4-.3c.4-.2.8-.4,1.1-.7.3-.3.5-.7.7-1.2s.2-1,.2-1.6Z"></path><path d="M68.5,43.7c.4,0,.8,0,1.1-.2.3-.1.6-.3.8-.6s.4-.5.5-.9.2-.7.2-1.1v-5.2h.6v5.2c0,.5,0,.9-.2,1.3-.1.4-.4.8-.6,1.1-.3.3-.6.5-1,.7-.4.2-.8.3-1.3.3s-.9,0-1.3-.3c-.4-.2-.7-.4-1-.7-.3-.3-.5-.7-.6-1.1-.1-.4-.2-.8-.2-1.3v-5.2h.6v5.2c0,.4,0,.8.2,1.1s.3.6.5.9c.2.2.5.4.8.6.3.1.7.2,1.1.2Z"></path><path d="M78.1,40.3v3.8h-.6v-8.4h2.2c1,0,1.7.2,2.2.6.5.4.7.9.7,1.7s0,.6-.2.9c-.1.3-.3.5-.5.7s-.5.4-.8.5c-.3.1-.6.2-1,.3,0,0,.2.1.3.2l2.9,3.6h-.5c0,0-.1,0-.2,0,0,0,0,0-.1-.1l-2.7-3.4c0,0-.1-.1-.2-.2,0,0-.2,0-.4,0h-1.1ZM78.1,39.8h1.5c.4,0,.7,0,1-.1s.5-.2.8-.4c.2-.2.4-.4.5-.6.1-.2.2-.5.2-.8,0-.6-.2-1-.6-1.3s-1-.4-1.7-.4h-1.5v3.7Z"></path><path d="M97.2,43.7c.3,0,.6,0,.8,0,.2,0,.5,0,.7-.1.2,0,.4-.1.6-.2s.4-.2.6-.3v-2.3h-1.6s0,0-.1,0c0,0,0,0,0,0v-.3h2.3v3c-.2.1-.4.3-.7.4s-.5.2-.7.3c-.3,0-.5.1-.8.2-.3,0-.6,0-1,0-.6,0-1.2-.1-1.7-.3-.5-.2-.9-.5-1.3-.9-.4-.4-.6-.8-.8-1.4-.2-.5-.3-1.1-.3-1.8s0-1.2.3-1.8c.2-.5.5-1,.8-1.4.4-.4.8-.7,1.3-.9.5-.2,1.1-.3,1.8-.3s.6,0,.9,0c.3,0,.5.1.8.2s.5.2.7.3c.2.1.4.3.6.4l-.2.3c0,0,0,0-.1,0s0,0-.1,0c0,0-.1,0-.3-.2-.1,0-.3-.2-.5-.3-.2,0-.4-.2-.7-.3s-.6-.1-1.1-.1-1,0-1.5.3c-.4.2-.8.4-1.1.8-.3.3-.6.7-.7,1.2-.2.5-.3,1-.3,1.6s0,1.1.3,1.6c.2.5.4.9.7,1.2.3.3.7.6,1.1.8.4.2.9.3,1.4.3Z"></path><path d="M113.3,39.9c0,.7,0,1.2-.3,1.8-.2.5-.5,1-.8,1.4s-.8.7-1.3.9c-.5.2-1,.3-1.6.3s-1.1-.1-1.6-.3c-.5-.2-.9-.5-1.3-.9-.4-.4-.6-.8-.8-1.4-.2-.5-.3-1.1-.3-1.8s0-1.2.3-1.8c.2-.5.5-1,.8-1.4.4-.4.8-.7,1.3-.9.5-.2,1-.3,1.6-.3s1.1.1,1.6.3c.5.2.9.5,1.3.9s.6.8.8,1.4c.2.5.3,1.1.3,1.8ZM112.6,39.9c0-.6,0-1.1-.2-1.6s-.4-.9-.7-1.2c-.3-.3-.7-.6-1.1-.7-.4-.2-.9-.3-1.4-.3s-1,0-1.4.3-.8.4-1.1.7c-.3.3-.5.7-.7,1.2s-.2,1-.2,1.6,0,1.1.2,1.6.4.9.7,1.2c.3.3.7.6,1.1.7s.9.3,1.4.3,1,0,1.4-.3c.4-.2.8-.4,1.1-.7.3-.3.5-.7.7-1.2s.2-1,.2-1.6Z"></path><path d="M117,35.7h.5c0,0,.1,0,.1,0,0,0,0,0,0,.1l2.9,7c0,.2.1.4.2.6,0-.2.1-.4.2-.6l2.9-7s0,0,0-.1,0,0,.1,0h.5l-3.5,8.4h-.5l-3.5-8.4Z"></path><path d="M134.1,35.7v.5h-4.4v3.4h3.7v.5h-3.7v3.5h4.4v.5h-5.1v-8.4h5.1Z"></path><path d="M140.1,40.3v3.8h-.6v-8.4h2.2c1,0,1.7.2,2.2.6.5.4.7.9.7,1.7s0,.6-.2.9c-.1.3-.3.5-.5.7s-.5.4-.8.5c-.3.1-.6.2-1,.3,0,0,.2.1.3.2l2.9,3.6h-.5c0,0-.1,0-.2,0,0,0,0,0-.1-.1l-2.7-3.4c0,0-.1-.1-.2-.2,0,0-.2,0-.4,0h-1.1ZM140.1,39.8h1.5c.4,0,.7,0,1-.1s.5-.2.8-.4c.2-.2.4-.4.5-.6.1-.2.2-.5.2-.8,0-.6-.2-1-.6-1.3s-1-.4-1.7-.4h-1.5v3.7Z"></path><path d="M150.5,35.7s0,0,.1,0l5.5,7.3c0-.1,0-.2,0-.3v-7.1h.5v8.4h-.3c0,0-.2,0-.2-.1l-5.5-7.3c0,.1,0,.2,0,.3v7.1h-.5v-8.4h.3c0,0,0,0,.1,0Z"></path><path d="M166.5,42c0,0,0-.1,0-.2,0,0,0-.1,0-.2l3.3-5.9c0,0,0,0,0,0,0,0,0,0,.1,0h.4v8.4h-.5v-7.2c0-.1,0-.2,0-.3l-3.3,5.9c0,.1-.1.2-.2.2h0c0,0-.2,0-.2-.2l-3.4-5.9c0,.1,0,.2,0,.3v7.2h-.5v-8.4h.4c0,0,.1,0,.1,0,0,0,0,0,0,0l3.4,5.9c0,.1.1.2.2.4Z"></path><path d="M181.4,35.7v.5h-4.4v3.4h3.7v.5h-3.7v3.5h4.4v.5h-5.1v-8.4h5.1Z"></path><path d="M187.1,35.7s0,0,.1,0l5.5,7.3c0-.1,0-.2,0-.3v-7.1h.5v8.4h-.3c0,0-.2,0-.2-.1l-5.5-7.3c0,.1,0,.2,0,.3v7.1h-.5v-8.4h.3c0,0,0,0,.1,0Z"></path><path d="M204.4,35.7v.5h-3v7.9h-.6v-7.9h-3v-.5h6.6Z"></path></g></svg></a></div>
+  <p>The Migration Explorer is a collaboration between DataRepublican and
+    <a href="https://itsyourgov.org" target="_blank" rel="noopener">The Oversight Project</a>.</p>
+</div>
 </div>
 <script>
 (function() {
@@ -3227,7 +3447,7 @@ document.addEventListener("keydown", (e) => {
 <dialog class="dr-dialog" id="mx-net-dlg" aria-labelledby="mx-net-dlg-title">
   <div class="dr-dialog__head"><h2 id="mx-net-dlg-title">About this network &amp; disclaimer</h2>
     <button type="button" class="dr-btn dr-btn--icon dr-btn--ghost" id="mx-net-dlg-close" aria-label="Close">✕</button></div>
-  <div class="dr-dialog__body"><p><b>Limitations &amp; disclaimer.</b> Provided for research, educational, and journalistic purposes only. Compiled from public federal records (Census, ACS, CBP, USASpending, DHS, DOL, ORR, EOIR) and IRS filings, offered “as is” without warranty of any kind; it may contain errors or omissions. Foreign-born counts include naturalized citizens and every legal status – the Census does not ask legal status. Modeled estimates are labeled as such. Organizations appear because a public record documents federal money, a grant, or an affiliation; a listing describes that record only and alleges no wrongdoing. Dollar figures are documented minimums and dollar types are never added together. Every claim links to its source; please verify before relying on it.</p></div>
+  <div class="dr-dialog__body"><p><b>About this project.</b> The Migration Explorer is a collaboration between DataRepublican and <a href="https://itsyourgov.org" target="_blank" rel="noopener">The Oversight Project</a>.</p><p><b>Limitations &amp; disclaimer.</b> Provided for research, educational, and journalistic purposes only. Compiled from public federal records (Census, ACS, CBP, USASpending, DHS, DOL, ORR, EOIR) and IRS filings, offered “as is” without warranty of any kind; it may contain errors or omissions. Foreign-born counts include naturalized citizens and every legal status – the Census does not ask legal status. Modeled estimates are labeled as such. Organizations appear because a public record documents federal money, a grant, or an affiliation; a listing describes that record only and alleges no wrongdoing. Dollar figures are documented minimums and dollar types are never added together. Every claim links to its source; please verify before relying on it.</p></div>
 </dialog>
 <script>
 (function() {

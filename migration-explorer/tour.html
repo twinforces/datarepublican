@@ -10,7 +10,7 @@ main.page-column:has(.mx-page) {
   container-type: normal;
 }
 .mx-page {
-  --mx-accent:#B22234;
+  --mx-accent:#B33939;
   font-family: var(--dr-font-content,"Libre Franklin",system-ui,sans-serif);
 }
 .mx-bar {
@@ -72,8 +72,79 @@ main.page-column:has(.mx-page) {
 }
 :is(#mx-map, #mx-net, #mx-tour, #mx-hub) .mx-switch a.on {
   background: var(--dr-panel,#fff);
-  color: #B22234;
+  color: #B33939;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+.mx-page .mx-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mx-partner {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 9px;
+  border: 1px solid var(--dr-line,#D3D7DE);
+  border-left: 3px solid #B33939;
+  border-radius: 3px;
+  background: var(--dr-panel,#fff);
+  color: #111 !important;
+  text-decoration: none !important;
+  line-height: 1;
+}
+.mx-partner span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dr-ink-faint,#6B7280);
+}
+.mx-partner .op-logo {
+  height: 25px;
+  width: auto;
+  display: block;
+}
+.mx-partner:hover {
+  border-color: #B33939;
+}
+.mx-credit {
+  margin: 48px auto 8px;
+  padding: 22px 0 6px;
+  border-top: 3px double #C9A44E;
+  text-align: center;
+  max-width: 760px;
+}
+.mx-credit__marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  margin-bottom: 10px;
+}
+.mx-credit .dr-mark {
+  height: 58px;
+  width: auto;
+}
+.mx-credit .op-logo {
+  height: 30px;
+  width: auto;
+  color: #111;
+  display: block;
+}
+.mx-credit .mx-x {
+  color: #C9A44E;
+  font-size: 18px;
+}
+.mx-credit p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dr-ink-faint,#6B7280);
+}
+.mx-credit p a {
+  color: #B33939;
+  font-weight: 600;
 }
 @media (max-width: 600px) {
   .mx-switch {
@@ -531,6 +602,14 @@ main.page-column:has(.mx-page) {
 }
 #mx-tour {
   margin: 0 calc(-1 * var(--page-gutter,0px));
+}
+#mx-tour .mx-tour-partner {
+  display: flex;
+  justify-content: center;
+  padding: 14px 0 16px;
+}
+#mx-tour .mx-tour-credit {
+  padding: 0 20px 24px;
 }
 </style>
 <div class="mx-page" id="mx-tour">
