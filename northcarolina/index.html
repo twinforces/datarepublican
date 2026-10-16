@@ -878,6 +878,17 @@ title: North Carolina 2026 general election map
 
 	/** Do a split, a la Florida map. */
 	function doSplit(methodStr, numerator, denominator, baseLabel) {
+		// Same fallback as splitIndependents: a county with no D or R ballots splits I by the state ratio.
+		const stateNow = splitIndependents(numerator), stateBase = splitIndependents(denominator);
+		function iSplit(res, state) {
+			const ind = res['total'] - res['Rep'] - res['Dem'];
+			const dr = res['Rep'] + res['Dem'], sdr = state['Rep'] + state['Dem'];
+			const repShare = dr > 0 ? res['Rep'] / dr : sdr > 0 ? state['Rep'] / sdr : 0.5;
+			return { 'ind': ind, 'iRep': ind * repShare, 'iDem': ind * (1.0 - repShare) };
+		}
+		function signedVotes(n) {
+			return (n < 0 ? '−' : '+') + fmt(Math.abs(n));
+		}
 		$.each(numerator, function (county, results2026) {
 			const countyid = counties[county];
 			const resultsBase = denominator[county];
@@ -908,23 +919,34 @@ title: North Carolina 2026 general election map
 
 			var gap = (demPct2026 - repPct2026) - (demPctBase - repPctBase);
 			var gapDesc = gap <= 0.0 ? "Republican advantage" : "Democratic advantage";
-			var gapRaw = Math.ceil((gap * total2026)) * -1;
-			gapDesc += " (";
-			gapDesc += gap <= 0.0 ? ("+" + gapRaw) : ("" + gapRaw);
-			gapDesc += " votes)";
+			gapDesc += " (" + signedVotes(Math.abs(gap) * total2026) + " votes)";
 
 			const splitColor = getSplitAdvantageColor(gap);
 			usncjsconfig[countyid].upColor = splitColor;
 			usncjsconfig[countyid].downColor = splitColor;
 			$('#' + countyid).attr({ fill: splitColor });
 
+			// Unaffiliated & other, split by the county's own D:R ratio (the "with I split" KPI, per county).
+			const iNow = iSplit(results2026, stateNow), iBase = iSplit(resultsBase, stateBase);
+			const adjM2026 = (demTotal2026 + iNow['iDem'] - repTotal2026 - iNow['iRep']) / total2026;
+			const adjMBase = (demTotalBase + iBase['iDem'] - repTotalBase - iBase['iRep']) / totalBase;
+			const adjGap = adjM2026 - adjMBase;
+			const adjGapDesc = (adjGap <= 0.0 ? "Republican advantage" : "Democratic advantage") +
+				" (" + signedVotes(Math.abs(adjGap) * total2026) + " votes)";
+
 			usncjsconfig[countyid].hover = county + "<br /><small>" +
 				methodStr + ", Democrat:<b>" + demTotal2026 + " (" + pctToString(demPct2026) + ")</b><br />" +
 				methodStr + ", Republican:<b>" + repTotal2026 + " (" + pctToString(repPct2026) + ")</b><br />" +
+				methodStr + ", Unaffiliated &amp; other:<b>" + iNow['ind'] + " (" + pctToString(iNow['ind'] / total2026) + ")</b><br />" +
 				"2026 Difference (D-R): <b>" + pctToString(demPct2026 - repPct2026) + "</b> " + partyDiffDesc + "<br />" +
 				baseLabel + ": Dem: " + pctToString(demPctBase) + " Rep: " + pctToString(repPctBase) + " Other:" + pctToString(otherPctBase) + "<br />" +
 				baseLabel + " Difference (D-R): <b>" + pctToString(demPctBase - repPctBase) + "</b><br />" +
 				"2026 vs " + baseLabel + " Gap: <b>" + pctToString(Math.abs(gap)) + "</b>, " + gapDesc + "<br />" +
+				"<i>Unaffiliated split by county D:R ratio (estimate)</i><br />" +
+				"2026 I est.: D <b>" + fmt(iNow['iDem']) + "</b> / R <b>" + fmt(iNow['iRep']) + "</b><br />" +
+				"2026 Difference with I split (D-R): <b>" + pctToString(adjM2026) + "</b><br />" +
+				baseLabel + " Difference with I split (D-R): <b>" + pctToString(adjMBase) + "</b><br />" +
+				"2026 vs " + baseLabel + " Gap with I split: <b>" + pctToString(Math.abs(adjGap)) + "</b>, " + adjGapDesc + "<br />" +
 				"</small>";
 		});
 	}
