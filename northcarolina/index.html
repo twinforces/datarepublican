@@ -942,19 +942,10 @@ title: North Carolina 2026 general election map
 	function doUpdate(checkboxId) {
 		resetHover();
 
-		methodFilter = [];
-		if ($('#methodMAIL').prop('checked')) {
-			methodFilter.push(1);
-		}
-		if ($('#methodIPEV').prop('checked')) {
-			methodFilter.push(2);
-		}
-		if (methodFilter.length == 0) {
-			methodFilter.push(1);
-			if (!$('#methodIPEV').prop('disabled')) {
-				methodFilter.push(2);
-			}
-		}
+		// Each method keeps its own same-point cutoff (per row in the data file), so "all" is the
+		// union of mail by the mail cutoff and in person by the in-person cutoff.
+		const method = $('input[name=method]:checked').val();
+		methodFilter = method === 'MAIL' ? [1] : method === 'IPEV' ? [2] : [1, 2];
 
 		const baselineKey = $('input[name=baseline]:checked').val();
 		const baseline = BASELINES[baselineKey];
@@ -1046,9 +1037,16 @@ title: North Carolina 2026 general election map
 		}
 
 		var ctl = '<div class="nc-group"><div class="nc-label">Ballots</div><div class="nc-seg">\n';
-		ctl += chip('methodMAIL', 'Mail', '', 'type="checkbox" checked="checked"');
-		ctl += has2026Ipev ? chip('methodIPEV', 'In person', 'early voting', 'type="checkbox"') :
-			chip('methodIPEV', 'In person', 'none yet in 2026', 'type="checkbox" disabled="disabled"');
+		// All early voting is the default once 2026 in-person ballots exist; before that it would
+		// compare mail-only 2026 against a baseline that includes in-person votes.
+		const radio = function (value, checked, disabled) {
+			return 'type="radio" name="method" value="' + value + '"' + (checked ? ' checked="checked"' : '') +
+				(disabled ? ' disabled="disabled"' : '');
+		};
+		ctl += chip('methodEV', 'All early voting', 'mail + in person', radio('EV', has2026Ipev, !has2026Ipev));
+		ctl += chip('methodMAIL', 'Mail', '', radio('MAIL', !has2026Ipev, false));
+		ctl += chip('methodIPEV', 'In person', has2026Ipev ? 'early voting' : 'none yet in 2026',
+			radio('IPEV', false, !has2026Ipev));
 		ctl += '</div></div>\n';
 
 		ctl += '<div class="nc-group"><div class="nc-label">Compare 2026 against</div><div class="nc-seg">\n';
