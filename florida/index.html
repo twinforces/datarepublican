@@ -176,8 +176,16 @@ title: Florida 2026 general election map
 
 	#fl-map .fl-kpis {
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 0.5rem;
+	}
+
+	#fl-map .fl-seg--methods {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	#fl-map .fl-shifts {
+		margin-top: 0.75rem;
 	}
 
 	#fl-map .fl-kpi {
@@ -474,6 +482,7 @@ title: Florida 2026 general election map
 		}
 
 		#fl-map .fl-kpis {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 0.375rem;
 		}
 
@@ -578,11 +587,34 @@ title: Florida 2026 general election map
 	};
 	const VIEW_ORDER = ['shift', 'margin'];
 
+	// Same points: 2024 at the same moment before the election (intraday git snapshots); 2022 at the end of
+	// the same day (no intraday data). 'date' is filled from DATA['same_point'] once the file loads.
 	const BASELINES = {
-		'2024f': { 'year': 2024, 'label': '2024 mail ballots', 'short': '2024', 'date': 'all mail ballots' },
-		'2022f': { 'year': 2022, 'label': '2022 mail ballots', 'short': '2022', 'date': 'all mail ballots' }
+		'2022sp': { 'year': 2022, 'label': '2022 same day', 'short': '2022', 'chip': '2022 same day', 'date': 'end of same day' },
+		'2022f': { 'year': 2022, 'label': '2022 final', 'short': '2022', 'chip': '2022 final', 'date': 'full count' },
+		'2024sp': { 'year': 2024, 'label': '2024 same time', 'short': '2024', 'chip': '2024 same time', 'date': 'same hour' },
+		'2024f': { 'year': 2024, 'label': '2024 final', 'short': '2024', 'chip': '2024 final', 'date': 'full count' }
 	};
-	const BASELINE_ORDER = ['2024f', '2022f'];
+	const BASELINE_ORDER = ['2022sp', '2022f', '2024sp', '2024f'];
+	const DEFAULT_BASELINE = '2022sp';
+	const METHODS = {
+		'mail': { 'key': 'series', 'label': 'Mail', 'sub': 'returned ballots' },
+		'ev': { 'key': 'series_ev', 'label': 'In person', 'sub': 'early voting' }
+	};
+
+	/** Which methods are ticked, e.g. ['mail', 'ev']. Unticking both falls back to mail. */
+	function methods() {
+		var out = [];
+		$('input[name=method]:checked').each(function () { out.push($(this).val()); });
+		return out.length ? out : ['mail'];
+	}
+
+	/** "Mail + in-person ballots", "Mail ballots", "In-person early votes". */
+	function methodLabel(ms) {
+		ms = ms || methods();
+		if (ms.length === 2) return 'Mail + in-person ballots';
+		return ms[0] === 'ev' ? 'In-person early votes' : 'Mail ballots';
+	}
 	const RACE = { 2024: 'President', 2022: 'Governor' };
 
 	function pctToString(pct) {
@@ -616,13 +648,13 @@ title: Florida 2026 general election map
 		const shift = view === 'shift';
 		const bins = shift ? ADV_BINS : MARGIN_BINS;
 		const tip = shift ? 'County margin moved this far toward the party vs the baseline.' :
-			'County\'s 2026 mail ballots lean this far toward the party.';
+			'County\'s 2026 ballots lean this far toward the party.';
 		var bar = '';
 		$.each(bins, function (ignore, b) {
 			bar += '<span style="background:' + b[1] + '" data-tip-title="' + b[2] + ' pts" data-tip="' + tip + '"></span>';
 		});
 		$('#flLegend').html(
-			'<div>' + (shift ? 'County shift in D−R margin vs baseline' : 'County D−R margin among 2026 mail ballots') +
+			'<div>' + (shift ? 'County shift in D−R margin vs baseline' : 'County D−R margin among 2026 ballots') +
 			' (party registration, no I split)</div>' +
 			'<div class="fl-legend-bar">' + bar + '</div>' +
 			'<div class="fl-legend-ends"><span class="fl-rep">' + bins[0][2] + ' pts</span><span>even</span>' +
@@ -639,13 +671,23 @@ title: Florida 2026 general election map
 		return n;
 	}
 
-	/** County x party counts for one series, every county present, in the {Dem, Rep, total} shape. */
-	function series(key) {
+	/**
+	 * County x party counts for one series summed over the ticked methods, every county present, in the
+	 * {Dem, Rep, total} shape. A file without series_ev (older data) counts as no early votes.
+	 */
+	function series(key, ms) {
 		var out = {};
-		const s = DATA['series'][key];
 		$.each(county_to_id, function (county, ignore) {
-			const c = s[county] || { 'DEM': 0, 'REP': 0, 'TOTAL': 0 };
-			out[county] = { 'Dem': c['DEM'], 'Rep': c['REP'], 'total': c['TOTAL'] };
+			out[county] = { 'Dem': 0, 'Rep': 0, 'total': 0 };
+		});
+		$.each(ms || methods(), function (ignore, m) {
+			const s = (DATA[METHODS[m]['key']] || {})[key] || {};
+			$.each(county_to_id, function (county, ignore) {
+				const c = s[county] || { 'DEM': 0, 'REP': 0, 'TOTAL': 0 };
+				out[county]['Dem'] += c['DEM'] || 0;
+				out[county]['Rep'] += c['REP'] || 0;
+				out[county]['total'] += c['TOTAL'] || 0;
+			});
 		});
 		return out;
 	}
@@ -701,17 +743,25 @@ title: Florida 2026 general election map
 			return '<div class="fl-kpi' + side + '"><div class="fl-kpi-label">' + label + '</div>' +
 				'<div class="fl-kpi-value">' + value + '</div><div class="fl-kpi-sub">' + sub + '</div></div>';
 		}
-		const countSub = pct1(now['total'], base['total']) + ' of ' + fmt(base['total']) + ' in ' + baseline['year'];
+		const countSub = pct1(now['total'], base['total']) + ' of ' + fmt(base['total']) + ' in ' + baseline['label'];
+		// Which party has more ballots in hand right now (registered party, raw counts).
+		const lead = now['Dem'] - now['Rep'], leadBase = base['Dem'] - base['Rep'];
+		function adv(n) {
+			return n === 0 ? 'Even' : '<span class="fl-' + (n < 0 ? 'rep' : 'dem') + '">' + (n < 0 ? 'R' : 'D') + ' +' + fmt(Math.abs(n)) + '</span>';
+		}
+		const advKpi = kpi('Advantage now', adv(lead), (lead < 0 ? 'Republican' : lead > 0 ? 'Democratic' : 'No') +
+			' lead in ballots · ' + adv(leadBase) + ' then', lead === 0 ? undefined : lead);
+		const ms = methods();
 		if (view === 'margin') {
-			$('#countMethod').text('Mail ballots · 2026 D−R margin · ' + baseline['label'] + ' for reference');
+			$('#countMethod').text(methodLabel(ms) + ' · 2026 D−R margin · ' + baseline['label'] + ' for reference');
 			$('#flKpis').html(
-				kpi('2026 ballots', fmt(now['total']), countSub) +
+				kpi('2026 ballots', fmt(now['total']), countSub) + advKpi +
 				kpi('Margin, with I split', lean(adjNow), lean(adjBase) + ' in ' + baseline['year'], adjNow) +
 				kpi('Margin, raw', lean(rawNow), lean(rawBase) + ' in ' + baseline['year'], rawNow));
 		} else {
-			$('#countMethod').text('Mail ballots · 2026 vs ' + baseline['label']);
+			$('#countMethod').text(methodLabel(ms) + ' · 2026 vs ' + baseline['label'] + ' (' + baseline['date'] + ')');
 			$('#flKpis').html(
-				kpi('2026 ballots', fmt(now['total']), countSub) +
+				kpi('2026 ballots', fmt(now['total']), countSub) + advKpi +
 				kpi('Shift, with I split', lean(adjNow - adjBase), lean(adjNow) + ' now, ' + lean(adjBase) + ' then', adjNow - adjBase) +
 				kpi('Shift, raw', lean(rawNow - rawBase), lean(rawNow) + ' now, ' + lean(rawBase) + ' then', rawNow - rawBase));
 		}
@@ -733,6 +783,7 @@ title: Florida 2026 general election map
 		$('#flBars').html(bar('2026', now) + bar(baseline['short'], base) +
 			'<div class="fl-bar-key">' + key('--fl-dem', 'Democrat') + key('--fl-dem-light', 'I → D') +
 			key('--fl-rep-light', 'I → R') + key('--fl-rep', 'Republican') + '</div>');
+		renderShifts(now, ms);
 
 		function cells(key) {
 			return '<td>' + fmt(now[key]) + '<small>' + pct1(now[key], now['total']) + '</small></td>' +
@@ -766,7 +817,8 @@ title: Florida 2026 general election map
 
 		const year = String(baseline['year']);
 		const final = splitIndependents(series(year + 'f'));
-		$('#flFoot').text('2026 so far is ' + pct1(now['total'], final['total']) + ' of all ' + year + ' mail ballots (D ' +
+		$('#flFoot').text('2026 so far is ' + pct1(now['total'], final['total']) + ' of all ' + year + ' ' +
+			methodLabel(ms).toLowerCase() + ' (D ' +
 			pct1(now['Dem'], final['Dem']) + ', R ' + pct1(now['Rep'], final['Rep']) + ' of their ' + year + ' totals' +
 			').' +
 			' I split: each county\'s I ballots go to D and R in that county\'s D:R ratio. A heuristic, not a measurement.');
@@ -827,9 +879,10 @@ title: Florida 2026 general election map
 			const raceLine = baseline['year'] + ' ' + RACE[baseline['year']] + ': ' + r['candidates']['DEM'] + ' ' +
 				pctToString(r['DEM'] / r['total']) + ', ' + r['candidates']['REP'] + ' ' + pctToString(r['REP'] / r['total']);
 
+			const mLabel = methodLabel();
 			if (total2026 < MIN_BALLOTS || (view === 'shift' && totalBase < MIN_BALLOTS)) {
 				usfljsconfig[county_to_id[county]].hover = county + "<br /><small>" +
-					"Mail ballots: " + total2026 + " in 2026, " + totalBase + " in " + baseLabel + "<br />" +
+					mLabel + ": " + total2026 + " in 2026, " + totalBase + " in " + baseLabel + "<br />" +
 					"Not enough ballots to " + (view === 'shift' ? "compare" : "show a margin") + "<br />" + raceLine + "</small>";
 				return;
 			}
@@ -854,8 +907,8 @@ title: Florida 2026 general election map
 			$('#' + county_to_id[county]).attr({ fill: splitColor });
 
 			usfljsconfig[county_to_id[county]].hover = county + "<br /><small>" +
-				"Mail ballots, Democrat: <b>" + fmt(demTotal2026) + " (" + pctToString(demPct2026) + ")</b><br />" +
-				"Mail ballots, Republican: <b>" + fmt(repTotal2026) + " (" + pctToString(repPct2026) + ")</b><br />" +
+				mLabel + ", Democrat: <b>" + fmt(demTotal2026) + " (" + pctToString(demPct2026) + ")</b><br />" +
+				mLabel + ", Republican: <b>" + fmt(repTotal2026) + " (" + pctToString(repPct2026) + ")</b><br />" +
 				"2026 Difference (D-R): <b>" + pctToString(demPct2026 - repPct2026) + "</b>" + partyDiffDesc + "<br />" +
 				baseLabel + ": Dem " + pctToString(demPctBase) + ", Rep " + pctToString(repPctBase) + ", Other " + pctToString(otherPctBase) +
 				" of " + fmt(totalBase) + "<br />" +
@@ -863,6 +916,26 @@ title: Florida 2026 general election map
 				"2026 vs " + baseLabel + " Gap: <b>" + pctToString(Math.abs(gap)) + "</b>, " + gapDesc + "<br />" +
 				raceLine + "</small>";
 		});
+	}
+
+	/** Statewide shift against every comparison point, for the ticked methods. */
+	function renderShifts(now, ms) {
+		var rows = '';
+		$.each(BASELINE_ORDER, function (ignore, k) {
+			const b = splitIndependents(series(k, ms));
+			if (b['total'] === 0) {
+				rows += '<tr><th scope="row">' + BASELINES[k]['label'] + '<small>' + BASELINES[k]['date'] + '</small></th>' +
+					'<td colspan="3">no ballots yet</td></tr>';
+				return;
+			}
+			const raw0 = (now['Dem'] - now['Rep']) / now['total'], raw1 = (b['Dem'] - b['Rep']) / b['total'];
+			const adj0 = (now['adjDem'] - now['adjRep']) / now['total'], adj1 = (b['adjDem'] - b['adjRep']) / b['total'];
+			rows += '<tr><th scope="row">' + BASELINES[k]['label'] + '<small>' + BASELINES[k]['date'] + '</small></th>' +
+				'<td>' + lean(raw1) + '<small>' + fmt(b['total']) + '</small></td><td>' + lean(raw0 - raw1) + '</td>' +
+				'<td>' + lean(adj0 - adj1) + '</td></tr>';
+		});
+		$('#flShifts').html('<thead><tr><th>Shift since each comparison point</th><th>Then<small>D−R, raw</small></th>' +
+			'<th>Shift<small>raw</small></th><th>Shift<small>I split</small></th></tr></thead><tbody>' + rows + '</tbody>');
 	}
 
 	/** D-R margin of a set of counties (all of them when names is null). */
@@ -891,7 +964,7 @@ title: Florida 2026 general election map
 		}).slice(0, BIG_COUNTIES), function (ignore, county) {
 			big[county] = true;
 		});
-		const eBig = marginOf(early, big), fBig = marginOf(denominator, big);
+		const eBig = marginOf(early, big), fBig = marginOf(series(year + 'f'), big);
 
 		var out = [];
 		$.each(numerator, function (county, v) {
@@ -901,7 +974,7 @@ title: Florida 2026 general election map
 		});
 
 		$('#flEarly').html(
-			'<div class="fl-label">Early mail ballots may not be representative</div>' +
+			'<div class="fl-label">Early ballots may not be representative</div>' +
 			'<p>In the ' + BIG_COUNTIES + ' largest counties, the first ' + year + ' ballots ran ' + lean(eBig['margin']) +
 			', against ' + lean(fBig['margin']) + ' by the end. Watch daily for updates.</p>' +
 			(out.length === 0 ? '' : '<p>Not yet reporting (fewer than ' + MIN_BALLOTS + ' ballots in 2026, gray on the map): ' +
@@ -940,7 +1013,24 @@ title: Florida 2026 general election map
 			return '<label class="fl-chip" id="' + id + 'Option"><input ' + attrs + ' id="' + id + '"><span>' + main +
 				'</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</label>\n';
 		}
-		var ctl = '<div class="fl-group"><div class="fl-label">Map shows</div><div class="fl-seg">\n';
+		const sp = data['same_point'] || {};
+		if (sp['2024']) {
+			BASELINES['2024sp']['date'] = new Date(sp['2024'] + '-04:00').toLocaleString('en-US', {
+				month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+				timeZone: 'America/New_York' }) + ' ET';
+		}
+		if (sp['2022']) {
+			BASELINES['2022sp']['date'] = 'end of ' + new Date(sp['2022'].slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', {
+				month: 'short', day: 'numeric', year: 'numeric' });
+		}
+		const hasEv = !!data['series_ev'];
+		var ctl = '<div class="fl-group"><div class="fl-label">Ballots</div><div class="fl-seg fl-seg--methods">\n';
+		$.each(['mail', 'ev'], function (ignore, m) {
+			if (m === 'ev' && !hasEv) return;
+			ctl += chip('method' + m, METHODS[m]['label'], METHODS[m]['sub'], 'type="checkbox" name="method" value="' + m + '" checked="checked"');
+		});
+		ctl += '</div></div>\n';
+		ctl += '<div class="fl-group"><div class="fl-label">Map shows</div><div class="fl-seg">\n';
 		$.each(VIEW_ORDER, function (ignore, key) {
 			const checked = key === 'shift' ? ' checked="checked"' : '';
 			ctl += chip('view' + key, VIEWS[key]['label'], VIEWS[key]['sub'], 'type="radio" name="view" value="' + key + '"' + checked);
@@ -948,21 +1038,23 @@ title: Florida 2026 general election map
 		ctl += '</div></div>\n';
 		ctl += '<div class="fl-group"><div class="fl-label">Compare 2026 against</div><div class="fl-seg">\n';
 		$.each(BASELINE_ORDER, function (ignore, key) {
-			const checked = key === '2024f' ? ' checked="checked"' : '';
-			ctl += chip('baseline' + key, BASELINES[key]['short'], BASELINES[key]['date'],
+			const checked = key === DEFAULT_BASELINE ? ' checked="checked"' : '';
+			ctl += chip('baseline' + key, BASELINES[key]['chip'], BASELINES[key]['date'],
 				'type="radio" name="baseline" value="' + key + '"' + checked);
 		});
 		ctl += '</div>\n';
-		ctl += '<p class="fl-note">Each year\'s full count of returned mail ballots, so the 2026 mix can be read against ' +
-			'either election.</p>\n';
+		ctl += '<p class="fl-note">Same time: 2024 at the same hour on the same day before the election. Same day: 2022 at ' +
+			'the end of that day, since 2022 has no hourly data, so its counts run ahead of 2026\'s until evening. ' +
+			'Final: every ballot of that kind in the election.</p>\n';
 		ctl += '<div class="fl-early" id="flEarly"></div>\n';
 		if (data['broward']['source'] !== 'state feed') {
 			ctl += '<p class="fl-note">Broward is not on the state feed yet. Its numbers come from the Broward Supervisor of ' +
-				'Elections mail ballot dashboard, read ' + new Date(data['broward']['fetched_at']).toLocaleString('en-US', {
+				'Elections turnout dashboard (mail and early vote by party), read ' + new Date(data['broward']['fetched_at']).toLocaleString('en-US', {
 					month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'
 				}) + '.</p>\n';
 		}
-		ctl += '<p class="fl-note">Mail ballots only. In-person early voting starts Oct 19–24 depending on the county.</p>\n';
+		ctl += '<p class="fl-note">In-person early voting opens Oct 19–24 depending on the county, so early-vote ' +
+			'totals undercount until every county is open.</p>\n';
 		ctl += '</div>\n';
 		$('#flControls').html(ctl);
 
@@ -973,9 +1065,9 @@ title: Florida 2026 general election map
 
 <div id="fl-map">
 <div class="fl-head">
-	<h1 class="fl-title">Florida 2026 general: mail ballots</h1>
+	<h1 class="fl-title">Florida 2026 general: early vote</h1>
 	<div class="fl-meta">
-		<span>Returns through <span id="asOf">…</span> · file updated <span id="timestamp">…</span> · counties update through the day</span>
+		<span>Feed updated <span id="timestamp">…</span> · counties update hourly</span><span id="asOf" hidden></span>
 		<button type="button" class="dr-dialog-open" id="flAboutOpen" aria-haspopup="dialog">
 			<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
 			About this map
@@ -991,6 +1083,7 @@ title: Florida 2026 general election map
 	<h2 class="fl-results-title" id="countMethod">Loading ballot data…</h2>
 	<div class="fl-kpis" id="flKpis"></div>
 	<div class="fl-bars" id="flBars"></div>
+	<table class="fl-table fl-shifts" id="flShifts"></table>
 </div>
 
 <div class="fl-card fl-mapcard">
@@ -1018,12 +1111,15 @@ title: Florida 2026 general election map
 		<button type="button" class="dr-btn dr-btn--icon dr-btn--ghost" id="flAboutClose" aria-label="Close">✕</button>
 	</div>
 	<div class="dr-dialog__body">
-		<p>This map is for exploring who has returned mail ballots, not an exact count. Counts by county and party come
-			from the Florida Division of Elections turnout feed, which counties update several times a day. Broward is
-			missing from that feed so far this year; until it appears, Broward's numbers come from the Broward
-			Supervisor of Elections mail ballot dashboard.</p>
-		<p>Shift view colors each county by how far its D−R margin among returned ballots has moved since the
-			baseline you pick: every mail ballot returned in the 2024 or 2022 general election. Margin view colors each
+		<p>This map is for exploring who has voted early, by mail and in person, not an exact count. Counts by county,
+			party and method come from the Florida Division of Elections turnout feed, which counties update about
+			hourly. Broward is missing from that feed so far this year; until it appears, Broward's numbers come from
+			the Broward Supervisor of Elections turnout dashboard.</p>
+		<p>Shift view colors each county by how far its D−R margin among the ticked ballot types has moved since the
+			comparison point you pick. Same time (2024): the counts at the same hour on the same day before the
+			election, from snapshots of the 2024 feed. Same day (2022): the end of the same day before the election
+			(the 2022 feed has only daily totals; the party split comes from the Division's daily early voting and
+			mail ballot reports). Final: every ballot of that type in that election. Margin view colors each
 			county by its 2026 D−R margin alone; the baseline still sets the comparison numbers in the tiles and table.</p>
 		<p>Totals include every county. Counties with fewer than 10 ballots in 2026 or in the baseline are gray on
 			the map.</p>
