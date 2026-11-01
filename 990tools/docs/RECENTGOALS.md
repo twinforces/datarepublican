@@ -4,13 +4,139 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-11-01: Bad address cross-links on PPP / federal pins
+
+**What:** Pin pages that share NPPES / contractor / grant / charity / DOT / FEC rows with other Fun lanes get a Bad address panel. Live links only when that lane already has a detail page. Same-key PPP cuts and Federal spending link too.
+
+**Why:** Address types were counts with nowhere to go. Combined roster lives on this page (loans / SAM / charities); other lanes keep their own pages.
+
+**How:** `spending_reporting/geo_overlap.py`. Sidecar `types`. `refresh_geo_overlap` after Widen. Test: `test_generate_geo_reports.py`.
+
+---
+
+## 2026-11-01: PPP / federal geo matches trucking Widen
+
+**What:** Geo suite indexes use breadcrumbs (`All reports › lane · slice`). Pin pages add **Widen:** address → colocator (all variants) → loose 0.5° → ZIP → state. The Building / Zip / State / Area lane bar is gone.
+
+**Why:** Fun geography is a zoom-out from a pin, same as trucking.
+
+**How:** `spending_reporting/geo_zoom.py`. `generate_geo_reports.py` wrap. Test: `test_generate_geo_reports.py`.
+
+---
+
+## 2026-11-01: TanStack sort on every PPP / federal table
+
+**What:** Pin details, by-state ranking tables, leftover loan galleries, and federal cluster indexes use the same DOT TanStack widget as PPP-cut cluster indexes.
+
+**Why:** Users change the sort on any column, on every Fun table.
+
+**How:** `generate_geo_reports.py` `__TS_TABLES__` / `__CLUSTER_TABLE__`. `generate_galleries.py` payload on `page()`. `--national-only`, `--skip-details`. Test: `test_generate_geo_reports.py`.
+
+---
+
+## 2026-11-01: Federal $ / pop and $ / EV maps
+
+**What:** Federal by-state Fun pages get two extra heatmaps: FY2025 $ per Census Vintage 2024 resident, and $ per 2024 electoral vote.
+
+**Why:** Total $ is headquarters volume. Per-capita and per-EV are the political cuts.
+
+**How:** `spending_reporting/state_weights.py`. `generate_geo_reports.py --heatmaps-only --only federal`. Wrap `--copy-focus federal`.
+
+---
+
+## 2026-11-01: PPP cut Fun rows + TanStack
+
+**What:** Fun matrix rows PPP Charged Off / Not yet paid / Forgiven / Payroll / Zero jobs. Cluster indexes use DOT TanStack (sort leftover, forgiven %, jobs, status counts). Leftover domain `ppp` stays on disk; `--only ppp` does not match the cuts.
+
+**Why:** Leftover>0 drops fully forgiven pins. Payroll and zero-jobs need different ORDER.
+
+**How:** `python3 -u spending_reporting/generate_geo_reports.py --only ppp_charged_off,ppp_not_yet_paid,ppp_forgiven,ppp_payroll,ppp_zero_jobs`. Wrap `python3 scripts/build_site.py --copy-focus ppp,federal` from grumpytechbro.com. Test: `test_generate_geo_reports.py`. Slice TanStack assets after `</%doc>` so the Mako doc’s `<%text>` mention does not leak.
+
+---
+
+## 2026-11-01: PPP / federal geography (colocator, zip, loose, state)
+
+**What:** DOT-style cluster reports for PPP leftover $ and FY2025 federal $ on SAM pins. Colocator / zip / loose 0.5° / clickable state heatmap. Detail pages list PPP loans, SAM dollars, other address types, charities.
+
+**Why:** Galleries rank loans. Geography answers who else is on the pin. Same slices as DOT.
+
+**How:** `python3 -u spending_reporting/generate_geo_reports.py --db-path /Volumes/Data/final/irs990.duckdb`. Writes `spending_reporting/reports/geo/` (gitignored). Doc: `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+---
+
+## 2026-11-01: USASpending FY2025 slim COPY + PPP galleries
+
+**What:** Land FY2025 contracts + assistance Award Data Archive ZIPs on Insurrection, slim-COPY into DuckDB (`usaspending_actions` / `usaspending_by_uei`), join later to SAM phy pins by UEI. PPP reports: charged off, Not yet paid (Exemption 4), forgiven-on-unfinished, payroll $/job, zero jobs. Federal $ pins after ingest.
+
+**Why:** SAM has no dollars. Postgres dump stays parked. GOV $ to location even if not a fraud cut. Exemption 4 is unfinished FOIA status, labeled **Not yet paid**. Forgiveness already on those rows is the possible-fraud cut.
+
+**How:** `USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending` + `./overnight_usaspending_run.sh`. Reports: `python3 -u spending_reporting/generate_galleries.py --db-path /Volumes/Data/final/irs990.duckdb`. Docs: `docs/usaspending.md`, `docs/generate_galleries.md`. Tests: `test_usaspending_processor.py`. Do not ingest the Postgres dump.
+
+---
+
+## 2026-10-17: Photon / maps.co / OpenCage on leftover pending_api
+
+**What:** Chunked `geolocate_api` on ~608k `pending_api`. Public Photon first, then maps.co, then OpenCage. Misses → `grok_pending`. Grok off.
+
+**Why:** Cheap parks and strip are done. This is the slow free pass.
+
+**How:** `./overnight_geolocate_api_run.sh`. Unset `PHOTON_*`. Skip per-round Geocoding COUNT. Doc: `docs/overnight_geolocate_api.md`.
+
+## 2026-10-17: tight MATCH + junk strip on leftover pending_api
+
+**What:** Five tight MATCH rules plus street-only strip of trailing N/A, 0.0, and glued city/state/zip.
+
+**Why:** Census then census_strip already retries C/O+suite. Leftover `pending_api` still had inverted PO, RR/HC, C/O-no-digit, unit-only streets, and foreign-state-without-US-ZIP. Strip is for Photon, not a park.
+
+**How:** `geocoding_api_processor.py` preprocess + `_strip_for_census_strip`; `census_tsv_loop.strip_co_and_suite` for future TSV. Re-run `./overnight_preprocess_pending_api_run.sh`. Grok off. Photon next.
+
+## 2026-10-17: pending_api pattern catch-up
+
+**What:** Run preprocess on `pending_api` (Census TSV skipped the live first stage).
+
+**Why:** ~96k of 704k would have been PatternOwners/PO before Census HTTP.
+
+**How:** `./overnight_preprocess_pending_api_run.sh` → `preprocess_grok_pending.py --statuses pending_api --batch-size 400`. Grok off. Photon next.
+
+---
+
+## 2026-10-15: Census TSV geocode loop
+
+**What:** Dump pending `Geocoding` to TSV, call Census at 2,500/HTTP with DuckDB closed, append results, one COPY-back. Free services only.
+
+**Why:** The 500-row overnight was DuckDB-save bound (~12k/hour, weeks for 5.7M). Census itself wants 2,500. Heap stays out of the HTTP path.
+
+**How:** `census_tsv_loop.py`, `overnight_census_tsv_run.sh`. Files in `/Volumes/Data/final/cms_data/census_tsv/`. Resume skips ids already in `results.tsv`. Apply leftover → `pending_api`. Tests: `test_census_tsv_loop.py`. Doc: `docs/census_tsv.md`. Stopped PGID 68557. Does not run Grok. Do not `--step address` until 09A unless asked.
+
+---
+
 ## 2026-10-09: SAM.gov public entity ingest
 
 **What:** `--step sam` loads the SAM Entity Registration Public V2 monthly extract into `sam_entities` and phy/mail streets into `Addresses` (`sam_entity_phy`, `sam_entity_mail`). No EIN/TIN in the public file.
 
 **Why:** Bounded (~800–900k) federal-vendor registry with UEI + street, joinable later to 990/DOT/PPP by name+address and to USASpending by UEI. USASpending itself stays parked (disk). Do not treat UEI/CAGE as an IRS EIN.
 
-**How:** `sam_processor.py`, `models/sam_entity.py`, `overnight_sam_run.sh`. Pipeline: after `ppp`, before `address`. Tests: `test_sam_processor.py`. Doc: `docs/sam.md`. Does not run `--step address`.
+**How:** `sam_processor.py`, `models/sam_entity.py`, `overnight_sam_run.sh`. Pipeline: after `ppp`, before `address`. Tests: `test_sam_processor.py`. Doc: `docs/sam.md`. Does not run `--step address`. Hash: `322b469e`.
+
+---
+
+## 2026-10-05: Blank-identity MCS-150 list + Leaflet map
+
+**What:** `blanks.html` lists USDOTs whose legal name is `NO GIVEN NAME` / `NO NAME GIVEN` / `NONE NONE` or a doubled given name (`HAROLD HAROLD`). Leaflet map of physical pins. Drops `X & X LLC`.
+
+**Why:** Danielle's chart of placeholder MCS-150 names. Harm rankings never show them (no SMS deaths).
+
+**How:** `generate_safety_gallery.py --only blanks`. Nav + Fun wrap. Tests: `BlankIdentityTests`.
+
+---
+
+## 2026-10-04: Deadliest PO Boxes in the Rogues gallery
+
+**What:** `poboxes.html` is the 100 PO Boxes with the most SMS crash deaths. Same death-first sort as Volume. Footprint is `PO:box:zip5` on phy or mail.
+
+**Why:** Volume is MCS-150 `LL:` yards. Phy-as-PO has almost no deaths (3). The deadly mailboxes are mail drops (J.B. Hunt / fleet HQs and 1-truck killers using a box).
+
+**How:** `generate_safety_gallery.py` `footprint=pobox`. Nav + master index + Fun wrap 4th link. Tests: `test_pobox_ranks_mail_po_not_yards`.
 
 ---
 

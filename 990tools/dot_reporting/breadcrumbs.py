@@ -20,6 +20,13 @@ def focus_label(focus: str | None) -> str:
         "grants": "NGO Grants (in)",
         "grants_out": "NGO Grants (out)",
         "usg": "USG NGO Funding",
+        "ppp": "PPP leftover",
+        "ppp_charged_off": "PPP Charged Off",
+        "ppp_not_yet_paid": "PPP Not yet paid",
+        "ppp_forgiven": "PPP Forgiven",
+        "ppp_payroll": "PPP Payroll",
+        "ppp_zero_jobs": "PPP Zero jobs",
+        "federal": "Federal spending",
     }.get(focus or "dot", focus or "Report")
 
 

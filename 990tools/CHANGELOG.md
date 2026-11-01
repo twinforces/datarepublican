@@ -5,12 +5,103 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-01 (USASpending slim + PPP galleries)
+
+### Bad address panel on PPP / federal geo pins
+- **Why:** Overlapping NPPES / contractor / grant / charity / DOT / FEC rows had counts and no jump to the Fun pages that already document that pin.
+- **Change:** Detail pages emit a Bad address panel. Live `../{suite}/{file}` links when the sibling HTML exists (Fun, DOT reports, or geo out). Types persist in the sidecar; `refresh_geo_overlap` patches pages after other suites land. National top-N often has the type without a page — those rows stay as counts.
+- **Doc:** `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+### FY2025 Award Data Archive slim COPY; Postgres dump stays parked
+- **Why:** SAM is a phone book. Federal dollars live in USASpending. Map FY2025 obligations onto existing SAM physical pins. The Postgres dump does not fit; Award Data Archive CSVs do.
+- **Change:** `--step usaspending` after `sam`. ZIPs land on Insurrection (`USASPENDING_DATA_DIR`). Slim columns into `usaspending_actions`, rollup `usaspending_by_uei`. No Addresses. Overnight: `overnight_usaspending_run.sh`.
+- **Doc:** `docs/usaspending.md`. Test: `test_usaspending_processor.py`.
+
+### PPP leftover galleries; Exemption 4 labeled Not yet paid
+- **Why:** Charged-off leftover $ and dollars-per-job are the interesting PPP cuts. Exemption 4 is a FOIA hide of unfinished status. Forgiveness already on an unfinished row is the possible-fraud cut.
+- **Change:** `spending_reporting/generate_galleries.py` writes charged_off / not_yet_paid / forgiven / payroll / zero_jobs, plus federal_pins once `usaspending_by_uei` exists. Display label **Not yet paid**. Forgiven page is every status with `forgiveness_amount > 0` (Paid in Full leftover $0 included), ranked by forgiven %. Every page uses the DOT Leaflet pin widget on the ranked rows.
+- **Doc:** `docs/generate_galleries.md`.
+
+### PPP / federal geography (colocator, zip, loose, by state)
+- **Why:** Loan galleries rank rows. Cluster reports show who else sits on the pin / ZIP / 0.5° cell / state, matching the DOT cluster maps. Leftover $ and FY2025 obligated $ color the states.
+- **Change:** `spending_reporting/generate_geo_reports.py` writes `reports/geo/`. PPP leftover (Paid in Full ~$0 drops out) and federal SAM-HQ $ each get address / colocator / zip / loose national lists and a by-state heatmap per slice. Detail pages list PPP loans, SAM/UEI, other address types, and charities. Suites wrap onto existing Fun with Geography as PPP loans / Federal spending rows. `geo/index.html` lists the dirs; leftover galleries stay on `reports/index.html`.
+- **Doc:** `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+### Federal by-state maps: $ / pop and $ / electoral vote
+- **Why:** Total $ heat is headquarters volume. Per-resident and per-EV maps show the same FY2025 SAM-HQ pile on a fairer scale; DC and small states jump.
+- **Change:** Federal by-state indexes render three Albers maps (total $, $ / Census Vintage 2024 pop, $ / 2024 Electoral College vote) plus table columns. `state_weights.py` holds the two denominators. `--heatmaps-only` rewrites indexes without cluster pages.
+- **Doc:** `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+### PPP / federal geo uses trucking Widen zoom-out
+- **Why:** The Building / Zip / State / Area bar jumped to national slice lists. Trucking zooms out from this pin: address → colocator (all street variants) → ZIP / loose cell → state.
+- **Change:** Geo pages emit DOT breadcrumbs (`All reports › PPP Charged Off · Address`) plus detail **Widen:** links. `spending_reporting/geo_zoom.py` uses `{domain}_{slice}` dirnames. Fun wrap still aliases `master_index.html` to `/fun/`.
+- **Doc:** `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+### TanStack sort on every PPP / federal table
+- **Why:** Cluster indexes could change sort. Pin details, by-state rankings, and leftover loan galleries were frozen to the generator's ORDER BY.
+- **Change:** Detail pages emit `__TS_TABLES__` (types, loans, SAM, charities). By-state indexes and leftover galleries emit `__CLUSTER_TABLE__`. `--national-only` / `--skip-details` on `generate_geo_reports.py`.
+- **Doc:** `docs/generate_geo_reports.md`, `docs/generate_galleries.md`. Test: `test_generate_geo_reports.py`.
+
+### PPP cut Fun rows + TanStack cluster tables
+- **Why:** One leftover>0 ranking cannot surface forgiven leftover $0, payroll $/job, or zero-job approved. The five leftover galleries are loan-level; Fun needs cluster lanes. DOT TanStack lets leftover / % / jobs / status counts share one sortable table.
+- **Change:** Domains `ppp_charged_off`, `ppp_not_yet_paid`, `ppp_forgiven`, `ppp_payroll`, `ppp_zero_jobs` with gallery-matching WHERE/HAVING/ORDER. Cluster indexes emit `__CLUSTER_TABLE__` + DOT `tanstack_table_assets.mako`. `--only ppp` is leftover only. Fun wrap replaces the single PPP loans row with those five cuts (`--copy-focus ppp` expands). `tanstack_assets_html` searches for `<%text>` after `</%doc>` so the doc-comment mention is not copied into HTML.
+- **Doc:** `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+---
+
+## [Unreleased] - 2026-10-17 (pending_api Photon / maps.co / OpenCage)
+
+### Free API tail on leftover `pending_api`
+- **Why:** Census and pattern/strip catch-up are done. Residual ~608k are mostly real streets. Public Photon is slow; chunked 400 avoids the fail-stage hang / PDC-save OOM. Per-round `COUNT(*)` on Geocoding was the Census tax — skip it when `--max-files` is set.
+- **Change:** `./overnight_geolocate_api_run.sh` runs `--start-step geolocate_api` only (no Census, no Grok). Unsets `PHOTON_DOMAIN`. Misses → `grok_pending`. `process_api_pending_records` does not COUNT the 23M heap when `max_files` is set.
+- **Doc:** `docs/overnight_geolocate_api.md`.
+
+## [Unreleased] - 2026-10-17 (pending_api preprocess catch-up)
+
+### Tight MATCH + street junk strip on leftover `pending_api`
+- **Why:** After the pattern catch-up, ~608k `pending_api` rows remain. Most are real streets Census missed. A few structural families were still leaking: inverted/boxless PO, RR/HC at street start (`_street_has_number` is any digit so `Rr 2` never parked), C/O with no digit, unit-only streets, foreign city/country in the state field. Trailing `N/A` / `0.0` / glued city-state-zip should be stripped for Photon, not parked.
+- **Change:** Preprocess MATCH: inverted `123 P.O. Box` and whole-street `Po 1745`; `RR|RFD|HC|HCR` + route number at start (no bare `route`); C/O-no-digit → PERSON after safe patterns (BNY Mellon still wins); entire street `Ste 200` / `Unit 4` → PARTIAL or FA:INTL; foreign place as state only when ZIP is not a US 5-digit. census_strip already retries C/O+suite; extras are trailing `N/A`, token `0.0`, glued `{city} {state} {zip}` on the street when those match parsed fields. Catch-up persists stripped canonical without changing status. Highways with house numbers, PMB-with-street, plaza/mall, `West End Ave` stay in queue.
+- **Doc:** `docs/preprocess_grok_pending.md`, `docs/census_tsv.md`. Tests: `test_preprocess_bogus.py`, `test_suite_strip.py`, `test_census_tsv_loop.py`.
+
+### Pattern pass on `pending_api` after Census TSV
+- **Why:** Live `geolocate_census` is preprocess → census → strip. The TSV loop dumped leftover `pending`/`owners` straight to Census HTTP, so ~96k structural rows (PR `VENDOR`, number-only `PARTIAL`, foreign `FA`, PO) landed in `pending_api` un-parked.
+- **Change:** `./overnight_preprocess_pending_api_run.sh` runs `preprocess_grok_pending.py --statuses pending_api --batch-size 400`. Per-batch `COUNT(*)` removed (same tax as the 500-row Census loop). Owner fan-out skipped. Does not call Photon/maps.co/OpenCage/Grok.
+
+---
+
+## [Unreleased] - 2026-10-15 (Census TSV loop)
+
+### Census geocode via pending/results TSV (DuckDB closed during HTTP)
+- **Why:** Overnight `--max-files 500` was a 16GB-host **save** bound. Each round paid process start + `COUNT(*)` + UPDATE on the 23M/107M heaps for ~5s of HTTP. Remaining ~5.7M pending at ~12k/hour was weeks. Census is happy at 2,500 per call (10k truncated around 60s). Same idea as `xml_addresses.tsv`.
+- **Change:** `census_tsv_loop.py` dump → geocode (HTTP 2500, DB closed, resume via `results.tsv`) → one `UPDATE … FROM read_csv`. Raw Census writes matches only so a crash can still strip; `census_strip` writes every leftover. Apply sets `Match:Census` / `Match:Census_Strip` + `LL:` on Geocoding and empty Address colocators; leftover dump ids become `pending_api`. Overnight: `overnight_census_tsv_run.sh`. Stopped the 500-row wrapper (PGID 68557) first. Does not run Grok. Does not fan out owner colocators.
+- **Doc:** `docs/census_tsv.md`. Test: `test_census_tsv_loop.py`.
+
+---
+
 ## [Unreleased] - 2026-10-09 (SAM.gov entities)
 
 ### SAM Entity Registration Public V2 into DuckDB
 - **Why:** Public extract has UEI + CAGE + legal name + physical/mailing street, not EIN. Load first; colocator / USASpending join later. Do not treat UEI or CAGE as an IRS EIN.
 - **Change:** `--step sam` after `ppp`. Monthly UTF-8 ZIP via sam.gov fileextractservices (no API key). Slim CSV off the pipe DAT (skip BOF/EOF), heap COPY into `sam_entities`, unique `uei` after. Phy/mail streets go through `SamEntity.build_addresses()` / `Address.py` then COPY as `sam_entity_phy` / `sam_entity_mail`. Drops secondary Address indexes for the load, rebuilds after. `--max-files` is a DAT row cap for smoke. Overnight: `overnight_sam_run.sh`. Exclusions not in this step.
 - **Doc:** `docs/sam.md`. Test: `test_sam_processor.py`.
+
+---
+
+## [Unreleased] - 2026-10-05 (blank identity)
+
+### MCS-150 blank-identity roster with a map
+- **Why:** Placeholder legal names (`NO GIVEN NAME RAVINDER`) and doubled given names do not appear on the death-first 100.
+- **Change:** `blanks.html` — full list, Leaflet pins, SMS columns when present. `--only blanks`. Yards with >1 USDOT link to colocator detail (`unsafe-*.html`, every carrier at the pin).
+- **Doc:** `docs/generate_safety_gallery.md`. Test: `BlankIdentityTests`.
+
+---
+
+## [Unreleased] - 2026-10-04 (deadliest PO Boxes)
+
+### Rogues gallery PO Box ranking
+- **Why:** The yard list is `LL:` physical pins. The 100 deadliest mailboxes are a different list (fleet PO drops + 1-truck killers that only list a box).
+- **Change:** `poboxes.html` death-first 100 on well-formed `PO:box:zip5` (phy or mail, unique USDOT per box). Same Apple/PU / Mill×harm columns. Nav on every gallery page.
+- **Doc:** `docs/generate_safety_gallery.md`. Test: `test_pobox_ranks_mail_po_not_yards`.
 
 ---
 

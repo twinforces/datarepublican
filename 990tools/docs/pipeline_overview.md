@@ -69,6 +69,8 @@ irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → 
 | `geolocate_grok` | xAI batch for hard tail |
 | `geolocate_archive` | Export `canonical_address` + colocator + geocoding_status TSV |
 
+Large Census drains use `census_tsv_loop.py` (`docs/census_tsv.md`): dump pending → HTTP 2,500 with DuckDB closed → one COPY-back. Overnight: `./overnight_census_tsv_run.sh`. The 500-row `--max-files` loop is the DuckDB-save bound, not the Census bound.
+
 After archive: **`grant_match`** (colocator + loose_colocator hail-mary) → **`backfill`** → **`photos`** (officer KG; after backfill so EIN graph is stable).
 
 **`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
@@ -116,6 +118,13 @@ nohup python -u irs990processor.py --step ppp --nostats -v > ppp_step.log 2>&1 &
 nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
 # or
 ./overnight_sam_run.sh
+```
+
+**`usaspending` step** (`usaspending_processor.py`): FY Award Data Archive CSVs (transaction grain). Slim COPY into `usaspending_actions`, rollup `usaspending_by_uei`. Join later to SAM phy pins by `recipient_uei`. ZIPs on Insurrection by default. **Does not write Addresses.** Postgres database dump stays parked. Doc: `docs/usaspending.md`. Galleries: `spending_reporting/generate_galleries.py` (PPP charged off / Not yet paid / forgiven / payroll / zero jobs, plus federal $ pins).
+
+```bash
+USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending \
+  ./overnight_usaspending_run.sh
 ```
 
 **Production resume point (June 2026):** `--start-step match` (address dedup complete; `einless` already run — skip unless re-hygiene needed).

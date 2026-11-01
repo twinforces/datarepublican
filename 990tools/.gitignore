@@ -50,6 +50,9 @@ dot_reporting/CHURCH_QUEUE_STATUS.md
 ofac_reporting/reports/
 ofac_reporting/*.log
 
+# PPP / federal $ galleries (regenerate via spending_reporting/generate_galleries.py)
+spending_reporting/reports/
+
 # Process / supervisor pid files
 *.pid
 backfill_colocators.pid

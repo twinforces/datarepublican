@@ -27,7 +27,7 @@ Checks for bad variants. Should say "No significant bad variants detected".
 
 Full step order:
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → sam → address → einless → match → geolocate_* → grant_match → backfill → photos → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → sam → usaspending → address → einless → match → geolocate_* → grant_match → backfill → photos → ratios → percentiles → export
 
 XML writes Charities/Grants/Officers to DuckDB. Address rows append `/Volumes/Data/final/xml_addresses.tsv` (`XML_DEFER_ADDRESSES=1`). Load them at `--step address`, not during XML.
 ```
@@ -46,10 +46,28 @@ nohup python -u irs990processor.py --step ppp --nostats -v > ppp_step.log 2>&1 &
 # smoke: python -u irs990processor.py --step ppp --max-files 1 --nostats -v
 nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
 # smoke: python -u irs990processor.py --step sam --max-files 1000 --nostats -v
+# USASpending ZIPs on Insurrection; Postgres dump stays parked
+USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending \
+  ./overnight_usaspending_run.sh
+# smoke: --step usaspending --max-files 1000
+python3 -u spending_reporting/generate_galleries.py --db-path /Volumes/Data/final/irs990.duckdb
+python3 -u spending_reporting/generate_geo_reports.py --db-path /Volumes/Data/final/irs990.duckdb
 nohup python -u irs990processor.py --step einless --nostats -v > einless_step.log 2>&1 &
 
 # XML catch-up (16GB). TSV+COPY in bulk_insert. XML_ONLY=1 skips irsfetch.
 XML_ONLY=1 ./overnight_ingest_run.sh
+
+# Census pending → TSV → HTTP 2500/call (DuckDB closed) → COPY-back. Grok off.
+./overnight_census_tsv_run.sh
+
+# Catch up preprocess on pending_api (TSV skipped the live first stage). Grok off.
+./overnight_preprocess_pending_api_run.sh
+# or: python3 -u preprocess_grok_pending.py --statuses pending_api --batch-size 400
+
+# Photon → maps.co → OpenCage on leftover pending_api. Grok off (misses → grok_pending).
+./overnight_geolocate_api_run.sh
+# pieces: python3 -u census_tsv_loop.py dump|geocode|apply
+# resume: geocode skips ids already in results.tsv; skip dump if pending.tsv exists.
 
 # Production resume (June 2026): sanctions + dot complete on /Volumes/Data/final/irs990.duckdb
 nohup python -u irs990processor.py --start-step address --nostats -v > address_step.log 2>&1 &
