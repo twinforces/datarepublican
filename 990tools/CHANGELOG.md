@@ -5,7 +5,9 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2026-11-01 (USASpending slim + PPP galleries)
+## [Unreleased] - 2026-11-01 (USASpending slim + PPP galleries) — `f8896005`
+
+Fun wrap of the matrix (GTB `5934eef`, no git remote). PPP cut **By state** Fun cells were empty after this commit: the regen chain used `--national-only` for the cuts, then `--only ppp,federal` for by-state, and token `ppp` is leftover only. Cut by-state generation is in flight (`ppp_cut_bystate_chain.sh`).
 
 ### Bad address panel on PPP / federal geo pins
 - **Why:** Overlapping NPPES / contractor / grant / charity / DOT / FEC rows had counts and no jump to the Fun pages that already document that pin.
@@ -78,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - 2026-10-09 (SAM.gov entities)
+## [Unreleased] - 2026-10-09 (SAM.gov entities) — `322b469e`
 
 ### SAM Entity Registration Public V2 into DuckDB
 - **Why:** Public extract has UEI + CAGE + legal name + physical/mailing street, not EIN. Load first; colocator / USASpending join later. Do not treat UEI or CAGE as an IRS EIN.
@@ -105,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - 2026-10-02 (PPP FOIA)
+## [Unreleased] - 2026-10-02 (PPP FOIA) — `667043d0`
 
 ### SBA Paycheck Protection Program loans into DuckDB
 - **Why:** Public FOIA dump has name + street, not EIN. Load first; colocator / grant-match later. Do not treat borrower name as an IRS EIN.
@@ -114,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - 2026-10-02 (DOT SMS ship)
+## [Unreleased] - 2026-10-02 (DOT SMS ship) — `917e643c`
 
 ### Rogues gallery on the master index; SMS on the DOT stack
 - **Why:** The unsafe-yard gallery is a ranking, not a focus×slice suite, so `parse_suite` skipped `unsafe_colocators`. National/by-state DOT details already know how to attach SMS; the pages needed a regen against `irs990.duckdb`.
