@@ -127,7 +127,8 @@ def cast_select_expr(col: str, duck_type: str) -> str:
         return f"TRY_CAST(NULLIF({ident}, '') AS {duck_type})"
     if "BOOL" in t:
         return f"TRY_CAST(NULLIF({ident}, '') AS BOOLEAN)"
-    return ident
+    # Empty TSV cells become NULL in read_csv. NOT NULL VARCHAR (FEC names) needs ''.
+    return f"COALESCE({ident}, '')"
 
 
 def write_bulk_tsv(columns: List[str], param_rows: List[tuple], directory: Optional[str] = None) -> str:

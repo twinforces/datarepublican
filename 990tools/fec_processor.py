@@ -11,8 +11,10 @@ Pipeline per cycle/file:
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +34,7 @@ from models import (
 
 PROMOTE_BATCH_SIZE = 15_000
 CHECKPOINT_EVERY_BATCHES = 10
+DELETE_BATCH_SIZE = 50_000
 
 
 FEC_BASE_URL = "https://www.fec.gov/files/bulk-downloads/"
@@ -46,6 +49,115 @@ FEC_FILE_TYPES: Tuple[Tuple[str, str, int, str, int], ...] = (
     ("pas2", "pas2", 22, "fec_raw_pas2", 1980),
     ("oppexp", "oppexp", 23, "fec_raw_oppexp", 2004),
 )
+
+
+def default_data_dir(final_dir: Optional[str] = None) -> Path:
+    """FEC zips/extracts. FEC_DATA_DIR wins; else {final_dir}/cms_data/fec."""
+    env = os.environ.get("FEC_DATA_DIR")
+    if env:
+        return Path(env)
+    if final_dir:
+        return Path(final_dir) / "cms_data" / "fec"
+    return Path("/Volumes/Data/final/cms_data/fec")
+
+
+def parse_cycles(raw: str) -> Optional[List[int]]:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    cycles: List[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            cycles.append(int(part))
+    return cycles or None
+
+
+def cycle_zip_names(cycle: int) -> List[str]:
+    yy = str(cycle)[2:]
+    names: List[str] = []
+    for _header_base, zip_prefix, _expected, _raw, min_cycle in FEC_FILE_TYPES:
+        if cycle < min_cycle:
+            continue
+        names.append(f"{zip_prefix}{yy}.zip")
+    return names
+
+
+def zip_url(cycle: int, zip_name: str) -> str:
+    return f"{FEC_BASE_URL}{cycle}/{zip_name}"
+
+
+def extract_marker_path(txt_path: Path) -> Path:
+    return txt_path.with_name(txt_path.name + ".from_zip.json")
+
+
+def extract_is_stale(zip_path: Path, txt_path: Path) -> bool:
+    """True when txt is missing or was not extracted from this zip (size+mtime)."""
+    marker = extract_marker_path(txt_path)
+    if not txt_path.exists() or not marker.exists():
+        return True
+    try:
+        meta = json.loads(marker.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True
+    st = zip_path.stat()
+    return meta.get("zip_mtime") != st.st_mtime or meta.get("zip_size") != st.st_size
+
+
+def write_extract_marker(zip_path: Path, txt_path: Path) -> None:
+    st = zip_path.stat()
+    extract_marker_path(txt_path).write_text(
+        json.dumps({"zip_mtime": st.st_mtime, "zip_size": st.st_size}),
+        encoding="utf-8",
+    )
+
+
+def should_reload_cycle(downloaded: bool, extract_stale: bool) -> bool:
+    """Replace DuckDB cycle rows when the zip is new or we just extracted it."""
+    return downloaded or extract_stale
+
+
+def ingest_marker_path(data_dir: Path, raw_table: str, cycle: int) -> Path:
+    return data_dir / f".fec_ingested_{raw_table}_{cycle}.json"
+
+
+def ingest_is_stale(zip_path: Path, marker: Path) -> bool:
+    if not zip_path.exists() or not marker.exists():
+        return True
+    try:
+        meta = json.loads(marker.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True
+    st = zip_path.stat()
+    return meta.get("zip_mtime") != st.st_mtime or meta.get("zip_size") != st.st_size
+
+
+def write_ingest_marker(zip_path: Path, marker: Path) -> None:
+    st = zip_path.stat()
+    marker.write_text(
+        json.dumps({"zip_mtime": st.st_mtime, "zip_size": st.st_size}),
+        encoding="utf-8",
+    )
+
+
+def download_cycle_zips(data_dir: Path, cycles: List[int]) -> Dict[str, int]:
+    """Download bulk zips only. Does not open DuckDB."""
+    stats = {"downloads": 0, "skipped": 0, "failed": 0}
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for cycle in cycles:
+        for name in cycle_zip_names(cycle):
+            dest = data_dir / name
+            try:
+                if ensure_download(zip_url(cycle, name), dest):
+                    stats["downloads"] += 1
+                    log_info(f"FEC downloaded {name}")
+                else:
+                    stats["skipped"] += 1
+            except RuntimeError as exc:
+                log_warning(f"FEC download skipped ({name}): {exc}")
+                stats["failed"] += 1
+    log_info(f"FEC zip download: {stats}")
+    return stats
 
 
 @dataclass(frozen=True)
@@ -78,12 +190,18 @@ class FECProcessor:
         stats: Dict[str, int] = {"downloads": 0, "ingested_cycles": 0, "rows_promoted": 0}
 
         for cfg in self._file_configs():
-            txt_path = self._ensure_file(cfg, stats)
-            if txt_path is None:
+            got = self._ensure_file(cfg, stats)
+            if got is None:
                 continue
+            txt_path, reload_cycle = got
+            self._reload_cycle = reload_cycle
             header = self._fec_header(cfg.header_base)
             fixed = self._fix_dangling_lines(txt_path, cfg.expected_fields, header)
             promoted = self._promote_cycle(cfg, fixed)
+            write_ingest_marker(
+                self.data_dir / cfg.zip_name,
+                ingest_marker_path(self.data_dir, cfg.raw_table, cfg.cycle),
+            )
             stats["rows_promoted"] += promoted
             stats["ingested_cycles"] += 1
 
@@ -110,12 +228,16 @@ class FECProcessor:
                 )
         return configs
 
-    def _ensure_file(self, cfg: FecFileConfig, stats: Dict[str, int]) -> Optional[Path]:
-        zip_url = f"{FEC_BASE_URL}{cfg.cycle}/{cfg.zip_name}"
+    def _ensure_file(
+        self, cfg: FecFileConfig, stats: Dict[str, int]
+    ) -> Optional[Tuple[Path, bool]]:
+        url = zip_url(cfg.cycle, cfg.zip_name)
         zip_path = self.data_dir / cfg.zip_name
 
+        downloaded = False
         try:
-            if ensure_download(zip_url, zip_path):
+            downloaded = bool(ensure_download(url, zip_path))
+            if downloaded:
                 stats["downloads"] += 1
         except RuntimeError as exc:
             log_warning(f"FEC download skipped ({cfg.zip_name}): {exc}")
@@ -127,15 +249,23 @@ class FECProcessor:
             return None
 
         txt_path = self.data_dir / txt_name
-        if txt_path.exists():
-            return txt_path
-
-        log_info(f"Extracting {txt_name} from {cfg.zip_name}")
-        subprocess.run(
-            ["unzip", "-o", "-qq", str(zip_path), txt_name, "-d", str(self.data_dir)],
-            check=True,
+        stale_extract = extract_is_stale(zip_path, txt_path)
+        stale_ingest = ingest_is_stale(
+            zip_path, ingest_marker_path(self.data_dir, cfg.raw_table, cfg.cycle)
         )
-        return txt_path if txt_path.exists() else None
+        need_extract = should_reload_cycle(downloaded, stale_extract)
+        reload_cycle = need_extract or stale_ingest
+        if need_extract:
+            log_info(f"Extracting {txt_name} from {cfg.zip_name}")
+            subprocess.run(
+                ["unzip", "-o", "-qq", str(zip_path), txt_name, "-d", str(self.data_dir)],
+                check=True,
+            )
+            if txt_path.exists():
+                write_extract_marker(zip_path, txt_path)
+        if not txt_path.exists():
+            return None
+        return txt_path, reload_cycle
 
     def _main_txt_in_zip(self, zip_path: Path) -> Optional[str]:
         if not zip_path.exists():
@@ -226,9 +356,10 @@ class FECProcessor:
 
     @staticmethod
     def _prepare_fec_conn(conn) -> None:
+        mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "12GB")
         conn.execute("SET preserve_insertion_order=false")
-        conn.execute("SET threads=2")
-        conn.execute("SET memory_limit='8GB'")
+        conn.execute("SET threads=1")
+        conn.execute(f"SET memory_limit='{mem}'")
 
     @staticmethod
     def _iter_fec_rows(fixed_path: Path):
@@ -263,7 +394,8 @@ class FECProcessor:
         with self.db_ops.acquire_write_conn() as conn:
             self._prepare_fec_conn(conn)
             existing = self._existing_cycle_rows(conn, owner_table, cycle)
-            if existing:
+            reload_cycle = getattr(self, "_reload_cycle", False)
+            if existing and not reload_cycle:
                 skip_rows = existing
                 log_info(
                     f"  {log_label} cycle {cycle}: resuming — skip {skip_rows:,} file rows, keep existing DB rows"
@@ -273,6 +405,10 @@ class FECProcessor:
                     flush=True,
                 )
             else:
+                if existing and reload_cycle:
+                    log_info(
+                        f"  {log_label} cycle {cycle}: zip updated — replacing {existing:,} rows"
+                    )
                 self._delete_cycle(conn, address_type, owner_table, cycle)
 
             skipped = 0
@@ -351,15 +487,63 @@ class FECProcessor:
         return f"{fallback_year}-01-01"
 
     def _delete_cycle(self, conn, address_type: str, owner_table: str, cycle: int) -> None:
-        conn.execute(
-            f"""
-            DELETE FROM Addresses
-            WHERE address_type = ?
-              AND owner_id IN (SELECT id FROM {owner_table} WHERE report_year = ?)
-            """,
-            (address_type, cycle),
+        """Delete one cycle in LIMIT batches. A single 29M DELETE OOMs at 8GB."""
+        addr_left = self._batched_delete(
+            conn,
+            table="Addresses",
+            pk="address_id",
+            id_select=(
+                f"SELECT a.address_id FROM Addresses a "
+                f"INNER JOIN {owner_table} o ON a.owner_id = o.id "
+                f"WHERE a.address_type = ? AND o.report_year = ?"
+            ),
+            params=(address_type, cycle),
+            label=f"Addresses {address_type} {cycle}",
         )
-        conn.execute(f"DELETE FROM {owner_table} WHERE report_year = ?", (cycle,))
+        owner_left = self._batched_delete(
+            conn,
+            table=owner_table,
+            pk="id",
+            id_select=f"SELECT id FROM {owner_table} WHERE report_year = ?",
+            params=(cycle,),
+            label=f"{owner_table} {cycle}",
+        )
+        log_info(
+            f"  deleted cycle {cycle}: {addr_left:,} addresses, {owner_left:,} {owner_table}"
+        )
+
+    def _batched_delete(
+        self,
+        conn,
+        *,
+        table: str,
+        pk: str,
+        id_select: str,
+        params: tuple,
+        label: str,
+        batch: int = DELETE_BATCH_SIZE,
+    ) -> int:
+        deleted = 0
+        while True:
+            conn.execute("DROP TABLE IF EXISTS _fec_del")
+            conn.execute(
+                f"CREATE TEMP TABLE _fec_del AS {id_select} LIMIT {int(batch)}",
+                params,
+            )
+            n = int(conn.execute("SELECT COUNT(*) FROM _fec_del").fetchone()[0] or 0)
+            if n == 0:
+                conn.execute("DROP TABLE IF EXISTS _fec_del")
+                return deleted
+            conn.execute(
+                f"DELETE FROM {table} WHERE {pk} IN (SELECT {pk} FROM _fec_del)"
+            )
+            conn.execute("DROP TABLE IF EXISTS _fec_del")
+            deleted += n
+            conn.execute("CHECKPOINT")
+            if deleted == n or deleted % (batch * 10) == 0:
+                log_info(f"  deleting {label}: {deleted:,} so far")
+                print(f"  deleting {label}: {deleted:,} so far", flush=True)
+        return deleted
 
     def _flush_promote_batch(self, conn, owners, addresses, checkpoint: bool = False) -> None:
         if owners:
@@ -526,3 +710,25 @@ class FECProcessor:
             "fec_operating_expenditures",
             build_row,
         )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="FEC bulk zip download / ingest helpers")
+    parser.add_argument(
+        "--download-only",
+        action="store_true",
+        help="Download zips without opening DuckDB",
+    )
+    args = parser.parse_args()
+    if not args.download_only:
+        parser.error("pass --download-only (ingest is irs990processor --step fec)")
+    cycles = parse_cycles(os.environ.get("FEC_CYCLES", "")) or list(range(2000, 2028, 2))
+    data_dir = default_data_dir()
+    stats = download_cycle_zips(data_dir, cycles)
+    if stats["failed"]:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
