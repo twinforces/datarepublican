@@ -73,13 +73,24 @@ Large Census drains use `census_tsv_loop.py` (`docs/census_tsv.md`): dump pendin
 
 After archive: **`grant_match`** (colocator + loose_colocator hail-mary) → **`backfill`** → **`photos`** (officer KG; after backfill so EIN graph is stable).
 
-**`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC bulk files per cycle (`FEC_CYCLES` env, default even years 2000–2026), fixes pipe-delimited rows, streams into `fec_*` tables + `Addresses` via model `build_address()` factories. Data under `{final_dir}/cms_data/fec/`.
+**`fec` step** (`fec_processor.py`): after XML, before medicare. Downloads FEC **bulk** zips from fec.gov (not the OpenFEC REST API; api.data.gov key is unused here). `FEC_CYCLES` env, default even years 2000–2026. A newer zip replaces that cycle in DuckDB instead of resume-append. Overnight zips/extracts land on Insurrection (`FEC_DATA_DIR`); DuckDB stays on Data. Doc: `docs/fec.md`.
 
-Run standalone: `FEC_CYCLES=2024 python -u irs990processor.py --step fec --nostats -v`
+```bash
+FEC_CYCLES=2024,2026 ./overnight_fec_download.sh   # no DuckDB
+FEC_CYCLES=2024,2026 ./overnight_fec_run.sh
+# smoke: FEC_CYCLES=2026 python -u irs990processor.py --step fec --nostats -v
+```
 
 **`medicare` step** (`medicare_processor.py`): CMS NPPES + Medicaid provider spending (Parquet from opendata.hhs.gov). Promotes to `medicare_providers`, `medicare_provider_spending`, code lookups. Data under `{final_dir}/cms_data/medicare/`.
 
 Run standalone: `python -u irs990processor.py --step medicare --nostats -v`
+
+**CMS Physician PUF + LEIE** (`cms_puf_processor.py`): 2024 By Provider / By Provider and Service / By Geography plus OIG LEIE. Sidecar, not `--step all`. `Bene_Avg_Age` is NPI-year mix. CSVs on Insurrection (`CMS_PUF_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_puf.md`.
+
+```bash
+python3 launch_overnight_cms_puf_download.py
+python3 launch_overnight_cms_puf.py
+```
 
 **`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.
 
@@ -120,7 +131,7 @@ nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
 ./overnight_sam_run.sh
 ```
 
-**`usaspending` step** (`usaspending_processor.py`): FY Award Data Archive CSVs (transaction grain). Slim COPY into `usaspending_actions`, rollup `usaspending_by_uei`. Join later to SAM phy pins by `recipient_uei`. ZIPs on Insurrection by default. **Does not write Addresses.** Postgres database dump stays parked. Doc: `docs/usaspending.md`. Galleries: `spending_reporting/generate_galleries.py` (PPP charged off / Not yet paid / forgiven / payroll / zero jobs, plus federal $ pins).
+**`usaspending` step** (`usaspending_processor.py`): FY Award Data Archive CSVs (transaction grain). `--start-year`/`--end-year` (default 2022–2030, UEI; 990 2017 is raised). Monthly Full files by the 15th. Slim COPY into `usaspending_actions`, rollup `usaspending_by_uei` (sum of loaded FYs). Join later to SAM phy pins by `recipient_uei`. ZIPs on Insurrection by default. **Does not write Addresses.** Postgres database dump stays parked. Doc: `docs/usaspending.md`. Galleries: `spending_reporting/generate_galleries.py` (PPP charged off / Not yet paid / forgiven / payroll / zero jobs, plus federal $ pins).
 
 ```bash
 USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending \

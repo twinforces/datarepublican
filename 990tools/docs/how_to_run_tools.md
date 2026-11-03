@@ -38,6 +38,10 @@ Common invocations:
 python -u irs990processor.py --db-path irs990.duckdb
 
 # Single step (resilient to CLI crashes — use nohup)
+# FEC bulk 2024+2026 (fec.gov zips, not OpenFEC API). Zips on Insurrection.
+FEC_CYCLES=2024,2026 ./overnight_fec_download.sh   # no DuckDB
+FEC_CYCLES=2024,2026 ./overnight_fec_run.sh
+# python3 launch_overnight_fec.py   # macOS double-fork + setsid
 nohup python -u irs990processor.py --step sanctions --nostats -v > sanctions_step.log 2>&1 &
 nohup python -u irs990processor.py --step dot --nostats -v > dot_step.log 2>&1 &
 nohup python -u irs990processor.py --step dot_safety --nostats -v > dot_safety_step.log 2>&1 &
@@ -47,9 +51,17 @@ nohup python -u irs990processor.py --step ppp --nostats -v > ppp_step.log 2>&1 &
 nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
 # smoke: python -u irs990processor.py --step sam --max-files 1000 --nostats -v
 # USASpending ZIPs on Insurrection; Postgres dump stays parked
+# Default FY2022–2030 (UEI). One year: USASPENDING_START_YEAR=2025 USASPENDING_END_YEAR=2025
 USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending \
   ./overnight_usaspending_run.sh
-# smoke: --step usaspending --max-files 1000
+# smoke: --step usaspending --start-year 2025 --end-year 2025 --max-files 1000
+# CMS 2024 Physician PUF + LEIE (not on --step all). CSVs on Insurrection.
+python3 launch_overnight_cms_puf_download.py
+python3 launch_overnight_cms_puf.py
+# Hub parquet for new tables (HF_TOKEN from ../.envrc). Out on Insurrection.
+python3 launch_overnight_hf.py
+# After writers release Data: CHECKPOINT + ditto DuckDB to Insurrection.
+python3 launch_overnight_duckdb_copy.py
 python3 -u spending_reporting/generate_galleries.py --db-path /Volumes/Data/final/irs990.duckdb
 python3 -u spending_reporting/generate_geo_reports.py --db-path /Volumes/Data/final/irs990.duckdb
 nohup python -u irs990processor.py --step einless --nostats -v > einless_step.log 2>&1 &

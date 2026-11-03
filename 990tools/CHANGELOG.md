@@ -5,14 +5,44 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-03 (FEC refresh + USASpending FY2022–2027 + CMS PUF) — `edd86a52` `41716877` `6bef052c` `363b6ef3`
+
+### FEC bulk 2024+2026 refresh
+- **Why:** Local 2024 zips were June copies; S3 updated 2026-11-01. Cycle 2026 was missing. Resume-append on an updated zip would duplicate `report_year` rows.
+- **Change:** A newer zip deletes that cycle then reloads. `FEC_DATA_DIR` (overnight: Insurrection). `./overnight_fec_download.sh` has no DuckDB. Ingest: `FEC_CYCLES=2024,2026 ./overnight_fec_run.sh`. Reload also when the ingest marker is missing. Cycle DELETE is 50k-row batches. Overnight memory default 12GB. COPY `COALESCE` for VARCHAR so blank FEC `contributor_name` is `''` not NULL.
+- **Worked:** wrapper **98751** 2026-11-03 03:20, 10 cycle-files, 103,002,959 rows promoted.
+- **Failed:** **66403** resume-skipped 2024 because zip current and missing txt did not set reload (ingest marker + extract-on-missing-txt). **67076** 29.1M one-shot DELETE OOM at 8GB. **77803** batched DELETE assumed `Addresses.id`; PK is `address_id`. **78156** empty TSV NAME → NULL vs `contributor_name NOT NULL`.
+- **Doc:** `docs/fec.md`. Test: `test_fec_processor.py`.
+
+### USASpending FY2022–FY2027 Award Data Archive
+- **Why:** SAM pins join on UEI (FY2022+). FY2025-only Fun $ understates the UEI-era pile.
+- **Change:** `--start-year`/`--end-year` floor FY2022. Missing FYs skip after a failed **GET**, not HEAD. Never unlink dest until GET to `.part` succeeds. Implausible remote length (local ≥10MB and remote <1MB) keeps local. Retry curl 52/28/56 even if dest is empty. curl 22 + dest <64KB unlinks and skips (FY2028 unpublished).
+- **Worked:** wrapper **91044** 2026-11-03 05:46, 57 files, 63.6M actions, 340,396 UEIs, stamp 20261006. FY2025 already in the marker skipped. Host empty replies ~55 min then waiter.
+- **Failed:** **27393** HEAD-none treated as missing FY2024 (no COPY). **70797** curl 22 FY2028 uncaught. **74835** flaky HEAD tiny length unlinked 2GB FY2022 contracts then curl 52. **75477/75658** curl 52 with empty dest did not retry until size>0 was dropped.
+- **Doc:** `docs/usaspending.md`. Test: `test_usaspending_processor.py`, `test_download_utils.py`.
+
+### CMS 2024 Physician PUF + OIG LEIE
+- **Why:** NPPES is who/where. Mickiewicz-style hours / HCPCS / age outliers need By Provider (`Bene_Avg_Age`) + By Provider and Service (HCPCS volume) + LEIE.
+- **Change:** `cms_puf_processor.py` `CREATE OR REPLACE` from CSV (CMS header names). Direct `duckdb.connect` — `DatabaseOperations` zip-cache bootstrap returned a None pool. Not on `--step all`. Download: `launch_overnight_cms_puf_download.py`. Ingest: `launch_overnight_cms_puf.py`.
+- **Worked:** download **49753**; ingest **11290** 2026-11-03 05:48. `cms_puf_provider` 1,296,739; `cms_puf_service` 9,781,673; `cms_puf_geo` 268,350; `cms_leie` 84,093. `Bene_Avg_Age` mean 73, min 7, max 94. Cells ≤10 benes are redacted in the CMS file.
+- **Failed:** **11101** `DatabaseOperations` pool None.
+- **Doc:** `docs/cms_puf.md`.
+
+---
+
 ## [Unreleased] - 2026-11-01 (USASpending slim + PPP galleries) — `f8896005`
 
-Fun wrap of the matrix (GTB `5934eef`, no git remote). PPP cut **By state** Fun cells were empty after this commit: the regen chain used `--national-only` for the cuts, then `--only ppp,federal` for by-state, and token `ppp` is leftover only. Cut by-state generation is in flight (`ppp_cut_bystate_chain.sh`).
+Fun wrap of the matrix (GTB `5934eef`, no git remote). PPP cut **By state** Fun cells were empty after this commit: the regen chain used `--national-only` for the cuts, then `--only ppp,federal` for by-state, and token `ppp` is leftover only. Cut by-state generation is in flight (`ppp_cut_bystate_chain.sh`); last DreamHost rsync died `Connection reset by peer`.
 
 ### Bad address panel on PPP / federal geo pins
 - **Why:** Overlapping NPPES / contractor / grant / charity / DOT / FEC rows had counts and no jump to the Fun pages that already document that pin.
 - **Change:** Detail pages emit a Bad address panel. Live `../{suite}/{file}` links when the sibling HTML exists (Fun, DOT reports, or geo out). Types persist in the sidecar; `refresh_geo_overlap` patches pages after other suites land. National top-N often has the type without a page — those rows stay as counts.
 - **Doc:** `docs/generate_geo_reports.md`. Test: `test_generate_geo_reports.py`.
+
+### USASpending ingest takes `--start-year` / `--end-year`
+- **Why:** FY2025 was hardcoded. SAM pins join on UEI, which starts FY2022.
+- **Change:** `--step usaspending` uses `--start-year`/`--end-year` with floor **FY2022** (default 2022–2030). A 990 `--start-year 2017` is raised. Overnight does not inherit `START_YEAR`. Missing FYs skip. Per-FY COPY so adding years does not wipe 2025. `USASPENDING_STAMP` selects the monthly Full stamp. `usaspending_by_uei` sums loaded FYs.
+- **Doc:** `docs/usaspending.md`. Test: `test_usaspending_processor.py`.
 
 ### FY2025 Award Data Archive slim COPY; Postgres dump stays parked
 - **Why:** SAM is a phone book. Federal dollars live in USASpending. Map FY2025 obligations onto existing SAM physical pins. The Postgres dump does not fit; Award Data Archive CSVs do.
