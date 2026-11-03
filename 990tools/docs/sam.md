@@ -22,4 +22,4 @@ The DAT is pipe-delimited with `BOF PUBLIC` / `EOF PUBLIC` header/trailer. Repea
 
 Addresses: dump `sam_entities` street columns to `sam_entity_addr_src.csv`, run `SamEntity.build_addresses()` / `Address.py` into `sam_entity_addresses.csv` (phy + mail), then `COPY` into `Addresses`. Index rebuild is **one CREATE INDEX per write session**, `threads=1`. OOM on an index skips it (16GB host). Mailing layout puts **state last** (column 46); physical puts state before ZIP.
 
-**Not in this step:** EIN backfill, USASpending awards, SAM exclusions, grant-match, browse UI, `--step address`. Hold address-dedup until XML 09A and the other address-producing sources are in.
+**Not in this step:** EIN backfill, SAM exclusions, grant-match, browse UI, `--step address`. Award dollars are `--step usaspending` (`docs/usaspending.md`). Do not treat UEI or CAGE as an IRS EIN.

@@ -62,7 +62,7 @@ from backfill_charities_processor import BackfillCharitiesProcessor
 from geolocate_prev_processor import GeolocatePrevProcessor
 from geolocate_archive_processor import GeolocateArchiveProcessor
 from einless_processor import EinlessProcessor
-from fec_processor import FECProcessor
+from fec_processor import FECProcessor, default_data_dir as fec_data_dir, parse_cycles as parse_fec_cycles
 from medicare_processor import MedicareProcessor
 from sanctions_processor import SanctionsProcessor
 from fmcsa_safety_processor import FmcsaSafetyProcessor
@@ -77,15 +77,7 @@ from queue_status_display import QueueStatusDisplay
 
 def _parse_cycle_list(raw: str) -> Optional[List[int]]:
     """Parse FEC_CYCLES env (e.g. '2024' or '2020,2022,2024'); empty → all default cycles."""
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-    cycles: List[int] = []
-    for part in raw.split(","):
-        part = part.strip()
-        if part.isdigit():
-            cycles.append(int(part))
-    return cycles or None
+    return parse_fec_cycles(raw)
 
 
 # Parsing functions are now handled by base_parser factory method
@@ -211,7 +203,7 @@ class IRS990Processor(BaseProcessor):
         fec_cycles = _parse_cycle_list(os.environ.get("FEC_CYCLES", ""))
         self.fec_processor = FECProcessor(
             self.db_ops,
-            data_dir=cms_data_dir / "fec",
+            data_dir=fec_data_dir(self.final_dir),
             cycles=fec_cycles,
         )
         self.medicare_processor = MedicareProcessor(self.db_ops, data_dir=cms_data_dir / "medicare")
@@ -580,13 +572,17 @@ class IRS990Processor(BaseProcessor):
         self.processed_steps += 1
         return stats.get("entities", 0)
 
-    def run_usaspending(self):
+    def run_usaspending(self, start_year: int = 2022, end_year: int = 2030):
         """FY Award Data Archive slim COPY. No Addresses; no Postgres dump."""
         if self.exit_processing:
             log_info("Shutdown requested before USASpending")
             return 0
-        log_info("Running USASpending Award Data Archive slim ingest")
-        stats = self.usaspending_processor.run()
+        log_info(
+            f"Running USASpending Award Data Archive slim ingest FY{start_year}–FY{end_year}"
+        )
+        stats = self.usaspending_processor.run(
+            start_year=start_year, end_year=end_year
+        )
         self.processed_steps += 1
         return stats.get("actions", 0)
 
@@ -1039,7 +1035,7 @@ def main():
         "dot_safety": lambda: processor.run_dot_safety(),
         "ppp": lambda: processor.run_ppp(),
         "sam": lambda: processor.run_sam(),
-        "usaspending": lambda: processor.run_usaspending(),
+        "usaspending": lambda: processor.run_usaspending(args.start_year, args.end_year),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),

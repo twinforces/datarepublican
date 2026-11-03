@@ -3,9 +3,10 @@
 usaspending_processor.py — FY award-transaction CSVs, slim COPY, join later by UEI.
 
 Source: Award Data Archive (files.usaspending.gov/award_data_archive/).
-One contracts ZIP + one assistance ZIP per fiscal year. Does **not** download
-the Postgres database dump. Does **not** write Addresses — SAM pins already
-exist; reports join recipient_uei → sam_entities.uei.
+One contracts ZIP + one assistance ZIP per fiscal year. `--start-year` /
+`--end-year` (default FY2022–2030, UEI era). Full files republish monthly.
+Does **not** download the Postgres database dump. Does **not** write
+Addresses — SAM pins already exist; reports join recipient_uei → sam_entities.uei.
 
 CSVs live on Insurrection by default (USASPENDING_DATA_DIR). DuckDB is the
 Data volume primary.
@@ -17,6 +18,7 @@ import csv
 import json
 import os
 import re
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -26,16 +28,18 @@ from download_utils import ensure_download
 from logging_utils import log_info, log_warning
 
 ARCHIVE_BASE = "https://files.usaspending.gov/award_data_archive"
-# Latest full-year pair as of 2026-10-14 archive stamp.
-DEFAULT_FILES = (
-    ("contract", 2025, "FY2025_All_Contracts_Full_20261006.zip"),
-    ("assistance", 2025, "FY2025_All_Assistance_Full_20261006.zip"),
-)
+# Monthly Full files share one stamp (YYYYMMDD). Default is the Oct 2026 drop.
+DEFAULT_STAMP = "20261006"
+# Award Data Archive Full files start FY2008. We ingest FY2022+ (UEI; DUNS before that).
+ARCHIVE_FY_MIN = 2008
+USASPENDING_FY_MIN = 2022
+FAMILIES = (("contract", "Contracts"), ("assistance", "Assistance"))
 INGEST_VERSION = 1
 MARKER_NAME = ".usaspending_ingest.json"
 ZIP_NAME_RE = re.compile(
-    r"FY(\d{4})_All_(Contracts|Assistance)_Full_\d{8}\.zip$", re.I
+    r"FY(\d{4})_All_(Contracts|Assistance)_Full_(\d{8})\.zip$", re.I
 )
+STAMP_RE = re.compile(r"Full_(\d{8})\.zip$", re.I)
 
 ACTIONS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS usaspending_actions (
@@ -218,6 +222,54 @@ def parse_zip_name(name: str) -> Optional[Tuple[str, int]]:
     return family, fy
 
 
+def zip_name(fy: int, kind: str, stamp: str) -> str:
+    return f"FY{int(fy)}_All_{kind}_Full_{stamp}.zip"
+
+
+def clamp_years(start_year: int, end_year: int) -> Tuple[int, int]:
+    """Raise start to FY2022. Archive files exist from FY2008; we do not load them."""
+    lo = max(int(start_year), USASPENDING_FY_MIN, ARCHIVE_FY_MIN)
+    hi = int(end_year)
+    return lo, hi
+
+
+def year_specs(start_year: int, end_year: int, stamp: str) -> List[Tuple[str, int, str]]:
+    """(family, fy, filename) for each Full archive in [start_year, end_year]."""
+    lo = max(int(start_year), ARCHIVE_FY_MIN)
+    hi = int(end_year)
+    if hi < lo:
+        return []
+    out: List[Tuple[str, int, str]] = []
+    for fy in range(lo, hi + 1):
+        for family, kind in FAMILIES:
+            out.append((family, fy, zip_name(fy, kind, stamp)))
+    return out
+
+
+def stamp_from_disk(data_dir: Path) -> Optional[str]:
+    stamps = []
+    if not data_dir.is_dir():
+        return None
+    for p in data_dir.glob("FY*_All_*_Full_*.zip"):
+        m = STAMP_RE.search(p.name)
+        if m:
+            stamps.append(m.group(1))
+    return max(stamps) if stamps else None
+
+
+def resolve_stamp(data_dir: Optional[Path] = None, stamp: Optional[str] = None) -> str:
+    if stamp:
+        return stamp.strip()
+    env = os.environ.get("USASPENDING_STAMP", "").strip()
+    if env:
+        return env
+    if data_dir is not None:
+        found = stamp_from_disk(data_dir)
+        if found:
+            return found
+    return DEFAULT_STAMP
+
+
 class UsaSpendingProcessor:
     """Download FY archive ZIPs, unzip, slim COPY, roll up by UEI."""
 
@@ -226,51 +278,105 @@ class UsaSpendingProcessor:
         db_ops: DatabaseOperations,
         data_dir: Optional[Path] = None,
         max_files: Optional[int] = None,
+        start_year: int = 2022,
+        end_year: int = 2030,
+        stamp: Optional[str] = None,
     ):
         self.db_ops = db_ops
         self.data_dir = Path(data_dir) if data_dir else default_data_dir()
         self.max_files = max_files  # row cap per CSV (smoke)
+        self.start_year = int(start_year)
+        self.end_year = int(end_year)
+        self.stamp = stamp
 
-    def run(self) -> Dict[str, int]:
+    def run(
+        self,
+        start_year: Optional[int] = None,
+        end_year: Optional[int] = None,
+        stamp: Optional[str] = None,
+    ) -> Dict[str, int]:
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        stats: Dict[str, int] = {"files": 0, "actions": 0, "ueis": 0}
-        specs = list(DEFAULT_FILES)
-        paths: List[Path] = []
+        stats: Dict[str, int] = {"files": 0, "actions": 0, "ueis": 0, "years": 0}
+        raw0 = self.start_year if start_year is None else int(start_year)
+        raw1 = self.end_year if end_year is None else int(end_year)
+        fy0, fy1 = clamp_years(raw0, raw1)
+        if fy0 != raw0:
+            log_info(f"USASpending start FY{raw0} raised to FY{fy0} (UEI floor)")
+        use_stamp = resolve_stamp(self.data_dir, stamp or self.stamp)
+        specs = year_specs(fy0, fy1, use_stamp)
+        log_info(
+            f"USASpending FY{fy0}–FY{fy1} stamp={use_stamp} ({len(specs)} archive names)"
+        )
+
+        present: List[Tuple[str, int, str, Path]] = []
         for family, fy, name in specs:
             dest = self.data_dir / name
             url = f"{ARCHIVE_BASE}/{name}"
             log_info(f"USASpending {family} FY{fy}: {url}")
-            ensure_download(url, dest, resume=True, timeout=0)
+            try:
+                ensure_download(url, dest, resume=True, timeout=0)
+            except (RuntimeError, subprocess.CalledProcessError) as exc:
+                msg = str(exc)
+                if dest.exists() and dest.stat().st_size > 1_000_000:
+                    log_warning(f"USASpending {name} download error; using local file")
+                    present.append((family, fy, name, dest))
+                    continue
+                if "curl 22" in msg or "HTTP error" in msg:
+                    log_warning(f"USASpending skip missing archive {name}: {exc}")
+                    continue
+                raise
             if not dest.exists() or dest.stat().st_size == 0:
-                raise RuntimeError(f"missing archive {dest}")
-            paths.append(dest)
+                log_warning(f"USASpending skip missing archive {name}")
+                continue
+            present.append((family, fy, name, dest))
+
+        if not present:
+            raise RuntimeError(
+                f"no USASpending Full archives for FY{fy0}–FY{fy1} stamp={use_stamp}"
+            )
 
         marker = self.data_dir / MARKER_NAME
-        if self._ingest_current(paths, marker):
-            return self._existing_counts(stats)
-
         self._ensure_table()
-        for family, fy, name in specs:
-            zip_path = self.data_dir / name
-            for csv_path in self._extract_csvs(zip_path):
-                n = self._copy_csv(csv_path, family, fy)
-                stats["files"] += 1
-                stats["actions"] += n
-                log_info(
-                    f"USASpending copied {n:,} {family} FY{fy} rows from {csv_path.name}"
-                )
+        copied_any = False
+        years_done = set()
+        for fy in sorted({fy for _, fy, _, _ in present}):
+            year_rows = [(fam, name, path) for fam, y, name, path in present if y == fy]
+            year_paths = [path for _, _, path in year_rows]
+            if self._year_current(fy, year_paths, marker):
+                log_info(f"USASpending FY{fy} unchanged — skip COPY")
+                years_done.add(fy)
+                continue
+            for family, name, zip_path in year_rows:
+                self._replace_family(fy, family)
+                for csv_path in self._extract_csvs(zip_path):
+                    n = self._copy_csv(csv_path, family, fy)
+                    stats["files"] += 1
+                    stats["actions"] += n
+                    copied_any = True
+                    log_info(
+                        f"USASpending copied {n:,} {family} FY{fy} rows from {csv_path.name}"
+                    )
+            years_done.add(fy)
+            self._merge_marker(marker, year_paths)
 
-        self._rebuild_by_uei()
-        self._index()
+        if copied_any:
+            self._rebuild_by_uei()
+            self._index()
+        stats["years"] = len(years_done)
         stats.update(self._existing_counts(stats))
-        self._save_marker(marker, paths)
         log_info(f"=== USASpending complete: {stats} ===")
         return stats
 
     def _ensure_table(self) -> None:
         with self.db_ops.acquire_write_conn() as conn:
             conn.execute(ACTIONS_TABLE_SQL)
-            conn.execute("DELETE FROM usaspending_actions")
+
+    def _replace_family(self, fy: int, family: str) -> None:
+        with self.db_ops.acquire_write_conn() as conn:
+            conn.execute(
+                "DELETE FROM usaspending_actions WHERE fiscal_year = ? AND award_family = ?",
+                [int(fy), family],
+            )
 
     def _extract_csvs(self, zip_path: Path) -> List[Path]:
         if not zipfile.is_zipfile(zip_path):
@@ -333,29 +439,49 @@ class UsaSpendingProcessor:
                 "ON usaspending_by_uei(uei)"
             )
 
-    def _ingest_current(self, paths: List[Path], marker: Path) -> bool:
+    def _marker_files(self, marker: Path) -> Dict[str, int]:
         if not marker.exists():
-            return False
+            return {}
         try:
             meta = json.loads(marker.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return False
+            return {}
         if meta.get("ingest_version") != INGEST_VERSION:
-            return False
-        want = sorted((str(p.resolve()), p.stat().st_size) for p in paths)
-        got = [(x.get("path"), x.get("size")) for x in meta.get("files") or []]
-        if want != sorted((str(a), b) for a, b in got):
-            return False
+            return {}
+        out: Dict[str, int] = {}
+        for item in meta.get("files") or []:
+            path = item.get("path")
+            size = item.get("size")
+            if path and isinstance(size, int):
+                out[path] = size
+        return out
+
+    def _year_current(self, fy: int, paths: List[Path], marker: Path) -> bool:
+        marked = self._marker_files(marker)
+        for p in paths:
+            if marked.get(str(p.resolve())) != p.stat().st_size:
+                return False
         try:
             count = self.db_ops.execute_query(
-                "SELECT COUNT(*) FROM usaspending_actions"
+                "SELECT COUNT(*) FROM usaspending_actions WHERE fiscal_year = ?",
+                (int(fy),),
             ).fetchone()[0]
         except Exception:
             return False
-        if int(count) <= 0:
-            return False
-        log_info(f"Skipping USASpending ingest — source unchanged ({int(count):,} actions)")
-        return True
+        return int(count) > 0
+
+    def _merge_marker(self, marker: Path, paths: List[Path]) -> None:
+        files = self._marker_files(marker)
+        for p in paths:
+            files[str(p.resolve())] = p.stat().st_size
+        payload = {
+            "ingest_version": INGEST_VERSION,
+            "files": [
+                {"path": path, "size": size, "name": Path(path).name}
+                for path, size in sorted(files.items())
+            ],
+        }
+        marker.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _existing_counts(self, stats: Dict[str, int]) -> Dict[str, int]:
         try:
@@ -376,12 +502,4 @@ class UsaSpendingProcessor:
             stats["ueis"] = 0
         return stats
 
-    def _save_marker(self, marker: Path, paths: List[Path]) -> None:
-        payload = {
-            "ingest_version": INGEST_VERSION,
-            "files": [
-                {"path": str(p.resolve()), "size": p.stat().st_size, "name": p.name}
-                for p in paths
-            ],
-        }
-        marker.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+

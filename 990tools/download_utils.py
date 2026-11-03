@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -34,43 +35,74 @@ def _parse_http_date(value: str) -> Optional[datetime]:
         return None
 
 
-def curl_remote_meta(url: str, timeout: int = 60) -> Optional[RemoteMeta]:
-    """HEAD request via curl (-I). Returns None if unreachable."""
-    try:
-        proc = subprocess.run(
-            ["curl", "-sI", "-L", "--max-time", str(timeout), url],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        raise RuntimeError("curl not found on PATH") from None
-
-    if proc.returncode != 0:
-        return None
-
+def _parse_curl_headers(blob: str) -> tuple[int, dict[str, str]]:
     headers: dict[str, str] = {}
     status_code = 0
-    for line in proc.stdout.splitlines():
+    for line in blob.splitlines():
         if line.upper().startswith("HTTP/"):
             parts = line.split()
             if len(parts) >= 2 and parts[1].isdigit():
                 status_code = int(parts[1])
+                headers = {}
         elif ":" in line:
             key, val = line.split(":", 1)
             headers[key.strip().lower()] = val.strip()
+    return status_code, headers
 
+
+def _curl_header_dump(url: str, timeout: int, *extra: str) -> Optional[str]:
+    cmd = ["curl", "-sL", "--max-time", str(timeout), *extra, url]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        raise RuntimeError("curl not found on PATH") from None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return proc.stdout
+
+
+def _meta_from_dump(url: str, dump: str) -> Optional[RemoteMeta]:
+    status_code, headers = _parse_curl_headers(dump)
     if status_code not in (200, 206):
         return None
-
     cl = headers.get("content-length")
+    cr = headers.get("content-range")
+    length = int(cl) if cl and cl.isdigit() else None
+    if length is None and cr:
+        # bytes 0-0/2039742911
+        if "/" in cr:
+            total = cr.rsplit("/", 1)[-1].strip()
+            if total.isdigit():
+                length = int(total)
     return RemoteMeta(
         url=url,
-        content_length=int(cl) if cl and cl.isdigit() else None,
+        content_length=length,
         last_modified=_parse_http_date(headers.get("last-modified", "")),
         etag=headers.get("etag"),
         status_code=status_code,
     )
+
+
+def curl_remote_meta(url: str, timeout: int = 60) -> Optional[RemoteMeta]:
+    """Remote size/etag. HEAD first; range GET if HEAD is empty or non-200.
+
+    files.usaspending.gov sometimes answers HEAD with nothing while GET works.
+    A real 404 returns None without retries.
+    """
+    for attempt in range(3):
+        for extra in (("-I",), ("-D", "-", "-o", "/dev/null", "-r", "0-0")):
+            dump = _curl_header_dump(url, timeout, *extra)
+            if not dump:
+                continue
+            status, _headers = _parse_curl_headers(dump)
+            meta = _meta_from_dump(url, dump)
+            if meta is not None:
+                return meta
+            if status in (403, 404, 410):
+                return None
+        if attempt < 2:
+            time.sleep(1 + attempt)
+    return None
 
 
 def _load_sidecar(meta_path: Path) -> Optional[dict]:
@@ -127,6 +159,29 @@ def is_local_current(local_path: Path, meta_path: Path, remote: RemoteMeta) -> b
     return remote.content_length is None or local_size == remote.content_length
 
 
+def implausible_remote_length(local_size: int, remote_len: Optional[int]) -> bool:
+    """HEAD/range sometimes returns a tiny error-page length against a GB zip."""
+    if remote_len is None or local_size <= 0:
+        return False
+    return local_size >= 10_000_000 and remote_len < 1_000_000
+
+
+def should_resume_partial(
+    local_size: int,
+    remote_len: Optional[int],
+    saved: Optional[dict],
+    same_object: bool,
+) -> bool:
+    """Keep a mid-GET partial. Wipe only when a sidecar proves a different object."""
+    if local_size <= 0:
+        return False
+    if remote_len and local_size < remote_len and (not saved or same_object):
+        return True
+    if not saved and not remote_len:
+        return True
+    return False
+
+
 def curl_download(
     url: str,
     dest: Path,
@@ -134,36 +189,48 @@ def curl_download(
     resume: bool = True,
     timeout: int = 0,
 ) -> None:
-    """Download url to dest using curl. Supports resume when dest partially exists."""
+    """Download url to dest using curl. Resume on curl 18/28/56; keep partials."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-
-    def _run(*, resume_flag: bool) -> subprocess.CompletedProcess:
-        cmd = ["curl", "-L", "--fail"]
-        if resume_flag and dest.exists():
+    last: Optional[subprocess.CompletedProcess] = None
+    for attempt in range(1, 6):
+        cmd = [
+            "curl",
+            "-L",
+            "--fail",
+            "--retry",
+            "8",
+            "--retry-delay",
+            "5",
+        ]
+        if resume and dest.exists() and dest.stat().st_size > 0:
             cmd.extend(["-C", "-"])
-        else:
-            cmd.extend(
-                ["--retry", "8", "--retry-delay", "5", "--retry-all-errors"]
-            )
         cmd.extend(["-o", str(dest)])
         if timeout > 0:
             cmd.extend(["--max-time", str(timeout)])
         cmd.append(url)
-        return subprocess.run(cmd)
-
-    if resume and dest.exists():
-        first = _run(resume_flag=True)
-        if first.returncode == 0:
+        last = subprocess.run(cmd)
+        if last.returncode == 0:
             return
-        log_warning(
-            f"Resume failed for {dest.name} (curl {first.returncode}); full GET"
+        size = dest.stat().st_size if dest.exists() else 0
+        # 18 needs bytes on disk. 28/52/56 can happen with an empty dest.
+        retryable = last.returncode in (28, 52, 56) or (
+            last.returncode == 18 and resume and size > 0
         )
-        try:
-            dest.unlink()
-        except OSError:
-            pass
-    result = _run(resume_flag=False)
-    result.check_returncode()
+        if retryable:
+            log_warning(
+                f"curl {last.returncode} on {dest.name} ({size:,} bytes) "
+                f"attempt {attempt}; retry"
+            )
+            time.sleep(min(5 * attempt, 30))
+            continue
+        break
+    if last is None:
+        raise RuntimeError(f"curl did not run for {url}")
+    if last.returncode == 22:
+        if dest.exists() and dest.stat().st_size < 64_000:
+            dest.unlink(missing_ok=True)
+        raise RuntimeError(f"HTTP error downloading {url} (curl 22)")
+    last.check_returncode()
 
 
 def ensure_download(
@@ -180,15 +247,29 @@ def ensure_download(
     """
     meta_path = dest.with_suffix(dest.suffix + ".meta.json")
     remote = curl_remote_meta(url)
-    if remote is None:
-        if dest.exists() and dest.stat().st_size > 0:
+    if dest.exists() and dest.stat().st_size > 0:
+        if remote is None:
             log_warning(f"Remote unreachable for {url}; using existing {dest}")
             return False
-        raise RuntimeError(f"Cannot reach {url} and no local file at {dest}")
-
-    if not force and is_local_current(dest, meta_path, remote):
-        log_info(f"Up to date: {dest.name} ({dest.stat().st_size:,} bytes)")
-        return False
+        if implausible_remote_length(dest.stat().st_size, remote.content_length):
+            log_warning(
+                f"Implausible remote length {remote.content_length} vs "
+                f"local {dest.stat().st_size:,} for {dest.name}; keeping local"
+            )
+            return False
+        if not force and is_local_current(dest, meta_path, remote):
+            log_info(f"Up to date: {dest.name} ({dest.stat().st_size:,} bytes)")
+            return False
+    elif remote is None:
+        # HEAD/range often empty on files.usaspending.gov while GET works.
+        log_warning(f"No HEAD/range for {url}; trying full GET")
+        remote = RemoteMeta(
+            url=url,
+            content_length=None,
+            last_modified=None,
+            etag=None,
+            status_code=0,
+        )
 
     # Stale or missing: never curl -C onto an old full file. Resume only makes
     # sense for a partial download of the *same* remote object; splicing a new
@@ -208,46 +289,39 @@ def ensure_download(
             and saved.get("last_modified") == remote.last_modified.isoformat()
         ):
             same_object = True
-        # Partial of same object: allow resume. Otherwise wipe and full GET.
-        # Socrata often omits Content-Length; keep bytes and resume when there
-        # is no sidecar (a prior successful download would have written one).
-        if same_object and remote_len and local_size < remote_len:
+        # Partial of this object: resume. First GET has no sidecar; do not
+        # treat local_size < Content-Length as a stale full file.
+        if should_resume_partial(local_size, remote_len, saved, same_object):
             use_resume = True
-            log_info(
-                f"Resuming partial {dest.name} ({local_size:,}/{remote_len:,} bytes)"
-            )
-        elif dest.exists() and not saved and not remote_len:
-            use_resume = True
-            log_info(
-                f"Resuming {dest.name} ({local_size:,} bytes; remote length unknown)"
-            )
+            shown = f"{local_size:,}/{remote_len:,}" if remote_len else f"{local_size:,}"
+            log_info(f"Resuming partial {dest.name} ({shown} bytes)")
         else:
             use_resume = False
-            log_info(f"Replacing stale {dest.name} with full download (no resume)")
+            log_info(f"Replacing stale {dest.name} via sidecar file (dest stays until GET succeeds)")
+
+    download_target = dest
+    if dest.exists() and dest.stat().st_size > 0 and not use_resume:
+        download_target = Path(str(dest) + ".part")
+        if download_target.exists():
             try:
-                dest.unlink()
+                download_target.unlink()
             except OSError:
                 pass
-            if meta_path.exists():
-                try:
-                    meta_path.unlink()
-                except OSError:
-                    pass
 
-    log_info(f"Downloading {url} → {dest}")
-    curl_download(url, dest, resume=use_resume, timeout=timeout)
-    final_size = dest.stat().st_size if dest.exists() else 0
+    log_info(f"Downloading {url} → {download_target}")
+    curl_download(url, download_target, resume=use_resume, timeout=timeout)
+    final_size = download_target.stat().st_size if download_target.exists() else 0
     if remote.content_length and final_size < remote.content_length:
-        try:
-            dest.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if download_target != dest:
+            download_target.unlink(missing_ok=True)
         raise RuntimeError(
             f"Download incomplete for {dest.name}: "
             f"{final_size} < {remote.content_length}"
         )
     if final_size <= 0:
         raise RuntimeError(f"Download empty for {dest.name}")
+    if download_target != dest:
+        download_target.replace(dest)
     _save_sidecar(meta_path, url, remote, dest)
     log_info(f"Downloaded {dest.name} ({final_size:,} bytes)")
     return True
