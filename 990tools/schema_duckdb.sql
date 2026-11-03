@@ -648,6 +648,13 @@ CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_npi ON medicare_provider
 CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_paid ON medicare_provider_rollup(total_paid);
 CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_provider_id ON medicare_provider_rollup(provider_id);
 
+-- CMS Physician PUF 2024 + LEIE (cms_puf_processor.py). CREATE OR REPLACE from CSV;
+-- column names are the CMS headers (Rndrng_NPI, Bene_Avg_Age, HCPCS_Cd, …).
+-- CREATE TABLE IF NOT EXISTS cms_puf_provider (Rndrng_NPI BIGINT);
+-- CREATE TABLE IF NOT EXISTS cms_puf_service (Rndrng_NPI BIGINT, HCPCS_Cd VARCHAR);
+-- CREATE TABLE IF NOT EXISTS cms_puf_geo (HCPCS_Cd VARCHAR);
+-- CREATE TABLE IF NOT EXISTS cms_leie (NPI BIGINT);
+
 -- Treasury OFAC SDN sanctions (Treasury sanctions list ingest)
 CREATE TABLE IF NOT EXISTS sanctioned_entities (
     id UUID DEFAULT uuidv7() PRIMARY KEY,
