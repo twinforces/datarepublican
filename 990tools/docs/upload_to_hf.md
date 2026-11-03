@@ -42,11 +42,17 @@ python3 upload_to_hf.py --export-only --keep-local
 # One table (smoke)
 python3 upload_to_hf.py --tables ZipFiles --export-only --out /tmp/hf_smoke
 
+# New ingest tables (FEC refresh, USASpending, CMS PUF, LEIE). Out on Insurrection.
+# --tables does not rewrite Hub README/manifest (those would become a partial card).
+python3 launch_overnight_hf.py
+
 # Force a skipped table in
 python3 upload_to_hf.py --include medicare_raw_spending --tables medicare_raw_spending
 ```
 
-`--db` defaults to `/Volumes/Data/final/irs990.duckdb` (`IRS990_DB` overrides).
+`--db` defaults to `/Volumes/Data/final/irs990.duckdb` (`IRS990_DB` overrides). Default `--out` is `/Volumes/Data/final/parquet_export_990`; overnight uses `/Volumes/Insurrection/990data/parquet_export_990` because Data is tight. `HF_TOKEN` comes from `datarepublican/.envrc`.
+
+`--tables` uploads those parquet files and `schema_duckdb.sql` only. A full discovery run is what rewrites `README.md` / `manifest.json` and prunes stale remote parquet.
 
 ## After upload
 

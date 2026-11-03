@@ -75,6 +75,14 @@ TABLE_BLURBS = {
     "sanctioned_identifiers": "OFAC identifiers (passport, tax id, …)",
     "sanctioned_names": "OFAC primary names and aliases",
     "sanctioned_programs": "OFAC program codes on each entity",
+    "ppp_loans": "SBA PPP FOIA loans (no EIN; leftover $ and forgiveness cuts)",
+    "sam_entities": "SAM.gov Entity Registration Public V2 (UEI + CAGE + phy/mail street)",
+    "usaspending_actions": "USASpending Award Data Archive actions (FY2022+, UEI grain)",
+    "usaspending_by_uei": "USASpending obligations rolled up by recipient UEI",
+    "cms_puf_provider": "CMS 2024 Physician PUF by NPI (Bene_Avg_Age is NPI-year mix)",
+    "cms_puf_service": "CMS 2024 Physician PUF by NPI × HCPCS (no beneficiary age)",
+    "cms_puf_geo": "CMS 2024 Physician PUF by geography × HCPCS",
+    "cms_leie": "HHS OIG List of Excluded Individuals/Entities",
 }
 
 
@@ -366,7 +374,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out", default=DEFAULT_OUT, help="Local parquet directory")
     p.add_argument("--repo", default=DEFAULT_REPO)
     p.add_argument("--schema", default=str(DEFAULT_SCHEMA))
-    p.add_argument("--tables", help="Comma-separated table list (skip discovery filter)")
+    p.add_argument(
+        "--tables",
+        help="Comma-separated table list (skip discovery). Does not rewrite Hub README/manifest.",
+    )
     p.add_argument("--include", default="", help="Comma-separated SKIP_TABLES to force in")
     p.add_argument("--exclude", default="", help="Comma-separated extra tables to drop")
     p.add_argument("--dry-run", action="store_true", help="Print the plan and exit")
@@ -469,7 +480,10 @@ def main() -> int:
             raise SystemExit("HF_TOKEN is required for upload (or pass --export-only)")
         create_repo(args.repo, repo_type="dataset", exist_ok=True, token=token)
         api = HfApi(token=token)
-        for sidecar in ("README.md", "schema_duckdb.sql", "manifest.json"):
+        # --tables is an add, not a full catalog. Rewriting README/manifest
+        # would shrink the Hub card to this run's tables only.
+        sidecars = ("schema_duckdb.sql",) if only else ("README.md", "schema_duckdb.sql", "manifest.json")
+        for sidecar in sidecars:
             api.upload_file(
                 path_or_fileobj=str(out_dir / sidecar),
                 path_in_repo=sidecar,
@@ -478,6 +492,8 @@ def main() -> int:
                 token=token,
                 commit_message=f"Update {sidecar}",
             )
+        if only:
+            print("  skip Hub README/manifest rewrite (--tables)")
 
     for item in catalog:
         name = item["name"]
@@ -495,8 +511,10 @@ def main() -> int:
                     dest.unlink()
                 print("  released local copy")
 
-    if api is not None:
+    if api is not None and not only:
         prune_stale_remote(api, args.repo, token, catalog, skipped)
+    elif api is not None:
+        print("  skip stale-parquet prune (--tables)")
 
     print(f"\nDone. https://huggingface.co/datasets/{args.repo}")
     return 0
