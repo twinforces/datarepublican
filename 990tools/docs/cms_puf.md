@@ -37,4 +37,6 @@ Each missing line is 1–10 benes. You cannot recover which HCPCS those lines we
 
 Mickiewicz-style flags want **hours vs a calendar year**, **HCPCS mix vs specialty**, **childhood codes on a high `Bene_Avg_Age` NPI**, **DME concentration**, and **LEIE overlap**. Age is the NPI-year mix on By Provider, not the genetic-test line. Join `cms_puf_service` to `cms_puf_provider` on `Rndrng_NPI` and to `cms_leie` on NPI. Do not treat a 76-year average on a COVID-test HCPCS as a per-line age.
 
+CMS minutes and work RVUs live in `cms_pfs_work_time` / `cms_pfs_rvu` (`docs/cms_clia_pfs.md`). Join `cms_puf_service.HCPCS_Cd` to `cpt_code` / `hcpcs`. CLIA labs are `cms_clia` (`PRVDR_NUM` is the CLIA id, no NPI).
+
 Use the provider−service gap as a **hidden-volume** component: large suppressed units on a small published book, or a provider-only NPI (all lines ≤10 benes) with high `Tot_Srvcs`. Age-bucket nulls bound a young/old tail (1–10 people), which is a weak age-mismatch prior, not a line-level age.

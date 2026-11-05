@@ -83,6 +83,15 @@ TABLE_BLURBS = {
     "cms_puf_service": "CMS 2024 Physician PUF by NPI × HCPCS (no beneficiary age)",
     "cms_puf_geo": "CMS 2024 Physician PUF by geography × HCPCS",
     "cms_leie": "HHS OIG List of Excluded Individuals/Entities",
+    "cms_clia": "CMS Provider of Services Clinical Laboratories (CLIA id in PRVDR_NUM, no NPI)",
+    "cms_pfs_rvu": "CMS Physician Fee Schedule PPRRVU work/PE/MP RVUs by HCPCS",
+    "cms_pfs_work_time": "CMS PFS physician work minutes by CPT (efficiency-adjusted total)",
+    "fmcsa_sms_basics": "FMCSA SMS BASIC scores by USDOT",
+    "fmcsa_sms_crashes": "FMCSA SMS crash rows",
+    "fmcsa_sms_inspections": "FMCSA SMS inspection rows",
+    "census_tsv_pending": "Geolocate queue dumped for Census TSV",
+    "census_tsv_results": "Census TSV geocode responses",
+    "census_tsv_best": "Best Census TSV hit per address",
 }
 
 
