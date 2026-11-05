@@ -82,6 +82,9 @@ STATE_SLUGS: Tuple[str, ...] = (
 )
 
 SQFT_PER_M2 = 10.76391041671
+# v1 called ST_Area_Spheroid(geom). That function reads X as latitude, GeoJSON X
+# is longitude, so |lon|>90 (west of 90°W) is NaN and east areas are too small.
+INGEST_VERSION = 2
 
 
 def default_data_dir() -> Path:
@@ -119,6 +122,16 @@ def zip_url(slug: str) -> str:
 def colocator_sql(lat_expr: str, lon_expr: str) -> str:
     """Match Addresses: Python round(x, 4) then f'LL:{{lat}}:{{lon}}'."""
     return f"printf('LL:%.4f:%.4f', ROUND({lat_expr}, 4), ROUND({lon_expr}, 4))"
+
+
+def area_sql(geom: str) -> str:
+    """Spheroid area. Flip so GeoJSON lon/lat matches ST_Area_Spheroid's lat/lon."""
+    return f"ST_Area_Spheroid(ST_FlipCoordinates({geom}))"
+
+
+def _say(msg: str) -> None:
+    print(msg, flush=True)
+    log_info(msg)
 
 
 def _marker_path(data_dir: Path) -> Path:
@@ -175,9 +188,9 @@ class BuildingFootprintsProcessor:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "12GB")
-        log_info(
+        _say(
             f"building footprints db={self.db_path} data={self.data_dir} "
-            f"states={len(slugs)} mem={mem}"
+            f"states={len(slugs)} mem={mem} ingest_version={INGEST_VERSION}"
         )
         conn = duckdb.connect(
             str(self.db_path),
@@ -213,7 +226,16 @@ class BuildingFootprintsProcessor:
             stats["building_footprints"] = n
             stats["building_colocator"] = c
             conn.execute("CHECKPOINT")
-            log_info(f"building footprints {n:,} buildings, {c:,} colocator cells")
+            bad = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM building_footprints "
+                    "WHERE isnan(area_sqft) OR isinf(area_sqft) OR area_sqft IS NULL"
+                ).fetchone()[0]
+            )
+            _say(
+                f"building footprints {n:,} buildings, {c:,} colocator cells, "
+                f"{bad:,} bad area_sqft"
+            )
         finally:
             conn.close()
         return stats
@@ -240,11 +262,16 @@ class BuildingFootprintsProcessor:
                 [slug],
             ).fetchone()[0]
         )
-        if already > 0 and prev.get("zip_size") == zip_size and prev.get("rows") == already:
-            log_info(f"skip {slug}: {already:,} rows, zip unchanged")
+        if (
+            already > 0
+            and prev.get("zip_size") == zip_size
+            and prev.get("rows") == already
+            and prev.get("version") == INGEST_VERSION
+        ):
+            _say(f"skip {slug}: {already:,} rows, zip unchanged, v{INGEST_VERSION}")
             return already
         geojson = _unzip_geojson(zip_path, self.data_dir)
-        log_info(f"ingest {slug} from {geojson.name} ({geojson.stat().st_size:,} bytes)")
+        _say(f"ingest {slug} from {geojson.name} ({geojson.stat().st_size:,} bytes)")
         conn.execute("DELETE FROM building_footprints WHERE state = ?", [slug])
         last_err: Optional[Exception] = None
         for geom in ("geom", "geometry"):
@@ -252,18 +279,27 @@ class BuildingFootprintsProcessor:
                 f"ST_Y(ST_Centroid({geom}))",
                 f"ST_X(ST_Centroid({geom}))",
             )
+            area = area_sql(geom)
             try:
                 conn.execute(
                     f"""
                     INSERT INTO building_footprints
                     SELECT
-                        ? AS state,
-                        ST_Area_Spheroid({geom}) AS area_m2,
-                        ST_Area_Spheroid({geom}) * {SQFT_PER_M2} AS area_sqft,
-                        ST_Y(ST_Centroid({geom})) AS centroid_lat,
-                        ST_X(ST_Centroid({geom})) AS centroid_lon,
-                        {colocator} AS colocator
-                    FROM ST_Read(?)
+                        state,
+                        area_m2,
+                        area_m2 * {SQFT_PER_M2} AS area_sqft,
+                        centroid_lat,
+                        centroid_lon,
+                        colocator
+                    FROM (
+                        SELECT
+                            ? AS state,
+                            {area} AS area_m2,
+                            ST_Y(ST_Centroid({geom})) AS centroid_lat,
+                            ST_X(ST_Centroid({geom})) AS centroid_lon,
+                            {colocator} AS colocator
+                        FROM ST_Read(?)
+                    )
                     """,
                     [slug, str(geojson)],
                 )
@@ -285,13 +321,17 @@ class BuildingFootprintsProcessor:
             geojson.unlink()
         except OSError as exc:
             log_warning(f"could not remove {geojson}: {exc}")
-        marker["states"][slug] = {"rows": n, "zip_size": zip_size}
+        marker["states"][slug] = {
+            "rows": n,
+            "zip_size": zip_size,
+            "version": INGEST_VERSION,
+        }
         _save_marker(self.data_dir, marker)
-        log_info(f"{slug}: {n:,} buildings")
+        _say(f"{slug}: {n:,} buildings")
         return n
 
     def _rebuild_colocator(self, conn: duckdb.DuckDBPyConnection) -> None:
-        log_info("rebuild building_colocator")
+        _say("rebuild building_colocator")
         conn.execute(
             """
             CREATE OR REPLACE TABLE building_colocator AS

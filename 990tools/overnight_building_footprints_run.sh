@@ -32,6 +32,7 @@ set +e
 caffeinate -i -s python3 -u building_footprints_processor.py \
   --db "$BUILDING_DB" \
   --data-dir "$BUILDING_DATA_DIR" \
+  --no-download \
   >>"$LOG" 2>&1
 rc=$?
 set -e

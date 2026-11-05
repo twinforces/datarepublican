@@ -8,7 +8,7 @@
 
 - Zips: `/Volumes/Insurrection/990data/buildings/{State}.geojson.zip`
 - DB: `/Volumes/Insurrection/990data/buildings.duckdb`
-- Marker: `.building_footprints_ingest.json` (skip a state when zip size and row count match)
+- Marker: `.building_footprints_ingest.json` (skip a state when zip size, row count, and `version` match)
 
 GeoJSON is unzipped, measured, then deleted. The zip stays. License: ODbL (Microsoft). Source: [USBuildingFootprints](https://github.com/microsoft/USBuildingFootprints) (`minedbuildings…/legacy/usbuildings-v2/`). Repo archived 2026-10-08; blobs still used.
 
@@ -36,8 +36,10 @@ WHERE a.colocator = 'LL:36.2128:-83.3032';
 
 A colocator cell is ~11 m. One house is usually one cell with `n_buildings` 1 and `max_area_sqft` in the hundreds-to-low-thousands. A medical strip is many buildings / large max. The geocode pin and the building centroid can round into adjacent cells (Allcare `LL:36.2128:-83.3032` is empty; 953 sqft sits at `LL:36.2128:-83.3029`).
 
-2026-11-04 ingest (wrapper **10619**): 130,099,920 buildings / 129,303,024 cells / 22G sidecar / 51 zips. `ST_Area_Spheroid` is NaN for all of California and Texas (and several other western states); those rows still have centroid + colocator. Tennessee area is populated except 65,649 NaNs.
+2026-11-04 ingest (wrapper **10619**): 130,099,920 buildings. `ST_Area_Spheroid(geom)` treated GeoJSON longitude as latitude, so every building west of 90°W was NaN and east areas were too small. v2 uses `ST_Area_Spheroid(ST_FlipCoordinates(geom))` and remeasures all 51 zips (`INGEST_VERSION=2`). Centroid / colocator axes were already correct.
 
-**Next (not this job):** OpenAddresses name→street; USASpending award description + `fts`. CLIA + PFS work time is `docs/cms_clia_pfs.md`. Repair western `area_sqft` (spheroid NaN).
+2026-11-05 v2 (wrapper **97867**): 130,099,920 buildings / 129,303,024 cells / **0** NaN `area_sqft`. CA median 2,212 sqft, TX 2,210, TN 1,941. Allcare `LL:36.2128:-83.3032` still empty; nearest centroid **6,539 sqft** at `LL:36.2128:-83.3029` (v1 stored 953 for that same footprint). A house-sized 802 sqft polygon sits one cell south-west.
+
+**Next (not this job):** OpenAddresses name→street.
 
 **Test:** `python3 -m unittest test_building_footprints.py`
