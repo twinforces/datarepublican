@@ -648,12 +648,24 @@ CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_npi ON medicare_provider
 CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_paid ON medicare_provider_rollup(total_paid);
 CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_provider_id ON medicare_provider_rollup(provider_id);
 
+-- Building footprints live in a sidecar, not this file:
+--   /Volumes/Insurrection/990data/buildings.duckdb
+--   building_footprints (state, area_m2, area_sqft, centroid_*, colocator)
+--   building_colocator (colocator, n_buildings, min/avg/max/sum area_sqft)
+-- ATTACH and join Addresses.colocator. See docs/building_footprints.md.
+
 -- CMS Physician PUF 2024 + LEIE (cms_puf_processor.py). CREATE OR REPLACE from CSV;
 -- column names are the CMS headers (Rndrng_NPI, Bene_Avg_Age, HCPCS_Cd, …).
 -- CREATE TABLE IF NOT EXISTS cms_puf_provider (Rndrng_NPI BIGINT);
 -- CREATE TABLE IF NOT EXISTS cms_puf_service (Rndrng_NPI BIGINT, HCPCS_Cd VARCHAR);
 -- CREATE TABLE IF NOT EXISTS cms_puf_geo (HCPCS_Cd VARCHAR);
 -- CREATE TABLE IF NOT EXISTS cms_leie (NPI BIGINT);
+
+-- CMS CLIA POS + PFS work RVU/time (cms_clia_pfs_processor.py). CREATE OR REPLACE.
+-- CLIA has no NPI; PRVDR_NUM is the CLIA id. RVU skip=9 copyright preamble.
+-- CREATE TABLE IF NOT EXISTS cms_clia (PRVDR_NUM VARCHAR, FAC_NAME VARCHAR, STATE_CD VARCHAR);
+-- CREATE TABLE IF NOT EXISTS cms_pfs_rvu (hcpcs VARCHAR, mod VARCHAR, work_rvu DOUBLE);
+-- CREATE TABLE IF NOT EXISTS cms_pfs_work_time (cpt_code VARCHAR, total_min DOUBLE, adj_total_min DOUBLE);
 
 -- Treasury OFAC SDN sanctions (Treasury sanctions list ingest)
 CREATE TABLE IF NOT EXISTS sanctioned_entities (

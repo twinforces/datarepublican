@@ -5,6 +5,26 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-04 (CLIA + PFS work time) — `c3f8fd3b`
+
+### CMS CLIA labs + Physician Fee Schedule work RVU/time
+- **Why:** Reasonableness needs CMS minutes and work RVUs, not just PUF volume. CLIA is the certified-lab roster.
+- **Change:** `cms_clia_pfs_processor.py` downloads POS Clinical Laboratories (catalog-newest quarter), RVU26D `PPRRVU*nonQPP.csv` (skip 9), and the CY 2026 PFS physician work-time CSV. Tables `cms_clia` / `cms_pfs_rvu` / `cms_pfs_work_time`. Direct `duckdb.connect`. Not on `--step all`. Overnight: `launch_overnight_cms_clia_pfs.py`. CLIA `PRVDR_NUM` is the CLIA id; there is no NPI column.
+- **Worked:** wrapper **14844** 2026-11-04 15:33. `cms_clia` 686,058 (TN 16,001); `cms_pfs_rvu` 19,226; `cms_pfs_work_time` 9,725. 99213 work_rvu 1.3 / 30 minutes.
+- **Doc:** `docs/cms_clia_pfs.md`. Test: `test_cms_clia_pfs.py`.
+
+---
+
+## [Unreleased] - 2026-11-04 (building footprints sidecar) — `7549fa11`
+
+### Microsoft US Building Footprints
+- **Why:** Area at an Address pin (house vs hospital) without Photon/Docker.
+- **Change:** Sidecar `/Volumes/Insurrection/990data/buildings.duckdb`. Centroid + sqft + `colocator` (same `round(lat,4)` as Addresses). GeoJSON is measured then deleted; zips stay. Tennessee first. Not on `--step all`.
+- **Worked:** wrapper **10619** 2026-11-04 17:01. `building_footprints` 130,099,920 (51 states); `building_colocator` 129,303,024. Sidecar 22G. All 51 zips kept, GeoJSON deleted. Allcare `LL:36.2128:-83.3032` has no building in that cell; nearest centroid is 953 sqft at `LL:36.2128:-83.3029`. `ST_Area_Spheroid` is NaN for all of CA/TX and several western states; centroids still populated.
+- **Doc:** `docs/building_footprints.md`. Test: `test_building_footprints.py`.
+
+---
+
 ## [Unreleased] - 2026-11-03 (FEC refresh + USASpending FY2022–2027 + CMS PUF) — `edd86a52` `41716877` `6bef052c` `363b6ef3`
 
 ### FEC bulk 2024+2026 refresh

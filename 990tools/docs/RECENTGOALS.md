@@ -4,13 +4,43 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
-## In flight: Hugging Face new tables + Insurrection DuckDB copy
+## 2026-11-04: CMS CLIA + PFS work RVU/time
 
-**What:** Upload FEC / USASpending / CMS PUF / LEIE parquet to `piercewetter3/irs-990-parsed`, then CHECKPOINT+ditto `/Volumes/Data/final/irs990.duckdb` → `/Volumes/Insurrection/990data/irs990.duckdb`.
+**What:** POS Clinical Laboratories Q3 2026 + PPRRVU work RVUs + CY 2026 physician work-time into `/Volumes/Data/final/irs990.duckdb`. Wrapper **14844**, 15:33. `cms_clia` 686,058 (TN 16,001); `cms_pfs_rvu` 19,226; `cms_pfs_work_time` 9,725. 99213 = 1.3 work RVU / 30 minutes.
 
-**Why:** Hub still has the May 990+FEC dump plus a later `ppp_loans` add. Insurrection's DuckDB is the 2026-10-30 09A copy (same 116,086,026,240 bytes, older mtime).
+**Why:** PUF volume × CMS minutes/RVU is the conversion a reasonableness grade needs. CLIA is the lab roster; it has no NPI (`PRVDR_NUM` is the CLIA id).
 
-**How:** `python3 launch_overnight_hf.py` (`--tables` so the Hub README is not rewritten as a partial card). `--out` on Insurrection. After upload: CHECKPOINT Data, refuse dest>src, `ditto`, compare sizes. Doc: `docs/upload_to_hf.md`.
+**How:** `python3 launch_overnight_cms_clia_pfs.py`. Doc: `docs/cms_clia_pfs.md`. Test: `test_cms_clia_pfs.py`. Hash: `c3f8fd3b`.
+
+---
+
+## 2026-11-04: Microsoft building footprints sidecar
+
+**What:** US v2 GeoJSON into `/Volumes/Insurrection/990data/buildings.duckdb`. Wrapper **10619**, 17:01. `building_footprints` 130,099,920 (51 states); `building_colocator` 129,303,024. Sidecar 22G.
+
+**Why:** Pin area (house vs hospital plate) without a geocoder. Photon/Docker is off.
+
+**How:** `python3 launch_overnight_building_footprints.py`. Doc: `docs/building_footprints.md`. Exact Allcare cell is empty; nearest building 953 sqft one cell east. Area NaN for CA/TX and several western states (`ST_Area_Spheroid`); centroids still there. Item 3 (USASpending descriptions) is unblocked. Hash: `7549fa11`.
+
+---
+
+## 2026-11-03: Hugging Face full discovery dump
+
+**What:** Every public DuckDB table on `piercewetter3/irs-990-parsed` (wrapper **86819**, 13:36, 48/48). README/manifest rewritten. Overnight default is discovery.
+
+**Why:** House rule: the Hub is the public warehouse. The 07:00 run was `--tables` for the new ingest only; SAM, FMCSA SMS, and census TSV were the gaps.
+
+**How:** `python3 launch_overnight_hf.py`. `--out` on Insurrection. Raw/ops stay skipped (`medicare_raw_spending`, `Zips_raw`, `fec_raw_committees`, pipeline scratch). Doc: `docs/upload_to_hf.md`.
+
+---
+
+## 2026-11-03: Hugging Face new tables + Insurrection DuckDB copy
+
+**What:** Eleven FEC / USASpending / CMS PUF / LEIE tables on `piercewetter3/irs-990-parsed` (HF wrapper **20175**, 07:00). CHECKPOINT+ditto Data → Insurrection `irs990.duckdb` (copy wrapper **30855**, 07:50). Both files 116,086,026,240 bytes, mtime 2026-11-03 05:48:56.
+
+**Why:** Hub still had the May 990+FEC dump plus `ppp_loans`. Insurrection was the 2026-10-30 09A copy.
+
+**How:** `python3 launch_overnight_hf.py` (`--tables`, README left in place). Then `python3 launch_overnight_duckdb_copy.py`. Hash: `363b6ef3`.
 
 ---
 
@@ -55,6 +85,8 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 | FEC bulk 2024+2026 | `edd86a52` — `docs/fec.md` |
 | USASpending FY2022–2027 | `41716877` — `docs/usaspending.md` |
 | CMS Physician PUF + LEIE | `6bef052c` — `docs/cms_puf.md` |
+| Building footprints sidecar | `7549fa11` — `docs/building_footprints.md` |
+| CMS CLIA + PFS work time | `c3f8fd3b` — `docs/cms_clia_pfs.md` |
 | Grok geocode | off until asked. Census TSV / Photon / maps.co / OpenCage first. |
 
 Do not treat GIN, UEI, CAGE, or PPP borrower name as an IRS EIN. Do not ingest PECOS or EIDL unless asked. LEIE is in (`cms_leie`, 2026-11-03).

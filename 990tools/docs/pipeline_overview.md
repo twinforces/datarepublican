@@ -85,12 +85,25 @@ FEC_CYCLES=2024,2026 ./overnight_fec_run.sh
 
 Run standalone: `python -u irs990processor.py --step medicare --nostats -v`
 
+**Building footprints** (`building_footprints_processor.py`): Microsoft US v2 GeoJSON → sidecar `/Volumes/Insurrection/990data/buildings.duckdb` (`building_footprints`, `building_colocator`). Join `Addresses.colocator`. Not on `--step all`. Photon/Docker off. Doc: `docs/building_footprints.md`.
+
+```bash
+python3 launch_overnight_building_footprints.py
+```
+
 **CMS Physician PUF + LEIE** (`cms_puf_processor.py`): 2024 By Provider / By Provider and Service / By Geography plus OIG LEIE. Sidecar, not `--step all`. `Bene_Avg_Age` is NPI-year mix. CSVs on Insurrection (`CMS_PUF_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_puf.md`.
 
 ```bash
 python3 launch_overnight_cms_puf_download.py
 python3 launch_overnight_cms_puf.py
 ```
+
+**CMS CLIA + PFS work time** (`cms_clia_pfs_processor.py`): POS Clinical Laboratories (newest quarter) plus PPRRVU work RVUs and the CY PFS physician work-time file. `cms_clia` / `cms_pfs_rvu` / `cms_pfs_work_time`. CLIA has no NPI (`PRVDR_NUM` is the CLIA id). Not on `--step all`. Files on Insurrection (`CMS_CLIA_PFS_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_clia_pfs.md`.
+
+```bash
+python3 launch_overnight_cms_clia_pfs.py
+```
+
 
 **`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.
 
