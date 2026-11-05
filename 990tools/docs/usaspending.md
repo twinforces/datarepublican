@@ -12,6 +12,8 @@
 
 **Parked:** the USASpending **Postgres database dump**. Do not download it.
 
+Award **descriptions** and a keyword index are a second pass: `docs/usaspending_text.md` (`python3 launch_overnight_usaspending_text.py`). Slim `usaspending_actions` is unchanged.
+
 **How:**
 
 ```bash

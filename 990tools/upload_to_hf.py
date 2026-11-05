@@ -79,6 +79,7 @@ TABLE_BLURBS = {
     "sam_entities": "SAM.gov Entity Registration Public V2 (UEI + CAGE + phy/mail street)",
     "usaspending_actions": "USASpending Award Data Archive actions (FY2022+, UEI grain)",
     "usaspending_by_uei": "USASpending obligations rolled up by recipient UEI",
+    "usaspending_award_text": "USASpending award descriptions + PSC/CFDA titles (FTS on description)",
     "cms_puf_provider": "CMS 2024 Physician PUF by NPI (Bene_Avg_Age is NPI-year mix)",
     "cms_puf_service": "CMS 2024 Physician PUF by NPI × HCPCS (no beneficiary age)",
     "cms_puf_geo": "CMS 2024 Physician PUF by geography × HCPCS",
