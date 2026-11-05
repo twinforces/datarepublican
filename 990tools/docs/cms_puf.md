@@ -33,6 +33,8 @@ CMS drops the **row**, it does not star the cell. `cms_puf_service` has no null 
 
 Each missing line is 1–10 benes. You cannot recover which HCPCS those lines were.
 
+Implied hours from this PUF × fee-schedule time: `docs/cms_puf_hours.md` (`cms_puf_npi_hours`). Building sqft is a later ATTACH.
+
 ## Reasonableness grade (design, not built)
 
 Mickiewicz-style flags want **hours vs a calendar year**, **HCPCS mix vs specialty**, **childhood codes on a high `Bene_Avg_Age` NPI**, **DME concentration**, and **LEIE overlap**. Age is the NPI-year mix on By Provider, not the genetic-test line. Join `cms_puf_service` to `cms_puf_provider` on `Rndrng_NPI` and to `cms_leie` on NPI. Do not treat a 76-year average on a COVID-test HCPCS as a per-line age.

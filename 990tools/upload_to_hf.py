@@ -87,6 +87,8 @@ TABLE_BLURBS = {
     "cms_clia": "CMS Provider of Services Clinical Laboratories (CLIA id in PRVDR_NUM, no NPI)",
     "cms_pfs_rvu": "CMS Physician Fee Schedule PPRRVU work/PE/MP RVUs by HCPCS",
     "cms_pfs_work_time": "CMS PFS physician work minutes by CPT (efficiency-adjusted total)",
+    "cms_puf_service_hours": "CMS 2024 PUF service lines × PFS minutes/RVU (hours lower bound)",
+    "cms_puf_npi_hours": "CMS 2024 PUF implied physician hours by NPI (timed lines only)",
     "fmcsa_sms_basics": "FMCSA SMS BASIC scores by USDOT",
     "fmcsa_sms_crashes": "FMCSA SMS crash rows",
     "fmcsa_sms_inspections": "FMCSA SMS inspection rows",
