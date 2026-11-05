@@ -666,6 +666,10 @@ CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_provider_id ON medicare_
 --     award_key VARCHAR PRIMARY KEY, description VARCHAR, psc VARCHAR, program_title VARCHAR
 -- );
 
+-- CMS PUF implied hours (cms_puf_hours_processor.py). Tot_Srvcs × adj_total_min / 60.
+-- CREATE TABLE IF NOT EXISTS cms_puf_service_hours (npi BIGINT, hcpcs VARCHAR, hours DOUBLE);
+-- CREATE TABLE IF NOT EXISTS cms_puf_npi_hours (npi BIGINT, hours_timed DOUBLE, colocator VARCHAR);
+
 -- CMS CLIA POS + PFS work RVU/time (cms_clia_pfs_processor.py). CREATE OR REPLACE.
 -- CLIA has no NPI; PRVDR_NUM is the CLIA id. RVU skip=9 copyright preamble.
 -- CREATE TABLE IF NOT EXISTS cms_clia (PRVDR_NUM VARCHAR, FAC_NAME VARCHAR, STATE_CD VARCHAR);

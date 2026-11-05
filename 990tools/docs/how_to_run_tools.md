@@ -62,6 +62,8 @@ python3 launch_overnight_cms_puf_download.py
 python3 launch_overnight_cms_puf.py
 # CMS CLIA labs + PFS work RVU/time (not on --step all). Files on Insurrection, DuckDB on Data.
 python3 launch_overnight_cms_clia_pfs.py
+# PUF × PFS minutes → implied hours (no building sidecar).
+python3 launch_overnight_cms_puf_hours.py
 # Hub parquet for new tables (HF_TOKEN from ../.envrc). Out on Insurrection.
 python3 launch_overnight_hf.py
 # Microsoft building footprints sidecar (Insurrection). Photon/Docker off.

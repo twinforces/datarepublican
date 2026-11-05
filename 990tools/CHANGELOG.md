@@ -5,6 +5,26 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-05 (CMS PUF implied hours) — `897d9d8b`
+
+### PUF volume × fee-schedule minutes
+- **Why:** Reasonableness needs hours, not raw Tot_Srvcs. Building sqft waits on footprint v2.
+- **Change:** `cms_puf_hours_processor.py` → `cms_puf_service_hours` (NPI×HCPCS×place) and `cms_puf_npi_hours` (timed hours, untimed/suppressed units, NPPES colocator, LEIE). Null hours when the time file has no CPT. Overnight: `launch_overnight_cms_puf_hours.py`.
+- **Worked:** wrapper **39329** 2026-11-05 13:04. `cms_puf_service_hours` 9,781,673 (9,236,202 timed). `cms_puf_npi_hours` 1,207,473. `--sqft-only` after footprint v2: 7,475 exact cells / **434,429** within ±3 (~33 m). Cut `entity=I`, hours>2080, max_area_near<4000, not lab/pathology: 5,816 NPIs.
+- **Doc:** `docs/cms_puf_hours.md`. Test: `test_cms_puf_hours.py`.
+
+---
+
+## [Unreleased] - 2026-11-05 (building footprint area v2) — `0839098f`
+
+### ST_Area_Spheroid treated longitude as latitude
+- **Why:** v1 `ST_Area_Spheroid(geom)` reads X as latitude. GeoJSON X is longitude. West of 90°W (`|lon|>90`) is an invalid latitude → NaN (57.5M buildings). East of 90°W is finite but too small (area computed at lat=lon).
+- **Change:** `ST_Area_Spheroid(ST_FlipCoordinates(geom))`. Marker `version` 2 so all 51 zips remeasure. Centroid/colocator unchanged. Overnight `--no-download`.
+- **Worked:** wrapper **97867** 2026-11-05 13:20. 130,099,920 buildings, 129,303,024 cells, **0** bad `area_sqft`. CA/TX median ~2,210 sqft. Allcare exact cell still empty; nearest centroid 6,539 sqft at `LL:36.2128:-83.3029` (v1 stored 953). `--no-download`, `INGEST_VERSION=2`.
+- **Doc:** `docs/building_footprints.md`. Test: `test_flip_makes_western_area_finite`.
+
+---
+
 ## [Unreleased] - 2026-11-04 (USASpending award text + FTS) — `e2149ece`
 
 ### USASpending award descriptions and keyword index

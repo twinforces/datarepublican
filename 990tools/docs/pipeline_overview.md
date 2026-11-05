@@ -110,6 +110,13 @@ python3 launch_overnight_cms_clia_pfs.py
 python3 launch_overnight_usaspending_text.py
 ```
 
+**CMS PUF implied hours** (`cms_puf_hours_processor.py`): `cms_puf_service` × `cms_pfs_work_time` / `cms_pfs_rvu` → `cms_puf_service_hours` / `cms_puf_npi_hours`. Lower bound (≤10-bene lines omitted). No building sqft in this pass. Doc: `docs/cms_puf_hours.md`.
+
+```bash
+python3 launch_overnight_cms_puf_hours.py
+```
+
+
 
 
 **`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.

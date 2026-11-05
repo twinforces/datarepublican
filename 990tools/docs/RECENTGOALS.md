@@ -4,6 +4,26 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-11-05: CMS PUF implied hours
+
+**What:** Wrapper **39329**, 13:04. `cms_puf_service_hours` 9,781,673 (9,236,202 timed). `cms_puf_npi_hours` 1,207,473. Building join: 7,475 exact / 434,429 within ±3 cells. 5,816 individuals with >2080h and max nearby sqft <4000 (labs/pathology excluded).
+
+**Why:** PUF units × 99213=30 min is the conversion. Hours are a lower bound (≤10-bene lines omitted). Labs sit at the top of a raw sort.
+
+**How:** `python3 launch_overnight_cms_puf_hours.py`. Doc: `docs/cms_puf_hours.md`. Test: `test_cms_puf_hours.py`. Hash: `897d9d8b`.
+
+---
+
+## 2026-11-05: building footprint area v2 (FlipCoordinates)
+
+**What:** Wrapper **97867**, 13:20. 130,099,920 buildings, 0 bad `area_sqft`. CA/TX median ~2,210 sqft. Allcare exact cell empty; nearest 6,539 sqft (v1 was 953).
+
+**Why:** v1 treated longitude as latitude.
+
+**How:** `INGEST_VERSION=2`, `--no-download`. Doc: `docs/building_footprints.md`. Hash: `0839098f`.
+
+---
+
 ## 2026-11-04: USASpending award text + FTS
 
 **What:** Descriptions / PSC / CFDA titles → `usaspending_award_text` + DuckDB FTS. Wrapper **50770**, 18:46. 51,082,389 awards (26.6M contract / 24.5M assistance), all with description. Slim actions still 63,616,013 with no description column.
@@ -96,8 +116,9 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 | USASpending FY2022–2027 | `41716877` — `docs/usaspending.md` |
 | USASpending award text + FTS | `e2149ece` — `docs/usaspending_text.md` |
 | CMS Physician PUF + LEIE | `6bef052c` — `docs/cms_puf.md` |
-| Building footprints sidecar | `7549fa11` — `docs/building_footprints.md` |
+| Building footprints sidecar | `7549fa11` ingest, `0839098f` area v2 — `docs/building_footprints.md` |
 | CMS CLIA + PFS work time | `c3f8fd3b` — `docs/cms_clia_pfs.md` |
+| CMS PUF implied hours | `897d9d8b` — `docs/cms_puf_hours.md` |
 | Grok geocode | off until asked. Census TSV / Photon / maps.co / OpenCage first. |
 
 Do not treat GIN, UEI, CAGE, or PPP borrower name as an IRS EIN. Do not ingest PECOS or EIDL unless asked. LEIE is in (`cms_leie`, 2026-11-03).
