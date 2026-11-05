@@ -104,6 +104,13 @@ python3 launch_overnight_cms_puf.py
 python3 launch_overnight_cms_clia_pfs.py
 ```
 
+**USASpending award text + FTS** (`usaspending_text_processor.py`): descriptions / PSC / CFDA titles from the extracted archive CSVs → `usaspending_award_text` + DuckDB FTS. Slim `usaspending_actions` unchanged. Postgres dump parked. Not on `--step all`. Doc: `docs/usaspending_text.md`.
+
+```bash
+python3 launch_overnight_usaspending_text.py
+```
+
+
 
 **`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.
 

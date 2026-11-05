@@ -5,6 +5,17 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-04 (USASpending award text + FTS) — `e2149ece`
+
+### USASpending award descriptions and keyword index
+- **Why:** Slim actions have dollars and UEI, not the transaction sentence. A search for “personal care” or a PSC needs that text.
+- **Change:** `usaspending_text_processor.py` collapses extracted archive CSVs to one row per `award_key` (longest description) via parquet parts on Insurrection, then `usaspending_award_text` + DuckDB FTS. Slim table unchanged. Postgres dump parked. Not on `--step all`. Overnight: `launch_overnight_usaspending_text.py`. Warehouse merge is 32 hash partitions (one GROUP BY over all parts OOM'd at 12GB, wrapper **46442**).
+- **Worked:** wrapper **50770** 2026-11-04 18:46. `usaspending_award_text` 51,082,389 (26.6M contract / 24.5M assistance), all with description. FTS built. Slim `usaspending_actions` still 63,616,013 with no description column.
+- **Failed:** **46442** single GROUP BY of 71 parquet parts OOM at 12GB.
+- **Doc:** `docs/usaspending_text.md`. Test: `test_usaspending_text.py`.
+
+---
+
 ## [Unreleased] - 2026-11-04 (CLIA + PFS work time) — `c3f8fd3b`
 
 ### CMS CLIA labs + Physician Fee Schedule work RVU/time

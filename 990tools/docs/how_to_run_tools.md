@@ -55,6 +55,8 @@ nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
 USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending \
   ./overnight_usaspending_run.sh
 # smoke: --step usaspending --start-year 2025 --end-year 2025 --max-files 1000
+# Award descriptions + DuckDB FTS from those CSVs (slim actions unchanged). Postgres dump parked.
+python3 launch_overnight_usaspending_text.py
 # CMS 2024 Physician PUF + LEIE (not on --step all). CSVs on Insurrection.
 python3 launch_overnight_cms_puf_download.py
 python3 launch_overnight_cms_puf.py

@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-11-04: USASpending award text + FTS
+
+**What:** Descriptions / PSC / CFDA titles → `usaspending_award_text` + DuckDB FTS. Wrapper **50770**, 18:46. 51,082,389 awards (26.6M contract / 24.5M assistance), all with description. Slim actions still 63,616,013 with no description column.
+
+**Why:** Keyword search over federal awards. Postgres dump stays parked.
+
+**How:** `python3 launch_overnight_usaspending_text.py`. Doc: `docs/usaspending_text.md`. Test: `test_usaspending_text.py`. First merge (**46442**) OOM'd; 32 hash partitions fixed it. Hash: `e2149ece`.
+
+---
+
 ## 2026-11-04: CMS CLIA + PFS work RVU/time
 
 **What:** POS Clinical Laboratories Q3 2026 + PPRRVU work RVUs + CY 2026 physician work-time into `/Volumes/Data/final/irs990.duckdb`. Wrapper **14844**, 15:33. `cms_clia` 686,058 (TN 16,001); `cms_pfs_rvu` 19,226; `cms_pfs_work_time` 9,725. 99213 = 1.3 work RVU / 30 minutes.
@@ -84,6 +94,7 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 | XML Addresses → TSV | `15b785fb` |
 | FEC bulk 2024+2026 | `edd86a52` — `docs/fec.md` |
 | USASpending FY2022–2027 | `41716877` — `docs/usaspending.md` |
+| USASpending award text + FTS | `e2149ece` — `docs/usaspending_text.md` |
 | CMS Physician PUF + LEIE | `6bef052c` — `docs/cms_puf.md` |
 | Building footprints sidecar | `7549fa11` — `docs/building_footprints.md` |
 | CMS CLIA + PFS work time | `c3f8fd3b` — `docs/cms_clia_pfs.md` |

@@ -661,6 +661,11 @@ CREATE INDEX IF NOT EXISTS idx_medicare_provider_rollup_provider_id ON medicare_
 -- CREATE TABLE IF NOT EXISTS cms_puf_geo (HCPCS_Cd VARCHAR);
 -- CREATE TABLE IF NOT EXISTS cms_leie (NPI BIGINT);
 
+-- USASpending award text + FTS (usaspending_text_processor.py). One row per award_key.
+-- CREATE TABLE IF NOT EXISTS usaspending_award_text (
+--     award_key VARCHAR PRIMARY KEY, description VARCHAR, psc VARCHAR, program_title VARCHAR
+-- );
+
 -- CMS CLIA POS + PFS work RVU/time (cms_clia_pfs_processor.py). CREATE OR REPLACE.
 -- CLIA has no NPI; PRVDR_NUM is the CLIA id. RVU skip=9 copyright preamble.
 -- CREATE TABLE IF NOT EXISTS cms_clia (PRVDR_NUM VARCHAR, FAC_NAME VARCHAR, STATE_CD VARCHAR);
