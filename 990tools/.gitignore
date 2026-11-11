@@ -53,6 +53,9 @@ ofac_reporting/*.log
 # PPP / federal $ galleries (regenerate via spending_reporting/generate_galleries.py)
 spending_reporting/reports/
 
+# CMS PUF watch gallery (regenerate via cms_reporting/generate_watch_gallery.py)
+cms_reporting/reports/
+
 # Process / supervisor pid files
 *.pid
 backfill_colocators.pid

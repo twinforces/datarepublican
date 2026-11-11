@@ -32,3 +32,5 @@ LIMIT 50;
 2026-11-05 ingest (wrapper **39329**): 9,781,673 service rows (9,236,202 timed) / 1,207,473 NPIs (1,192,538 with colocator). 15,076 NPIs above 3000 timed hours. A raw sort puts clinical labs first — pathology units × a time-file row is not “one physician’s year.” Filter `provider_type` / `entity` before reading it as a person.
 
 Building join (`--sqft-only`, ±3 cells): **7,475** exact / **434,429** near of 1,207,473 NPIs. Cut `entity='I' AND hours_timed > 2080 AND max_area_near < 4000` excluding lab/pathology: **5,816** NPIs. Therapy and optometry dominate a raw hours sort — filter `provider_type` before reading it as a physician-year.
+
+The ranked watch list from this table is `docs/cms_puf_score.md` (`watch=1,338` after office/facility, specialty p90, and mill rules).
