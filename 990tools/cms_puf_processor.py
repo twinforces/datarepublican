@@ -13,15 +13,32 @@ from typing import Dict
 
 import duckdb
 
+from download_utils import ensure_download
 from logging_utils import log_info
 
 DEFAULT_DATA_DIR = Path("/Volumes/Insurrection/990data/cms_data/medicare_puf")
 
 FILES = (
-    ("cms_puf_provider", "MUP_PHY_R26_P05_V10_D24_Prov.csv"),
-    ("cms_puf_service", "PHY_R26_P05_V10_D24_Prov_Svc.csv"),
-    ("cms_puf_geo", "MUP_PHY_R26_P05_V10_D24_Geo.csv"),
-    ("cms_leie", "LEIE_UPDATED.csv"),
+    (
+        "cms_puf_provider",
+        "MUP_PHY_R26_P05_V10_D24_Prov.csv",
+        "https://data.cms.gov/sites/default/files/2026-05/7323ba02-52e7-4a86-b2ce-ad210c25d9aa/MUP_PHY_R26_P05_V10_D24_Prov.csv",
+    ),
+    (
+        "cms_puf_service",
+        "PHY_R26_P05_V10_D24_Prov_Svc.csv",
+        "https://data.cms.gov/sites/default/files/2026-05/b5ebab5a-f490-418a-9bce-4b9f31419356/PHY_R26_P05_V10_D24_Prov_Svc.csv",
+    ),
+    (
+        "cms_puf_geo",
+        "MUP_PHY_R26_P05_V10_D24_Geo.csv",
+        "https://data.cms.gov/sites/default/files/2026-05/e534c74b-79b8-4892-8a95-5a17e2dfec9f/MUP_PHY_R26_P05_V10_D24_Geo.csv",
+    ),
+    (
+        "cms_leie",
+        "LEIE_UPDATED.csv",
+        "https://oig.hhs.gov/exclusions/downloadables/UPDATED.csv",
+    ),
 )
 
 INDEXES = (
@@ -41,7 +58,15 @@ class CmsPufProcessor:
         self.db_path = db_path
         self.data_dir = Path(data_dir) if data_dir else default_data_dir()
 
-    def run(self) -> Dict[str, int]:
+    def download(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        for _table, name, url in FILES:
+            log_info(f"CMS PUF {name}")
+            ensure_download(url, self.data_dir / name)
+
+    def run(self, *, skip_download: bool = False) -> Dict[str, int]:
+        if not skip_download:
+            self.download()
         stats: Dict[str, int] = {}
         mem = os.environ.get("DUCKDB_MEMORY_LIMIT", "12GB")
         log_info(f"CMS PUF ingest from {self.data_dir} db={self.db_path} mem={mem}")
@@ -54,7 +79,7 @@ class CmsPufProcessor:
             },
         )
         try:
-            for table, name in FILES:
+            for table, name, _url in FILES:
                 path = self.data_dir / name
                 if not path.exists() or path.stat().st_size == 0:
                     raise RuntimeError(f"missing PUF file {path}")

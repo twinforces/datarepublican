@@ -21,7 +21,7 @@
 
 Hospital campuses stack too (Cedars, Brigham 75 Francis St). Mill uses a tighter 3,000 sqft cut than solo, and counts **office** hours so nursing-home rounders at a shared pin do not make a mill. Facility-heavy NPIs drop out of solo watch even if the pin is a house.
 
-**How:** `python3 -u cms_puf_score_processor.py` (needs `cms_puf_npi_hours` + `cms_puf_service_hours`). Not on `--step all`. Tests: `python3 -m unittest test_cms_puf_score.py`.
+**How:** `python -u irs990processor.py --step cms_puf_score --nostats -v` (needs `cms_puf_npi_hours` + `cms_puf_service_hours`). Tests: `python3 -m unittest test_cms_puf_score.py`.
 
 ```sql
 SELECT npi, name, first_name, provider_type, hours_office, office_vs_p90,

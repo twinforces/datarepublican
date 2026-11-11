@@ -16,10 +16,10 @@ Hours are a **lower bound**: CMS omits service rows with ≤10 benes. Do not tre
 **How:**
 
 ```bash
-python3 launch_overnight_cms_puf_hours.py
+python -u irs990processor.py --step cms_puf_hours --nostats -v
 ```
 
-Not on `--step all`. Direct `duckdb.connect` on Data.
+`--step cms_puf_hours` (after `geolocate_archive`). Direct `duckdb.connect` on Data.
 
 ```sql
 SELECT npi, name, provider_type, hours_timed, srvcs_untimed, suppressed_srvcs, colocator

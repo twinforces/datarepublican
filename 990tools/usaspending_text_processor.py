@@ -6,7 +6,7 @@ Slim `usaspending_actions` stays as-is (no description column). This builds
 DuckDB FTS index over description / PSC title / program title.
 
 Reads the CSVs already extracted on Insurrection. Does not download the
-Postgres dump. Not on --step all.
+Postgres dump. `--step usaspending_text` after `usaspending`.
 """
 
 from __future__ import annotations

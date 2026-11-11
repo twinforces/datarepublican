@@ -24,7 +24,7 @@ python3 launch_overnight_building_footprints.py
 BUILDING_STATES=Delaware python3 -u building_footprints_processor.py
 ```
 
-Not on `--step all`. Join with ATTACH (both volumes mounted):
+`--step building_footprints`. Join with ATTACH (both volumes mounted):
 
 ```sql
 ATTACH '/Volumes/Insurrection/990data/buildings.duckdb' AS bld;

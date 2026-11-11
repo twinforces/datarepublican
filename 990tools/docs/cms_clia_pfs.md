@@ -4,7 +4,7 @@
 
 **Why:** A reasonableness grade that turns billed units into hours needs CMS’s own minutes and work RVUs. The PUF has volume; this is the conversion. CLIA is the lab roster (certificate, address, test volume) so a high-volume genetic-test NPI can be checked against an actual certified lab. CLIA has **no NPI** — `PRVDR_NUM` is the CLIA id (`01D0026356`).
 
-**Tables** (CREATE OR REPLACE, CMS grain, not `--step all`):
+**Tables** (CREATE OR REPLACE, CMS grain, `--step cms_clia_pfs`):
 
 | Table | Source | Grain |
 |---|---|---|
@@ -17,7 +17,7 @@
 **How:**
 
 ```bash
-python3 launch_overnight_cms_clia_pfs.py
+python -u irs990processor.py --step cms_clia_pfs --nostats -v
 ```
 
 Files on Insurrection (`CMS_CLIA_PFS_DATA_DIR`, default `/Volumes/Insurrection/990data/cms_data/clia_pfs`). DuckDB on Data. Direct `duckdb.connect`. Overnight is a Python double-fork so a Grok 10h process-group kill misses it.

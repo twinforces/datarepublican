@@ -6,10 +6,10 @@
 
 **Tables:** `usaspending_award_text` (`award_key` PK, `description`, `psc`, `psc_description`, `program_code`, `program_title`, UEI/name). Join `usaspending_actions.award_key`. FTS: `fts_main_usaspending_award_text.match_bm25(award_key, 'query')`.
 
-**How:** Uses extracted `FY*_All_*_Full_*.csv` (no re-download). Per-CSV collapse writes parquet under `USASPENDING_DATA_DIR/text_parts/` so the 108G warehouse only receives unique awards. Resume via `.usaspending_text_ingest.json`. Warehouse merge is 32 hash partitions of `award_key` (a single GROUP BY of all parts OOM'd at 12GB). Temp spills to `text_parts/_duckdb_tmp`. Not on `--step all`.
+**How:** Uses extracted `FY*_All_*_Full_*.csv` (no re-download). Per-CSV collapse writes parquet under `USASPENDING_DATA_DIR/text_parts/` so the 108G warehouse only receives unique awards. Resume via `.usaspending_text_ingest.json`. Warehouse merge is 32 hash partitions of `award_key` (a single GROUP BY of all parts OOM'd at 12GB). Temp spills to `text_parts/_duckdb_tmp`. `--step usaspending_text` after `usaspending`.
 
 ```bash
-python3 launch_overnight_usaspending_text.py
+python -u irs990processor.py --step usaspending_text --nostats -v
 ```
 
 Smoke: `python3 -u usaspending_text_processor.py --start-year 2027 --end-year 2027`.

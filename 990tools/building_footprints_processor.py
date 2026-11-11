@@ -5,7 +5,7 @@ Polygons stay on disk only long enough to measure. The warehouse table is
 centroid + area + colocator (same LL:round(lat,4) as Addresses). Join is
 ATTACH buildings.duckdb then building_colocator.colocator = Addresses.colocator.
 
-Not on --step all. Sidecar on Insurrection so the 108G irs990 file does not grow.
+Sidecar on Insurrection so the 108G irs990 file does not grow. `--step building_footprints`.
 """
 
 from __future__ import annotations

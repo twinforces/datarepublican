@@ -13,7 +13,7 @@
 | `MUP_PHY_R26_P05_V10_D24_Geo.csv` | `cms_puf_geo` | none |
 | `LEIE_UPDATED.csv` | `cms_leie` | n/a |
 
-**How:** `python3 launch_overnight_cms_puf.py` (download first with `launch_overnight_cms_puf_download.py`). DuckDB on Data. Not on `--step all` yet.
+**How:** `python -u irs990processor.py --step cms_puf --nostats -v` (download + COPY). DuckDB on Data. Overnight wrappers still work.
 
 Column names stay as CMS published them (`Rndrng_NPI`, `HCPCS_Cd`, `Bene_Avg_Age`).
 

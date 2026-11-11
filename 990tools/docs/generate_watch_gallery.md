@@ -7,6 +7,8 @@
 **How:**
 
 ```bash
+python -u irs990processor.py --step cms_puf_watch --nostats -v
+# or
 python3 -u cms_reporting/generate_watch_gallery.py \
     --db-path /Volumes/Data/final/irs990.duckdb
 ```
@@ -15,7 +17,7 @@ Writes `dot_reporting/reports/cms_puf_watch/` (`index.html` mills, `solo.html`, 
 
 **Campus leftover** on mill pins: OSM `building`/`amenity`/`healthcare=hospital` within 80 m, or a neighbor about six stories (20 m / 8 floors), or Overture class `hospital`. That is the Brigham / cancer-center scrap-footprint pattern. A one-story medical park (Doctor Cir) stays unflagged. Live Overpass at generate time; optional `_output/cms_puf_watch_height.tsv` from the mill-pin probe. `--no-osm` skips Overpass. Pins stay on the mill list; the flag is the cut.
 
-Not on `--step all`. Tests: `python3 -m unittest test_cms_watch_gallery.py`.
+`--step cms_puf_watch`. Tests: `python3 -m unittest test_cms_watch_gallery.py`.
 
 Fun wrap copies the extra suite (do not full-rsync Fun):
 

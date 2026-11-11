@@ -70,6 +70,12 @@ from dot_processor import DotProcessor
 from ppp_processor import PppProcessor
 from sam_processor import SamProcessor
 from usaspending_processor import UsaSpendingProcessor, default_data_dir as usaspending_data_dir
+from usaspending_text_processor import UsaSpendingTextProcessor
+from cms_puf_processor import CmsPufProcessor, default_data_dir as cms_puf_data_dir
+from cms_clia_pfs_processor import CmsCliaPfsProcessor, default_data_dir as cms_clia_pfs_data_dir
+from cms_puf_hours_processor import CmsPufHoursProcessor
+from cms_puf_score_processor import CmsPufScoreProcessor
+from building_footprints_processor import BuildingFootprintsProcessor
 from logging_utils import log_info, log_error, log_debug, log_warning, update_logging_config
 from config import global_config
 from queue_status_display import QueueStatusDisplay
@@ -104,9 +110,13 @@ BATCH_SIZE = 100
 # Geolocate (after match): prev → census bulk → API tail → grok batch → archive.
 # geolocate_new = legacy combined census+api (one step); prefer census then api separately.
 PIPELINE_STEPS = [
-    "irsfetch", "zip", "bmf", "xml", "fec", "medicare", "sanctions", "dot", "dot_safety", "ppp", "sam", "usaspending", "address", "einless", "match",
+    "irsfetch", "zip", "bmf", "xml", "fec", "medicare",
+    "cms_puf", "cms_clia_pfs", "building_footprints",
+    "sanctions", "dot", "dot_safety", "ppp", "sam", "usaspending", "usaspending_text",
+    "address", "einless", "match",
     "geolocate_prev", "geolocate_census", "geolocate_api", "geolocate_new", "geolocate_grok",
     "geolocate_archive",
+    "cms_puf_hours", "cms_puf_score", "cms_puf_watch",
     "grant_match", "backfill", "photos", "ratios",
     "percentiles", "export",
 ]
@@ -229,6 +239,15 @@ class IRS990Processor(BaseProcessor):
             data_dir=usaspending_data_dir(str(final_dir)),
             max_files=self.max_files,
         )
+        self.cms_puf_processor = CmsPufProcessor(
+            self.db_path, data_dir=cms_puf_data_dir()
+        )
+        self.cms_clia_pfs_processor = CmsCliaPfsProcessor(
+            self.db_path, data_dir=cms_clia_pfs_data_dir()
+        )
+        self.building_footprints_processor = BuildingFootprintsProcessor()
+        self.cms_puf_hours_processor = CmsPufHoursProcessor(self.db_path)
+        self.cms_puf_score_processor = CmsPufScoreProcessor(self.db_path)
         # Initialize bulk operations
         self.bulk_ops = self.db_ops.get_bulk_operations()
 
@@ -585,6 +604,97 @@ class IRS990Processor(BaseProcessor):
         )
         self.processed_steps += 1
         return stats.get("actions", 0)
+
+    def run_usaspending_text(self, start_year: int = 2022, end_year: int = 2030):
+        """Award descriptions + DuckDB FTS from extracted USASpending CSVs."""
+        if self.exit_processing:
+            log_info("Shutdown requested before USASpending text")
+            return 0
+        log_info(
+            f"Running USASpending award text + FTS FY{start_year}–FY{end_year}"
+        )
+        proc = UsaSpendingTextProcessor(
+            self.db_path,
+            data_dir=usaspending_data_dir(str(self.final_dir)),
+            start_year=start_year,
+            end_year=end_year,
+            max_files=self.max_files,
+        )
+        stats = proc.run()
+        self.processed_steps += 1
+        return stats.get("usaspending_award_text", 0)
+
+    def run_cms_puf(self):
+        """Download CMS Physician PUF + LEIE and COPY into DuckDB."""
+        if self.exit_processing:
+            log_info("Shutdown requested before CMS PUF")
+            return 0
+        log_info("Running CMS Physician PUF + LEIE download + ingest")
+        stats = self.cms_puf_processor.run()
+        self.processed_steps += 1
+        return stats.get("cms_puf_service", 0)
+
+    def run_cms_clia_pfs(self):
+        """CLIA lab roster + PFS work RVU/time (minutes for PUF hours)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before CLIA/PFS")
+            return 0
+        log_info("Running CMS CLIA labs + PFS work RVU/time ingest")
+        stats = self.cms_clia_pfs_processor.run()
+        self.processed_steps += 1
+        return stats.get("cms_pfs_work_time", 0)
+
+    def run_building_footprints(self):
+        """Microsoft US building footprints sidecar (Insurrection)."""
+        if self.exit_processing:
+            log_info("Shutdown requested before building footprints")
+            return 0
+        log_info("Running Microsoft US building footprints sidecar ingest")
+        stats = self.building_footprints_processor.run()
+        self.processed_steps += 1
+        return stats.get("building_footprints", 0)
+
+    def run_cms_puf_hours(self):
+        """PUF volume × PFS minutes, then ATTACH building sqft if the sidecar exists."""
+        if self.exit_processing:
+            log_info("Shutdown requested before CMS PUF hours")
+            return 0
+        log_info("Running CMS PUF implied hours")
+        stats = self.cms_puf_hours_processor.run()
+        self.processed_steps += 1
+        return stats.get("cms_puf_npi_hours", 0)
+
+    def run_cms_puf_score(self):
+        """Ranked mill/solo watch list. Not a fraud determination."""
+        if self.exit_processing:
+            log_info("Shutdown requested before CMS PUF score")
+            return 0
+        log_info("Running CMS PUF watch list")
+        stats = self.cms_puf_score_processor.run()
+        self.processed_steps += 1
+        return stats.get("cms_puf_npi_score", 0)
+
+    def run_cms_puf_watch(self):
+        """HTML mill/solo gallery from cms_puf_npi_score."""
+        if self.exit_processing:
+            log_info("Shutdown requested before CMS PUF watch gallery")
+            return 0
+        from cms_reporting.generate_watch_gallery import (  # noqa: PLC0415
+            DEFAULT_OUT,
+            ROOT,
+            generate,
+        )
+
+        log_info("Running CMS PUF watch gallery")
+        height = ROOT / "_output" / "cms_puf_watch_height.tsv"
+        meta = generate(
+            self.db_path,
+            DEFAULT_OUT,
+            osm=True,
+            height_tsv=height if height.exists() else None,
+        )
+        self.processed_steps += 1
+        return int(meta.get("mills", 0)) + int(meta.get("solos", 0))
 
     def process_xml_files(self):
         """Parse XML files and extract data to dataclasses (step 5)"""
@@ -1030,12 +1140,18 @@ def main():
         "bmf": lambda: processor.process_bmf_files(),
         "fec": lambda: processor.run_fec(),
         "medicare": lambda: processor.run_medicare(),
+        "cms_puf": lambda: processor.run_cms_puf(),
+        "cms_clia_pfs": lambda: processor.run_cms_clia_pfs(),
+        "building_footprints": lambda: processor.run_building_footprints(),
         "sanctions": lambda: processor.run_sanctions(),
         "dot": lambda: processor.run_dot(),
         "dot_safety": lambda: processor.run_dot_safety(),
         "ppp": lambda: processor.run_ppp(),
         "sam": lambda: processor.run_sam(),
         "usaspending": lambda: processor.run_usaspending(args.start_year, args.end_year),
+        "usaspending_text": lambda: processor.run_usaspending_text(
+            args.start_year, args.end_year
+        ),
         "address": lambda: processor.deduplicate_addresses(),
         "einless": lambda: processor.run_einless(),
         "match": lambda: processor.match_grants(),
@@ -1045,6 +1161,9 @@ def main():
         "geolocate_new": lambda: processor.run_geolocate_new(),
         "geolocate_grok": lambda: processor.run_geolocate_grok(),
         "geolocate_archive": lambda: processor.run_geolocate_archive(),
+        "cms_puf_hours": lambda: processor.run_cms_puf_hours(),
+        "cms_puf_score": lambda: processor.run_cms_puf_score(),
+        "cms_puf_watch": lambda: processor.run_cms_puf_watch(),
         "geolocate": lambda: processor.run_geolocate_new(),
         "geolocate1": lambda: processor.run_geolocate_prev(),
         "grant_match": lambda: processor.grant_match_processor.match_grants(),

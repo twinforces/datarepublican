@@ -6,7 +6,7 @@ Tables (CREATE OR REPLACE, main irs990.duckdb):
   cms_pfs_rvu       PPRRVU non-QPP: work RVU + PE/MP + intra/pre/post fractions
   cms_pfs_work_time CY PFS final-rule physician work minutes (efficiency-adjusted)
 
-No Addresses. Not on --step all. CLIA has no NPI (PRVDR_NUM is the CLIA id).
+No Addresses. `--step cms_clia_pfs`. CLIA has no NPI (PRVDR_NUM is the CLIA id).
 hcpcs_codes stays descriptor-only; this is the time/RVU grain for a later
 reasonableness grade (Tot_Srvcs × minutes).
 """
