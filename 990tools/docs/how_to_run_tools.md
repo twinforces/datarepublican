@@ -64,6 +64,10 @@ python3 launch_overnight_cms_puf.py
 python3 launch_overnight_cms_clia_pfs.py
 # PUF × PFS minutes → implied hours (no building sidecar).
 python3 launch_overnight_cms_puf_hours.py
+# Ranked watch list from those hours (not a fraud determination).
+python3 -u cms_puf_score_processor.py
+# HTML gallery (mills + solo + mill detail pages).
+python3 -u cms_reporting/generate_watch_gallery.py
 # Hub parquet for new tables (HF_TOKEN from ../.envrc). Out on Insurrection.
 python3 launch_overnight_hf.py
 # Microsoft building footprints sidecar (Insurrection). Photon/Docker off.

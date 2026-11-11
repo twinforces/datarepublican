@@ -110,14 +110,23 @@ python3 launch_overnight_cms_clia_pfs.py
 python3 launch_overnight_usaspending_text.py
 ```
 
-**CMS PUF implied hours** (`cms_puf_hours_processor.py`): `cms_puf_service` × `cms_pfs_work_time` / `cms_pfs_rvu` → `cms_puf_service_hours` / `cms_puf_npi_hours`. Lower bound (≤10-bene lines omitted). No building sqft in this pass. Doc: `docs/cms_puf_hours.md`.
+**CMS PUF implied hours** (`cms_puf_hours_processor.py`): `cms_puf_service` × `cms_pfs_work_time` / `cms_pfs_rvu` → `cms_puf_service_hours` / `cms_puf_npi_hours`. Lower bound (≤10-bene lines omitted). Building sqft is a later ATTACH. Doc: `docs/cms_puf_hours.md`.
 
 ```bash
 python3 launch_overnight_cms_puf_hours.py
 ```
 
+**CMS PUF watch list** (`cms_puf_score_processor.py`): office vs facility, specialty p90, mill stack in a small building → `cms_puf_npi_score` / `cms_puf_watch_cells`. Not a fraud determination. Doc: `docs/cms_puf_score.md`.
 
+```bash
+python3 -u cms_puf_score_processor.py
+```
 
+**CMS PUF watch gallery** (`cms_reporting/generate_watch_gallery.py`): mill pins, solo outliers, mill detail pages under `dot_reporting/reports/cms_puf_watch/`. Campus leftover via Overpass / Overture. Fun extra `cms_puf_watch`. Doc: `docs/generate_watch_gallery.md`.
+
+```bash
+python3 -u cms_reporting/generate_watch_gallery.py
+```
 
 **`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.
 

@@ -4,6 +4,26 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-11-05: CMS PUF watch gallery
+
+**What:** `cms_reporting/generate_watch_gallery.py` → `dot_reporting/reports/cms_puf_watch/` (25 mill pins, 1,242 solo, one detail page per pin). Fun extra `cms_puf_watch`. Master index featured row.
+
+**Why:** A table is not a queue a human will click. Same shape as DOT Rogues, with “not a fraud determination” on every page.
+
+**How:** `python3 -u cms_reporting/generate_watch_gallery.py`. Wrap: `python3 scripts/build_site.py --copy-focus cms_puf_watch --force-copy` from grumpytechbro.com. Doc: `docs/generate_watch_gallery.md`. Hash: `c2899e50`.
+
+---
+
+## 2026-11-05: CMS PUF watch list
+
+**What:** `cms_puf_npi_score` 1,197,445 NPIs. `watch=1,338` (solo 1,242, mill 198 at 25 cells). Raw 5,816-hour queue → 1,531 still watch. Paley/Kvitle off the list. SC House Calls is the top mill. Zero LEIE overlap.
+
+**Why:** Hours at a house pin is not fraud. Facility rounding, therapy units, and hospital campuses have to drop out before a human reads the queue.
+
+**How:** `python3 -u cms_puf_score_processor.py`. Doc: `docs/cms_puf_score.md`. Tests: `test_cms_puf_score.py`. Hash: `c2899e50`.
+
+---
+
 ## 2026-11-05: CMS PUF implied hours
 
 **What:** Wrapper **39329**, 13:04. `cms_puf_service_hours` 9,781,673 (9,236,202 timed). `cms_puf_npi_hours` 1,207,473. Building join: 7,475 exact / 434,429 within ±3 cells. 5,816 individuals with >2080h and max nearby sqft <4000 (labs/pathology excluded).
@@ -119,6 +139,7 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 | Building footprints sidecar | `7549fa11` ingest, `0839098f` area v2 — `docs/building_footprints.md` |
 | CMS CLIA + PFS work time | `c3f8fd3b` — `docs/cms_clia_pfs.md` |
 | CMS PUF implied hours | `897d9d8b` — `docs/cms_puf_hours.md` |
+| CMS PUF watch list + gallery | `c2899e50` — `docs/cms_puf_score.md`, `docs/generate_watch_gallery.md` |
 | Grok geocode | off until asked. Census TSV / Photon / maps.co / OpenCage first. |
 
 Do not treat GIN, UEI, CAGE, or PPP borrower name as an IRS EIN. Do not ingest PECOS or EIDL unless asked. LEIE is in (`cms_leie`, 2026-11-03).

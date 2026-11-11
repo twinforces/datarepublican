@@ -5,6 +5,26 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-05 (CMS PUF watch gallery) — `c2899e50`
+
+### HTML mill / solo pages
+- **Why:** The watch table is a queue. Fun already ships ranked tables + maps for DOT Rogues.
+- **Change:** `cms_reporting/generate_watch_gallery.py` writes mills, solo outliers, and one detail page per mill pin under `dot_reporting/reports/cms_puf_watch/`. Featured on `master_index`. Fun extra `cms_puf_watch`. Campus leftover on mill pins: OSM hospital within 80 m, neighbor about six stories (20 m / 8 floors), or Overture class hospital (`campus_flag.py`).
+- **Worked:** 25 mill pins, 1,242 solo. SC House Calls is the top mill page. Paley is not on solo.
+- **Doc:** `docs/generate_watch_gallery.md`. Test: `test_cms_watch_gallery.py`.
+
+---
+
+## [Unreleased] - 2026-11-05 (CMS PUF watch list) — `c2899e50`
+
+### Ranked watch list from implied hours
+- **Why:** 5,816 individuals with >2,080 timed hours in a <4,000 sqft pin is mostly facility rounding, therapy, optometry, and hospital campuses.
+- **Change:** `cms_puf_score_processor.py` → `cms_puf_npi_score` + `cms_puf_watch_cells`. Solo = office-heavy + 2× specialty p90 + small site, not therapy/optometry/lab. Mill = ≥5 people with >2,080 **office** hours in <3,000 sqft, one city. `priority` ranks the queue.
+- **Worked:** 1,197,445 scored; watch **1,338** (solo 1,242, mill 198 NPIs / 25 cells). Paley 0.3% office. Kvitle optometry. SC House Calls 50 office-high NPIs at 2,743 sqft.
+- **Doc:** `docs/cms_puf_score.md`. Test: `test_cms_puf_score.py`.
+
+---
+
 ## [Unreleased] - 2026-11-05 (CMS PUF implied hours) — `897d9d8b`
 
 ### PUF volume × fee-schedule minutes
