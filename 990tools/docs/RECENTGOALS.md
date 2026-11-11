@@ -4,6 +4,16 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 
 ---
 
+## 2026-11-10: sidecars on --step all
+
+**What:** `cms_puf`, `cms_clia_pfs`, `building_footprints`, `usaspending_text`, `cms_puf_hours`, `cms_puf_score`, `cms_puf_watch` are `PIPELINE_STEPS`. PUF downloads in `CmsPufProcessor.run()`.
+
+**Why:** `--step all` must rebuild the warehouse from scratch, including utilization hours and the watch list.
+
+**How:** `python -u irs990processor.py --step cms_puf` (etc.). Hours after `geolocate_archive`. Test: `test_pipeline_steps.py`. Hash: `52501cac`.
+
+---
+
 ## 2026-11-05: CMS PUF watch gallery
 
 **What:** `cms_reporting/generate_watch_gallery.py` → `dot_reporting/reports/cms_puf_watch/` (25 mill pins, 1,242 solo, one detail page per pin). Fun extra `cms_puf_watch`. Master index featured row.
@@ -140,6 +150,7 @@ Active scratchpad (What / Why / How + hashes). Older detail lives in CHANGELOG.m
 | CMS CLIA + PFS work time | `c3f8fd3b` — `docs/cms_clia_pfs.md` |
 | CMS PUF implied hours | `897d9d8b` — `docs/cms_puf_hours.md` |
 | CMS PUF watch list + gallery | `c2899e50` — `docs/cms_puf_score.md`, `docs/generate_watch_gallery.md` |
+| Sidecars on `--step all` | `52501cac` — `docs/pipeline_overview.md` |
 | Grok geocode | off until asked. Census TSV / Photon / maps.co / OpenCage first. |
 
 Do not treat GIN, UEI, CAGE, or PPP borrower name as an IRS EIN. Do not ingest PECOS or EIDL unless asked. LEIE is in (`cms_leie`, 2026-11-03).

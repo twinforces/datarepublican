@@ -54,8 +54,10 @@ COPY (
 ## Main Pipeline Step Order (`irs990processor.py`)
 
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → sam → address → einless → match
+irsfetch → zip → bmf → xml → fec → medicare → cms_puf → cms_clia_pfs → building_footprints
+  → sanctions → dot → dot_safety → ppp → sam → usaspending → usaspending_text → address → einless → match
   → geolocate_prev → geolocate_census → geolocate_api → geolocate_grok → geolocate_archive
+  → cms_puf_hours → cms_puf_score → cms_puf_watch
   → grant_match → backfill → photos → ratios → percentiles → export
 ```
 
@@ -85,47 +87,46 @@ FEC_CYCLES=2024,2026 ./overnight_fec_run.sh
 
 Run standalone: `python -u irs990processor.py --step medicare --nostats -v`
 
-**Building footprints** (`building_footprints_processor.py`): Microsoft US v2 GeoJSON → sidecar `/Volumes/Insurrection/990data/buildings.duckdb` (`building_footprints`, `building_colocator`). Join `Addresses.colocator`. Not on `--step all`. Photon/Docker off. Doc: `docs/building_footprints.md`.
+**`building_footprints` step** (`building_footprints_processor.py`): Microsoft US v2 GeoJSON → sidecar `/Volumes/Insurrection/990data/buildings.duckdb` (`building_footprints`, `building_colocator`). Join `Addresses.colocator`. Sidecar so the 108G irs990 file does not grow. Photon/Docker off. Doc: `docs/building_footprints.md`.
 
 ```bash
-python3 launch_overnight_building_footprints.py
+python -u irs990processor.py --step building_footprints --nostats -v
 ```
 
-**CMS Physician PUF + LEIE** (`cms_puf_processor.py`): 2024 By Provider / By Provider and Service / By Geography plus OIG LEIE. Sidecar, not `--step all`. `Bene_Avg_Age` is NPI-year mix. CSVs on Insurrection (`CMS_PUF_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_puf.md`.
+**`cms_puf` step** (`cms_puf_processor.py`): 2024 By Provider / By Provider and Service / By Geography plus OIG LEIE. Downloads then COPY. `Bene_Avg_Age` is NPI-year mix. CSVs on Insurrection (`CMS_PUF_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_puf.md`.
 
 ```bash
-python3 launch_overnight_cms_puf_download.py
-python3 launch_overnight_cms_puf.py
+python -u irs990processor.py --step cms_puf --nostats -v
 ```
 
-**CMS CLIA + PFS work time** (`cms_clia_pfs_processor.py`): POS Clinical Laboratories (newest quarter) plus PPRRVU work RVUs and the CY PFS physician work-time file. `cms_clia` / `cms_pfs_rvu` / `cms_pfs_work_time`. CLIA has no NPI (`PRVDR_NUM` is the CLIA id). Not on `--step all`. Files on Insurrection (`CMS_CLIA_PFS_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_clia_pfs.md`.
+**`cms_clia_pfs` step** (`cms_clia_pfs_processor.py`): POS Clinical Laboratories (newest quarter) plus PPRRVU work RVUs and the CY PFS physician work-time file. `cms_clia` / `cms_pfs_rvu` / `cms_pfs_work_time`. CLIA has no NPI (`PRVDR_NUM` is the CLIA id). Files on Insurrection (`CMS_CLIA_PFS_DATA_DIR`). Direct `duckdb.connect`. Doc: `docs/cms_clia_pfs.md`.
 
 ```bash
-python3 launch_overnight_cms_clia_pfs.py
+python -u irs990processor.py --step cms_clia_pfs --nostats -v
 ```
 
-**USASpending award text + FTS** (`usaspending_text_processor.py`): descriptions / PSC / CFDA titles from the extracted archive CSVs → `usaspending_award_text` + DuckDB FTS. Slim `usaspending_actions` unchanged. Postgres dump parked. Not on `--step all`. Doc: `docs/usaspending_text.md`.
+**`usaspending_text` step** (`usaspending_text_processor.py`): descriptions / PSC / CFDA titles from the extracted archive CSVs → `usaspending_award_text` + DuckDB FTS. Slim `usaspending_actions` unchanged. Postgres dump parked. After `usaspending`. Doc: `docs/usaspending_text.md`.
 
 ```bash
-python3 launch_overnight_usaspending_text.py
+python -u irs990processor.py --step usaspending_text --nostats -v
 ```
 
-**CMS PUF implied hours** (`cms_puf_hours_processor.py`): `cms_puf_service` × `cms_pfs_work_time` / `cms_pfs_rvu` → `cms_puf_service_hours` / `cms_puf_npi_hours`. Lower bound (≤10-bene lines omitted). Building sqft is a later ATTACH. Doc: `docs/cms_puf_hours.md`.
+**`cms_puf_hours` step** (`cms_puf_hours_processor.py`): `cms_puf_service` × `cms_pfs_work_time` / `cms_pfs_rvu` → `cms_puf_service_hours` / `cms_puf_npi_hours`. Lower bound (≤10-bene lines omitted). After `geolocate_archive` so NPPES practice pins have `LL:` colocators; ATTACH building sqft when the sidecar exists. Doc: `docs/cms_puf_hours.md`.
 
 ```bash
-python3 launch_overnight_cms_puf_hours.py
+python -u irs990processor.py --step cms_puf_hours --nostats -v
 ```
 
-**CMS PUF watch list** (`cms_puf_score_processor.py`): office vs facility, specialty p90, mill stack in a small building → `cms_puf_npi_score` / `cms_puf_watch_cells`. Not a fraud determination. Doc: `docs/cms_puf_score.md`.
+**`cms_puf_score` step** (`cms_puf_score_processor.py`): office vs facility, specialty p90, mill stack in a small building → `cms_puf_npi_score` / `cms_puf_watch_cells`. Not a fraud determination. Doc: `docs/cms_puf_score.md`.
 
 ```bash
-python3 -u cms_puf_score_processor.py
+python -u irs990processor.py --step cms_puf_score --nostats -v
 ```
 
-**CMS PUF watch gallery** (`cms_reporting/generate_watch_gallery.py`): mill pins, solo outliers, mill detail pages under `dot_reporting/reports/cms_puf_watch/`. Campus leftover via Overpass / Overture. Fun extra `cms_puf_watch`. Doc: `docs/generate_watch_gallery.md`.
+**`cms_puf_watch` step** (`cms_reporting/generate_watch_gallery.py`): mill pins, solo outliers, mill detail pages under `dot_reporting/reports/cms_puf_watch/`. Campus leftover via Overpass / Overture. Fun extra `cms_puf_watch`. Doc: `docs/generate_watch_gallery.md`.
 
 ```bash
-python3 -u cms_reporting/generate_watch_gallery.py
+python -u irs990processor.py --step cms_puf_watch --nostats -v
 ```
 
 **`sanctions` step** (`sanctions_processor.py`): Treasury OFAC SDN list (advanced XML). Promotes to `sanctioned_entities`, `sanctioned_names`, `sanctioned_identifiers`, `sanctioned_programs`, plus street addresses in `Addresses` (`address_type=ofac_sanction`). Data under `{final_dir}/cms_data/treasury/`. Ingest only — grant-match flagging is a later consumer.

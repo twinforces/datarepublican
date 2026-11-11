@@ -27,7 +27,7 @@ Checks for bad variants. Should say "No significant bad variants detected".
 
 Full step order:
 ```
-irsfetch → zip → bmf → xml → fec → medicare → sanctions → dot → dot_safety → ppp → sam → usaspending → address → einless → match → geolocate_* → grant_match → backfill → photos → ratios → percentiles → export
+irsfetch → zip → bmf → xml → fec → medicare → cms_puf → cms_clia_pfs → building_footprints → sanctions → dot → dot_safety → ppp → sam → usaspending → usaspending_text → address → einless → match → geolocate_* → cms_puf_hours → cms_puf_score → cms_puf_watch → grant_match → backfill → photos → ratios → percentiles → export
 
 XML writes Charities/Grants/Officers to DuckDB. Address rows append `/Volumes/Data/final/xml_addresses.tsv` (`XML_DEFER_ADDRESSES=1`). Load them at `--step address`, not during XML.
 ```
@@ -55,23 +55,21 @@ nohup python -u irs990processor.py --step sam --nostats -v > sam_step.log 2>&1 &
 USASPENDING_DATA_DIR=/Volumes/Insurrection/990data/cms_data/usaspending \
   ./overnight_usaspending_run.sh
 # smoke: --step usaspending --start-year 2025 --end-year 2025 --max-files 1000
-# Award descriptions + DuckDB FTS from those CSVs (slim actions unchanged). Postgres dump parked.
-python3 launch_overnight_usaspending_text.py
-# CMS 2024 Physician PUF + LEIE (not on --step all). CSVs on Insurrection.
-python3 launch_overnight_cms_puf_download.py
-python3 launch_overnight_cms_puf.py
-# CMS CLIA labs + PFS work RVU/time (not on --step all). Files on Insurrection, DuckDB on Data.
-python3 launch_overnight_cms_clia_pfs.py
-# PUF × PFS minutes → implied hours (no building sidecar).
-python3 launch_overnight_cms_puf_hours.py
-# Ranked watch list from those hours (not a fraud determination).
-python3 -u cms_puf_score_processor.py
-# HTML gallery (mills + solo + mill detail pages).
-python3 -u cms_reporting/generate_watch_gallery.py
+# CMS 2024 Physician PUF + LEIE (CSVs on Insurrection). --step all includes this.
+python -u irs990processor.py --step cms_puf --nostats -v
+# CMS CLIA labs + PFS work RVU/time.
+python -u irs990processor.py --step cms_clia_pfs --nostats -v
+# Microsoft building footprints sidecar (Insurrection).
+python -u irs990processor.py --step building_footprints --nostats -v
+# Award descriptions + DuckDB FTS (after usaspending).
+python -u irs990processor.py --step usaspending_text --nostats -v
+# PUF × PFS minutes → implied hours, then mill/solo watch + HTML gallery.
+# Hours waits on geolocate_archive so NPPES pins have LL: colocators.
+python -u irs990processor.py --step cms_puf_hours --nostats -v
+python -u irs990processor.py --step cms_puf_score --nostats -v
+python -u irs990processor.py --step cms_puf_watch --nostats -v
 # Hub parquet for new tables (HF_TOKEN from ../.envrc). Out on Insurrection.
 python3 launch_overnight_hf.py
-# Microsoft building footprints sidecar (Insurrection). Photon/Docker off.
-python3 launch_overnight_building_footprints.py
 # After writers release Data: CHECKPOINT + ditto DuckDB to Insurrection.
 python3 launch_overnight_duckdb_copy.py
 python3 -u spending_reporting/generate_galleries.py --db-path /Volumes/Data/final/irs990.duckdb

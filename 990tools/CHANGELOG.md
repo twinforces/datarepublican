@@ -5,6 +5,15 @@ All notable changes to the IRS 990 Data Processor will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-10 (sidecars on --step all) — `52501cac`
+
+### Warehouse sidecars are pipeline steps
+- **Why:** `--step all` has to build a complete DuckDB from scratch. PUF, CLIA/PFS, hours, watch list, gallery, building footprints, and USASpending text lived next to the pipeline.
+- **Change:** `PIPELINE_STEPS` gains `cms_puf`, `cms_clia_pfs`, `building_footprints`, `usaspending_text`, `cms_puf_hours`, `cms_puf_score`, `cms_puf_watch`. PUF step downloads then COPY. Hours sits after `geolocate_archive` so NPPES pins have `LL:` colocators. Direct `duckdb.connect` unchanged (pool bootstrap is still None for these COPY jobs).
+- **Doc:** `docs/pipeline_overview.md`, `docs/how_to_run_tools.md`. Test: `test_pipeline_steps.py`.
+
+---
+
 ## [Unreleased] - 2026-11-05 (CMS PUF watch gallery) — `c2899e50`
 
 ### HTML mill / solo pages
